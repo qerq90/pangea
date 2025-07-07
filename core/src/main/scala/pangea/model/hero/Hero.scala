@@ -1,0 +1,14 @@
+package pangea.model.hero
+
+import pangea.model.state.StateType
+import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.user.UserId
+
+case class Hero(
+  id: HeroId,
+  userId: UserId,
+  state: StateType,
+  baseStats: BaseStats,
+  fightStats: FightStats,
+  equipment: Equipment
+)
