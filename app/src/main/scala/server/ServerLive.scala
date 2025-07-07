@@ -27,7 +27,7 @@ final class ServerLive(
       for {
         vkChecking <- req.as[VkChecking].option
         resp <- vkChecking match {
-          case Some(_) => Ok("33ebc838")
+          case Some(_) => Ok("3aeb4587")
           case None    => Ok("ok")
         }
       } yield resp
