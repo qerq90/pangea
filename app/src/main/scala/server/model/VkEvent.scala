@@ -10,7 +10,7 @@ case class VkEvent(`type`: String, `object`: ObjectMessage)
 
 object VkEvent {
   implicit val configuration: Configuration =
-    Configuration.default.withSnakeCaseConstructorNames
+    Configuration.default.withSnakeCaseMemberNames
 
   case class ObjectMessage(message: Message)
 
