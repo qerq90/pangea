@@ -8,9 +8,9 @@ import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes, MediaType}
 import pangea.dao.monster.MonsterDao
 import pangea.service.sender.vk.VkSender
-import server.model.{ServerConfig, VkChecking}
+import server.model.{ServerConfig, VkChecking, VkEvent}
 import zio.interop.catz._
-import zio.{Task, UIO}
+import zio.{Task, UIO, ZIO}
 
 final class ServerLive(
   config: ServerConfig,
@@ -25,15 +25,22 @@ final class ServerLive(
   private val routes: HttpRoutes[Task] = HttpRoutes.of[Task] {
     case req @ POST -> Root =>
       for {
-        vkChecking <- req.as[VkChecking].option
-        resp <- vkChecking match {
-          case Some(_) =>
-            Ok(
-              "3aeb4587",
-              `Content-Type`(MediaType.text.plain)
-            )
-          case None => Ok("ok")
+//        vkChecking <- req.as[VkChecking].option
+//        resp <- vkChecking match {
+//          case Some(_) =>
+//            Ok(
+//              "3aeb4587",
+//              `Content-Type`(MediaType.text.plain)
+//            )
+//          case None => Ok("ok")
+//        }
+
+        event <- req.as[VkEvent].option
+        _ <- event match {
+          case Some(value) => ZIO.attempt(println(value.`object`.message.text))
+          case None        => ZIO.attempt(println("bad event"))
         }
+        resp <- Ok("ok")
       } yield resp
   }
 
