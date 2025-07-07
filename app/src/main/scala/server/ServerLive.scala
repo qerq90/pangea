@@ -1,5 +1,6 @@
 package server
 
+import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.server.EmberServerBuilder
@@ -36,9 +37,10 @@ final class ServerLive(
 //        }
 
         event <- req.as[VkEvent].option
+        json  <- req.as[Json]
         _ <- event match {
           case Some(value) => ZIO.attempt(println(value.`object`.message.text))
-          case None        => ZIO.attempt(println("bad event"))
+          case None        => ZIO.attempt(println(json.noSpaces))
         }
         resp <- Ok("ok")
       } yield resp
