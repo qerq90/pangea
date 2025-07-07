@@ -1,9 +1,9 @@
 import Dependencies.*
 
 lazy val root = (project in file("."))
-  .aggregate(api)
+  .aggregate(app)
 
-lazy val api = (project in file("app"))
+lazy val app = (project in file("app"))
   .settings(
     standartSettings,
     libraryDependencies ++= apiDependencies,

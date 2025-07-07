@@ -2,13 +2,13 @@ package pangea.dao
 
 import cats.implicits.catsSyntaxOptionId
 import doobie.hikari.{Config, HikariTransactor}
-import doobie.util.transactor.Transactor
+import doobie.util.transactor.{Transactor => DTransactor}
 import pangea.dao.config.PostgresConfig
 import zio.{Task, ZIO, ZLayer}
 import zio.interop.catz._
 
 object Transactor {
-  val live: ZLayer[PostgresConfig, Throwable, Transactor[Task]] =
+  val live: ZLayer[PostgresConfig, Throwable, DTransactor[Task]] =
     ZLayer.scoped {
       for {
         config <- ZIO.service[PostgresConfig]
