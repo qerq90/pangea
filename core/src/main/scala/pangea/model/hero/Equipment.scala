@@ -4,7 +4,6 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import pangea.model.stats.FightStats
 
 case class Equipment(
   helmetId: Long,
