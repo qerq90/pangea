@@ -38,10 +38,12 @@ final class ServerLive(
         json  <- req.as[Json]
         _ <- event match {
           case Some(value) =>
-            stateHandler.makeActionVK(
-              VkId(value.`object`.message.peerId.toString),
-              value.`object`.message.text
-            )
+            stateHandler
+              .makeActionVK(
+                VkId(value.`object`.message.peerId.toString),
+                value.`object`.message.text
+              )
+              .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }
         resp <- Ok("ok")
