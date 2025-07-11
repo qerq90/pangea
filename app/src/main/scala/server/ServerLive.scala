@@ -8,6 +8,7 @@ import org.http4s.headers.`Content-Type`
 import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes, MediaType}
 import pangea.dao.monster.MonsterDao
+import pangea.model.user.UserId
 import pangea.service.sender.vk.VkSender
 import server.model.{ServerConfig, VkChecking, VkEvent}
 import zio.interop.catz._
@@ -42,6 +43,11 @@ final class ServerLive(
           case Some(value) => ZIO.attempt(println(value.`object`.message.text))
           case None        => ZIO.attempt(println(json.noSpaces))
         }
+        _ <- vkSender.sendMessage(
+          UserId(51422811),
+          "Someone is in site",
+          List.empty
+        )
         resp <- Ok("ok")
       } yield resp
   }
