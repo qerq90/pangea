@@ -1,7 +1,10 @@
 package pangea.model.hero
 
+import doobie.Meta
+import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import pangea.model.stats.FightStats
 
 case class Equipment(
   helmetId: Long,
@@ -23,4 +26,6 @@ case class Equipment(
 object Equipment {
   implicit val encoder: Encoder[Equipment] = deriveEncoder[Equipment]
   implicit val decoder: Decoder[Equipment] = deriveDecoder[Equipment]
+
+  implicit val meta: Meta[FightStats] = new Meta(pgDecoderGet, pgEncoderPut)
 }
