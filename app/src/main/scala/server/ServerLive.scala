@@ -4,20 +4,17 @@ import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.headers.`Content-Type`
 import org.http4s.implicits._
-import org.http4s.{HttpApp, HttpRoutes, MediaType}
-import pangea.dao.monster.MonsterDao
-import pangea.model.user.UserId
-import pangea.service.sender.vk.VkSender
-import server.model.{ServerConfig, VkChecking, VkEvent}
+import org.http4s.{HttpApp, HttpRoutes}
+import pangea.model.user.VkId
+import pangea.service.state.StateHandler
+import server.model.{ServerConfig, VkEvent}
 import zio.interop.catz._
 import zio.{Task, UIO, ZIO}
 
 final class ServerLive(
   config: ServerConfig,
-  vkSender: VkSender,
-  monsterDao: MonsterDao
+  stateHandler: StateHandler
 ) extends Server {
 
   private val dsl = Http4sDsl[Task]
@@ -40,14 +37,13 @@ final class ServerLive(
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
         _ <- event match {
-          case Some(value) => ZIO.attempt(println(value.`object`.message.text))
-          case None        => ZIO.attempt(println(json.noSpaces))
+          case Some(value) =>
+            stateHandler.makeActionVK(
+              VkId(value.`object`.message.peerId.toString),
+              value.`object`.message.text
+            )
+          case None => ZIO.attempt(println(json.noSpaces))
         }
-        _ <- vkSender.sendMessage(
-          UserId(51422811),
-          "Someone is in site",
-          List.empty
-        )
         resp <- Ok("ok")
       } yield resp
   }

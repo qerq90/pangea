@@ -1,7 +1,6 @@
 package server
 
-import pangea.dao.monster.MonsterDao
-import pangea.service.sender.vk.VkSender
+import pangea.service.state.StateHandler
 import server.model.ServerConfig
 import zio._
 
@@ -10,13 +9,11 @@ trait Server {
 }
 
 object Server {
-  val live
-      : ZLayer[ServerConfig with VkSender with MonsterDao, Nothing, Server] =
+  val live: ZLayer[ServerConfig with StateHandler, Nothing, Server] =
     ZLayer {
       for {
-        config     <- ZIO.service[ServerConfig]
-        vkClient   <- ZIO.service[VkSender]
-        monsterDao <- ZIO.service[MonsterDao]
-      } yield new ServerLive(config, vkClient, monsterDao)
+        config       <- ZIO.service[ServerConfig]
+        stateHandler <- ZIO.service[StateHandler]
+      } yield new ServerLive(config, stateHandler)
     }
 }

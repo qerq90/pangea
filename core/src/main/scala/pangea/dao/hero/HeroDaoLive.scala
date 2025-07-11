@@ -1,8 +1,7 @@
 package pangea.dao.hero
 
-import doobie.implicits.toSqlInterpolator
-import doobie.util.transactor.Transactor
 import doobie.implicits._
+import doobie.util.transactor.Transactor
 import io.circe.syntax.EncoderOps
 import pangea.model.hero.Hero
 import pangea.model.user.UserId
@@ -17,8 +16,15 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       .option
       .transact(xa)
 
-  override def insertHero(hero: Hero): Task[Unit] =
-    sql"insert into heroes(id, user_id, state, base_stats, fight_stats, equipment) values(${hero.id}, ${hero.userId}, ${hero.state}, ${hero.baseStats.asJson.noSpaces}, ${hero.fightStats.asJson.noSpaces}, ${hero.equipment.asJson.noSpaces})".update.run
+  override def insertHero(hero: Hero): Task[Hero] =
+    sql"insert into heroes(user_id, state, base_stats, fight_stats, equipment) values(${hero.id}, ${hero.userId}, ${hero.state}, ${hero.baseStats.asJson.noSpaces}, ${hero.fightStats.asJson.noSpaces}, ${hero.equipment.asJson.noSpaces}) returning id, user_id, state, base_stats, fight_stats, equipment".update
+      .withUniqueGeneratedKeys[Hero](
+        "id",
+        "user_id",
+        "state",
+        "base_stats",
+        "fight_stats",
+        "equipment"
+      )
       .transact(xa)
-      .unit
 }

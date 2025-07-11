@@ -1,0 +1,31 @@
+package pangea.repository.hero
+
+import pangea.dao.hero.HeroDao
+import pangea.model.hero.{Equipment, Hero, HeroId}
+import pangea.model.state.StateType.{GlobalMap, Registration}
+import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.user.UserId
+import pangea.repository.hero.HeroRepositoryLive.newHero
+import zio.Task
+
+case class HeroRepositoryLive(heroDao: HeroDao) extends HeroRepository {
+
+  override def registerNewHero(userId: UserId): Task[Hero] =
+    heroDao.insertHero(newHero(userId))
+
+  override def getHero(userId: UserId): Task[Option[Hero]] =
+    heroDao.getHeroByUserId(userId)
+}
+
+object HeroRepositoryLive {
+  private def newHero(id: UserId): Hero =
+    Hero(
+      HeroId(-1),
+      id,
+      state = Registration,
+      baseStats = BaseStats(4, 4, 4, 4),
+      fightStats = FightStats(4, 64, 0, 0),
+      equipment = Equipment(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    )
+
+}

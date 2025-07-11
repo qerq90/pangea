@@ -1,24 +1,25 @@
 package pangea.service.state
 
-import pangea.dao.hero.HeroDao
-import pangea.dao.user.UserDao
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, VkId}
+import pangea.repository.hero.HeroRepository
+import pangea.repository.user.UserRepository
 import pangea.service.state.states.StatesMap
 import zio.{Task, ZIO, ZLayer}
 
 class StateHandler(
-  userDao: UserDao,
-  heroDao: HeroDao,
+  userDao: UserRepository,
+  heroRepo: HeroRepository,
   states: Map[StateType, State]
 ) {
 
   def makeActionVK(vkId: VkId, action: String): Task[Unit] =
     for {
       userOp <- userDao.getUserByVkId(vkId)
-      user <- ZIO
-        .fromOption(userOp)
-        .orElseFail(new Throwable(s"Not found user with vkId ${vkId}"))
+      user <- userOp match {
+        case Some(value) => ZIO.succeed(value)
+        case None        => userDao.insertUserByVk(vkId)
+      }
 
       _ <- makeAction(user, action)
     } yield ()
@@ -26,25 +27,21 @@ class StateHandler(
   def makeActionTelegram(telegramId: TelegramId, action: String): Task[Unit] =
     for {
       userOp <- userDao.getUserByTelegramId(telegramId)
-      user <- ZIO
-        .fromOption(userOp)
-        .orElseFail(
-          new Throwable(s"Not found user with telegramId ${telegramId}")
-        )
+      user <- userOp match {
+        case Some(value) => ZIO.succeed(value)
+        case None        => userDao.insertUserByTelegramId(telegramId)
+      }
 
       _ <- makeAction(user, action)
     } yield ()
 
   private def makeAction(user: User, action: String): Task[Unit] =
     for {
-      heroOp <- heroDao.getHeroByUserId(user.userId)
-      hero <- ZIO
-        .fromOption(heroOp)
-        .orElseFail(
-          new Throwable(
-            s"Not found hero for user with userId ${user.userId}"
-          )
-        )
+      heroOp <- heroRepo.getHero(user.userId)
+      hero <- heroOp match {
+        case Some(value) => ZIO.succeed(value)
+        case None        => heroRepo.registerNewHero(user.userId)
+      }
       stateOp = states.get(hero.state)
       state <- ZIO
         .fromOption(stateOp)
@@ -75,12 +72,16 @@ class StateHandler(
 }
 
 object StateHandler {
-  val live: ZLayer[StatesMap with HeroDao with UserDao, Nothing, StateHandler] =
+  val live: ZLayer[
+    StatesMap with HeroRepository with UserRepository,
+    Nothing,
+    StateHandler
+  ] =
     ZLayer.fromZIO(
       for {
-        userDao   <- ZIO.service[UserDao]
-        heroDao   <- ZIO.service[HeroDao]
+        userRepo  <- ZIO.service[UserRepository]
+        heroRepo  <- ZIO.service[HeroRepository]
         statesMap <- ZIO.service[StatesMap]
-      } yield new StateHandler(userDao, heroDao, statesMap.states)
+      } yield new StateHandler(userRepo, heroRepo, statesMap.states)
     )
 }

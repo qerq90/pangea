@@ -7,7 +7,7 @@ import zio.{Task, ZLayer}
 
 trait HeroDao {
   def getHeroByUserId(userId: UserId): Task[Option[Hero]]
-  def insertHero(hero: Hero): Task[Unit]
+  def insertHero(hero: Hero): Task[Hero]
 }
 
 object HeroDao {

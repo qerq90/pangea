@@ -2,9 +2,15 @@ package app
 
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
+import pangea.dao.hero.HeroDao
 import pangea.dao.monster.MonsterDao
+import pangea.dao.user.UserDao
+import pangea.repository.hero.HeroRepository
+import pangea.repository.user.{UserRepository, UserRepositoryLive}
 import pangea.service.sender.Sender
 import pangea.service.sender.vk.config.VkConfig
+import pangea.service.state.StateHandler
+import pangea.service.state.states.StatesMap
 import server.Server
 import server.model.ServerConfig
 import zio._
@@ -24,6 +30,12 @@ object Main extends ZIOAppDefault {
       Transactor.live,
       Sender.vk,
       MonsterDao.live,
+      HeroDao.live,
+      UserDao.live,
+      StatesMap.live,
+      HeroRepository.live,
+      UserRepository.live,
+      StateHandler.live,
       ServerConfig.live,
       Server.live
     )

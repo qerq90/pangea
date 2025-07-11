@@ -22,13 +22,13 @@ class UserDaoLive(xa: Transactor[Task]) extends UserDao {
       .option
       .transact(xa)
 
-  override def insertUser(user: User): Task[Unit] =
-    sql"insert into users(id, vk_id, telegram_id) values(${user.userId}, ${user.vkId}, ${user.telegramId})".update.run
+  override def insertUser(user: User): Task[UserId] =
+    sql"insert into users(vk_id, telegram_id) values(${user.vkId}, ${user.telegramId})".update
+      .withUniqueGeneratedKeys[UserId]("id")
       .transact(xa)
-      .unit
 
   override def updateState(userId: UserId, stateType: StateType): Task[Unit] =
-    sql"update users set state = ${stateType} where id = ${userId}".update.run
+    sql"update users set state = $stateType where id = $userId".update.run
       .transact(xa)
       .unit
 }

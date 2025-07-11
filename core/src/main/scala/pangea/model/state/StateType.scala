@@ -9,5 +9,6 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
 
   val values = findValues
 
-  case object GlobalMap extends StateType
+  case object GlobalMap    extends StateType
+  case object Registration extends StateType
 }
