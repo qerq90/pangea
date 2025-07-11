@@ -48,7 +48,7 @@ class VkSender(client: Client[Task], config: VkConfig) extends Sender {
 
     client
       .run(request)
-      .use(_ => ZIO.unit)
+      .use(res => ZIO.log(res.toString()).unit)
   }
 
   private def randomId = Random.between(Int.MinValue, Int.MaxValue)
