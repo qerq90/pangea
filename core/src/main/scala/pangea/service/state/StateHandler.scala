@@ -8,17 +8,17 @@ import pangea.service.state.states.StatesMap
 import zio.{Task, ZIO, ZLayer}
 
 class StateHandler(
-  userDao: UserRepository,
+  userRepo: UserRepository,
   heroRepo: HeroRepository,
   states: Map[StateType, State]
 ) {
 
   def makeActionVK(vkId: VkId, action: String): Task[Unit] =
     for {
-      userOp <- userDao.getUserByVkId(vkId)
+      userOp <- userRepo.getUserByVkId(vkId)
       user <- userOp match {
         case Some(value) => ZIO.succeed(value)
-        case None        => userDao.insertUserByVk(vkId)
+        case None        => userRepo.insertUserByVk(vkId)
       }
 
       _ <- makeAction(user, action)
@@ -26,10 +26,10 @@ class StateHandler(
 
   def makeActionTelegram(telegramId: TelegramId, action: String): Task[Unit] =
     for {
-      userOp <- userDao.getUserByTelegramId(telegramId)
+      userOp <- userRepo.getUserByTelegramId(telegramId)
       user <- userOp match {
         case Some(value) => ZIO.succeed(value)
-        case None        => userDao.insertUserByTelegramId(telegramId)
+        case None        => userRepo.insertUserByTelegramId(telegramId)
       }
 
       _ <- makeAction(user, action)
@@ -61,7 +61,7 @@ class StateHandler(
         )
 
       _ <-
-        userDao
+        userRepo
           .updateState(user.userId, potentiallyNewState)
           .unless(potentiallyNewState == hero.state)
 

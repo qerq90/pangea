@@ -17,7 +17,7 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       .transact(xa)
 
   override def insertHero(hero: Hero): Task[Hero] =
-    sql"insert into heroes(user_id, state, base_stats, fight_stats, equipment) values(${hero.id}, ${hero.userId}, ${hero.state}, ${hero.baseStats.asJson.noSpaces}, ${hero.fightStats.asJson.noSpaces}, ${hero.equipment.asJson.noSpaces}) returning id, user_id, state, base_stats, fight_stats, equipment".update
+    sql"insert into heroes(user_id, state, base_stats, fight_stats, equipment) values(${hero.userId}, ${hero.state}, ${hero.baseStats.asJson.noSpaces}, ${hero.fightStats.asJson.noSpaces}, ${hero.equipment.asJson.noSpaces}) returning id, user_id, state, base_stats, fight_stats, equipment".update
       .withUniqueGeneratedKeys[Hero](
         "id",
         "user_id",
