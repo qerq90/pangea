@@ -7,6 +7,5 @@ case class Monster(
   lvl: Long,
   race: Race,
   rarity: Rarity,
-  baseStats: BaseStats,
   fightStats: FightStats
 )

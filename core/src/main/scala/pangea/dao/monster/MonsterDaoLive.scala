@@ -18,7 +18,7 @@ class MonsterDaoLive(xa: Transactor[Task]) extends MonsterDao {
       .transact(xa)
 
   override def insertMonster(monster: Monster): Task[Long] =
-    sql"insert into monsters(lvl, race, rarity, base_stats, fight_stats) values(${monster.lvl}, ${monster.race}, ${monster.rarity}, ${monster.baseStats.asJson}, ${monster.fightStats.asJson})".update
+    sql"insert into monsters(lvl, race, rarity, fight_stats) values(${monster.lvl}, ${monster.race}, ${monster.rarity}, ${monster.fightStats.asJson})".update
       .withUniqueGeneratedKeys[Long]("id")
       .transact(xa)
 }
