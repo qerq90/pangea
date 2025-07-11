@@ -1,10 +1,10 @@
 package pangea.dao.hero
 
 import doobie.implicits.toSqlInterpolator
+import doobie.util.transactor.Transactor
 import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
 import io.circe.syntax.EncoderOps
-import doobie.util.transactor.Transactor
 import pangea.model.hero.{Hero, HeroId}
 import pangea.model.user.UserId
 import zio.Task

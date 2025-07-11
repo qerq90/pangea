@@ -37,7 +37,9 @@ class StateHandler(
 
   private def makeAction(user: User, action: String): Task[Unit] =
     for {
-      heroOp <- heroRepo.getHero(user.userId)
+      heroOp <- heroRepo
+        .getHero(user.userId)
+        .tapError(err => ZIO.logError(err.getMessage))
       hero <- heroOp match {
         case Some(value) => ZIO.succeed(value)
         case None        => heroRepo.registerNewHero(user.userId)
