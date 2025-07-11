@@ -10,8 +10,12 @@ import zio.Task
 
 case class HeroRepositoryLive(heroDao: HeroDao) extends HeroRepository {
 
-  override def registerNewHero(userId: UserId): Task[Hero] =
-    heroDao.insertHero(newHero(userId))
+  override def registerNewHero(userId: UserId): Task[Hero] = {
+    val hero = newHero(userId)
+    heroDao
+      .insertHero(hero)
+      .map(heroId => hero.copy(id = heroId))
+  }
 
   override def getHero(userId: UserId): Task[Option[Hero]] =
     heroDao.getHeroByUserId(userId)
