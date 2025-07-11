@@ -27,5 +27,5 @@ object Equipment {
   implicit val encoder: Encoder[Equipment] = deriveEncoder[Equipment]
   implicit val decoder: Decoder[Equipment] = deriveDecoder[Equipment]
 
-  implicit val meta: Meta[FightStats] = new Meta(pgDecoderGet, pgEncoderPut)
+  implicit val meta: Meta[Equipment] = new Meta(pgDecoderGet, pgEncoderPut)
 }
