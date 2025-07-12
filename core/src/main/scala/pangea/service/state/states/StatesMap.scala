@@ -1,14 +1,21 @@
 package pangea.service.state.states
 
 import pangea.model.state.StateType
-import pangea.model.state.StateType.GlobalMap
+import pangea.model.state.StateType.{GlobalMap, Registration}
+import pangea.service.sender.Sender
 import pangea.service.state.State
-import zio.{ULayer, ZLayer}
+import zio.{ZIO, ZLayer}
 
 case class StatesMap(states: Map[StateType, State])
 
 object StatesMap {
-  val live: ULayer[StatesMap] = ZLayer.succeed(
-    StatesMap(Map[StateType, State](GlobalMap -> GlobalMapState()))
+  val live: ZLayer[Sender, Nothing, StatesMap] = ZLayer.fromZIO(
+    for {
+      sender <- ZIO.service[Sender]
+      states = Map[StateType, State](
+        GlobalMap    -> GlobalMapState(),
+        Registration -> RegistrationState(sender)
+      )
+    } yield new StatesMap(states)
   )
 }
