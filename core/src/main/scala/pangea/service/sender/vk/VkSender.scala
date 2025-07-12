@@ -3,7 +3,7 @@ package pangea.service.sender.vk
 import org.http4s.client.Client
 import org.http4s.implicits.http4sLiteralsSyntax
 import org.http4s.{Method, Request}
-import pangea.model.user.UserId
+import pangea.model.user.User
 import pangea.model.vk.Attachment
 import pangea.service.sender.Sender
 import pangea.service.sender.vk.config.VkConfig
@@ -21,7 +21,7 @@ class VkSender(client: Client[Task], config: VkConfig) extends Sender {
   )
 
   override def sendMessage(
-      id: UserId,
+      user: User,
       message: String,
       attachments: List[Attachment]
   ): Task[Unit] = {
@@ -29,14 +29,14 @@ class VkSender(client: Client[Task], config: VkConfig) extends Sender {
     if (attachments.nonEmpty) {
       queryParams ++= Map(
         "message"    -> List(message),
-        "user_id"    -> List(id.value.toString),
+        "user_id"    -> List(user.vkId.value),
         "random_id"  -> List(randomId.toString),
         "attachment" -> List(attachments.mkString(","))
       ) ++ baseQueryParams
     } else {
       queryParams ++= Map(
         "message"   -> List(message),
-        "user_id"   -> List(id.value.toString),
+        "user_id"   -> List(user.vkId.value),
         "random_id" -> List(randomId.toString)
       ) ++ baseQueryParams
     }

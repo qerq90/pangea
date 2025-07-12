@@ -1,6 +1,6 @@
 package pangea.service.sender
 
-import pangea.model.user.UserId
+import pangea.model.user.User
 import pangea.model.vk.Attachment
 import pangea.service.sender.vk.VkSender
 import pangea.service.sender.vk.config.VkConfig
@@ -8,7 +8,7 @@ import zio.{Task, ZIO, ZLayer}
 
 trait Sender {
   def sendMessage(
-      id: UserId,
+      user: User,
       message: String,
       attachments: List[Attachment]
   ): Task[Unit]

@@ -16,7 +16,7 @@ case class RegistrationState(sender: Sender) extends State {
       case _ =>
         for {
           _ <- sender.sendMessage(
-            user.userId,
+            user,
             "Spasibo, bro, zaregal tebe geroya",
             List.empty
           )
