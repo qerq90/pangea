@@ -1,10 +1,12 @@
 package pangea.model.item
 
 import enumeratum._
+import io.circe.syntax.EncoderOps
+import io.circe.{Decoder, Encoder, HCursor}
 
 sealed trait ItemType extends EnumEntry
 
-object ItemType extends Enum[ItemType] with DoobieEnum[ItemType] {
+object ItemType extends Enum[ItemType] {
 
   val values = findValues
 
@@ -22,4 +24,11 @@ object ItemType extends Enum[ItemType] with DoobieEnum[ItemType] {
   case object Weapon           extends ItemType
   case object AdditionalWeapon extends ItemType
 
+  case object NoItem extends ItemType
+
+  implicit val encoder: Encoder[ItemType] =
+    (itemType: ItemType) => itemType.entryName.asJson
+
+  implicit val decoder: Decoder[ItemType] =
+    (json: HCursor) => json.as[String].map(s => ItemType.withName(s))
 }

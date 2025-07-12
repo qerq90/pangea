@@ -4,22 +4,23 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import pangea.model.item.Item
 
 case class Equipment(
-  helmetId: Long,
-  shoulderPadsId: Long,
-  chestPlateId: Long,
-  braceletsId: Long,
-  glovesId: Long,
-  pantsId: Long,
-  leggingsId: Long,
-  amuletId: Long,
-  firstRingId: Long,
-  secondRingId: Long,
-  beltId: Long,
-  flaskId: Long,
-  weaponId: Long,
-  additionalWeaponId: Long
+  helmetId: Item,
+  shoulderPadsId: Item,
+  chestPlateId: Item,
+  braceletsId: Item,
+  glovesId: Item,
+  pantsId: Item,
+  leggingsId: Item,
+  amuletId: Item,
+  firstRingId: Item,
+  secondRingId: Item,
+  beltId: Item,
+  flaskId: Item,
+  weaponId: Item,
+  additionalWeaponId: Item
 )
 
 object Equipment {
