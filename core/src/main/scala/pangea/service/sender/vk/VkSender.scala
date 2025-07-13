@@ -5,6 +5,7 @@ import org.http4s.implicits.http4sLiteralsSyntax
 import org.http4s.{Method, Request}
 import pangea.model.user.User
 import pangea.model.vk.Attachment
+import pangea.model.vk.keyboard.Keyboard
 import pangea.service.sender.Sender
 import pangea.service.sender.vk.config.VkConfig
 import zio.interop.catz._
@@ -23,9 +24,16 @@ class VkSender(client: Client[Task], config: VkConfig) extends Sender {
   override def sendMessage(
       user: User,
       message: String,
-      attachments: List[Attachment]
+      attachments: List[Attachment],
+      keyboard: Option[Keyboard]
   ): Task[Unit] = {
     var queryParams = Map.empty[String, List[String]]
+    keyboard.foreach(keyboard =>
+      queryParams ++= Map[String, List[String]](
+        "keyboard" -> List(keyboard.getJson)
+      )
+    )
+
     if (attachments.nonEmpty) {
       queryParams ++= Map(
         "message"    -> List(message),
