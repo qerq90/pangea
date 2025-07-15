@@ -2,10 +2,9 @@ package pangea.service.state.states
 
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.model.vk.keyboard.Keyboard
 import pangea.model.vk.keyboard.registration.StartKeyboard
 import pangea.service.sender.Sender
-import pangea.service.state.State
+import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
 case class RegistrationState(sender: Sender) extends State {
@@ -13,7 +12,7 @@ case class RegistrationState(sender: Sender) extends State {
   // never gonna be used
   override def enter(): Task[Unit] = ZIO.unit
 
-  override def action(user: User, action: String): Task[StateType] =
+  override def action(user: User, action: UserAction): Task[StateType] =
     action match {
       case _ =>
         for {

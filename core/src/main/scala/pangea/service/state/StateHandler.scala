@@ -13,7 +13,7 @@ class StateHandler(
   states: Map[StateType, State]
 ) {
 
-  def makeActionVK(vkId: VkId, action: String): Task[Unit] =
+  def makeActionVK(vkId: VkId, action: UserAction): Task[Unit] =
     for {
       userOp <- userRepo.getUserByVkId(vkId)
       user <- userOp match {
@@ -24,7 +24,10 @@ class StateHandler(
       _ <- makeAction(user, action)
     } yield ()
 
-  def makeActionTelegram(telegramId: TelegramId, action: String): Task[Unit] =
+  def makeActionTelegram(
+      telegramId: TelegramId,
+      action: UserAction
+  ): Task[Unit] =
     for {
       userOp <- userRepo.getUserByTelegramId(telegramId)
       user <- userOp match {
@@ -35,7 +38,7 @@ class StateHandler(
       _ <- makeAction(user, action)
     } yield ()
 
-  private def makeAction(user: User, action: String): Task[Unit] =
+  private def makeAction(user: User, action: UserAction): Task[Unit] =
     for {
       heroOp <- heroRepo.getHero(user.userId)
       hero <- heroOp match {

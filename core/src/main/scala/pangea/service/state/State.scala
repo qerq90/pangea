@@ -6,5 +6,5 @@ import zio.Task
 
 trait State {
   def enter(): Task[Unit]
-  def action(user: User, action: String): Task[StateType]
+  def action(user: User, action: UserAction): Task[StateType]
 }

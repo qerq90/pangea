@@ -7,7 +7,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes}
 import pangea.model.user.VkId
-import pangea.service.state.StateHandler
+import pangea.service.state.{StateHandler, UserAction}
 import server.model.{ServerConfig, VkEvent}
 import zio.interop.catz._
 import zio.{Task, UIO, ZIO}
@@ -36,13 +36,12 @@ final class ServerLive(
 
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
-        _     <- ZIO.logInfo(json.toString())
         _ <- event match {
           case Some(value) =>
             stateHandler
               .makeActionVK(
                 VkId(value.`object`.message.peerId.toString),
-                value.`object`.message.text
+                UserAction(value.`object`.message.text, Json.Null)
               )
               .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
