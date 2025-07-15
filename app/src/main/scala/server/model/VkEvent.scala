@@ -1,6 +1,6 @@
 package server.model
 
-import io.circe.Decoder
+import io.circe.{Decoder, Json}
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveConfiguredDecoder
 import io.circe.generic.semiauto.deriveDecoder
@@ -14,7 +14,7 @@ object VkEvent {
 
   case class ObjectMessage(message: Message)
 
-  case class Message(text: String, peerId: Long)
+  case class Message(text: String, peerId: Long, payload: Option[Json])
 
   implicit val decoder: Decoder[VkEvent] = deriveDecoder[VkEvent]
 
