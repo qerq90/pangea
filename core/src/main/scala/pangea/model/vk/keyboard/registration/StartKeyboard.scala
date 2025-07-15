@@ -8,5 +8,5 @@ object StartKeyboard {
     .withInline(false)
     .withOneTime(true)
     .addRow()
-    .addButton(Button.withAction(Text("Начать", payloadEmpty)))
+    .addButton(Button.withAction(Text("Начать", """{ "start": 1 }""")))
 }
