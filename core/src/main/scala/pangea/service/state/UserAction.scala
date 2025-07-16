@@ -2,4 +2,4 @@ package pangea.service.state
 
 import io.circe.Json
 
-case class UserAction(text: String, payload: Json)
+case class UserAction(text: String, payload: Option[Json])
