@@ -1,6 +1,5 @@
 package pangea.service.state.states.Registration
 
-import io.circe.Json
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.sender.Sender
@@ -13,12 +12,12 @@ case class RegistrationState(sender: Sender) extends State {
   // never gonna be used
   override def enter(): Task[Unit] = ZIO.unit
 
-  private def matchUserAction(action: UserAction): Actions = Actions.Text
+  private def matchUserAction(action: UserAction): Action = Action.Text
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
-      case Actions.Start => ???
-      case Actions.Text =>
+      case Action.Start => ???
+      case Action.Text =>
         for {
           _ <- sender.sendMessage(
             user,
