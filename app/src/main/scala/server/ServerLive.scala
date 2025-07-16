@@ -36,7 +36,7 @@ final class ServerLive(
 
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
-        _     <- ZIO.attempt(println(json.noSpaces))
+        _ <- ZIO.logInfo(json.toString())
         _ <- event match {
           case Some(value) =>
             stateHandler
