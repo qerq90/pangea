@@ -2,7 +2,7 @@ package pangea.service.state.states.Registration
 
 import enumeratum._
 
-trait Actions extends EnumEntry
+sealed trait Actions extends EnumEntry
 
 object Actions extends Enum[Actions] {
   val values = findValues
