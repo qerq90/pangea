@@ -13,7 +13,7 @@ case class RegistrationState(sender: Sender) extends State {
   // never gonna be used
   override def enter(): Task[Unit] = ZIO.unit
 
-  private def matchUserAction(action: UserAction): Actions = ???
+  private def matchUserAction(action: UserAction): Actions = Actions.Text
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
