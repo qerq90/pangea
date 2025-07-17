@@ -12,11 +12,15 @@ case class RegistrationState(sender: Sender) extends State {
   // never gonna be used
   override def enter(): Task[Unit] = ZIO.unit
 
-  private def matchUserAction(action: UserAction): Action = Action.Text
+  private def matchUserAction(action: UserAction): Action =
+    action.payload match {
+      case Some(payload) => payload.as[Action].toOption.get
+      case None          => Action.Text
+    }
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
-      case Action.Start => ???
+      case Action.Start => getStart(user, action)
       case Action.Text =>
         for {
           _ <- sender.sendMessage(
@@ -27,4 +31,14 @@ case class RegistrationState(sender: Sender) extends State {
           )
         } yield StateType.Registration
     }
+
+  private def getStart(user: User, action: UserAction): Task[StateType] =
+    for {
+      _ <- sender.sendMessage(
+        user,
+        "Спасибо за регистрацию, бро",
+        List.empty,
+        None
+      )
+    } yield StateType.Registration
 }
