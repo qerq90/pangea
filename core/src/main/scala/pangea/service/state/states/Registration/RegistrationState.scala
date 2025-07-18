@@ -15,8 +15,13 @@ case class RegistrationState(sender: Sender) extends State {
 
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
-      case Some(payload) => payload.as[Action](decoder).toOption.get
-      case None          => Action.Text
+      case Some(payload) =>
+        payload.hcursor
+          .getOrElse("action")("Unknown")
+          .map(Action.withName)
+          .toOption
+          .get
+      case None => Action.Text
     }
 
   override def action(user: User, action: UserAction): Task[StateType] =
