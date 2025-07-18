@@ -1,11 +1,12 @@
 package pangea.service.state.states.Registration
 
+import io.circe.{jawn, Json}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.sender.Sender
 import pangea.service.state.states.Registration.keyboard.StartKeyboard
 import pangea.service.state.{State, UserAction}
-import zio.{Task, ZIO}
+import zio.{Scope, Task, ZIO, ZIOAppArgs, ZIOAppDefault}
 
 case class RegistrationState(sender: Sender) extends State {
 
@@ -14,8 +15,9 @@ case class RegistrationState(sender: Sender) extends State {
 
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
-      case Some(payload) => payload.as[Action].toOption.get
-      case None          => Action.Text
+      case Some(payload) =>
+        val x = payload.as[Action]; println(x.left); x.toOption.get
+      case None => Action.Text
     }
 
   override def action(user: User, action: UserAction): Task[StateType] =
