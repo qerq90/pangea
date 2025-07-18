@@ -39,16 +39,15 @@ final class ServerLive(
         _     <- ZIO.logInfo(json.toString())
         _ <- event match {
           case Some(value) =>
-            ZIO.logInfo(s"${value.`object`.message.payload}") *>
-              stateHandler
-                .makeActionVK(
-                  VkId(value.`object`.message.peerId.toString),
-                  UserAction(
-                    value.`object`.message.text,
-                    value.`object`.message.payload
-                  )
+            stateHandler
+              .makeActionVK(
+                VkId(value.`object`.message.peerId.toString),
+                UserAction(
+                  value.`object`.message.text,
+                  value.`object`.message.payload
                 )
-                .catchAll(err => ZIO.logError(err.getMessage))
+              )
+              .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }
         resp <- Ok("ok")

@@ -16,6 +16,7 @@ case class RegistrationState(sender: Sender) extends State {
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
       case Some(payload) =>
+        println(payload);
         val x = payload.as[Action]; println(x.left); x.toOption.get
       case None => Action.Text
     }
