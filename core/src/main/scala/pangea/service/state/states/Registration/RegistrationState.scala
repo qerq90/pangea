@@ -16,10 +16,10 @@ case class RegistrationState(sender: Sender) extends State {
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
       case Some(payload) =>
-        payload.hcursor
-          .getOrElse("action")("Unknown")
+        payload.asObject.get
+          .apply("action")
+          .flatMap(_.asString)
           .map(Action.withName)
-          .toOption
           .get
       case None => Action.Text
     }
