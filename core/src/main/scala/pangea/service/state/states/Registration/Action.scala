@@ -17,7 +17,7 @@ object Action extends Enum[Action] {
     Map[String, String]("action" -> a.entryName).asJson
 
   implicit val decoder: Decoder[Action] = (cursor: HCursor) =>
-    cursor.getOrElse[String]("action")("unknown").map(Action.withName)
+    cursor.getOrElse[String]("action")("Unknown").map(Action.withName)
 
   implicit class ActionOps(action: Action) {
     def json: Json = action.asJson
