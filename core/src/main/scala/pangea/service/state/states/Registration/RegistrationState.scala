@@ -1,6 +1,6 @@
 package pangea.service.state.states.Registration
 
-import pangea.service.state.states.Registration.Action.decoder
+import io.circe.jawn.decode
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.sender.Sender
@@ -15,13 +15,8 @@ case class RegistrationState(sender: Sender) extends State {
 
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
-      case Some(payload) =>
-        payload.asObject.get
-          .apply("action")
-          .flatMap(_.asString)
-          .map(Action.withName)
-          .get
-      case None => Action.Text
+      case Some(payload) => decode[Action](payload).toOption.get
+      case None          => Action.Text
     }
 
   override def action(user: User, action: UserAction): Task[StateType] =

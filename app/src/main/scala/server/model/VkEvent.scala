@@ -14,7 +14,7 @@ object VkEvent {
 
   case class ObjectMessage(message: Message)
 
-  case class Message(text: String, peerId: Long, payload: Option[Json])
+  case class Message(text: String, peerId: Long, payload: Option[String])
 
   implicit val decoder: Decoder[VkEvent] = deriveDecoder[VkEvent]
 
