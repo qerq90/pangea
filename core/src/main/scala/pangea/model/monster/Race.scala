@@ -1,6 +1,7 @@
 package pangea.model.monster
 
 import enumeratum._
+import io.circe.{Decoder, HCursor}
 import pangea.model.monster.Race.RaceFactor
 
 sealed trait Race extends EnumEntry {
@@ -281,4 +282,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
                                          |
                                          |Заметки путешественника Ашалдарона о расах Пангеи""".stripMargin
   }
+
+  implicit val decoder: Decoder[Race] = (c: HCursor) =>
+    c.get[String]("race").map(Race.withName)
 }

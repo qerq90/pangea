@@ -32,10 +32,7 @@ case class RegistrationState(sender: Sender) extends State {
         sender
           .sendMessage(
             user,
-            decode[Json](action.payload.get).toOption.get.hcursor
-              .get[String]("race")
-              .toOption
-              .get,
+            decode[Race](action.payload.get).toOption.get.entryName,
             List.empty,
             None
           )
