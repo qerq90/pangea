@@ -14,7 +14,7 @@ import zio.interop.catz._
 class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
 
   override def getHeroByUserId(userId: UserId): Task[Option[Hero]] =
-    sql"select * from heroes where user_id = ${userId.value}"
+    sql"select user_id, state, race, base_stats, fight_stats, equipment from heroes where user_id = ${userId.value}"
       .query[Hero]
       .option
       .transact(xa)
