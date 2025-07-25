@@ -3,6 +3,7 @@ package pangea.repository.hero
 import pangea.dao.hero.HeroDao
 import pangea.model.hero.{Equipment, Hero, HeroId}
 import pangea.model.item.Item.NoItem
+import pangea.model.monster.Race.Human
 import pangea.model.state.StateType.{GlobalMap, Registration}
 import pangea.model.stats.{BaseStats, FightStats}
 import pangea.model.user.UserId
@@ -28,6 +29,7 @@ object HeroRepositoryLive {
       HeroId(-1),
       id,
       state = Registration,
+      race = Human,
       baseStats = BaseStats(4, 4, 4, 4),
       fightStats = FightStats(4, 64, 0, 0),
       equipment = Equipment(
