@@ -2,11 +2,15 @@ package pangea.service.state.states.Registration
 
 import io.circe.Json
 import io.circe.jawn.decode
+import pangea.dao.hero.HeroDao
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
 import pangea.model.user.User
+import pangea.model.vk.keyboard.Action.Text
+import pangea.model.vk.keyboard.{Button, Keyboard}
 import pangea.service.sender.Sender
+import pangea.service.state.states.Registration.Action.Travel1
 import pangea.service.state.states.Registration.keyboard.{
   RaceDescriptionKeyboard,
   RaceKeyboard,
@@ -15,7 +19,7 @@ import pangea.service.state.states.Registration.keyboard.{
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
-case class RegistrationState(sender: Sender) extends State {
+case class RegistrationState(sender: Sender, heroDao: HeroDao) extends State {
 
   // never gonna be used
   override def enter(): Task[Unit] = ZIO.unit
@@ -28,15 +32,7 @@ case class RegistrationState(sender: Sender) extends State {
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
-      case Action.Travel =>
-        sender
-          .sendMessage(
-            user,
-            decode[Race](action.payload.get).toOption.get.entryName,
-            List.empty,
-            None
-          )
-          .as(Registration)
+      case Action.Travel => updateRace(user, action)
       case Action.RaceDescription =>
         getRaceDescription(user, Race.withNameOption(action.text))
       case Action.Race => getRace(user)
@@ -50,6 +46,26 @@ case class RegistrationState(sender: Sender) extends State {
           )
         } yield Registration
     }
+
+  private def updateRace(user: User, action: UserAction): Task[StateType] =
+    for {
+      race <- ZIO.fromEither(decode[Race](action.payload.get))
+      _    <- heroDao.updateRace(user.userId, race)
+      _ <- sender.sendMessage(
+        user,
+        "Вы открываете глаза. Практически ничего не видно, только сверху проблёскивает свет звёзд. Тяжело дышать, вы замкнуты и стеснены в движениях, рядом лишь камни и земля, кажется ваших сил хватит что бы выбраться наверх.",
+        List.empty,
+        Some(
+          Keyboard.default
+            .addRow()
+            .addButton(
+              Button.withAction(
+                Text("Выбраться наверх", Some(Action.Travel.json))
+              )
+            )
+        )
+      )
+    } yield Registration
 
   private def getRaceDescription(
       user: User,

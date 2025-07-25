@@ -14,6 +14,7 @@ object Action extends Enum[Action] {
   case object Race            extends Action
   case object RaceDescription extends Action
   case object Travel          extends Action
+  case object Travel1         extends Action
 
   implicit val encoder: Encoder[Action] = (a: Action) =>
     Map[String, String]("action" -> a.entryName).asJson
