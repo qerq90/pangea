@@ -1,5 +1,6 @@
 package pangea.service.state.states.Registration
 
+import io.circe.Json
 import io.circe.jawn.decode
 import pangea.model.monster.Race
 import pangea.model.state.StateType
@@ -28,7 +29,17 @@ case class RegistrationState(sender: Sender) extends State {
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
       case Action.Travel =>
-        sender.sendMessage(user, "SPS", List.empty, None).as(Registration)
+        sender
+          .sendMessage(
+            user,
+            decode[Json](action.payload.get).toOption.get.hcursor
+              .get[String]("race")
+              .toOption
+              .get,
+            List.empty,
+            None
+          )
+          .as(Registration)
       case Action.RaceDescription =>
         getRaceDescription(user, Race.withNameOption(action.text))
       case Action.Race => getRace(user)

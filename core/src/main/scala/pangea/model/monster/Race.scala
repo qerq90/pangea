@@ -55,7 +55,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Elf extends Race {
-    override def toString: String = "Человек"
+    override def toString: String = "Эльф"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -72,7 +72,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
                                          |Длинные,
                                          |заостренные уши, часто украшенные украшениями.
                                          |Глаза больших
-                                         |размеров,  с яркими, пронзительными
+                                         |размеров, с яркими, пронзительными
                                          |цветами - от глубокого синего до золотистого.
                                          |Волосы длинные,
                                          |прямые или волнистые, с оттенками от золотого до черного.
