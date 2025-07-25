@@ -9,5 +9,5 @@ object StartKeyboard {
     .withInline(false)
     .withOneTime(true)
     .addRow()
-    .addButton(Button.withAction(Text("Начать", Some(Action.Start.json))))
+    .addButton(Button.withAction(Text("Начать", Some(Action.Race.json))))
 }

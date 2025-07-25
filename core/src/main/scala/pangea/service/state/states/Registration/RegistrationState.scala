@@ -1,10 +1,16 @@
 package pangea.service.state.states.Registration
 
 import io.circe.jawn.decode
+import pangea.model.monster.Race
 import pangea.model.state.StateType
+import pangea.model.state.StateType.Registration
 import pangea.model.user.User
 import pangea.service.sender.Sender
-import pangea.service.state.states.Registration.keyboard.StartKeyboard
+import pangea.service.state.states.Registration.keyboard.{
+  RaceDescriptionKeyboard,
+  RaceKeyboard,
+  StartKeyboard
+}
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
@@ -21,8 +27,12 @@ case class RegistrationState(sender: Sender) extends State {
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
-      case Action.Start => getStart(user, action)
-      case Action.Text =>
+      case Action.Travel =>
+        sender.sendMessage(user, "SPS", List.empty, None).as(Registration)
+      case Action.RaceDescription =>
+        getRaceDescription(user, Race.withNameOption(action.text))
+      case Action.Race => getRace(user)
+      case _ =>
         for {
           _ <- sender.sendMessage(
             user,
@@ -30,16 +40,42 @@ case class RegistrationState(sender: Sender) extends State {
             List.empty,
             Some(StartKeyboard.keyboard)
           )
-        } yield StateType.Registration
+        } yield Registration
     }
 
-  private def getStart(user: User, action: UserAction): Task[StateType] =
+  private def getRaceDescription(
+      user: User,
+      race: Option[Race]
+  ): Task[StateType] =
+    race match {
+      case Some(race) =>
+        sender
+          .sendMessage(
+            user,
+            race.description,
+            List.empty,
+            Some(RaceDescriptionKeyboard.keyboard(race))
+          )
+          .as(Registration)
+
+      case None =>
+        sender
+          .sendMessage(
+            user,
+            "Теперь, выберите свою расу. Позже её можно будет сменить.",
+            List.empty,
+            Some(RaceKeyboard.keyboard)
+          )
+          .as(Registration)
+    }
+
+  private def getRace(user: User): Task[StateType] =
     for {
       _ <- sender.sendMessage(
         user,
-        "Спасибо за регистрацию, бро",
+        "Теперь, выберите свою расу. Позже её можно будет сменить.",
         List.empty,
-        None
+        Some(RaceKeyboard.keyboard)
       )
-    } yield StateType.Registration
+    } yield Registration
 }
