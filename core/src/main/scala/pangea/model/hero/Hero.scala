@@ -8,8 +8,8 @@ import pangea.model.user.UserId
 case class Hero(
   id: HeroId,
   userId: UserId,
-  race: Race,
   state: StateType,
+  race: Race,
   baseStats: BaseStats,
   fightStats: FightStats,
   equipment: Equipment
