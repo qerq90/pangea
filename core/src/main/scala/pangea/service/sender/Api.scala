@@ -3,11 +3,14 @@ package pangea.service.sender
 import pangea.model.user.User
 import pangea.model.vk.Attachment
 import pangea.model.vk.keyboard.Keyboard
-import pangea.service.sender.vk.VkSender
+import pangea.model.vk.model.UserResponse
+import pangea.service.sender.vk.VkApi
 import pangea.service.sender.vk.config.VkConfig
 import zio.{Task, ZIO, ZLayer}
 
-trait Sender {
+trait Api {
+  def getName(user: User): Task[UserResponse]
+
   def sendMessage(
       user: User,
       message: String,
@@ -16,9 +19,9 @@ trait Sender {
   ): Task[Unit]
 }
 
-object Sender {
-  val vk: ZLayer[VkConfig, Throwable, VkSender] = ZLayer.fromZIO(for {
+object Api {
+  val vk: ZLayer[VkConfig, Throwable, VkApi] = ZLayer.fromZIO(for {
     config <- ZIO.service[VkConfig]
     client <- pangea.client.Client.make
-  } yield new VkSender(client, config))
+  } yield new VkApi(client, config))
 }

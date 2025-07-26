@@ -1,19 +1,21 @@
 package pangea.service.sender.vk
 
+import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.client.Client
 import org.http4s.implicits.http4sLiteralsSyntax
 import org.http4s.{Method, Request}
 import pangea.model.user.User
 import pangea.model.vk.Attachment
 import pangea.model.vk.keyboard.Keyboard
-import pangea.service.sender.Sender
+import pangea.model.vk.model.UserResponse
+import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
 import zio.interop.catz._
 import zio.{Task, ZIO}
 
 import scala.util.Random
 
-class VkSender(client: Client[Task], config: VkConfig) extends Sender {
+class VkApi(client: Client[Task], config: VkConfig) extends Api {
 
   private val uri = uri"https://api.vk.com/method/"
   private val baseQueryParams: Map[String, List[String]] = Map(
@@ -61,6 +63,18 @@ class VkSender(client: Client[Task], config: VkConfig) extends Sender {
       )
   }
 
-  private def randomId = Random.between(Int.MinValue, Int.MaxValue)
+  override def getName(user: User): Task[UserResponse] = {
+    val queryParams = baseQueryParams ++ Map(
+      "user_ids" -> List(user.vkId.value)
+    )
 
+    val request = Request[Task](
+      method = Method.GET,
+      uri = uri / "users.get" =? queryParams
+    )
+
+    client.expect[UserResponse](request)
+  }
+
+  private def randomId = Random.between(Int.MinValue, Int.MaxValue)
 }

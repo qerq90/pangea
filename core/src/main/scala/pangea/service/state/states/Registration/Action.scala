@@ -15,6 +15,13 @@ object Action extends Enum[Action] {
   case object RaceDescription extends Action
   case object Travel          extends Action
   case object Travel1         extends Action
+  case object Travel2         extends Action
+  case object Travel3         extends Action
+  case object Travel4         extends Action
+  case object Travel5         extends Action
+  case object Travel6         extends Action
+  case object Travel7         extends Action
+  case object Travel8         extends Action
 
   implicit val encoder: Encoder[Action] = (a: Action) =>
     Map[String, String]("action" -> a.entryName).asJson
@@ -25,4 +32,5 @@ object Action extends Enum[Action] {
   implicit class ActionOps(action: Action) {
     def json: Json = action.asJson
   }
+
 }
