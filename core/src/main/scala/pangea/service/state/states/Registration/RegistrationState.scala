@@ -99,7 +99,7 @@ case class RegistrationState(api: Api, heroDao: HeroDao) extends State {
             .addButton(
               Button.withAction(
                 Text(
-                  "Молча кивнуть девушке и осмотреть комнату получше",
+                  "Кивнуть девушке и осмотреть комнату",
                   Some(Action.Travel6.json)
                 )
               )
