@@ -34,7 +34,7 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       userId: UserId,
       newState: StateType
   ): Task[Unit] =
-    sql"update users set state = $newState where id = $userId".update.run
+    sql"update heroes set state = $newState where user_id = $userId".update.run
       .transact(xa)
       .unit
 
