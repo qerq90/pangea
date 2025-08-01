@@ -4,6 +4,7 @@ import pangea.dao.hero.HeroDao
 import pangea.model.hero.{Equipment, Hero, HeroId}
 import pangea.model.item.Item.NoItem
 import pangea.model.monster.Race.Human
+import pangea.model.state.StateType
 import pangea.model.state.StateType.{GlobalMap, Registration}
 import pangea.model.stats.{BaseStats, FightStats}
 import pangea.model.user.UserId
@@ -21,6 +22,9 @@ case class HeroRepositoryLive(heroDao: HeroDao) extends HeroRepository {
 
   override def getHero(userId: UserId): Task[Option[Hero]] =
     heroDao.getHeroByUserId(userId)
+
+  override def updateState(userId: UserId, newState: StateType): Task[Unit] =
+    heroDao.updateState(userId, newState)
 }
 
 object HeroRepositoryLive {

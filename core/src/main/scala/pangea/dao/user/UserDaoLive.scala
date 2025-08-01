@@ -26,9 +26,4 @@ class UserDaoLive(xa: Transactor[Task]) extends UserDao {
     sql"insert into users(vk_id, telegram_id) values(${user.vkId}, ${user.telegramId})".update
       .withUniqueGeneratedKeys[UserId]("id")
       .transact(xa)
-
-  override def updateState(userId: UserId, stateType: StateType): Task[Unit] =
-    sql"update users set state = $stateType where id = $userId".update.run
-      .transact(xa)
-      .unit
 }

@@ -12,8 +12,6 @@ trait UserRepository {
   def getUserByVkId(vkId: VkId): Task[Option[User]]
 
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
-
-  def updateState(userId: UserId, newState: StateType): Task[Unit]
 }
 
 object UserRepository {

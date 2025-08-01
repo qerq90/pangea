@@ -64,7 +64,7 @@ class StateHandler(
         )
 
       _ <-
-        userRepo
+        heroRepo
           .updateState(user.userId, potentiallyNewState)
           .unless(potentiallyNewState == hero.state)
 

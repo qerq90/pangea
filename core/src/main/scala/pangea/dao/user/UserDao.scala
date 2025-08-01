@@ -9,7 +9,6 @@ trait UserDao {
   def getUserByVkId(vkId: VkId): Task[Option[User]]
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
   def insertUser(user: User): Task[UserId]
-  def updateState(userId: UserId, stateType: StateType): Task[Unit]
 }
 
 object UserDao {
