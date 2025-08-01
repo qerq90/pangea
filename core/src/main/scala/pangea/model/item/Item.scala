@@ -6,6 +6,7 @@ import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 
 case class Item(
+  id: Long,
   itemType: ItemType,
   attack: Long,
   accuracy: Long,
@@ -15,7 +16,7 @@ case class Item(
 )
 
 object Item {
-  def NoItem: Item = Item(ItemType.NoItem, 0, 0, 0, 0, 0)
+  def NoItem: Item = Item(0, ItemType.NoItem, 0, 0, 0, 0, 0)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

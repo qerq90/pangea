@@ -6,7 +6,7 @@ import pangea.service.state.{State, UserAction}
 import zio.Task
 
 case class GlobalMapState() extends State {
-  override def enter(): Task[Unit] = ???
+  override def enter(user: User): Task[Unit] = ???
 
   override def action(user: User, action: UserAction): Task[StateType] = ???
 }

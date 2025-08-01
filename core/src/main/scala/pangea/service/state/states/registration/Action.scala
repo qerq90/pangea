@@ -1,4 +1,4 @@
-package pangea.service.state.states.Registration
+package pangea.service.state.states.registration
 
 import enumeratum._
 import io.circe._
@@ -22,6 +22,8 @@ object Action extends Enum[Action] {
   case object Travel6         extends Action
   case object Travel7         extends Action
   case object Travel8         extends Action
+  case object Travel9         extends Action
+  case object EndOfTravel     extends Action
 
   implicit val encoder: Encoder[Action] = (a: Action) =>
     Map[String, String]("action" -> a.entryName).asJson

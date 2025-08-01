@@ -1,9 +1,9 @@
-package pangea.service.state.states.Registration.keyboard
+package pangea.service.state.states.registration.keyboard
 
 import pangea.model.monster.Race
 import pangea.model.vk.keyboard.Action.Text
 import pangea.model.vk.keyboard.{Button, Keyboard}
-import pangea.service.state.states.Registration.Action
+import pangea.service.state.states.registration.Action
 
 object RaceKeyboard {
   val keyboard: Keyboard = Keyboard.default

@@ -69,7 +69,7 @@ class StateHandler(
           .unless(potentiallyNewState == hero.state)
 
       _ <- newState
-        .enter()
+        .enter(user)
         .unless(potentiallyNewState == hero.state)
     } yield ()
 }

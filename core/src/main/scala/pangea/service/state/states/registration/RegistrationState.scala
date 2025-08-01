@@ -1,4 +1,4 @@
-package pangea.service.state.states.Registration
+package pangea.service.state.states.registration
 
 import io.circe.jawn.decode
 import pangea.dao.hero.HeroDao
@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.model.vk.keyboard.Action.Text
 import pangea.model.vk.keyboard.{Button, Keyboard}
 import pangea.service.sender.Api
-import pangea.service.state.states.Registration.keyboard.{
+import pangea.service.state.states.registration.keyboard.{
   NameKeyboard,
   RaceDescriptionKeyboard,
   RaceKeyboard,
@@ -21,7 +21,7 @@ import zio.{Task, ZIO}
 case class RegistrationState(api: Api, heroDao: HeroDao) extends State {
 
   // never gonna be used
-  override def enter(): Task[Unit] = ZIO.unit
+  override def enter(user: User): Task[Unit] = ZIO.unit
 
   private def matchUserAction(action: UserAction): Action =
     action.payload match {
@@ -31,15 +31,17 @@ case class RegistrationState(api: Api, heroDao: HeroDao) extends State {
 
   override def action(user: User, action: UserAction): Task[StateType] =
     matchUserAction(action) match {
-      case Action.Travel8 => ???
-      case Action.Travel7 => getTravel7(user)
-      case Action.Travel6 => getTravel6(user)
-      case Action.Travel5 => getTravel5(user)
-      case Action.Travel4 => getTravel4(user)
-      case Action.Travel3 => getTravel3(user)
-      case Action.Travel2 => getTravel2(user)
-      case Action.Travel1 => getTravel1(user)
-      case Action.Travel  => updateRace(user, action)
+      case Action.EndOfTravel => endTravel(user)
+      case Action.Travel9     => getTravel9(user)
+      case Action.Travel8     => getTravel8(user)
+      case Action.Travel7     => getTravel7(user)
+      case Action.Travel6     => getTravel6(user)
+      case Action.Travel5     => getTravel5(user)
+      case Action.Travel4     => getTravel4(user)
+      case Action.Travel3     => getTravel3(user)
+      case Action.Travel2     => getTravel2(user)
+      case Action.Travel1     => getTravel1(user)
+      case Action.Travel      => updateRace(user, action)
       case Action.RaceDescription =>
         getRaceDescription(user, Race.withNameOption(action.text))
       case Action.Race => getRace(user)
@@ -53,6 +55,50 @@ case class RegistrationState(api: Api, heroDao: HeroDao) extends State {
           )
         } yield Registration
     }
+
+  private def endTravel(user: User): Task[StateType] =
+    api
+      .sendMessage(
+        user,
+        "Вы выходите из таверны и отправляетесь в подземелье", // TODO заменить сообщение
+        List.empty,
+        None
+      )
+      .as(StateType.Dungeon)
+
+  private def getTravel9(user: User): Task[StateType] =
+    api
+      .sendMessage(
+        user,
+        "«Не знаю. В прочем она оставила для тебя письмо. Сообщила о том, что тебе будет крайне интересно его прочесть, а так же сказала отдать его тебе, когда ты принесёшь мне две тысячи золотых. В целом, была рада познакомиться, с сегодняшнего дня, просто лежать в постели у тебя уже не получится, теперь уже я буду требовать с вас плату» — продолжала говорит она.",
+        List.empty,
+        Some(
+          Keyboard.default
+            .addRow()
+            .addButton(
+              Button.withAction(
+                Text("Отправиться в подземелье", Some(Action.EndOfTravel.json))
+              )
+            )
+        )
+      )
+      .as(Registration)
+
+  private def getTravel8(user: User): Task[StateType] =
+    api
+      .sendMessage(
+        user,
+        "«Приятно познакомиться» — Сказала она. «А теперь я расскажу вам об этом месте. Судя по всему вы здесь впервые. Наш маленький город зовётся Кинэт,  тут практически нет опытных искателей, но здесь есть все необходимое для размеренной жизни и хорошей пенсии вдали от многих угроз этого мира. Однако это не для тебя. Искательница, что принесла тебя, сказала, что ты обязательно пойдёшь в лабиринт. Она оплатила комнату для тебя и лекаря, а так же начальную экипировку для тебя.» — весьма бодро и с непонятно откуда взявшейся добротой звучали её слова.",
+        List.empty,
+        Some(
+          Keyboard.default
+            .addRow()
+            .addButton(
+              Button.withAction(Text("Кто она?", Some(Action.Travel9.json)))
+            )
+        )
+      )
+      .as(Registration)
 
   private def getTravel7(user: User): Task[StateType] =
     api
