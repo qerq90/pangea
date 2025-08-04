@@ -9,6 +9,7 @@ case class Hero(
   id: HeroId,
   userId: UserId,
   state: StateType,
+  lvl: Long,
   race: Race,
   baseStats: BaseStats,
   fightStats: FightStats,

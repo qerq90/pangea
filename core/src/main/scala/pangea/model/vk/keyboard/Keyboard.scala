@@ -25,7 +25,7 @@ case class Keyboard(
 }
 
 object Keyboard {
-  val default: Keyboard = Keyboard(List.empty, one_time = true, inline = false)
+  val default: Keyboard = Keyboard(List.empty, one_time = false, inline = false)
 
   implicit val encoder: Encoder[Keyboard] = deriveEncoder[Keyboard]
 }

@@ -30,9 +30,10 @@ case class HeroRepositoryLive(heroDao: HeroDao) extends HeroRepository {
 object HeroRepositoryLive {
   private def newHero(id: UserId): Hero =
     Hero(
-      HeroId(-1),
-      id,
+      id = HeroId(-1),
+      userId = id,
       state = Registration,
+      lvl = 1,
       race = Human,
       baseStats = BaseStats(4, 4, 4, 4),
       fightStats = FightStats(4, 64, 0, 0),

@@ -15,13 +15,13 @@ import zio.interop.catz._
 class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
 
   override def getHeroByUserId(userId: UserId): Task[Option[Hero]] =
-    sql"select id, user_id, state, race, base_stats, fight_stats, equipment from heroes where user_id = ${userId.value}"
+    sql"select id, user_id, state, lvl, race, base_stats, fight_stats, equipment from heroes where user_id = ${userId.value}"
       .query[Hero]
       .option
       .transact(xa)
 
   override def insertHero(hero: Hero): Task[HeroId] =
-    sql"insert into heroes(user_id, state, race, base_stats, fight_stats, equipment) values(${hero.userId}, ${hero.state}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson})".update
+    sql"insert into heroes(user_id, state, lvl, race, base_stats, fight_stats, equipment) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson})".update
       .withUniqueGeneratedKeys[HeroId]("id")
       .transact(xa)
 
