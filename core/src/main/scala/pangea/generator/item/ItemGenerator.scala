@@ -1,7 +1,10 @@
 package pangea.generator.item
 
+import pangea.model.item.stats.Stat
 import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.util.ListOps
+
+import scala.annotation.tailrec
 import scala.util.Random
 
 object ItemGenerator {
@@ -22,6 +25,42 @@ object ItemGenerator {
     (param + percentValue).toLong
   }
 
+  @tailrec
+  private def updateExtraParams(n: Long, item: Item): Item = {
+    val modifiedItem = Stat.values.toList.random match {
+      case Stat.Attack =>
+        item.withAttack(
+          item.attack + modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl)
+        )
+      case Stat.Accuracy =>
+        item.withAccuracy(
+          item.accuracy + modifyParameter(item.rarity.factorR3 * item.lvl)
+        )
+      case Stat.Concentration =>
+        item.withConcentration(
+          item.concentration + modifyParameter(
+            item.rarity.factorR3 * 0.5 * item.lvl
+          )
+        )
+      case Stat.Armor =>
+        item.withArmor(
+          item.armor + modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl)
+        )
+      case Stat.Defence =>
+        item.withDefence(
+          item.defence + modifyParameter(
+            item.rarity.factorR3 * 0.5 * item.lvl
+          )
+        )
+      case Stat.Evasion =>
+        item.withEvasion(
+          item.evasion + modifyParameter(item.rarity.factorR3 * item.lvl)
+        )
+    }
+    if (n > 0) updateExtraParams(n - 1, modifiedItem)
+    else modifiedItem
+  }
+
   def createItem(lvl: Long, rarity: Rarity): Item = {
     val itemLvl             = getModifiedLvl(lvl)
     val numberOfExtraParams = rarity.getNumOfExtraParams
@@ -37,6 +76,8 @@ object ItemGenerator {
       Item(
         id,
         "default attack item name",
+        itemLvl,
+        rarity,
         itemType,
         attack,
         accuracy,
@@ -56,6 +97,8 @@ object ItemGenerator {
       Item(
         id,
         "default defence item name",
+        itemLvl,
+        rarity,
         itemType,
         attack,
         accuracy,
@@ -66,6 +109,9 @@ object ItemGenerator {
       )
     }
 
-    item // TODO add more stats based on numOfExtraStats
+    updateExtraParams(
+      numberOfExtraParams,
+      item
+    )
   }
 }

@@ -8,6 +8,8 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 case class Item(
   id: Long,
   name: String,
+  lvl: Long,
+  rarity: Rarity,
   itemType: ItemType,
   attack: Long,
   accuracy: Long,
@@ -17,6 +19,10 @@ case class Item(
   evasion: Long
 ) {
   def withName(name: String): Item = copy(name = name)
+
+  def withLvl(lvl: Long): Item = copy(lvl = lvl)
+
+  def withRarity(rarity: Rarity): Item = copy(rarity = rarity)
 
   def withAttack(attack: Long): Item = copy(attack = attack)
 
@@ -33,7 +39,8 @@ case class Item(
 }
 
 object Item {
-  def NoItem: Item = Item(0, "Пусто", ItemType.NoItem, 0, 0, 0, 0, 0, 0)
+  def NoItem: Item =
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]
