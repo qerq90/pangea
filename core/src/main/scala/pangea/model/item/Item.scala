@@ -18,6 +18,8 @@ case class Item(
   defence: Long,
   evasion: Long
 ) {
+  def withId(id: Long): Item = copy(id = id)
+
   def withName(name: String): Item = copy(name = name)
 
   def withLvl(lvl: Long): Item = copy(lvl = lvl)

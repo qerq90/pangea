@@ -1,6 +1,8 @@
 package pangea.model.item
 
 import enumeratum._
+import io.circe.{Decoder, Encoder, HCursor}
+import io.circe.syntax.EncoderOps
 
 import scala.util.Random
 
@@ -68,4 +70,10 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
     override val factorR3: Double         = 15
     override val paramsChance: List[Long] = List(100, 100, 100, 100, 50)
   }
+
+  implicit val encoder: Encoder[Rarity] = (rarity: Rarity) =>
+    rarity.entryName.asJson
+
+  implicit val decoder: Decoder[Rarity] = (c: HCursor) =>
+    c.as[String].map(Rarity.withName)
 }
