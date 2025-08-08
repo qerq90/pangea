@@ -5,20 +5,26 @@ import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import pangea.model.hero.HeroId
+import pangea.model.inventory.Inventory.Items
 import pangea.model.item.Item
 
 case class Inventory(
   id: Long,
   heroId: HeroId,
   maxItems: Long,
-  items: List[Item]
+  items: Items
 ) {
-  def addItem(item: Item): Inventory = copy(items = items.appended(item))
+  def addItem(item: Item): Inventory =
+    copy(items = items.copy(data = items.data.appended(item)))
+
+  def withItems(items: List[Item]): Inventory = copy(items = Items(items))
 }
 
 object Inventory {
-  implicit val encoderForItems: Encoder[List[Item]] = deriveEncoder[List[Item]]
-  implicit val decoderForItems: Decoder[List[Item]] = deriveDecoder[List[Item]]
+  case class Items(data: List[Item])
+
+  implicit val encoderForItems: Encoder[Items] = deriveEncoder[Items]
+  implicit val decoderForItems: Decoder[Items] = deriveDecoder[Items]
 
   implicit val meta: Meta[List[Item]] = new Meta(pgDecoderGet, pgEncoderPut)
 }

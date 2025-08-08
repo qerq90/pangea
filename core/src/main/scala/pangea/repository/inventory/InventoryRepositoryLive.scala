@@ -4,7 +4,7 @@ import pangea.dao.inventory.InventoryDao
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory
 import pangea.model.item.Item
-import zio.{IO, Task, ZIO}
+import zio.{IO, ZIO}
 
 final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     extends InventoryRepository {
@@ -20,7 +20,7 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
         .tapError(err => ZIO.logError(s"Error occurred: ${err.getMessage}"))
         .orElseFail(InventoryRepoError.CantFindInventory)
       updatedInventory <-
-        if (inventory.maxItems >= inventory.items.length)
+        if (inventory.maxItems >= inventory.items.data.length)
           ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
         else ZIO.succeed(inventory.addItem(item))
       _ <- inventoryDao
@@ -34,12 +34,12 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
       inventory <- inventoryDao
         .get(heroId)
         .orElseFail(InventoryRepoError.CantFindInventory)
-      itemsWithoutOne = inventory.items.filter(_.id != itemId)
-      _ <- ZIO.when(itemsWithoutOne.length == inventory.items.length)(
+      itemsWithoutOne = inventory.items.data.filter(_.id != itemId)
+      _ <- ZIO.when(itemsWithoutOne.length == inventory.items.data.length)(
         ZIO.fail(InventoryRepoError.CantFindItemToRemove)
       )
       _ <- inventoryDao
-        .update(inventory.copy(items = itemsWithoutOne))
+        .update(inventory.withItems(itemsWithoutOne))
         .orElseFail(InventoryRepoError.CantUpdateInventory)
     } yield ()
 }
