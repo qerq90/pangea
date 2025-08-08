@@ -26,5 +26,5 @@ object Inventory {
   implicit val encoderForItems: Encoder[Items] = deriveEncoder[Items]
   implicit val decoderForItems: Decoder[Items] = deriveDecoder[Items]
 
-  implicit val meta: Meta[List[Item]] = new Meta(pgDecoderGet, pgEncoderPut)
+  implicit val meta: Meta[Items] = new Meta(pgDecoderGet, pgEncoderPut)
 }
