@@ -17,6 +17,7 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     (for {
       inventory <- inventoryDao
         .get(heroId)
+        .tapError(err => ZIO.logError(s"Error occurred: ${err.getMessage}"))
         .orElseFail(InventoryRepoError.CantFindInventory)
       updatedInventory <-
         if (inventory.maxItems >= inventory.items.length)
