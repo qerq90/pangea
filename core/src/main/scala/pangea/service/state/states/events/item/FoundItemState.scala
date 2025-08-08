@@ -61,7 +61,7 @@ case class FoundItemState(
         api
           .sendMessage(
             user,
-            "",
+            "Вы находите предмет",
             List.empty,
             Some(FoundItemKeyboard.keyboard)
           )
