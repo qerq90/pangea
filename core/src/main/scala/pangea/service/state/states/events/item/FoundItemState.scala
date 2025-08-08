@@ -12,6 +12,7 @@ import pangea.model.state.StateType
 import pangea.model.state.StateType.{Dungeon, FoundItem}
 import pangea.model.user.User
 import pangea.repository.event.EventRepository
+import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.service.sender.Api
 import pangea.service.state.states.events.item.FoundItemState.FoundItemData
 import pangea.service.state.states.events.item.keyboard.FoundItemKeyboard
@@ -21,7 +22,8 @@ import zio.{Task, ZIO}
 case class FoundItemState(
   api: Api,
   eventRepo: EventRepository,
-  heroDao: HeroDao
+  heroDao: HeroDao,
+  inventoryRepository: InventoryRepository
 ) extends State {
   private lazy val eventType = this.getClass.getSimpleName
 
@@ -62,8 +64,31 @@ case class FoundItemState(
     for {
       eventData <- eventRepo.getEvent(user.userId, eventType)
       item      <- ZIO.fromEither(eventData.data.as[FoundItemData].map(_.item))
-      // TODO add item to your inventory if it can be added
-      _ <- api.sendMessage(user, s"Вы получили ${item.name}", List.empty, None)
+      hero <- heroDao
+        .getHeroByUserId(user.userId)
+        .flatMap(ZIO.fromOption(_))
+        .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
+
+      added <- inventoryRepository
+        .addItem(hero.id, item)
+        .as(true)
+        .tapSomeError { case InventoryRepoError.NoMorePlaceForItems =>
+          api.sendMessage(
+            user,
+            s"В инвентаре нет места, вы уходите ни с чем.",
+            List.empty,
+            None
+          )
+        }
+        .catchAll(_ => ZIO.succeed(false))
+      _ <- ZIO.when(added)(
+        api.sendMessage(
+          user,
+          s"Вы получили ${item.name}: ${item.asJson.noSpaces}",
+          List.empty,
+          None
+        )
+      )
       _ <- eventRepo.endEvent(user.userId, eventType)
     } yield Dungeon
 
