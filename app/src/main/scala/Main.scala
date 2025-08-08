@@ -4,10 +4,12 @@ import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
 import pangea.dao.event.EventDao
 import pangea.dao.hero.HeroDao
+import pangea.dao.inventory.InventoryDao
 import pangea.dao.monster.MonsterDao
 import pangea.dao.user.UserDao
 import pangea.repository.event.EventRepository
 import pangea.repository.hero.HeroRepository
+import pangea.repository.inventory.InventoryRepository
 import pangea.repository.user.{UserRepository, UserRepositoryLive}
 import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
@@ -35,10 +37,12 @@ object Main extends ZIOAppDefault {
       HeroDao.live,
       UserDao.live,
       EventDao.live,
+      InventoryDao.live,
       StatesMap.live,
       HeroRepository.live,
       UserRepository.live,
       EventRepository.live,
+      InventoryRepository.live,
       StateHandler.live,
       ServerConfig.live,
       Server.live
