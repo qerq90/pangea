@@ -89,6 +89,14 @@ case class FoundItemState(
           None
         )
       )
+      _ <- ZIO.when(!added)(
+        api.sendMessage(
+          user,
+          s"Вы не смогли забрать ${item.name}, вы уходите ни с чем.",
+          List.empty,
+          None
+        )
+      )
       _ <- eventRepo.endEvent(user.userId, eventType)
     } yield Dungeon
 
