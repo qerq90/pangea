@@ -69,6 +69,8 @@ case class FoundItemState(
         .flatMap(ZIO.fromOption(_))
         .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
 
+      _ <- ZIO.logInfo(s"hero: ${hero}")
+
       added <- inventoryRepository
         .addItem(hero.id, item)
         .as(true)
@@ -81,6 +83,8 @@ case class FoundItemState(
           )
         }
         .catchAll(_ => ZIO.succeed(false))
+
+      _ <- ZIO.logInfo(s"added: $added")
       _ <- ZIO.when(added)(
         api.sendMessage(
           user,
