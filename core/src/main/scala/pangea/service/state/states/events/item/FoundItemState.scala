@@ -83,7 +83,7 @@ case class FoundItemState(
         .tapSomeError { case InventoryRepoError.NoMorePlaceForItems =>
           api.sendMessage(
             user,
-            s"В инвентаре нет места, вы уходите ни с чем.",
+            s"В инвентаре нет места",
             List.empty,
             None
           )
@@ -101,7 +101,7 @@ case class FoundItemState(
       _ <- ZIO.when(!added)(
         api.sendMessage(
           user,
-          s"Вы не смогли забрать ${item.name}, вы уходите ни с чем.",
+          s"Вы не смогли забрать ${item.name}, вы уходите ни с чем...",
           List.empty,
           None
         )
