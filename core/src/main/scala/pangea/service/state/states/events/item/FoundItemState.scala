@@ -57,7 +57,15 @@ case class FoundItemState(
     getAction(action) match {
       case Action.TakeItem     => takeItem(user)
       case Action.DontTakeItem => dontTakeItem(user)
-      case Action.Text         => ZIO.succeed(FoundItem)
+      case Action.Text =>
+        api
+          .sendMessage(
+            user,
+            "",
+            List.empty,
+            Some(FoundItemKeyboard.keyboard)
+          )
+          .as(FoundItem)
     }
 
   private def takeItem(user: User) =
@@ -68,8 +76,6 @@ case class FoundItemState(
         .getHeroByUserId(user.userId)
         .flatMap(ZIO.fromOption(_))
         .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
-
-      _ <- ZIO.logInfo(s"hero: ${hero}")
 
       added <- inventoryRepository
         .addItem(hero.id, item)
@@ -84,7 +90,6 @@ case class FoundItemState(
         }
         .catchAll(_ => ZIO.succeed(false))
 
-      _ <- ZIO.logInfo(s"added: $added")
       _ <- ZIO.when(added)(
         api.sendMessage(
           user,
