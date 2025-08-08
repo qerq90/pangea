@@ -1,6 +1,7 @@
 package pangea.repository.hero
 
 import pangea.dao.hero.HeroDao
+import pangea.dao.inventory.InventoryDao
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.UserId
@@ -13,6 +14,6 @@ trait HeroRepository {
 }
 
 object HeroRepository {
-  val live: ZLayer[HeroDao, Nothing, HeroRepository] =
-    ZLayer.fromFunction(new HeroRepositoryLive(_))
+  val live: ZLayer[HeroDao with InventoryDao, Nothing, HeroRepository] =
+    ZLayer.fromFunction(new HeroRepositoryLive(_, _))
 }
