@@ -14,7 +14,7 @@ object ItemGenerator {
   private def getModifiedLvl(lvl: Long): Long = {
     var scaledLvl = lvl - random.between(0, 7) + 1
     if (scaledLvl > 150) scaledLvl = 150
-    if (scaledLvl < 0) scaledLvl = 1
+    if (scaledLvl <= 0) scaledLvl = 1
 
     scaledLvl
   }
