@@ -93,7 +93,7 @@ case class FoundItemState(
       _ <- ZIO.when(added)(
         api.sendMessage(
           user,
-          s"Вы получили ${item.name}: ${item.asJson.noSpaces}",
+          s"Вы получили ${item.name}",
           List.empty,
           None
         )
