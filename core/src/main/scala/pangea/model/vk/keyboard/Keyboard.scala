@@ -16,12 +16,20 @@ case class Keyboard(
   def addRow(): Keyboard =
     this.copy(buttons = this.buttons.appended(List.empty))
 
+  def addOptionalRow(bool: Boolean): Keyboard =
+    if (bool) addRow()
+    else this
+
   def addButton(button: Button): Keyboard =
     if (this.buttons.last.length == 5) this
     else {
       val newList = this.buttons.last.appended(button)
       this.copy(buttons = this.buttons.dropRight(1).appended(newList))
     }
+
+  def addOptionalButton(bool: Boolean)(button: Button): Keyboard =
+    if (bool) addButton(button)
+    else this
 }
 
 object Keyboard {

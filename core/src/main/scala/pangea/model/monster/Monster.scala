@@ -1,6 +1,6 @@
 package pangea.model.monster
 
-import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.stats.FightStats
 
 case class Monster(
   id: Long,

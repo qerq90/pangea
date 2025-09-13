@@ -7,20 +7,20 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import pangea.model.item.Item
 
 case class Equipment(
-  helmetId: Item,
-  shoulderPadsId: Item,
-  chestPlateId: Item,
-  braceletsId: Item,
-  glovesId: Item,
-  pantsId: Item,
-  leggingsId: Item,
-  amuletId: Item,
-  firstRingId: Item,
-  secondRingId: Item,
-  beltId: Item,
-  flaskId: Item,
-  weaponId: Item,
-  additionalWeaponId: Item
+  helmet: Item,
+  shoulderPads: Item,
+  chestPlate: Item,
+  bracelets: Item,
+  gloves: Item,
+  pants: Item,
+  boots: Item,
+  amulet: Item,
+  firstRing: Item,
+  secondRing: Item,
+  belt: Item,
+  flask: Item,
+  weapon: Item,
+  additionalWeapon: Item
 )
 
 object Equipment {

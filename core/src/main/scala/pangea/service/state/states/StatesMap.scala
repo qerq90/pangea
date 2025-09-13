@@ -6,6 +6,7 @@ import pangea.model.state.StateType.{
   Dungeon,
   FoundItem,
   GlobalMap,
+  HeroStats,
   Registration
 }
 import pangea.repository.event.EventRepository
@@ -15,6 +16,7 @@ import pangea.service.state.State
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.registration.RegistrationState
+import pangea.service.state.states.hero.HeroStatsState
 import zio.{ZIO, ZLayer}
 
 case class StatesMap(states: Map[StateType, State])
@@ -35,6 +37,7 @@ object StatesMap {
           GlobalMap    -> GlobalMapState(),
           Registration -> RegistrationState(api, heroDao),
           Dungeon      -> DungeonState(api),
+          HeroStats    -> HeroStatsState(api, heroDao),
           FoundItem    -> FoundItemState(api, eventRepo, heroDao, inventoryRepo)
         )
       } yield new StatesMap(states)

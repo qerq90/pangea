@@ -6,7 +6,7 @@ import pangea.model.hero.{Equipment, Hero, HeroId}
 import pangea.model.item.Item.NoItem
 import pangea.model.monster.Race.Human
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{GlobalMap, Registration}
+import pangea.model.state.StateType.Registration
 import pangea.model.stats.{BaseStats, FightStats}
 import pangea.model.user.UserId
 import pangea.repository.hero.HeroRepositoryLive.newHero
@@ -40,6 +40,8 @@ object HeroRepositoryLive {
       state = Registration,
       lvl = 1,
       race = Human,
+      exp = 0,
+      upgradePoints = 0,
       baseStats = BaseStats(4, 4, 4, 4),
       fightStats = FightStats(4, 64, 0, 0),
       equipment = Equipment(

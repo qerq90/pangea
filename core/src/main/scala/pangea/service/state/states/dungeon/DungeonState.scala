@@ -2,7 +2,7 @@ package pangea.service.state.states.dungeon
 
 import io.circe.jawn.decode
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{events, Dungeon}
+import pangea.model.state.StateType.{events, Dungeon, HeroStats}
 import pangea.model.user.User
 import pangea.service.sender.Api
 import pangea.service.state.states.dungeon.keyboard.EnterKeyboard
@@ -28,8 +28,9 @@ case class DungeonState(api: Api) extends State {
 
   override def action(user: User, action: UserAction): Task[StateType] =
     getAction(action) match {
-      case Action.FindEvent => findEvent(user)
-      case Action.Text      => ZIO.succeed(Dungeon)
+      case Action.FindEvent   => findEvent(user)
+      case Action.MakeBonfire => ZIO.succeed(HeroStats)
+      case Action.Text        => ZIO.succeed(Dungeon)
     }
 
   private def findEvent(user: User): Task[StateType] =

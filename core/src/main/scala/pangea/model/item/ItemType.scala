@@ -10,9 +10,22 @@ object ItemType extends Enum[ItemType] {
 
   val values = findValues
 
-  val itemTypes: List[ItemType]    = values.filter(_ != NoItem).toList
-  val attackItems: List[ItemType]  = List(Weapon) // TODO full list
-  val defenceItems: List[ItemType] = List(Ring)   // TODO full list
+  val itemTypes: List[ItemType] = values.filter(_ != NoItem).toList
+
+  val attackItems: List[ItemType] =
+    List(
+      Weapon,
+      Boots,
+      Helmet,
+      ShoulderPads,
+      Gloves,
+      Ring,
+      Amulet,
+      Bracelets,
+      Leggings
+    )
+  val defenceItems: List[ItemType] =
+    List(Helmet, ShoulderPads, ChestPlate, Pants, Boots, Belt, Leggings)
 
   case object Helmet           extends ItemType
   case object ShoulderPads     extends ItemType
@@ -20,6 +33,7 @@ object ItemType extends Enum[ItemType] {
   case object Bracelets        extends ItemType
   case object Gloves           extends ItemType
   case object Pants            extends ItemType
+  case object Boots            extends ItemType
   case object Leggings         extends ItemType
   case object Amulet           extends ItemType
   case object Ring             extends ItemType
