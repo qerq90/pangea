@@ -4,10 +4,12 @@ import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, VkId}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
+import pangea.service.sender.Api
 import pangea.service.state.states.StatesMap
 import zio.{Task, ZIO, ZLayer}
 
 class StateHandler(
+  api: Api,
   userRepo: UserRepository,
   heroRepo: HeroRepository,
   states: Map[StateType, State]
@@ -22,6 +24,17 @@ class StateHandler(
       }
 
       _ <- makeAction(user, action)
+        .catchAll(err =>
+          ZIO
+            .logError(
+              s"Error occurred while making action: ${err.getMessage}"
+            ) *> api.sendMessage(
+            user,
+            "Произошла ошибка, пропишите /home или обратитесь в техподдержку",
+            List.empty,
+            None
+          )
+        )
     } yield ()
 
   def makeActionTelegram(
@@ -76,15 +89,16 @@ class StateHandler(
 
 object StateHandler {
   val live: ZLayer[
-    StatesMap with HeroRepository with UserRepository,
+    Api with StatesMap with HeroRepository with UserRepository,
     Nothing,
     StateHandler
   ] =
     ZLayer.fromZIO(
       for {
+        api       <- ZIO.service[Api]
         userRepo  <- ZIO.service[UserRepository]
         heroRepo  <- ZIO.service[HeroRepository]
         statesMap <- ZIO.service[StatesMap]
-      } yield new StateHandler(userRepo, heroRepo, statesMap.states)
+      } yield new StateHandler(api, userRepo, heroRepo, statesMap.states)
     )
 }
