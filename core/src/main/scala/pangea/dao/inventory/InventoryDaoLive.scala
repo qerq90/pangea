@@ -6,16 +6,15 @@ import doobie.util.transactor.Transactor
 import io.circe.syntax.EncoderOps
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory
-import pangea.model.item.Item
 import zio.Task
 import zio.interop.catz._
-
-import pangea.model.inventory.Inventory.meta
+import pangea.model.inventory.Inventory.{meta, Items}
+import pangea.model.item.Item
 
 class InventoryDaoLive(xa: Transactor[Task]) extends InventoryDao {
 
   override def create(heroId: HeroId): Task[Unit] =
-    sql"insert into inventories(hero_id, max_items, items) values($heroId, 30, ${List.empty[Item].asJson})".update.run
+    sql"insert into inventories(hero_id, max_items, items) values($heroId, 30, ${Items(List.empty[Item])})".update.run
       .transact(xa)
       .unit
 
