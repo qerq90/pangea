@@ -24,15 +24,15 @@ final class ServerLive(
   private val routes: HttpRoutes[Task] = HttpRoutes.of[Task] {
     case req @ POST -> Root =>
       for {
-//        vkChecking <- req.as[VkChecking].option
-//        resp <- vkChecking match {
-//          case Some(_) =>
-//            Ok(
-//              "3aeb4587",
-//              `Content-Type`(MediaType.text.plain)
-//            )
-//          case None => Ok("ok")
-//        }
+        vkChecking <- req.as[VkChecking].option
+        resp <- vkChecking match {
+          case Some(_) =>
+            Ok(
+              "b874fbde",
+              `Content-Type`(MediaType.text.plain)
+            )
+          case None => Ok("ok")
+        }
 
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
