@@ -3,6 +3,7 @@ package pangea.model.hero
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.trauma.Trauma
 import pangea.model.user.UserId
 
 case class Hero(
@@ -15,19 +16,65 @@ case class Hero(
   race: Race,
   baseStats: BaseStats,
   fightStats: FightStats,
-  equipment: Equipment
+  equipment: Equipment,
+  dungeonLevel: Int,
+  gold: Long,
+  traumaUntil: Option[Long],
+  traumaName: Option[String],
+  flaskCharges: Int
 ) {
-  def getInfo: String =
-    s"""Уровень $lvl
-       | $getLvlExp/$getNeededExp очков опыта
+  // Effective armor pool = Armor × Defence (Defence scales the pool, not % reduction)
+  def maxArmor: Long = equipment.allArmor * fightStats.defence
+
+  def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)
+
+  def effectiveFightStats(nowMs: Long): FightStats = {
+    val rf        = race.factor
+    val traumaMod = if (traumaActive(nowMs)) traumaModifier else 1.0
+    fightStats.copy(
+      atk           = (fightStats.atk * rf.attackFactor * traumaMod).toLong.max(1L),
+      defence       = (fightStats.defence * rf.defenceFactor * traumaMod).toLong,
+      accuracy      = (fightStats.accuracy * rf.accuracyFactor * traumaMod).toLong,
+      evasion       = (fightStats.evasion * rf.evasionFactor * traumaMod).toLong,
+      concentration = ((fightStats.concentration + baseStats.int) * rf.concentrationFactor * traumaMod).toLong
+    )
+  }
+
+  def effectiveMaxHp(nowMs: Long): Long = {
+    val base     = baseStats.vit * 16L
+    val withRace = (base * race.factor.hpFactor).toLong.max(1L)
+    if (traumaActive(nowMs)) (withRace * traumaModifier).toLong.max(1L) else withRace
+  }
+
+  // Stat multiplier from active trauma (1.0 if no known trauma → fallback -20%)
+  private def traumaModifier: Double =
+    traumaName.flatMap(Trauma.byName).map(_.modifier).getOrElse(0.8)
+
+  // Remaining trauma in "Xh Ym" format, or None
+  def traumaRemainingText(nowMs: Long): Option[String] =
+    traumaUntil.filter(_ > nowMs).map { until =>
+      val secs    = (until - nowMs) / 1000L
+      val hours   = secs / 3600
+      val minutes = (secs % 3600) / 60
+      s"${hours}ч ${minutes}мин"
+    }
+  def getInfo(nowMs: Long): String = {
+    val eff   = effectiveFightStats(nowMs)
+    val maxHp = effectiveMaxHp(nowMs)
+    s"""${race.toString}, Уровень $lvl
+       | $getLvlExp/$getNeededExp опыта
        |
-       | 👊 - ${baseStats.str} очков силы
-       | 💪 - ${baseStats.vit} очков телосложения
-       | 👣 - ${baseStats.agi} - очков ловкости
-       | ❤ ${fightStats.hp}/64 🧥 ${fightStats.armor}/100
+       | 💪 СИЛ ${baseStats.str}  ТЕЛО ${baseStats.vit}
+       | 🏃 ЛОВ ${baseStats.agi}  ИНТ ${baseStats.int}
        |
-       | Свободных очков характеристик: ${upgradePoints}
+       | ⚔ Атк ${eff.atk}  🎯 Точн ${eff.accuracy}
+       | 🛡 Защ ${eff.defence}  👁 Укл ${eff.evasion}
+       | ❤ ${fightStats.hp}/$maxHp
+       |
+       | Золото: $gold
+       | Свободных очков: $upgradePoints
        |""".stripMargin
+  }
 
   def getNeededExp: Long = {
     var neededExp = 100

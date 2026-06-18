@@ -4,7 +4,7 @@ import enumeratum._
 import io.circe.{Decoder, Encoder, HCursor}
 import io.circe.syntax.EncoderOps
 
-import scala.util.Random
+import pangea.domain.Rng
 
 sealed trait Rarity extends EnumEntry {
   val factorR: Double
@@ -12,10 +12,11 @@ sealed trait Rarity extends EnumEntry {
   val factorR3: Double
   val paramsChance: List[Long]
 
-  def getNumOfExtraParams: Long =
-    paramsChance
-      .map(chance => (Random.between(0, 100) + chance) / 100)
-      .fold(0L)((acc, el) => acc + el)
+  def getNumOfExtraParams(rng: Rng): (Long, Rng) =
+    paramsChance.foldLeft((0L, rng)) { case ((acc, r), chance) =>
+      val (roll, next) = r.between(0L, 100L)
+      ((roll + chance) / 100L + acc, next)
+    }
 }
 
 object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {

@@ -1,18 +1,12 @@
 package pangea.service.state.states
 
 import pangea.dao.hero.HeroDao
+import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{
-  Dungeon,
-  FoundItem,
-  GlobalMap,
-  HeroStats,
-  Registration
-}
-import pangea.repository.event.EventRepository
+import pangea.model.state.StateType.{Battle, Death, Dungeon, FoundItem, GlobalMap, HeroStats, Inventory, Registration, Rest}
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.sender.Api
 import pangea.service.state.State
+import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.registration.RegistrationState
@@ -23,23 +17,29 @@ case class StatesMap(states: Map[StateType, State])
 
 object StatesMap {
   val live: ZLayer[
-    Api with HeroDao with EventRepository with InventoryRepository,
-    Nothing,
+    Players with HeroDao with InventoryRepository with Journal with SceneContent,
+    Throwable,
     StatesMap
   ] =
     ZLayer.fromZIO(
       for {
-        api           <- ZIO.service[Api]
+        players       <- ZIO.service[Players]
         heroDao       <- ZIO.service[HeroDao]
-        eventRepo     <- ZIO.service[EventRepository]
         inventoryRepo <- ZIO.service[InventoryRepository]
+        journal       <- ZIO.service[Journal]
+        content       <- ZIO.service[SceneContent]
         states = Map[StateType, State](
-          GlobalMap    -> GlobalMapState(),
-          Registration -> RegistrationState(api, heroDao),
-          Dungeon      -> DungeonState(api),
-          HeroStats    -> HeroStatsState(api, heroDao),
-          FoundItem    -> FoundItemState(api, eventRepo, heroDao, inventoryRepo)
+          GlobalMap    -> GlobalMapState(heroDao, content),
+          Registration -> RegistrationState(players, heroDao, inventoryRepo, journal, content),
+          Dungeon      -> DungeonState(heroDao, content),
+          HeroStats    -> HeroStatsState(heroDao, content),
+          FoundItem    -> FoundItemState(heroDao, inventoryRepo, journal, content),
+          Battle       -> BattleState(heroDao, content),
+          Death        -> DeathState(heroDao, inventoryRepo, content),
+          Rest         -> RestState(heroDao, content),
+          Inventory    -> InventoryState(heroDao, inventoryRepo, content)
         )
+        _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)
     )
 }

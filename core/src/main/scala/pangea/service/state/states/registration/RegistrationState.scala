@@ -1,286 +1,119 @@
 package pangea.service.state.states.registration
 
+import io.circe.Json
 import io.circe.jawn.decode
+import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
+import pangea.engine.{Beat, Branch, Choice, Journal, Narrative, Players, Renderer, SceneContent, Screen, Target}
+import pangea.model.GameEvent
+import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
 import pangea.model.user.User
-import pangea.model.vk.keyboard.Action.Text
-import pangea.model.vk.keyboard.{Button, Keyboard}
-import pangea.service.sender.Api
-import pangea.service.state.states.registration.keyboard.{
-  NameKeyboard,
-  RaceDescriptionKeyboard,
-  RaceKeyboard,
-  StartKeyboard
-}
+import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
-case class RegistrationState(api: Api, heroDao: HeroDao) extends State {
+case class RegistrationState(
+  players:       Players,
+  heroDao:       HeroDao,
+  inventoryRepo: InventoryRepository,
+  journal:       Journal,
+  content:       SceneContent
+) extends State {
 
-  // never gonna be used
-  override def enter(user: User): Task[Unit] = ZIO.unit
+  override def enter(user: User, renderer: Renderer): Task[Unit] = ZIO.unit
 
-  private def matchUserAction(action: UserAction): Action =
-    action.payload match {
-      case Some(payload) => decode[Action](payload).toOption.get
-      case None          => Action.Text
+  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    branch.act(user, ua, renderer)
+
+  private lazy val travelNarrative: Narrative = {
+    val bs = content.beats("registration.travel").map {
+      case ("Travel7", beat) =>
+        "Travel7" -> Beat(
+          beat.text,
+          user => players.getDisplayName(user).map(name => List(Choice("Travel8", s"Меня зовут $name")))
+        )
+      case other => other
     }
+    new Narrative(bs)
+  }
 
-  override def action(user: User, action: UserAction): Task[StateType] =
-    matchUserAction(action) match {
-      case Action.EndOfTravel => endTravel(user)
-      case Action.Travel9     => getTravel9(user)
-      case Action.Travel8     => getTravel8(user)
-      case Action.Travel7     => getTravel7(user)
-      case Action.Travel6     => getTravel6(user)
-      case Action.Travel5     => getTravel5(user)
-      case Action.Travel4     => getTravel4(user)
-      case Action.Travel3     => getTravel3(user)
-      case Action.Travel2     => getTravel2(user)
-      case Action.Travel1     => getTravel1(user)
-      case Action.Travel      => updateRace(user, action)
-      case Action.RaceDescription =>
-        getRaceDescription(user, Race.withNameOption(action.text))
-      case Action.Race => getRace(user)
-      case _ =>
-        for {
-          _ <- api.sendMessage(
-            user,
-            "Добро пожаловать на Пангею! Для того что бы приступить, отправьте слово «Начать»\nЭто текстовая онлайн-ммо- игра «Клеймо Пангеи», все действия в ней происходят при использовании команд под окном чата, результаты этих действий приходят в виде ответа от сообщества. В игре представлено большое число вариативности и уникальности вашего игрового пути к прохождению всей игровой компании. Так же не забывайте взаимодействовать с другими игроками для облегчения своей игры.\nкартинка c приветствием\nПрежде всего, проверим управление. Вы видите кнопки внизу?\n\n⚠Если у Вас нет кнопок для управления под окном чата - проверьте, что они не скрыты (кнопка \"показать/скрыть\" в строке набора текста в мобильном приложении, покатана на скрине), а также что используется последняя версия официального мобильного приложения \"Вконтакте\", либо обычный браузер.",
-            List.empty,
-            Some(StartKeyboard.keyboard)
-          )
-        } yield Registration
-    }
+  private lazy val branch: Branch = new Branch(
+    routes = Map(
+      "EndOfTravel"     -> Target.Run { (user, _, renderer)  => endTravel(user, renderer) },
+      "Travel"          -> Target.Run { (user, ua, renderer)  => updateRace(user, ua, renderer) },
+      "RaceDescription" -> Target.Run { (user, ua, renderer)  => getRaceDescription(user, ua.text, renderer) },
+      "Race"            -> Target.Run { (user, _, renderer)   => getRace(user, renderer) }
+    ) ++ travelNarrative.toRoutes(Registration),
+    fallback = Target.Run { (user, _, renderer) => showWelcome(user, renderer) }
+  )
 
-  private def endTravel(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "Вы выходите из таверны и отправляетесь в подземелье", // TODO заменить сообщение
-        List.empty,
-        None
-      )
-      .as(StateType.Dungeon)
-
-  private def getTravel9(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "«Не знаю. В прочем она оставила для тебя письмо. Сообщила о том, что тебе будет крайне интересно его прочесть, а так же сказала отдать его тебе, когда ты принесёшь мне две тысячи золотых. В целом, была рада познакомиться, с сегодняшнего дня, просто лежать в постели у тебя уже не получится, теперь уже я буду требовать с вас плату» — продолжала говорит она.",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text("Отправиться в подземелье", Some(Action.EndOfTravel.json))
-              )
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel8(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "«Приятно познакомиться» — Сказала она. «А теперь я расскажу вам об этом месте. Судя по всему вы здесь впервые. Наш маленький город зовётся Кинэт,  тут практически нет опытных искателей, но здесь есть все необходимое для размеренной жизни и хорошей пенсии вдали от многих угроз этого мира. Однако это не для тебя. Искательница, что принесла тебя, сказала, что ты обязательно пойдёшь в лабиринт. Она оплатила комнату для тебя и лекаря, а так же начальную экипировку для тебя.» — весьма бодро и с непонятно откуда взявшейся добротой звучали её слова.",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(Text("Кто она?", Some(Action.Travel9.json)))
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel7(user: User): Task[StateType] =
-    api
-      .getName(user)
-      .flatMap { response =>
-        val firstName = response.response.head.firstName
-        val lastName  = response.response.head.lastName
-        api
-          .sendMessage(
-            user,
-            "Спустя несколько минут, в комнату вошла другая высокая женщина - человек, её лицо было посечено шрамами, но оно излучала доброту, которая никаким образом не подходила такому лицу. По одежде можно было понять, что она не служанка.\n«Доброе утро. Я Вельсмера , хозяйка здешней таверны.» представилась она.",
-            List.empty,
-            Some(NameKeyboard.keyboard(s"Меня зовут $firstName $lastName"))
-          )
-          .as(Registration)
-      }
-
-  private def getTravel6(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "Вы осматриваете помещение. Судя по всему это гостиная комната для одного посетителя, есть пустой шкаф с одеждой, небольшой рюкзак, стол за которым можно поесть, а так же вы обнаружили на себе незнакомую но чистую одежду, идеально подходящую под вашу комплекцию.В дверь входит служанка и ставит миску с, аппетитно пахнущим супом на стол, кладёт несколько ломтиков хлеба и уходит пожелав вам приятного аппетита. Вы почуствовали сильный голод, и немедленно принялись за трапезу.",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button
-                .withAction(Text("Наконец то еда!", Some(Action.Travel7.json)))
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel5(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "Вы проснулись в белоснежной кровати, тело чувствуется лёгким и абсолютно здоровым, вы проверяете свои конечности, и они слушаются вас без каких-либо проблем, при попытке встать с кровати, она предательски издаёт скрип, в эту же секунду вы слышите топот ног откуда-то снизу поднимающий всё ближе к вам.\nЕщё несколько секунд и в комнату врывается вместе со свежим и холодным воздухом, девушка-человек, одетая в форму служанки.\n«Вам уже лучше! Это хорошо. Я сейчас же позову хозяйку, и принесу еду, ни в коем случае никуда не уходите! Вам нужно по-есть, и не бойтесь, всё уже оплачено!».",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text(
-                  "Кивнуть девушке и осмотреть комнату",
-                  Some(Action.Travel6.json)
-                )
-              )
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel4(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "Неопределенное время, вы ощущаете будто бродите в тумане из своих мыслей. Нет ни солнца, ни луны, никакого источника света или понимая, безцельное блуждание на задворках неизвестности...\nОднако ветер доносит до вас обрывки фраз...«Жизненные силы восполняются с каждым днём, серьёзных травм нет. В общем будет жить» — сказал неизвестный голос.\n«Надеюсь, что все так и будет...» — прозвучал трепетно, необычайно нежный голос неизвестного, но кажется родного для вас существа...",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button
-                .withAction(Text("Открыть глаза", Some(Action.Travel5.json)))
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel3(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "С трудом пройдя десятки метров, вы замечаете как среди трупов бродит фигура, чьё лицо и тело спрятано под накидкой, когда же она обращает на вас внимание, на вашей руке загорается странный символ и кажется сейчас от боли вы потеряете сознание.",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text("Потерять сознание...", Some(Action.Travel4.json))
-              )
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel2(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "При попытках вспомнить хоть, что-то, ваша голова только сильнее начинала болеть. Здравый смысл подсказывал лишь, что надо лишь двигаться подальше от места где лежат одни трупы самых разных невиданных ранее существ и рас...",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text(
-                  "Идти дальше прочь от этого места",
-                  Some(Action.Travel3.json)
-                )
-              )
-            )
-        )
-      )
-      .as(Registration)
-
-  private def getTravel1(user: User): Task[StateType] =
-    api
-      .sendMessage(
-        user,
-        "Вы начали двигаться вверх, раздвигая тяжёлые и мокрые камни впереди себя. Спустя несколько минут ваших усилий. Вы выбрались и оказались в лесу... немного осмотревшись вы поняли, что вылезали не из каменного завала, а из целой горы трупов...",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text("Как же болит моя голова", Some(Action.Travel2.json))
-              )
-            )
-        )
-      )
-      .as(Registration)
-
-  private def updateRace(user: User, action: UserAction): Task[StateType] =
+  private def endTravel(user: User, renderer: Renderer): Task[StateType] =
     for {
-      race <- ZIO.fromEither(decode[Race](action.payload.get))
+      _    <- renderer.show(user, Screen(content.text("registration.endTravel"), Nil))
+      hero <- heroDao.getHeroByUserId(user.userId)
+      _    <- ZIO.whenCase(hero) { case Some(h) =>
+                 RegistrationState.starterItems
+                   .map(item => inventoryRepo.addItem(h.id, item).orElse(ZIO.unit))
+                   .reduce(_ *> _) *>
+                 renderer.show(user, Screen(content.text("registration.startingEquipment"), Nil))
+               }
+    } yield StateType.Dungeon
+
+  private def updateRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    for {
+      race <- ZIO.fromEither(decode[Race](ua.payload.get))
       _    <- heroDao.updateRace(user.userId, race)
-      _ <- api.sendMessage(
-        user,
-        "Вы открываете глаза. Практически ничего не видно, только сверху проблёскивает свет звёзд. Тяжело дышать, вы замкнуты и стеснены в движениях, рядом лишь камни и земля, кажется ваших сил хватит что бы выбраться наверх.",
-        List.empty,
-        Some(
-          Keyboard.default
-            .addRow()
-            .addButton(
-              Button.withAction(
-                Text("Выбраться наверх", Some(Action.Travel1.json))
-              )
-            )
-        )
-      )
+      _    <- journal.append(GameEvent(user.userId, "race_selected",
+                Json.obj("race" -> race.entryName.asJson)))
+      _    <- renderer.show(user, content.screen("registration.preTravel"))
     } yield Registration
 
-  private def getRaceDescription(
-      user: User,
-      race: Option[Race]
-  ): Task[StateType] =
-    race match {
-      case Some(race) =>
-        api
-          .sendMessage(
-            user,
-            race.description,
-            List.empty,
-            Some(RaceDescriptionKeyboard.keyboard(race))
-          )
-          .as(Registration)
+  private lazy val raceChoices: List[Choice] =
+    Race.values.toList.map(r => Choice("RaceDescription", r.toString))
 
+  private def getRaceDescription(user: User, raceName: String, renderer: Renderer): Task[StateType] =
+    Race.withNameOption(raceName) match {
+      case Some(r) =>
+        val choices = List(
+          Choice("Travel", content.text("registration.raceDescription.confirmLabel"), Map("race" -> r.entryName)),
+          Choice("Race",   content.text("registration.raceDescription.backLabel"))
+        )
+        renderer.show(user, Screen(r.description, choices)).as(Registration)
       case None =>
-        api
-          .sendMessage(
-            user,
-            "Теперь, выберите свою расу. Позже её можно будет сменить.",
-            List.empty,
-            Some(RaceKeyboard.keyboard)
-          )
-          .as(Registration)
+        renderer.show(user, Screen(content.text("registration.raceSelect"), raceChoices)).as(Registration)
     }
 
-  private def getRace(user: User): Task[StateType] =
-    for {
-      _ <- api.sendMessage(
-        user,
-        "Теперь, выберите свою расу. Позже её можно будет сменить.",
-        List.empty,
-        Some(RaceKeyboard.keyboard)
-      )
-    } yield Registration
+  private def getRace(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text("registration.raceSelect"), raceChoices))
+      .as(Registration)
+
+  private def showWelcome(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, content.screen("registration.welcome"))
+      .as(Registration)
+}
+
+object RegistrationState {
+  val starterItems: List[Item] = List(
+    Item(-1L,  "Шлем новобранца",          1L, Rarity.Gray, ItemType.Helmet,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-2L,  "Наплечники новобранца",     1L, Rarity.Gray, ItemType.ShoulderPads,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-3L,  "Нагрудник новобранца",      1L, Rarity.Gray, ItemType.ChestPlate,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-4L,  "Браслеты новобранца",       1L, Rarity.Gray, ItemType.Bracelets,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-5L,  "Перчатки новобранца",       1L, Rarity.Gray, ItemType.Gloves,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-6L,  "Штаны новобранца",          1L, Rarity.Gray, ItemType.Pants,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-7L,  "Сапоги новобранца",         1L, Rarity.Gray, ItemType.Boots,
+      attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 0, evasion = 3),
+    Item(-8L,  "Меч новобранца",            1L, Rarity.Gray, ItemType.Weapon,
+      attack = 20, accuracy = 5, concentration = 0, armor = 0, defence = 0, evasion = 0),
+    Item(-9L,  "Фляга начинающего исследователя", 1L, Rarity.Gray, ItemType.Flask,
+      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+  )
 }

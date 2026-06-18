@@ -2,17 +2,17 @@ package app
 
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
-import pangea.dao.event.EventDao
 import pangea.dao.hero.HeroDao
 import pangea.dao.inventory.InventoryDao
-import pangea.dao.monster.MonsterDao
+import pangea.dao.journal.JournalLive
 import pangea.dao.user.UserDao
-import pangea.repository.event.EventRepository
+import pangea.engine.{Journal, Players, SceneContent}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
-import pangea.repository.user.{UserRepository, UserRepositoryLive}
+import pangea.repository.user.UserRepository
 import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
+import pangea.service.sender.vk.VkPlayers
 import pangea.service.state.StateHandler
 import pangea.service.state.states.StatesMap
 import server.Server
@@ -33,15 +33,15 @@ object Main extends ZIOAppDefault {
       PostgresConfig.live,
       Transactor.live,
       Api.vk,
-      MonsterDao.live,
+      ZLayer.fromZIO(ZIO.service[Api].map(VkPlayers(_))).asInstanceOf[ZLayer[Api, Nothing, Players]],
       HeroDao.live,
       UserDao.live,
-      EventDao.live,
       InventoryDao.live,
+      JournalLive.live,
+      SceneContent.live,
       StatesMap.live,
       HeroRepository.live,
       UserRepository.live,
-      EventRepository.live,
       InventoryRepository.live,
       StateHandler.live,
       ServerConfig.live,

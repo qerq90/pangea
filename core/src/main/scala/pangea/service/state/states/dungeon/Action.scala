@@ -9,9 +9,13 @@ sealed trait Action extends EnumEntry
 object Action extends Enum[Action] {
   override def values: IndexedSeq[Action] = findValues
 
-  case object Text        extends Action
-  case object FindEvent   extends Action
-  case object MakeBonfire extends Action
+  case object Text          extends Action
+  case object FindEvent     extends Action
+  case object GoDarker      extends Action
+  case object GoLighter     extends Action
+  case object GoToCity      extends Action
+  case object OpenInventory extends Action
+  case object Rest          extends Action
 
   implicit val encoder: Encoder[Action] = (a: Action) =>
     Map[String, String]("action" -> a.entryName).asJson

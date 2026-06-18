@@ -21,7 +21,13 @@ case class Equipment(
   flask: Item,
   weapon: Item,
   additionalWeapon: Item
-)
+) {
+  def allArmor: Long =
+    helmet.armor + shoulderPads.armor + chestPlate.armor + bracelets.armor +
+    gloves.armor + pants.armor + boots.armor + amulet.armor +
+    firstRing.armor + secondRing.armor + belt.armor + flask.armor +
+    weapon.armor + additionalWeapon.armor
+}
 
 object Equipment {
   implicit val encoder: Encoder[Equipment] = deriveEncoder[Equipment]

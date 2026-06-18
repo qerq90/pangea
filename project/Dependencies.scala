@@ -36,7 +36,7 @@ object Dependencies {
     "circe-core",
     "circe-generic",
     "circe-parser"
-  ).map("io.circe" %% _ % "0.14.13")
+  ).map("io.circe" %% _ % "0.14.13") :+ ("io.circe" %% "circe-yaml" % "0.14.2")
 
   private val enumeratum = List(
     "com.beachape" %% "enumeratum"        % "1.7.6",
@@ -59,6 +59,11 @@ object Dependencies {
     "ch.qos.logback" % "logback-classic"   % "1.5.18",
     "dev.zio"       %% "zio-logging"       % "2.5.0",
     "dev.zio"       %% "zio-logging-slf4j" % "2.5.0"
+  )
+
+  val testDependencies: List[ModuleID] = List(
+    "dev.zio" %% "zio-test"     % "2.0.22" % Test,
+    "dev.zio" %% "zio-test-sbt" % "2.0.22" % Test
   )
 
   val apiDependencies: List[ModuleID] = pureconfig ++ ip4s ++ logging

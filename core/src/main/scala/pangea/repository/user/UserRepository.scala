@@ -8,10 +8,9 @@ import zio.{Task, ZLayer}
 trait UserRepository {
   def insertUserByVk(vkId: VkId): Task[User]
   def insertUserByTelegramId(telegramId: TelegramId): Task[User]
-
   def getUserByVkId(vkId: VkId): Task[Option[User]]
-
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
+  def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean]
 }
 
 object UserRepository {

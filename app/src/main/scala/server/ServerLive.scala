@@ -42,6 +42,7 @@ final class ServerLive(
             stateHandler
               .makeActionVK(
                 VkId(value.`object`.message.peerId.toString),
+                value.`object`.message.id,
                 UserAction(
                   value.`object`.message.text,
                   value.`object`.message.payload

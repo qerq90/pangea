@@ -28,6 +28,9 @@ case class UserRepositoryLive(userDao: UserDao) extends UserRepository {
 
   override def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]] =
     userDao.getUserByTelegramId(telegramId)
+
+  override def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean] =
+    userDao.checkAndRecordEvent(userId, eventId)
 }
 
 object UserRepositoryLive {

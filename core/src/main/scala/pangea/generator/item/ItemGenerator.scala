@@ -1,117 +1,90 @@
 package pangea.generator.item
 
+import pangea.domain.Rng
 import pangea.model.item.stats.Stat
 import pangea.model.item.{Item, ItemType, Rarity}
-import pangea.util.ListOps
 
 import scala.annotation.tailrec
-import scala.util.Random
 
 object ItemGenerator {
-  private val random = new Random()
-  private val id     = -1
+  private val id = -1
 
-  private def getModifiedLvl(lvl: Long): Long = {
-    var scaledLvl = lvl - random.between(0, 7) + 1
-    if (scaledLvl > 150) scaledLvl = 150
-    if (scaledLvl <= 0) scaledLvl = 1
-
-    scaledLvl
+  private def getModifiedLvl(lvl: Long, rng: Rng): (Long, Rng) = {
+    val (delta, next) = rng.between(0L, 7L)
+    val scaled        = (lvl - delta + 1).max(1L).min(150L)
+    (scaled, next)
   }
 
-  private def modifyParameter(param: Double): Long = {
-    val randomPercent: Long = random.between(-10, 11)
-    val percentValue        = (param / 100.0) * randomPercent
-    (param + percentValue).toLong
+  private def modifyParameter(param: Double, rng: Rng): (Long, Rng) = {
+    val (pct, next)  = rng.between(-10L, 11L)
+    val percentValue = (param / 100.0) * pct
+    ((param + percentValue).toLong, next)
   }
 
   @tailrec
-  private def updateExtraParams(n: Long, item: Item): Item = {
-    val modifiedItem = Stat.values.toList.random match {
-      case Stat.Attack =>
-        item.withAttack(
-          item.attack + modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl)
-        )
-      case Stat.Accuracy =>
-        item.withAccuracy(
-          item.accuracy + modifyParameter(item.rarity.factorR3 * item.lvl)
-        )
-      case Stat.Concentration =>
-        item.withConcentration(
-          item.concentration + modifyParameter(
-            item.rarity.factorR3 * 0.5 * item.lvl
-          )
-        )
-      case Stat.Armor =>
-        item.withArmor(
-          item.armor + modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl)
-        )
-      case Stat.Defence =>
-        item.withDefence(
-          item.defence + modifyParameter(
-            item.rarity.factorR3 * 0.5 * item.lvl
-          )
-        )
-      case Stat.Evasion =>
-        item.withEvasion(
-          item.evasion + modifyParameter(item.rarity.factorR3 * item.lvl)
-        )
+  private def updateExtraParams(n: Long, item: Item, rng: Rng): (Item, Rng) =
+    if (n <= 0) (item, rng)
+    else {
+      val (stat, rng1) = rng.pick(Stat.values.toList)
+      val (modified, rng2) = stat match {
+        case Stat.Attack =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+          (item.withAttack(item.attack + v), r)
+        case Stat.Accuracy =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * item.lvl, rng1)
+          (item.withAccuracy(item.accuracy + v), r)
+        case Stat.Concentration =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+          (item.withConcentration(item.concentration + v), r)
+        case Stat.Armor =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+          (item.withArmor(item.armor + v), r)
+        case Stat.Defence =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+          (item.withDefence(item.defence + v), r)
+        case Stat.Evasion =>
+          val (v, r) = modifyParameter(item.rarity.factorR3 * item.lvl, rng1)
+          (item.withEvasion(item.evasion + v), r)
+      }
+      updateExtraParams(n - 1, modified, rng2)
     }
-    if (n > 0) updateExtraParams(n - 1, modifiedItem)
-    else modifiedItem
+
+  def rarityForLevel(dungeonLevel: Int, rng: Rng): (Rarity, Rng) = {
+    val (roll, next) = rng.between(0L, 100L)
+    val rarity = dungeonLevel match {
+      case l if l <= 15  => if (roll < 60) Rarity.Gray   else if (roll < 90) Rarity.White  else Rarity.Green
+      case l if l <= 35  => if (roll < 25) Rarity.White  else if (roll < 65) Rarity.Green  else if (roll < 92) Rarity.Blue   else Rarity.Purple
+      case l if l <= 60  => if (roll < 20) Rarity.Green  else if (roll < 60) Rarity.Blue   else if (roll < 88) Rarity.Purple else Rarity.Violet
+      case l if l <= 100 => if (roll < 10) Rarity.Blue   else if (roll < 50) Rarity.Purple else if (roll < 80) Rarity.Violet else Rarity.Orange
+      case _             => if (roll < 20) Rarity.Purple else if (roll < 55) Rarity.Violet else Rarity.Orange
+    }
+    (rarity, next)
   }
 
-  def createItem(lvl: Long, rarity: Rarity): Item = {
-    val itemLvl             = getModifiedLvl(lvl)
-    val numberOfExtraParams = rarity.getNumOfExtraParams
+  def createItem(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) = {
+    val (itemLvl, rng1)            = getModifiedLvl(lvl, rng)
+    val (numberOfExtraParams, rng2) = rarity.getNumOfExtraParams(rng1)
+    val (isAttack, rng3)           = rng2.nextBoolean
 
-    val item = if (random.nextBoolean()) { // attack
-      val itemType      = ItemType.attackItems.random
-      val attack        = 0
-      val accuracy      = 0
-      val armor         = modifyParameter(rarity.factorR * itemLvl)
-      val defence       = modifyParameter(rarity.factorR1 * itemLvl)
-      val evasion       = 0
-      val concentration = 0
-      Item(
-        id,
-        "default attack item name",
-        itemLvl,
-        rarity,
-        itemType,
-        attack,
-        accuracy,
-        concentration,
-        armor,
-        defence,
-        evasion
-      )
-    } else { // defence
-      val itemType      = ItemType.defenceItems.random
-      val attack        = modifyParameter(rarity.factorR * itemLvl)
-      val accuracy      = 0
-      val armor         = 0
-      val concentration = 0
-      val defence       = 0
-      val evasion       = modifyParameter(rarity.factorR1 * itemLvl)
-      Item(
-        id,
-        "default defence item name",
-        itemLvl,
-        rarity,
-        itemType,
-        attack,
-        accuracy,
-        concentration,
-        armor,
-        defence,
-        evasion
-      )
-    }
+    val (item, rng4) =
+      if (isAttack) {
+        val (itemType, rng3a)  = rng3.pick(ItemType.attackItems)
+        val (armor, rng3b)     = modifyParameter(rarity.factorR * itemLvl, rng3a)
+        val (defence, rng3c)   = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
+        (Item(id, "?", itemLvl, rarity, itemType,
+          attack = 0, accuracy = 0, concentration = 0,
+          armor = armor, defence = defence, evasion = 0), rng3c)
+      } else {
+        val (itemType, rng3a)  = rng3.pick(ItemType.defenceItems)
+        val (attack, rng3b)    = modifyParameter(rarity.factorR * itemLvl, rng3a)
+        val (evasion, rng3c)   = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
+        (Item(id, "?", itemLvl, rarity, itemType,
+          attack = attack, accuracy = 0, concentration = 0,
+          armor = 0, defence = 0, evasion = evasion), rng3c)
+      }
 
-    updateExtraParams(
-      numberOfExtraParams,
-      item
-    )
+    val (withExtras, rng5)   = updateExtraParams(numberOfExtraParams, item, rng4)
+    val (name, rng6)         = ItemNameGenerator.generate(withExtras.itemType, rarity, rng5)
+    (withExtras.withName(name), rng6)
   }
 }

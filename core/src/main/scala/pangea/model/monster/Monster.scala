@@ -8,4 +8,6 @@ case class Monster(
   race: Race,
   rarity: Rarity,
   fightStats: FightStats
-)
+) {
+  def name: String = s"${rarity} ${race}"
+}
