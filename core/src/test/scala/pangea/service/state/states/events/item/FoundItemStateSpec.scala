@@ -4,7 +4,7 @@ import pangea.engine.SceneContent
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestJournal, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestJournal, TestRenderer}
 import zio.test._
 import zio.ZIO
 
@@ -21,7 +21,8 @@ object FoundItemStateSpec extends ZIOSpecDefault {
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
       invRepo   = if (canAddItem) TestInventoryRepository.accepting else TestInventoryRepository.full
-      state     = FoundItemState(heroDao, invRepo, journal, content)
+      itemRepo  = TestItemRepository.make
+      state     = FoundItemState(heroDao, invRepo, itemRepo, journal, content)
     } yield (state, renderer, heroDao)
 
   override def spec = suite("FoundItemState")(
@@ -91,6 +92,35 @@ object FoundItemStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.head.choices.map(_.id).contains("TakeItem")) &&
               assertTrue(screens.head.choices.map(_.id).contains("DontTakeItem")) &&
               assertTrue(sceneData.isDefined)
+    },
+
+    test("enter → предмет в scene_data имеет реальный ID (не -1)") {
+      import io.circe.parser.decode
+      import pangea.service.state.states.events.item.FoundItemState.FoundItemData
+      for {
+        triple                    <- makeState()
+        (state, renderer, heroDao) = triple
+        _                         <- state.enter(testUser, renderer)
+        sceneData                 <- heroDao.readSceneData(userId)
+        item                       = sceneData.flatMap(json => decode[FoundItemData](json.noSpaces).toOption).map(_.item)
+      } yield assertTrue(item.isDefined) &&
+              assertTrue(item.get.id > 0L)
+    },
+
+    test("TakeItem → предмет в инвентаре имеет реальный ID") {
+      for {
+        renderer <- TestRenderer.make
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        journal  <- TestJournal.make
+        content  <- ZIO.attempt(SceneContent.load())
+        invRepo   = TestInventoryRepository.accepting
+        itemRepo  = TestItemRepository.make
+        state     = FoundItemState(heroDao, invRepo, itemRepo, journal, content)
+        _        <- state.enter(testUser, renderer)
+        _        <- state.action(testUser, tap("TakeItem"), renderer)
+        items     = invRepo.snapshot
+      } yield assertTrue(items.nonEmpty) &&
+              assertTrue(items.forall(_.id > 0L))
     }
   )
 }

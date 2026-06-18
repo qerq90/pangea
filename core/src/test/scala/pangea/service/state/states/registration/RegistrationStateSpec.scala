@@ -5,7 +5,7 @@ import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestJournal, TestPlayers, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestJournal, TestPlayers, TestRenderer}
 import zio.test._
 import zio.ZIO
 
@@ -30,7 +30,7 @@ object RegistrationStateSpec extends ZIOSpecDefault {
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
       invRepo   = TestInventoryRepository.accepting
-    } yield (RegistrationState(new TestPlayers, heroDao, invRepo, journal, content), renderer, heroDao, invRepo)
+    } yield (RegistrationState(new TestPlayers, heroDao, invRepo, TestItemRepository.make, journal, content), renderer, heroDao, invRepo)
 
   private def makeStateWithHero =
     for {
@@ -39,7 +39,7 @@ object RegistrationStateSpec extends ZIOSpecDefault {
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
       invRepo   = TestInventoryRepository.accepting
-    } yield (RegistrationState(new TestPlayers, heroDao, invRepo, journal, content), renderer, heroDao, invRepo)
+    } yield (RegistrationState(new TestPlayers, heroDao, invRepo, TestItemRepository.make, journal, content), renderer, heroDao, invRepo)
 
   override def spec = suite("RegistrationState")(
 

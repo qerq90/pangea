@@ -5,6 +5,7 @@ import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
 import pangea.model.state.StateType.{Battle, Death, Dungeon, FoundItem, GlobalMap, HeroStats, Inventory, Registration, Rest}
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
@@ -17,7 +18,7 @@ case class StatesMap(states: Map[StateType, State])
 
 object StatesMap {
   val live: ZLayer[
-    Players with HeroDao with InventoryRepository with Journal with SceneContent,
+    Players with HeroDao with InventoryRepository with ItemRepository with Journal with SceneContent,
     Throwable,
     StatesMap
   ] =
@@ -26,14 +27,15 @@ object StatesMap {
         players       <- ZIO.service[Players]
         heroDao       <- ZIO.service[HeroDao]
         inventoryRepo <- ZIO.service[InventoryRepository]
+        itemRepo      <- ZIO.service[ItemRepository]
         journal       <- ZIO.service[Journal]
         content       <- ZIO.service[SceneContent]
         states = Map[StateType, State](
           GlobalMap    -> GlobalMapState(heroDao, content),
-          Registration -> RegistrationState(players, heroDao, inventoryRepo, journal, content),
+          Registration -> RegistrationState(players, heroDao, inventoryRepo, itemRepo, journal, content),
           Dungeon      -> DungeonState(heroDao, content),
           HeroStats    -> HeroStatsState(heroDao, content),
-          FoundItem    -> FoundItemState(heroDao, inventoryRepo, journal, content),
+          FoundItem    -> FoundItemState(heroDao, inventoryRepo, itemRepo, journal, content),
           Battle       -> BattleState(heroDao, content),
           Death        -> DeathState(heroDao, inventoryRepo, content),
           Rest         -> RestState(heroDao, content),

@@ -1,10 +1,17 @@
 package pangea.repository.item
 
-import pangea.model.item.{Item, ItemType}
-import pangea.model.user.User
-import zio.Task
+import pangea.dao.item.ItemDao
+import pangea.domain.Rng
+import pangea.model.hero.HeroId
+import pangea.model.item.{Item, Rarity}
+import zio.{Task, ZLayer}
 
 trait ItemRepository {
-  def createItem(user: User, types: List[ItemType]): Task[Item]
-  def getItem(itemId: Long): Task[Item]
+  def generate(heroId: HeroId, lvl: Long, rarity: Rarity, rng: Rng): Task[Item]
+  def persist(heroId: HeroId, item: Item): Task[Item]
+}
+
+object ItemRepository {
+  val live: ZLayer[ItemDao, Nothing, ItemRepository] =
+    ZLayer.fromFunction(new ItemRepositoryLive(_))
 }

@@ -11,8 +11,9 @@ import pangea.model.item.Item
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.model.GameEvent
-import pangea.service.state.states.InventoryState
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
+import pangea.repository.item.ItemRepository
+import pangea.service.state.states.InventoryState
 import pangea.service.state.states.events.item.FoundItemState.FoundItemData
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -20,6 +21,7 @@ import zio.{Random, Task, ZIO}
 case class FoundItemState(
   heroDao:             HeroDao,
   inventoryRepository: InventoryRepository,
+  itemRepository:      ItemRepository,
   journal:             Journal,
   content:             SceneContent
 ) extends State {
@@ -41,12 +43,12 @@ case class FoundItemState(
       seed              <- Random.nextLong
       rng0               = Rng(seed)
       (rarity, rng1)     = ItemGenerator.rarityForLevel(hero.dungeonLevel, rng0)
-      item               = ItemGenerator.createItem(hero.lvl, rarity, rng1)._1
-      _    <- heroDao.writeSceneData(user.userId, FoundItemData(item).asJson)
-      _    <- journal.append(GameEvent(user.userId, "item_found",
-                Json.obj("name" -> item.name.asJson, "rarity" -> item.rarity.toString.asJson,
-                         "hero_lvl" -> hero.lvl.asJson, "seed" -> seed.asJson)))
-      _    <- showFoundScreen(user, renderer)
+      item              <- itemRepository.generate(hero.id, hero.lvl, rarity, rng1)
+      _                 <- heroDao.writeSceneData(user.userId, FoundItemData(item).asJson)
+      _                 <- journal.append(GameEvent(user.userId, "item_found",
+                             Json.obj("name" -> item.name.asJson, "rarity" -> item.rarity.toString.asJson,
+                                      "hero_lvl" -> hero.lvl.asJson, "seed" -> seed.asJson)))
+      _                 <- showFoundScreen(user, renderer)
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

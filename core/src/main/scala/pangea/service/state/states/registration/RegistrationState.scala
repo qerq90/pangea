@@ -12,6 +12,7 @@ import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
@@ -19,6 +20,7 @@ case class RegistrationState(
   players:       Players,
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
+  itemRepo:      ItemRepository,
   journal:       Journal,
   content:       SceneContent
 ) extends State {
@@ -55,9 +57,11 @@ case class RegistrationState(
       _    <- renderer.show(user, Screen(content.text("registration.endTravel"), Nil))
       hero <- heroDao.getHeroByUserId(user.userId)
       _    <- ZIO.whenCase(hero) { case Some(h) =>
-                 RegistrationState.starterItems
-                   .map(item => inventoryRepo.addItem(h.id, item).orElse(ZIO.unit))
-                   .reduce(_ *> _) *>
+                 ZIO.foreachDiscard(RegistrationState.starterItems) { item =>
+                   itemRepo.persist(h.id, item)
+                     .flatMap(itemWithId => inventoryRepo.addItem(h.id, itemWithId))
+                     .orElse(ZIO.unit)
+                 } *>
                  renderer.show(user, Screen(content.text("registration.startingEquipment"), Nil))
                }
     } yield StateType.Dungeon

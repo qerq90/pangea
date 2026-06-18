@@ -50,7 +50,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           noWeapon = hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
           weaponMod: Double = if (noWeapon) 0.5 else 1.0
           concBonus: Double = 1.0 + buffedEff.concentration * 0.005
-          damage  = ((buffedEff.atk * hero.baseStats.str * spread / 100L) * weaponMod * concBonus).toLong.max(1L)
+          damage  = (((buffedEff.atk + hero.baseStats.str) * spread / 100L) * weaponMod * concBonus).toLong.max(1L)
           _      <- renderer.show(user, Screen(
                       content.format("battle.hit", "damage" -> damage.toString, "monster" -> monster.name), Nil))
           armorDmg  = math.min(battle.monsterCurrentArmor, damage)
