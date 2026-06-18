@@ -4,11 +4,12 @@ import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.headers.`Content-Type`
 import org.http4s.implicits._
-import org.http4s.{HttpApp, HttpRoutes}
+import org.http4s.{HttpApp, HttpRoutes, MediaType}
 import pangea.model.user.VkId
 import pangea.service.state.{StateHandler, UserAction}
-import server.model.{ServerConfig, VkEvent}
+import server.model.{ServerConfig, VkChecking, VkEvent}
 import zio.interop.catz._
 import zio.{Task, UIO, ZIO}
 
