@@ -29,7 +29,7 @@ object ActiveBattle {
     monsterRarity       = monster.rarity.entryName,
     monsterStats        = monster.fightStats,
     monsterCurrentHp    = monster.fightStats.hp,
-    monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence
+    monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L)
   )
 
   implicit val encoder: Encoder[ActiveBattle] = deriveEncoder
