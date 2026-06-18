@@ -4,12 +4,11 @@ import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.headers.`Content-Type`
 import org.http4s.implicits._
-import org.http4s.{HttpApp, HttpRoutes, MediaType}
+import org.http4s.{HttpApp, HttpRoutes}
 import pangea.model.user.VkId
 import pangea.service.state.{StateHandler, UserAction}
-import server.model.{ServerConfig, VkChecking, VkEvent}
+import server.model.{ServerConfig, VkEvent}
 import zio.interop.catz._
 import zio.{Task, UIO, ZIO}
 
@@ -25,15 +24,15 @@ final class ServerLive(
   private val routes: HttpRoutes[Task] = HttpRoutes.of[Task] {
     case req @ POST -> Root =>
       for {
-        vkChecking <- req.as[VkChecking].option
-        resp <- vkChecking match {
-          case Some(_) =>
-            Ok(
-              "b874fbde",
-              `Content-Type`(MediaType.text.plain)
-            )
-          case None => Ok("ok")
-        }
+//        vkChecking <- req.as[VkChecking].option
+//        resp <- vkChecking match {
+//          case Some(_) =>
+//            Ok(
+//              "b874fbde",
+//              `Content-Type`(MediaType.text.plain)
+//            )
+//          case None => Ok("ok")
+//        }
 
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
@@ -52,6 +51,7 @@ final class ServerLive(
               .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }
+        resp <- Ok("ok")
       } yield resp
   }
 
