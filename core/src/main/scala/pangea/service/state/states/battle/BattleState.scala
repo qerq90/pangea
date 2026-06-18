@@ -190,17 +190,29 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
-      _      <- renderer.show(user, buildBattleScreen(hero, battle, hero.effectiveMaxHp(now)))
+      _      <- renderer.show(user, buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now))
     } yield ()
 
-  private def buildBattleScreen(hero: Hero, battle: ActiveBattle, maxHp: Long): Screen = {
+  private def buildBattleScreen(hero: Hero, battle: ActiveBattle, maxHp: Long, nowMs: Long): Screen = {
+    val eff             = hero.effectiveFightStats(nowMs)
+    val buffedEff       = battle.heroBattleState.applyTo(eff)
+    val mobHitPct       = (mobHitChance(hero.baseStats.agi, buffedEff.evasion, battle) * 100).toInt
+    val monsterDodgePct = ((1.0 - playerHitChance(buffedEff.accuracy, battle)) * 100).toInt
     val text = content.format("battle.enter.text",
-      "monster"    -> battle.toMonster.name,
-      "monsterHp"  -> battle.monsterCurrentHp.toString,
-      "monsterMax" -> battle.monsterStats.hp.toString,
-      "heroHp"     -> hero.fightStats.hp.toString,
-      "heroMax"    -> maxHp.toString,
-      "heroArmor"  -> hero.fightStats.armor.toString
+      "monster"      -> battle.toMonster.name,
+      "monsterRace"  -> battle.toMonster.race.toString,
+      "monsterHp"    -> battle.monsterCurrentHp.toString,
+      "monsterMax"   -> battle.monsterStats.hp.toString,
+      "monsterArmor"    -> battle.monsterCurrentArmor.toString,
+      "monsterMaxArmor" -> battle.monsterStats.armor.toString,
+      "monsterAtk"      -> battle.monsterStats.atk.toString,
+      "mobHit"       -> s"$mobHitPct%",
+      "monsterDodge" -> s"$monsterDodgePct%",
+      "heroHp"       -> hero.fightStats.hp.toString,
+      "heroMax"      -> maxHp.toString,
+      "heroArmor"    -> hero.fightStats.armor.toString,
+      "heroMaxArmor" -> hero.maxArmor.toString,
+      "flaskCharges" -> hero.flaskCharges.toString
     )
     Screen(text, content.screen("battle.enter").choices)
   }
