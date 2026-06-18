@@ -52,7 +52,6 @@ final class ServerLive(
               .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }
-        resp <- Ok("ok")
       } yield resp
   }
 
