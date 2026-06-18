@@ -70,7 +70,7 @@ case class DungeonState(heroDao: HeroDao, content: SceneContent) extends State {
     val hasFlask   = hero.equipment.flask.itemType != pangea.model.item.ItemType.NoItem
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp))
-      _ <- ZIO.when(hasFlask)(heroDao.updateFlaskCharges(user.userId, 1))
+      _ <- ZIO.when(hasFlask)(heroDao.updateFlaskCharges(user.userId, Hero.MaxFlaskCharges))
       _ <- renderer.show(user, Screen(
              content.format("dungeon.spring",
                "healed"      -> healed.toString,

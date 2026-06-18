@@ -65,17 +65,22 @@ object RestStateSpec extends ZIOSpecDefault {
     },
 
     test("action после 30с → восстанавливает armor до maxArmor") {
-      val depletedHero = TestFixtures.hero(userId).copy(
-        fightStats = TestFixtures.hero(userId).fightStats.copy(armor = 0L)
+      import pangea.model.item.{Item, ItemType, Rarity}
+      val helmet = Item(1L, "Шлем", 1L, Rarity.Gray, ItemType.Helmet,
+        attack=0, accuracy=0, concentration=0, armor=30, defence=0, evasion=0)
+      val heroWithArmor = TestFixtures.hero(userId).copy(
+        equipment  = TestFixtures.emptyEquipment.copy(helmet = helmet),
+        fightStats = TestFixtures.hero(userId).fightStats.copy(armor = 0L)  // броня истрачена в бою
       )
       for {
-        triple              <- makeState(depletedHero)
+        triple              <- makeState(heroWithArmor)
         (state, heroDao, renderer) = triple
         _                   <- state.enter(testUser, renderer)
         _                   <- TestClock.adjust(java.time.Duration.ofSeconds(31))
         _                   <- state.action(testUser, anyAction, renderer)
         updatedHero         <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(updatedHero.exists(_.fightStats.armor == updatedHero.get.maxArmor))
+      } yield assertTrue(updatedHero.exists(_.fightStats.armor == 30L)) &&  // восстановлена до allArmor
+              assertTrue(updatedHero.exists(_.fightStats.armor == updatedHero.get.maxArmor))
     },
 
     test("post-death recovery: если DeathState записал restDurationMs=2мин, enter читает его и action ждёт полные 2 мин") {

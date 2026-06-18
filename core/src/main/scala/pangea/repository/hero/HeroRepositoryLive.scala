@@ -64,7 +64,7 @@ object HeroRepositoryLive {
       gold         = 0L,
       traumaUntil  = None,
       traumaName   = None,
-      flaskCharges = 1
+      flaskCharges = Hero.MaxFlaskCharges
     )
 
 }

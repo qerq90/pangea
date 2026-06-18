@@ -89,7 +89,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(updated.exists(_.flaskCharges == 1)) &&
+              assertTrue(updated.exists(_.flaskCharges == pangea.model.hero.Hero.MaxFlaskCharges)) &&
               assertTrue(screens.exists(_.text.contains("пополнена")))
     },
 

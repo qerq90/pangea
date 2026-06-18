@@ -23,8 +23,8 @@ case class Hero(
   traumaName: Option[String],
   flaskCharges: Int
 ) {
-  // Effective armor pool = Armor × Defence (Defence scales the pool, not % reduction)
-  def maxArmor: Long = equipment.allArmor * fightStats.defence
+  // Effective armor pool = Armor × Defence (min 1 so base equipment armor always counts)
+  def maxArmor: Long = equipment.allArmor * fightStats.defence.max(1L)
 
   def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)
 
@@ -97,4 +97,8 @@ case class Hero(
 
     heroExp
   }
+}
+
+object Hero {
+  val MaxFlaskCharges: Int = 8
 }
