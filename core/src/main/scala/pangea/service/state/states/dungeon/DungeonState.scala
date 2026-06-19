@@ -70,7 +70,12 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
              content.format("dungeon.spring",
                "healed"      -> healed.toString,
                "flaskFilled" -> (if (hasFlask) content.text("dungeon.springFlaskFilled") else "")), Nil))
-    } yield StateType.Dungeon
+      roll   <- Random.nextIntBetween(1, 101)
+      result <- if (roll <= 50)
+                  renderer.show(user, Screen(content.text("dungeon.springAmbush"), Nil)) *>
+                    startBattle(user, hero)
+                else ZIO.succeed(StateType.Dungeon)
+    } yield result
   }
 
   private def startBattle(user: User, hero: Hero): Task[StateType] =

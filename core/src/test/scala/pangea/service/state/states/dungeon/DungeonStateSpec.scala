@@ -51,7 +51,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(isValidFindOutcome(result))
     },
 
-    test("FindEvent Spring (индекс 3) → восстанавливает HP, остаётся в Dungeon") {
+    test("FindEvent Spring (индекс 3) → восстанавливает HP, без засады остаётся в Dungeon") {
       val lowHpHero = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L)
       )
@@ -61,13 +61,28 @@ object DungeonStateSpec extends ZIOSpecDefault {
         content  <- ZIO.attempt(SceneContent.load())
         invRepo   = TestInventoryRepository.accepting
         state     = DungeonState(heroDao, invRepo, content)
-        _        <- TestRandom.feedInts(3)
+        _        <- TestRandom.feedInts(3, 99) // 3 = Spring, 99 → roll 100 = нет засады
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
               assertTrue(updated.exists(_.fightStats.hp > 10L)) &&
               assertTrue(screens.exists(_.text.contains("ручеёк")))
+    },
+
+    test("FindEvent Spring → засада (roll ≤ 50) → начинается бой") {
+      for {
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        invRepo   = TestInventoryRepository.accepting
+        state     = DungeonState(heroDao, invRepo, content)
+        _        <- TestRandom.feedInts(3, 0) // 3 = Spring, 0 → roll 1 = засада
+        _        <- TestRandom.feedLongs(42L)  // seed для монстра
+        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        screens  <- renderer.sentScreens
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(screens.exists(_.text.contains("заметили")))
     },
 
     test("FindEvent Spring с экипированной флягой → фляга в слоте пополнена") {
@@ -87,7 +102,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         content  <- ZIO.attempt(SceneContent.load())
         invRepo   = TestInventoryRepository.accepting
         state     = DungeonState(heroDao, invRepo, content)
-        _        <- TestRandom.feedInts(3)
+        _        <- TestRandom.feedInts(3, 99) // без засады
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
@@ -109,7 +124,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         content  <- ZIO.attempt(SceneContent.load())
         invRepo   = TestInventoryRepository.withItems(List(flaskInInv))
         state     = DungeonState(heroDao, invRepo, content)
-        _        <- TestRandom.feedInts(3)
+        _        <- TestRandom.feedInts(3, 99) // без засады
         _        <- state.action(testUser, tap("FindEvent"), renderer)
       } yield assertTrue(invRepo.snapshot.find(_.id == 2L).exists(_.charges.contains(4)))
     },
