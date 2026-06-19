@@ -80,7 +80,7 @@ object DeathStateSpec extends ZIOSpecDefault {
               assertTrue(battle.isEmpty)
     },
 
-    test("action с предметами в инвентаре → каждый предмет имеет 20% шанс дропа (не крашится)") {
+    test("action с предметами в инвентаре → каждый предмет имеет 25% шанс дропа (не крашится)") {
       val manyItems = (1 to 20).map(i =>
         Item(i.toLong, s"Предмет $i", 1L, Rarity.Gray, ItemType.Weapon,
              attack = 1, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)

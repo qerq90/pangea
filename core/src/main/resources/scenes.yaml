@@ -161,7 +161,7 @@ death:
     choices:
       Respawn: "Продолжить"
   penalty: "Потери: -{expLost} опыта, -{goldLost} золота."
-  itemDropped: "Вы потеряли предмет: {itemName}."
+  itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
   trauma: "⚠ Вы получили травму «{traumaName}» на 8 часов. Штраф к характеристикам: -{penalty}."
 
 foundItem:

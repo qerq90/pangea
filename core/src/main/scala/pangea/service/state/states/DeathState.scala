@@ -4,6 +4,7 @@ import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Renderer, SceneContent, Screen}
+import pangea.model.battle.ActiveBattle
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -30,6 +31,11 @@ case class DeathState(
       hero         <- heroDao.getHeroByUserId(user.userId)
                         .flatMap(ZIO.fromOption(_))
                         .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
+      battleJson   <- heroDao.readActiveBattle(user.userId)
+      monsterName   = battleJson
+                        .flatMap(_.as[ActiveBattle].toOption)
+                        .map(_.toMonster.name)
+                        .getOrElse("Монстр")
       expLost       = (hero.exp * 0.1).toLong.max(0L)
       newExp        = (hero.exp - expLost).max(0L)
       newLevel      = BattleState.computeLevel(newExp)
@@ -54,24 +60,26 @@ case class DeathState(
                           "traumaName" -> trauma.name,
                           "penalty"    -> s"${((1.0 - trauma.modifier) * 100).toInt}%"), Nil))
 
-      _            <- dropItems(user, hero.id, renderer)
+      _            <- dropItems(user, hero.id, monsterName, renderer)
       deathRestMs   = hero.dungeonLevel.toLong * 2L * 60L * 1000L
       _            <- heroDao.writeSceneData(user.userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
     } yield StateType.Rest
 
-  // Each unequipped inventory item has a 20% independent drop chance on death
-  private def dropItems(user: User, heroId: pangea.model.hero.HeroId, renderer: Renderer): Task[Unit] =
+  // Each unequipped inventory item has a 25% independent drop chance on death
+  private def dropItems(user: User, heroId: pangea.model.hero.HeroId, monsterName: String, renderer: Renderer): Task[Unit] =
     for {
       inventory <- inventoryRepo.get(heroId).orElse(ZIO.succeed(
                      pangea.model.inventory.Inventory(0L, heroId, 0L,
                        pangea.model.inventory.Inventory.Items(Nil))))
       realItems  = inventory.items.data.filter(_.id != 0L)
       _         <- ZIO.foreachDiscard(realItems) { item =>
-                     Random.nextIntBetween(0, 5).flatMap { roll =>
+                     Random.nextIntBetween(0, 4).flatMap { roll =>
                        ZIO.when(roll == 0) {
                          inventoryRepo.removeItem(item.id, heroId).orElse(ZIO.unit) *>
                            renderer.show(user, Screen(
-                             content.format("death.itemDropped", "itemName" -> item.name), Nil))
+                             content.format("death.itemDropped",
+                               "monsterName" -> monsterName,
+                               "itemName"    -> item.name), Nil))
                        }
                      }
                    }
