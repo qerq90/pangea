@@ -40,7 +40,7 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
               assertTrue(screens.nonEmpty)
     },
 
-    test("enter → показывает статы героя с gold и INT") {
+    test("enter → показывает статы героя с уровнем и INT") {
       for {
         renderer <- TestRenderer.make
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
@@ -50,7 +50,7 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
         screens  <- renderer.sentScreens
       } yield assertTrue(screens.nonEmpty) &&
               assertTrue(screens.head.text.contains("Уровень")) &&
-              assertTrue(screens.head.text.contains("Золото"))
+              assertTrue(screens.head.text.contains("ИНТ"))
     },
 
     test("enter с upgrade points → показывает кнопку Upgrade") {

@@ -40,7 +40,7 @@ case class InventoryState(
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       items  = inv.items.data
       _ <- if (items.isEmpty)
-             renderer.show(user, content.screen("inventory.empty"))
+             renderer.show(user, emptyScreen(hero))
            else
              heroDao.writeSceneData(user.userId, InventoryPage(0).asJson) *>
                showItemScreen(user, hero, items, 0, renderer)
@@ -57,7 +57,7 @@ case class InventoryState(
       page    <- currentPage(user)
       newPage  = (page + delta).max(0).min((items.size - 1).max(0))
       _       <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items.isEmpty) renderer.show(user, content.screen("inventory.empty"))
+      _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
            else showItemScreen(user, hero, items, newPage, renderer)
     } yield StateType.Inventory
 
@@ -94,7 +94,7 @@ case class InventoryState(
       items2  = inv2.items.data
       newPage = page.min((items2.size - 1).max(0))
       _      <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items2.isEmpty) renderer.show(user, content.screen("inventory.empty"))
+      _ <- if (items2.isEmpty) renderer.show(user, emptyScreen(hero2))
            else showItemScreen(user, hero2, items2, newPage, renderer)
     } yield StateType.Inventory
 
@@ -113,7 +113,7 @@ case class InventoryState(
       items2  = inv2.items.data
       newPage = page.min((items2.size - 1).max(0))
       _      <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items2.isEmpty) renderer.show(user, content.screen("inventory.empty"))
+      _ <- if (items2.isEmpty) renderer.show(user, emptyScreen(hero))
            else showItemScreen(user, hero, items2, newPage, renderer)
     } yield StateType.Inventory
 
@@ -123,13 +123,18 @@ case class InventoryState(
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       items  = inv.items.data
       page  <- currentPage(user)
-      _     <- if (items.isEmpty) renderer.show(user, content.screen("inventory.empty"))
+      _     <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
                else showItemScreen(user, hero, items, page.min((items.size - 1).max(0)), renderer)
     } yield StateType.Inventory
 
+  private def emptyScreen(hero: Hero): Screen = {
+    val base = content.screen("inventory.empty")
+    Screen(s"📦 Инвентарь пуст | 💰 ${hero.gold}", base.choices)
+  }
+
   private def showItemScreen(user: User, hero: Hero, items: List[Item], page: Int, renderer: Renderer): Task[Unit] = {
     val item    = items(page)
-    val text    = InventoryState.itemText(item, hero.equipment, page + 1, items.size)
+    val text    = InventoryState.itemText(item, hero.equipment, page + 1, items.size, Some(hero.gold))
     val choices = List(
       Option.when(page > 0)(Choice("Prev", "◀ Пред.")),
       Some(Choice("Equip", "✅ Надеть")),
@@ -165,7 +170,7 @@ object InventoryState {
     (newEq, newFight, oldItem)
   }
 
-  def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int): String = {
+  def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int, gold: Option[Long] = None): String = {
     val currentlyEquipped = equippedIn(eq, item.itemType)
     val slotInfo = if (currentlyEquipped.itemType != ItemType.NoItem)
       s"\nСейчас надет: ${currentlyEquipped.name}"
@@ -179,7 +184,8 @@ object InventoryState {
       Option.when(item.evasion > 0)(s"Уклонение: +${item.evasion}")
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    s"📦 Инвентарь ($pageNum/$total)\n\n${item.name} [${item.rarity}] Ур.${item.lvl}\n$statsStr$slotInfo"
+    val goldStr = gold.fold("")(g => s" | 💰 $g")
+    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name} [${item.rarity}] Ур.${item.lvl}\n$statsStr$slotInfo"
   }
 
   private def equippedIn(eq: Equipment, itemType: ItemType): Item = itemType match {

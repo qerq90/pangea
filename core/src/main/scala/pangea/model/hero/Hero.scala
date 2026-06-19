@@ -70,7 +70,6 @@ case class Hero(
        | 🛡 Защ ${eff.defence}  👁 Укл ${eff.evasion}
        | ❤ ${fightStats.hp}/$maxHp
        |
-       | Золото: $gold
        | Свободных очков: $upgradePoints
        |""".stripMargin
   }
