@@ -103,11 +103,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     for {
       expGained        <- ZIO.succeed((hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L))
       goldGained        = (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
-      newTotalExp       = hero.exp + expGained
-      newLevel          = BattleState.computeLevel(newTotalExp)
-      newUpgradePoints  = hero.upgradePoints + (newLevel - hero.lvl) * 4
+      (newExp, newLevel, newPoints) = {
+        var e = hero.exp + expGained
+        var l = hero.lvl
+        var p = hero.upgradePoints
+        while (e >= l * 100L && l < 150L) { e -= l * 100L; l += 1L; p += 4L }
+        (e, l, p)
+      }
       _                <- heroDao.clearActiveBattle(user.userId)
-      _                <- heroDao.updateExpAndLevel(user.userId, newTotalExp, newLevel, newUpgradePoints)
+      _                <- heroDao.updateExpAndLevel(user.userId, newExp, newLevel, newPoints)
       _                <- heroDao.updateGold(user.userId, hero.gold + goldGained)
       _                <- renderer.show(user, Screen(
                             content.format("battle.victory",
@@ -258,16 +262,6 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 }
 
 object BattleState {
-  def computeLevel(totalExp: Long): Long = {
-    var remaining = totalExp
-    var level     = 1L
-    while (remaining >= level * 100 && level < 150) {
-      remaining -= level * 100
-      level     += 1
-    }
-    level
-  }
-
   def playerHitChance(accuracy: Long, monsterEvasion: Long): Double =
     (accuracy.toDouble / monsterEvasion.toDouble).max(0.05).min(0.95)
 

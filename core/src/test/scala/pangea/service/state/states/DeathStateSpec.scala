@@ -27,7 +27,8 @@ object DeathStateSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
     } yield (DeathState(heroDao, invRepo, content), heroDao, invRepo, renderer)
 
-  private val richHero = TestFixtures.hero(userId).copy(exp = 1000L, gold = 500L)
+  // exp=80 (внутри уровня 1), теряет 10% = 8, newExp=72
+  private val richHero = TestFixtures.hero(userId).copy(exp = 80L, gold = 500L)
 
   override def spec = suite("DeathState")(
 
@@ -41,7 +42,7 @@ object DeathStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.choices.map(_.id).contains("Respawn"))
     },
 
-    test("action → теряет 10% опыта и 50% золота, переходит в Rest") {
+    test("action → теряет 10% опыта текущего уровня и 50% золота, переходит в Rest") {
       for {
         triple                    <- makeState(richHero)
         (state, heroDao, _, renderer) = triple
@@ -50,7 +51,7 @@ object DeathStateSpec extends ZIOSpecDefault {
         screens                   <- renderer.sentScreens
         sceneData                 <- heroDao.readSceneData(userId)
       } yield assertTrue(result == StateType.Rest) &&
-              assertTrue(updated.exists(_.exp == 900L)) &&
+              assertTrue(updated.exists(_.exp == 72L)) &&
               assertTrue(updated.exists(_.gold == 250L)) &&
               assertTrue(screens.exists(_.text.contains("опыта"))) &&
               assertTrue(screens.exists(_.text.contains("золота"))) &&

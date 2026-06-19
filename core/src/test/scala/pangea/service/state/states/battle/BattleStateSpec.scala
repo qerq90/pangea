@@ -293,22 +293,6 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(updated.exists(_.fightStats.hp == 500L))  // урон поглощён баффом
     },
 
-    test("computeLevel: exp=0 → уровень 1") {
-      assertTrue(BattleState.computeLevel(0L) == 1L)
-    },
-
-    test("computeLevel: exp=100 → уровень 2") {
-      assertTrue(BattleState.computeLevel(100L) == 2L)
-    },
-
-    test("computeLevel: exp=300 → уровень 3") {
-      assertTrue(BattleState.computeLevel(300L) == 3L)
-    },
-
-    test("computeLevel: уровень не превышает 150") {
-      assertTrue(BattleState.computeLevel(Long.MaxValue) == 150L)
-    },
-
     test("playerHitChance: огромная точность → не превышает 95%") {
       val chance = BattleState.playerHitChance(accuracy = 999999L, monsterEvasion = 1L)
       assertTrue(chance == 0.95)

@@ -74,26 +74,7 @@ case class Hero(
        |""".stripMargin
   }
 
-  def getNeededExp: Long = {
-    var neededExp = 100
-    var heroExp   = exp
-    while (heroExp > neededExp) {
-      heroExp -= neededExp
-      neededExp += 100
-    }
-
-    neededExp
-  }
-
-  def getLvlExp: Long = {
-    var neededExp = 100
-    var heroExp   = exp
-    while (heroExp > neededExp) {
-      heroExp -= neededExp
-      neededExp += 100
-    }
-
-    heroExp
-  }
+  def getNeededExp: Long = lvl * 100L
+  def getLvlExp: Long    = exp
 }
 

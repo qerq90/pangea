@@ -9,7 +9,6 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.model.trauma.Trauma
-import pangea.service.state.states.battle.BattleState
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
@@ -38,16 +37,13 @@ case class DeathState(
                         .getOrElse("Монстр")
       expLost       = (hero.exp * 0.1).toLong.max(0L)
       newExp        = (hero.exp - expLost).max(0L)
-      newLevel      = BattleState.computeLevel(newExp)
-      levelDiff     = (hero.lvl - newLevel).max(0L)
-      newUpgrade    = (hero.upgradePoints - levelDiff * 4).max(0L)
       goldLost      = hero.gold / 2
       newGold       = hero.gold - goldLost
       traumaUntil   = now + 8L * 3600 * 1000
       traumaIdx    <- Random.nextIntBetween(0, Trauma.all.length)
       trauma        = Trauma.all(traumaIdx)
 
-      _            <- heroDao.updateExpAndLevel(user.userId, newExp, newLevel, newUpgrade)
+      _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateGold(user.userId, newGold)
       _            <- heroDao.updateTrauma(user.userId, Some(traumaUntil), Some(trauma.name))
       _            <- heroDao.clearActiveBattle(user.userId)
