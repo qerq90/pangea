@@ -127,6 +127,27 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("HP")))
     },
 
+    test("UseFlask дважды за раунд → второй раз заблокирован, HP не меняется повторно") {
+      val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
+                   attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0)
+      val heroWithFlask = strongHero.copy(
+        fightStats   = strongHero.fightStats.copy(hp = 10L),
+        equipment    = TestFixtures.emptyEquipment.copy(flask = flask),
+        flaskCharges = 8
+      )
+      val battleAlreadyUsed = strongBattle.copy(flaskUsedThisRound = true)
+      for {
+        triple                     <- makeState(heroWithFlask, battleAlreadyUsed)
+        (state, heroDao, renderer)  = triple
+        result                     <- state.action(testUser, tap("UseFlask"), renderer)
+        updatedHero                <- heroDao.getHeroByUserId(userId)
+        screens                    <- renderer.sentScreens
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
+              assertTrue(updatedHero.exists(_.flaskCharges == 8)) &&
+              assertTrue(screens.exists(_.text.contains("уже использована")))
+    },
+
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
       val flask     = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
                        attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0)

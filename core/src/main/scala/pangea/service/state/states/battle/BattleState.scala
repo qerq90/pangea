@@ -166,6 +166,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 else if (hero.flaskCharges <= 0)
                   renderer.show(user, Screen(content.text("battle.flaskEmpty"), Nil))
                     .as(StateType.Battle)
+                else if (battle.flaskUsedThisRound)
+                  renderer.show(user, Screen(content.text("battle.flaskAlreadyUsed"), Nil))
+                    .as(StateType.Battle)
                 else {
                   val maxHp    = hero.effectiveMaxHp(now)
                   val healAmt  = (maxHp / 4L).max(1L)
@@ -175,13 +178,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   for {
                     _ <- heroDao.updateFightStats(user.userId, newStats)
                     _ <- heroDao.updateFlaskCharges(user.userId, hero.flaskCharges - 1)
+                    _ <- heroDao.writeActiveBattle(user.userId, battle.copy(flaskUsedThisRound = true).asJson)
                     _ <- renderer.show(user, Screen(
                            content.format("battle.flaskUsed",
                              "healed" -> healed.toString,
                              "hp"     -> newHp.toString,
                              "max"    -> maxHp.toString), Nil))
-                    r <- monsterAttacks(user, hero.copy(fightStats = newStats), battle, now, renderer)
-                  } yield r
+                    _ <- showScreen(user, renderer)
+                  } yield StateType.Battle
                 }
     } yield result
 

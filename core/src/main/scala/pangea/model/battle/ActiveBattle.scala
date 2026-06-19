@@ -12,14 +12,15 @@ case class ActiveBattle(
   monsterStats:        FightStats,
   monsterCurrentHp:    Long,
   monsterCurrentArmor: Long,
-  heroBattleState:     HeroBattleState = HeroBattleState.empty
+  heroBattleState:     HeroBattleState = HeroBattleState.empty,
+  flaskUsedThisRound:  Boolean = false
 ) {
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats)
 
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
-  def tickBuffs: ActiveBattle = copy(heroBattleState = heroBattleState.tick)
+  def tickBuffs: ActiveBattle = copy(heroBattleState = heroBattleState.tick, flaskUsedThisRound = false)
 }
 
 object ActiveBattle {
@@ -44,6 +45,7 @@ object ActiveBattle {
       monsterCurrentHp    <- c.get[Long]("monsterCurrentHp")
       monsterCurrentArmor <- c.get[Long]("monsterCurrentArmor")
       heroBattleState     <- c.getOrElse[HeroBattleState]("heroBattleState")(HeroBattleState.empty)
+      flaskUsedThisRound  <- c.getOrElse[Boolean]("flaskUsedThisRound")(false)
     } yield ActiveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
-                         monsterCurrentHp, monsterCurrentArmor, heroBattleState)
+                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, flaskUsedThisRound)
 }
