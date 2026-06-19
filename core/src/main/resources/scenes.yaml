@@ -102,7 +102,6 @@ dungeon:
       Rest: "Отдых"
 
   findEvent: "Вы пробираетесь по коридорам лабиринта, нервно оглядываясь и чувствуя чей то взгляд на затылке."
-  traumaActive: "⚠ Травма активна ({traumaName})! Осталось: {remaining}. Все характеристики снижены."
   spring: "💧 Вы находите живительный ручеёк! HP полностью восстановлено (+{healed}).{flaskFilled}"
   springFlaskFilled: " Фляга пополнена."
 
@@ -119,6 +118,7 @@ heroStats:
   upgradeAgi: "+1 Ловкость (уклонение +2.5)"
   upgradeInt: "+1 Интеллект"
   backToStats: "Назад"
+  traumaActive: "\n⚠ Травма «{traumaName}» активна. Осталось: {remaining}. Все характеристики снижены."
 
 battle:
   enter:
@@ -143,6 +143,8 @@ battle:
   noFlask: "Фляга не экипирована!"
   flaskEmpty: "Фляга пуста! Найдите живительный ручеёк, чтобы пополнить её."
   flaskAlreadyUsed: "Фляга уже использована в этом раунде!"
+  flaskBuff: "Эффект фляги активирован!"
+  flaskNoEffect: "Фляга не имеет эффекта."
 
 rest:
   enter:

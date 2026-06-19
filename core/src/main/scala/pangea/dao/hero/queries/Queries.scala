@@ -14,9 +14,9 @@ import pangea.model.user.UserId
 
 object Queries {
   private val fields: Fragment =
-    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, gold, trauma_until, trauma_name, flask_charges"
+    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, gold, trauma_until, trauma_name"
   private val fieldInsert: Fragment =
-    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, gold, trauma_until, trauma_name, flask_charges"
+    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, gold, trauma_until, trauma_name"
   private val tableName: Fragment = sql"heroes"
 
   private val selectAll = fr"select $fields from $tableName"
@@ -25,7 +25,7 @@ object Queries {
     selectAll ++ sql"where user_id = $userId"
 
   def insert(hero: Hero): Fragment =
-    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaName}, ${hero.flaskCharges})"
+    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaName})"
 
   def updateGold(userId: UserId, gold: Long): Fragment =
     sql"update $tableName set gold = $gold where user_id = $userId"
@@ -36,8 +36,8 @@ object Queries {
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaName: Option[String]): Fragment =
     sql"update $tableName set trauma_until = $traumaUntil, trauma_name = $traumaName where user_id = $userId"
 
-  def updateFlaskCharges(userId: UserId, charges: Int): Fragment =
-    sql"update $tableName set flask_charges = $charges where user_id = $userId"
+  def updateEquipment(userId: UserId, eq: Equipment): Fragment =
+    sql"update $tableName set equipment = ${eq.asJson} where user_id = $userId"
 
   def updateDungeonLevel(userId: UserId, level: Int): Fragment =
     sql"update $tableName set dungeon_level = $level where user_id = $userId"

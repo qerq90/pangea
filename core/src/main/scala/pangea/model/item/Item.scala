@@ -16,7 +16,10 @@ case class Item(
   concentration: Long,
   armor: Long,
   defence: Long,
-  evasion: Long
+  evasion: Long,
+  flaskEffect: Option[FlaskEffect] = None,
+  charges:     Option[Int]         = None,
+  maxCharges:  Option[Int]         = None
 ) {
   def withId(id: Long): Item = copy(id = id)
 
@@ -42,7 +45,7 @@ case class Item(
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, None, None, None)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

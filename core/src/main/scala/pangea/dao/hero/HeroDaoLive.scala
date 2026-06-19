@@ -71,11 +71,11 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaName: Option[String]): Task[Unit] =
     Queries.updateTrauma(userId, traumaUntil, traumaName).update.run.transact(xa).unit
 
-  override def updateFlaskCharges(userId: UserId, charges: Int): Task[Unit] =
-    Queries.updateFlaskCharges(userId, charges).update.run.transact(xa).unit
-
   override def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     Queries.updateBaseStats(userId, stats).update.run.transact(xa).unit
+
+  override def updateEquipment(userId: UserId, eq: Equipment): Task[Unit] =
+    Queries.updateEquipment(userId, eq).update.run.transact(xa).unit
 
   override def updateEquipmentAndFightStats(userId: UserId, eq: Equipment, stats: FightStats): Task[Unit] =
     Queries.updateEquipmentAndFightStats(userId, eq, stats).update.run.transact(xa).unit

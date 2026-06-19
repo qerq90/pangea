@@ -20,8 +20,7 @@ case class Hero(
   dungeonLevel: Int,
   gold: Long,
   traumaUntil: Option[Long],
-  traumaName: Option[String],
-  flaskCharges: Int
+  traumaName: Option[String]
 ) {
   // Effective armor pool = Armor × Defence (min 1 so base equipment armor always counts)
   def maxArmor: Long = equipment.allArmor * fightStats.defence.max(1L)
@@ -99,6 +98,3 @@ case class Hero(
   }
 }
 
-object Hero {
-  val MaxFlaskCharges: Int = 8
-}

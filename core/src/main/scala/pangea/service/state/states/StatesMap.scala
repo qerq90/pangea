@@ -33,7 +33,7 @@ object StatesMap {
         states = Map[StateType, State](
           GlobalMap    -> GlobalMapState(heroDao, content),
           Registration -> RegistrationState(players, heroDao, inventoryRepo, itemRepo, journal, content),
-          Dungeon      -> DungeonState(heroDao, content),
+          Dungeon      -> DungeonState(heroDao, inventoryRepo, content),
           HeroStats    -> HeroStatsState(heroDao, content),
           FoundItem    -> FoundItemState(heroDao, inventoryRepo, itemRepo, journal, content),
           Battle       -> BattleState(heroDao, content),

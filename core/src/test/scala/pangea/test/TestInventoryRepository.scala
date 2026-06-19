@@ -19,6 +19,14 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =
     ZIO.succeed { items = items.filterNot(_.id == itemId) }
 
+  def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit] =
+    ZIO.succeed {
+      items = items.map(item =>
+        if (item.itemType == pangea.model.item.ItemType.Flask && item.maxCharges.isDefined)
+          item.copy(charges = item.maxCharges)
+        else item)
+    }
+
   def snapshot: List[Item] = items
 }
 

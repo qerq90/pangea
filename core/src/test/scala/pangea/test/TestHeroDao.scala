@@ -42,11 +42,11 @@ class TestHeroDao(
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaName: Option[String]): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(traumaUntil = traumaUntil, traumaName = traumaName))))
 
-  def updateFlaskCharges(userId: UserId, charges: Int): Task[Unit] =
-    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(flaskCharges = charges))))
-
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(baseStats = stats))))
+
+  def updateEquipment(userId: UserId, eq: Equipment): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(equipment = eq))))
 
   def updateEquipmentAndFightStats(userId: UserId, eq: Equipment, stats: FightStats): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(equipment = eq, fightStats = stats))))

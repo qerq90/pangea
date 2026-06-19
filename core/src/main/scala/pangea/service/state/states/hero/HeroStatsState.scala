@@ -82,12 +82,17 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     } yield StateType.HeroStats
 
   private def buildStatsScreen(hero: Hero, nowMs: Long): Screen = {
+    val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
+      "\n" + content.format("heroStats.traumaActive",
+        "traumaName" -> hero.traumaName.getOrElse("Травма"),
+        "remaining"  -> remaining)
+    }.getOrElse("")
     val choices = List(
       Some(Choice("OpenInventory", content.text("heroStats.inventory"))),
       Option.when(hero.upgradePoints > 0)(Choice("Upgrade", content.text("heroStats.upgrade"))),
       Some(Choice("Back", content.text("heroStats.leave")))
     ).flatten
-    Screen(hero.getInfo(nowMs), choices)
+    Screen(hero.getInfo(nowMs) + traumaLine, choices)
   }
 
   private def getHero(user: User): Task[Hero] =

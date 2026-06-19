@@ -160,32 +160,50 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
-      result <- if (hero.equipment.flask.itemType == pangea.model.item.ItemType.NoItem)
+      flask   = hero.equipment.flask
+      result <- if (flask.itemType == pangea.model.item.ItemType.NoItem)
                   renderer.show(user, Screen(content.text("battle.noFlask"), Nil))
                     .as(StateType.Battle)
-                else if (hero.flaskCharges <= 0)
+                else if (flask.charges.forall(_ <= 0))
                   renderer.show(user, Screen(content.text("battle.flaskEmpty"), Nil))
                     .as(StateType.Battle)
                 else if (battle.flaskUsedThisRound)
                   renderer.show(user, Screen(content.text("battle.flaskAlreadyUsed"), Nil))
                     .as(StateType.Battle)
                 else {
-                  val maxHp    = hero.effectiveMaxHp(now)
-                  val healAmt  = (maxHp / 4L).max(1L)
-                  val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
-                  val healed   = newHp - hero.fightStats.hp
-                  val newStats = hero.fightStats.copy(hp = newHp)
-                  for {
-                    _ <- heroDao.updateFightStats(user.userId, newStats)
-                    _ <- heroDao.updateFlaskCharges(user.userId, hero.flaskCharges - 1)
-                    _ <- heroDao.writeActiveBattle(user.userId, battle.copy(flaskUsedThisRound = true).asJson)
-                    _ <- renderer.show(user, Screen(
-                           content.format("battle.flaskUsed",
-                             "healed" -> healed.toString,
-                             "hp"     -> newHp.toString,
-                             "max"    -> maxHp.toString), Nil))
-                    _ <- showScreen(user, renderer)
-                  } yield StateType.Battle
+                  val spentFlask   = flask.copy(charges = flask.charges.map(_ - 1))
+                  val newEquipment = hero.equipment.copy(flask = spentFlask)
+                  val updatedBattle = battle.copy(flaskUsedThisRound = true)
+                  flask.flaskEffect match {
+                    case Some(pangea.model.item.FlaskEffect.HealPercent(pct)) =>
+                      val maxHp    = hero.effectiveMaxHp(now)
+                      val healAmt  = ((maxHp * pct / 100L)).max(1L)
+                      val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
+                      val healed   = newHp - hero.fightStats.hp
+                      val newStats = hero.fightStats.copy(hp = newHp)
+                      for {
+                        _ <- heroDao.updateEquipmentAndFightStats(user.userId, newEquipment, newStats)
+                        _ <- heroDao.writeActiveBattle(user.userId, updatedBattle.asJson)
+                        _ <- renderer.show(user, Screen(
+                               content.format("battle.flaskUsed",
+                                 "healed" -> healed.toString,
+                                 "hp"     -> newHp.toString,
+                                 "max"    -> maxHp.toString), Nil))
+                        _ <- showScreen(user, renderer)
+                      } yield StateType.Battle
+                    case Some(pangea.model.item.FlaskEffect.AddBuff(buff, rounds)) =>
+                      val timedBuff    = buff.copy(turnsLeft = Some(rounds))
+                      val newBattle    = updatedBattle.copy(heroBattleState = updatedBattle.heroBattleState.add(timedBuff))
+                      for {
+                        _ <- heroDao.updateEquipment(user.userId, newEquipment)
+                        _ <- heroDao.writeActiveBattle(user.userId, newBattle.asJson)
+                        _ <- renderer.show(user, Screen(content.text("battle.flaskBuff"), Nil))
+                        _ <- showScreen(user, renderer)
+                      } yield StateType.Battle
+                    case None =>
+                      renderer.show(user, Screen(content.text("battle.flaskNoEffect"), Nil))
+                        .as(StateType.Battle)
+                  }
                 }
     } yield result
 
@@ -216,7 +234,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroMax"      -> maxHp.toString,
       "heroArmor"    -> hero.fightStats.armor.toString,
       "heroMaxArmor" -> hero.maxArmor.toString,
-      "flaskCharges" -> hero.flaskCharges.toString
+      "flaskCharges" -> hero.equipment.flask.charges.getOrElse(0).toString
     )
     Screen(text, content.screen("battle.enter").choices)
   }

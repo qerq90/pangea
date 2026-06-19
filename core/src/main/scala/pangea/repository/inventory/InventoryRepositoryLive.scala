@@ -29,6 +29,16 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     } yield ())
       .tapError(err => ZIO.logError(s"Error occurred: $err"))
 
+  def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit] =
+    for {
+      inventory <- inventoryDao.get(heroId).orElseFail(InventoryRepoError.CantFindInventory)
+      refilled   = inventory.items.data.map(item =>
+                     if (item.itemType == pangea.model.item.ItemType.Flask && item.maxCharges.isDefined)
+                       item.copy(charges = item.maxCharges)
+                     else item)
+      _         <- inventoryDao.update(inventory.withItems(refilled)).orElseFail(InventoryRepoError.CantUpdateInventory)
+    } yield ()
+
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =
     for {
       inventory <- inventoryDao

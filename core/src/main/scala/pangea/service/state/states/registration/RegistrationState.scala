@@ -118,6 +118,9 @@ object RegistrationState {
     Item(-8L,  "Меч новобранца",            1L, Rarity.Gray, ItemType.Weapon,
       attack = 20, accuracy = 5, concentration = 0, armor = 0, defence = 0, evasion = 0),
     Item(-9L,  "Фляга начинающего исследователя", 1L, Rarity.Gray, ItemType.Flask,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      flaskEffect = Some(pangea.model.item.FlaskEffect.HealPercent(25)),
+      charges     = Some(8),
+      maxCharges  = Some(8))
   )
 }

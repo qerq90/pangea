@@ -13,7 +13,7 @@ import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
-case class DungeonState(heroDao: HeroDao, content: SceneContent) extends State {
+case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inventory.InventoryRepository, content: SceneContent) extends State {
 
   private val branch = new Branch(
     routes = Map(
@@ -34,14 +34,6 @@ case class DungeonState(heroDao: HeroDao, content: SceneContent) extends State {
     for {
       now      <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero     <- getHero(user)
-      _        <- ZIO.when(hero.traumaActive(now)) {
-                    val remaining  = hero.traumaRemainingText(now).getOrElse("?")
-                    val traumaName = hero.traumaName.getOrElse("Травма")
-                    renderer.show(user, Screen(
-                      content.format("dungeon.traumaActive",
-                        "remaining"  -> remaining,
-                        "traumaName" -> traumaName), Nil))
-                  }
       enterScr  = content.screen("dungeon.enter")
       text      = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
       _        <- renderer.show(user, Screen(text, enterScr.choices))
@@ -65,12 +57,15 @@ case class DungeonState(heroDao: HeroDao, content: SceneContent) extends State {
     } yield result
 
   private def healAtSpring(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[StateType] = {
-    val maxHp      = hero.effectiveMaxHp(nowMs)
-    val healed     = (maxHp - hero.fightStats.hp).max(0L)
-    val hasFlask   = hero.equipment.flask.itemType != pangea.model.item.ItemType.NoItem
+    val maxHp    = hero.effectiveMaxHp(nowMs)
+    val healed   = (maxHp - hero.fightStats.hp).max(0L)
+    val flask    = hero.equipment.flask
+    val hasFlask = flask.itemType != pangea.model.item.ItemType.NoItem && flask.maxCharges.isDefined
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp))
-      _ <- ZIO.when(hasFlask)(heroDao.updateFlaskCharges(user.userId, Hero.MaxFlaskCharges))
+      _ <- ZIO.when(hasFlask)(heroDao.updateEquipment(user.userId,
+             hero.equipment.copy(flask = flask.copy(charges = flask.maxCharges))))
+      _ <- inventoryRepo.refillFlasks(hero.id).orElse(ZIO.unit)
       _ <- renderer.show(user, Screen(
              content.format("dungeon.spring",
                "healed"      -> healed.toString,
