@@ -63,7 +63,7 @@ object HeroRepositoryLive {
       dungeonLevel = 1,
       gold         = 0L,
       traumaUntil  = None,
-      traumaName   = None
+      traumaNames  = Nil
     )
 
 }

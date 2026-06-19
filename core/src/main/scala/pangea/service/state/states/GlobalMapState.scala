@@ -69,7 +69,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
                   for {
                     _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = hero.maxArmor))
                     _ <- heroDao.updateGold(user.userId, hero.gold - cost)
-                    _ <- heroDao.updateTrauma(user.userId, None, None)
+                    _ <- heroDao.updateTrauma(user.userId, None, Nil)
                     _ <- renderer.show(user, Screen(content.text("globalMap.healed"), Nil))
                     _ <- enter(user, renderer)
                   } yield StateType.GlobalMap

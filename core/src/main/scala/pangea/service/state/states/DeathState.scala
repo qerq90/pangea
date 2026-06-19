@@ -39,13 +39,30 @@ case class DeathState(
       newExp        = (hero.exp - expLost).max(0L)
       goldLost      = hero.gold / 2
       newGold       = hero.gold - goldLost
+
+      // traumas that are still active are kept; expired ones reset to empty list
+      existingNames = if (hero.traumaActive(now)) hero.traumaNames else Nil
+
+      // pick the right tier: light → medium → heavy (progression)
+      hasAllLight   = Trauma.light.forall(t => existingNames.contains(t.name))
+      hasAllMedium  = Trauma.medium.forall(t => existingNames.contains(t.name))
+      pool          = if (!hasAllLight)
+                        Trauma.light.filterNot(t => existingNames.contains(t.name))
+                      else if (!hasAllMedium)
+                        Trauma.medium.filterNot(t => existingNames.contains(t.name))
+                      else {
+                        val remaining = Trauma.heavy.filterNot(t => existingNames.contains(t.name))
+                        if (remaining.isEmpty) Trauma.heavy else remaining
+                      }
+
+      traumaIdx    <- Random.nextIntBetween(0, pool.length)
+      trauma        = pool(traumaIdx)
       traumaUntil   = now + 8L * 3600 * 1000
-      traumaIdx    <- Random.nextIntBetween(0, Trauma.all.length)
-      trauma        = Trauma.all(traumaIdx)
+      newTraumaNames = existingNames :+ trauma.name
 
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateGold(user.userId, newGold)
-      _            <- heroDao.updateTrauma(user.userId, Some(traumaUntil), Some(trauma.name))
+      _            <- heroDao.updateTrauma(user.userId, Some(traumaUntil), newTraumaNames)
       _            <- heroDao.clearActiveBattle(user.userId)
       _            <- renderer.show(user, Screen(
                         content.format("death.penalty",
@@ -53,15 +70,14 @@ case class DeathState(
                           "goldLost" -> goldLost.toString), Nil))
       _            <- renderer.show(user, Screen(
                         content.format("death.trauma",
-                          "traumaName" -> trauma.name,
-                          "penalty"    -> s"${((1.0 - trauma.modifier) * 100).toInt}%"), Nil))
+                          "traumaName"  -> trauma.name,
+                          "description" -> trauma.description), Nil))
 
       _            <- dropItems(user, hero.id, monsterName, renderer)
       deathRestMs   = hero.dungeonLevel.toLong * 2L * 60L * 1000L
       _            <- heroDao.writeSceneData(user.userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
     } yield StateType.Rest
 
-  // Each unequipped inventory item has a 25% independent drop chance on death
   private def dropItems(user: User, heroId: pangea.model.hero.HeroId, monsterName: String, renderer: Renderer): Task[Unit] =
     for {
       inventory <- inventoryRepo.get(heroId).orElse(ZIO.succeed(

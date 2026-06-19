@@ -28,6 +28,6 @@ object TestFixtures {
     dungeonLevel = dungeonLevel,
     gold         = 0L,
     traumaUntil  = None,
-    traumaName   = None
+    traumaNames  = Nil
   )
 }

@@ -65,10 +65,10 @@ object DeathStateSpec extends ZIOSpecDefault {
         _                         <- state.action(testUser, anyAction, renderer)
         updated                   <- heroDao.getHeroByUserId(userId)
         screens                   <- renderer.sentScreens
-      } yield assertTrue(updated.exists(_.traumaName.isDefined)) &&
-              assertTrue(updated.exists(h => pangea.model.trauma.Trauma.byName(h.traumaName.get).isDefined)) &&
+      } yield assertTrue(updated.exists(_.traumaNames.nonEmpty)) &&
+              assertTrue(updated.exists(h => h.traumaNames.forall(n => pangea.model.trauma.Trauma.byName(n).isDefined))) &&
               assertTrue(updated.exists(_.traumaUntil.isDefined)) &&
-              assertTrue(screens.exists(_.text.contains("травму")))
+              assertTrue(screens.exists(_.text.contains("травм")))
     },
 
     test("action без предметов → очищает бой, не падает") {

@@ -83,7 +83,7 @@ globalMap:
     choices:
       Heal: "Вылечиться"
       LeaveTavern: "Уйти"
-  healed: "Вы отдохнули и полностью исцелились! Травма снята."
+  healed: "Вы отдохнули и полностью исцелились! Все травмы сняты."
   notEnoughGold: "Недостаточно золота. Нужно {cost}, у вас {gold}."
   alreadyFull: "Вы и так здоровы — незачем тратить золото."
   guild: "🏛 Гильдия приключенцев — здесь пока никого нет. Загляните позже."
@@ -128,7 +128,7 @@ heroStats:
   upgradeAgi: "+1 Ловкость (уклонение +2.5)"
   upgradeInt: "+1 Интеллект"
   backToStats: "Назад"
-  traumaActive: "\n⚠ Травма «{traumaName}» активна. Осталось: {remaining}. Все характеристики снижены."
+  traumaActive: "\n⚠ Активные травмы: {traumaNames}. Осталось: {remaining}."
 
 battle:
   enter:
@@ -171,7 +171,7 @@ death:
       Respawn: "Продолжить"
   penalty: "Потери: -{expLost} опыта, -{goldLost} золота."
   itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
-  trauma: "⚠ Вы получили травму «{traumaName}» на 8 часов. Штраф к характеристикам: -{penalty}."
+  trauma: "⚠ Новая травма: «{traumaName}». {description}"
 
 foundItem:
   header: "Вы находите предмет!"

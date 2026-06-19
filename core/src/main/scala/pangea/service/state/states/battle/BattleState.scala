@@ -82,9 +82,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
           buffReduct   = math.min(ticked.heroBattleState.armorBonus, rawDamage)
           afterBuff    = rawDamage - buffReduct
-          armorAbsorb  = math.min(hero.fightStats.armor, afterBuff)
+          effArmor     = eff.armor
+          armorAbsorb  = math.min(effArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
-          newArmor     = hero.fightStats.armor - armorAbsorb
+          newArmor     = effArmor - armorAbsorb
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           newStats     = hero.fightStats.copy(hp = newHp, armor = newArmor)
           _           <- heroDao.updateFightStats(user.userId, newStats)
@@ -118,6 +119,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                               "monster" -> battle.toMonster.name,
                               "exp"     -> expGained.toString,
                               "gold"    -> goldGained.toString), Nil))
+      _                <- ZIO.when(newLevel > hero.lvl)(
+                            renderer.show(user, Screen(s"Вы получили новый уровень $newLevel!", Nil))
+                          )
     } yield StateType.Dungeon
 
   private def heroDeath(user: User, renderer: Renderer): Task[StateType] =
@@ -142,9 +146,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
           buffReduct   = math.min(battle.heroBattleState.armorBonus, rawDamage)
           afterBuff    = rawDamage - buffReduct
-          armorAbsorb  = math.min(hero.fightStats.armor, afterBuff)
+          effArmor     = eff.armor
+          armorAbsorb  = math.min(effArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
-          newArmor     = hero.fightStats.armor - armorAbsorb
+          newArmor     = effArmor - armorAbsorb
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           _           <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = newHp, armor = newArmor))
           _           <- renderer.show(user, Screen(

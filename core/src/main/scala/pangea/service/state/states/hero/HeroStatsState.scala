@@ -81,9 +81,11 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   private def buildStatsScreen(hero: Hero, nowMs: Long): Screen = {
     val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
+      val names = hero.activeTraumas(nowMs).map(_.name)
+      val namesStr = if (names.isEmpty) "Травмы" else names.mkString(", ")
       "\n" + content.format("heroStats.traumaActive",
-        "traumaName" -> hero.traumaName.getOrElse("Травма"),
-        "remaining"  -> remaining)
+        "traumaNames" -> namesStr,
+        "remaining"   -> remaining)
     }.getOrElse("")
     val choices = List(
       Some(Choice("OpenInventory", content.text("heroStats.inventory"))),
