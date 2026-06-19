@@ -82,7 +82,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(screens.exists(_.text.contains("заметили")))
+              assertTrue(screens.exists(_.text.contains("ручья")))
     },
 
     test("FindEvent Spring с экипированной флягой → фляга в слоте пополнена") {

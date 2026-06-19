@@ -75,9 +75,9 @@ globalMap:
     text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor}\n💰 Золото: {gold}"
     choices:
       Tavern: "Таверна"
-      Guild: "Гильдия приключенцев"
+      Guild: "Гильдия Искателей"
       Construction: "Стройка"
-      ReturnToDungeon: "В подземелье"
+      ReturnToDungeon: "В лабиринт"
   tavern:
     text: "Таверна «Золотой якорь».\nПолное исцеление и снятие травм стоит {cost} золота.\nУ вас: {gold} золота."
     choices:
@@ -104,7 +104,7 @@ dungeon:
   findEvent: "Вы пробираетесь по коридорам лабиринта, нервно оглядываясь и чувствуя чей то взгляд на затылке."
   spring: "💧 Вы находите живительный ручеёк! HP полностью восстановлено (+{healed}).{flaskFilled}"
   springFlaskFilled: " Фляга пополнена."
-  springAmbush: " Но вас заметили..."
+  springAmbush: " Однако на шум живительного ручья пришёл и кто-то ещё…"
 
 heroStats:
   inventory: "Инвентарь"
