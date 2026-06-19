@@ -59,7 +59,6 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   private def applyUpgrade(user: User, renderer: Renderer, stat: String): Task[StateType] =
     for {
-      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       _    <- if (hero.upgradePoints <= 0)
                 renderer.show(user, Screen(content.text("heroStats.noPoints"), Nil))
@@ -75,9 +74,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
                   _ <- heroDao.updateBaseStats(user.userId, newBase)
                   _ <- heroDao.updateExpAndLevel(user.userId, hero.exp, hero.lvl, hero.upgradePoints - 1)
                   _ <- renderer.show(user, Screen(content.text("heroStats.upgradeApplied"), Nil))
-                  _ <- renderer.show(user, buildStatsScreen(hero.copy(
-                         baseStats     = newBase,
-                         upgradePoints = hero.upgradePoints - 1), now))
+                  _ <- showUpgradeScreen(user, renderer)
                 } yield ()
               }
     } yield StateType.HeroStats
