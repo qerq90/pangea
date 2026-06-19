@@ -171,10 +171,15 @@ object InventoryState {
   }
 
   def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int, gold: Option[Long] = None): String = {
-    val currentlyEquipped = equippedIn(eq, item.itemType)
-    val slotInfo = if (currentlyEquipped.itemType != ItemType.NoItem)
-      s"\nСейчас надет: ${currentlyEquipped.name}"
-    else ""
+    val slotInfo = item.itemType match {
+      case ItemType.Ring =>
+        val r1 = if (eq.firstRing.itemType  != ItemType.NoItem) s"Слот 1: ${eq.firstRing.name}"  else "Слот 1: свободен"
+        val r2 = if (eq.secondRing.itemType != ItemType.NoItem) s"Слот 2: ${eq.secondRing.name}" else "Слот 2: свободен"
+        s"\n$r1\n$r2"
+      case _ =>
+        val cur = equippedIn(eq, item.itemType)
+        if (cur.itemType != ItemType.NoItem) s"\nСейчас надет: ${cur.name}" else ""
+    }
     val stats = List(
       Option.when(item.attack > 0)(s"Атака: +${item.attack}"),
       Option.when(item.accuracy > 0)(s"Точность: +${item.accuracy}"),
@@ -184,10 +189,11 @@ object InventoryState {
       Option.when(item.evasion > 0)(s"Уклонение: +${item.evasion}")
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    val goldStr = gold.fold("")(g => s" | 💰 $g")
+    val goldStr  = gold.fold("")(g => s" | 💰 $g")
     s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name} [${item.rarity}] Ур.${item.lvl}\n$statsStr$slotInfo"
   }
 
+  // Возвращает предмет, который будет вытеснен в инвентарь при надевании
   private def equippedIn(eq: Equipment, itemType: ItemType): Item = itemType match {
     case ItemType.Helmet           => eq.helmet
     case ItemType.ShoulderPads     => eq.shoulderPads
@@ -198,7 +204,10 @@ object InventoryState {
     case ItemType.Leggings         => eq.pants
     case ItemType.Boots            => eq.boots
     case ItemType.Amulet           => eq.amulet
-    case ItemType.Ring             => eq.firstRing
+    // Кольцо: ничего не вытесняется пока есть свободный слот; иначе вытесняется второй
+    case ItemType.Ring             =>
+      if (eq.firstRing.itemType == ItemType.NoItem || eq.secondRing.itemType == ItemType.NoItem) Item.NoItem
+      else eq.secondRing
     case ItemType.Belt             => eq.belt
     case ItemType.Flask            => eq.flask
     case ItemType.Weapon           => eq.weapon
@@ -216,7 +225,10 @@ object InventoryState {
     case ItemType.Leggings         => eq.copy(pants = item)
     case ItemType.Boots            => eq.copy(boots = item)
     case ItemType.Amulet           => eq.copy(amulet = item)
-    case ItemType.Ring             => eq.copy(firstRing = item)
+    // Кольцо: первый свободный слот; если оба заняты — второй
+    case ItemType.Ring             =>
+      if (eq.firstRing.itemType == ItemType.NoItem) eq.copy(firstRing = item)
+      else eq.copy(secondRing = item)
     case ItemType.Belt             => eq.copy(belt = item)
     case ItemType.Flask            => eq.copy(flask = item)
     case ItemType.Weapon           => eq.copy(weapon = item)
@@ -224,7 +236,7 @@ object InventoryState {
     case ItemType.NoItem           => eq
   }
 
-  private def applyDelta(base: FightStats, added: Item, removed: Item): FightStats =
+  def applyDelta(base: FightStats, added: Item, removed: Item): FightStats =
     base.copy(
       atk           = base.atk + added.attack - removed.attack,
       armor         = base.armor + added.armor - removed.armor,

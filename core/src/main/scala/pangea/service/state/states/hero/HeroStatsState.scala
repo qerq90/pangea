@@ -13,8 +13,9 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   private val branch = new Branch(
     routes = Map(
-      "Back"         -> Target.Goto(StateType.Dungeon),
-      "OpenInventory"-> Target.Goto(StateType.Inventory),
+      "Back"           -> Target.Goto(StateType.Dungeon),
+      "OpenInventory"  -> Target.Goto(StateType.Inventory),
+      "OpenEquipment"  -> Target.Goto(StateType.Equipment),
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
       "UpgradeVit"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "vit") },
@@ -89,6 +90,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     }.getOrElse("")
     val choices = List(
       Some(Choice("OpenInventory", content.text("heroStats.inventory"))),
+      Some(Choice("OpenEquipment", content.text("heroStats.equipment"))),
       Option.when(hero.upgradePoints > 0)(Choice("Upgrade", content.text("heroStats.upgrade"))),
       Some(Choice("Back", content.text("heroStats.leave")))
     ).flatten

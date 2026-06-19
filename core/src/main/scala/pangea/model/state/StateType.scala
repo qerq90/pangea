@@ -21,5 +21,6 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object FoundItem extends StateType
   case object Rest      extends StateType
   case object Spring    extends StateType
-  case object Inventory extends StateType
+  case object Inventory  extends StateType
+  case object Equipment  extends StateType
 }

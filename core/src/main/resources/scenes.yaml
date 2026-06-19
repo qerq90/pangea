@@ -106,6 +106,15 @@ dungeon:
   springFlaskFilled: " Фляга пополнена."
   springAmbush: " Однако на шум живительного ручья пришёл и кто-то ещё…"
 
+equipment:
+  header: "Снаряжение"
+  empty: "Пусто"
+  unequipBtn: "🔓 Снять"
+  back: "↩ Назад"
+  unequipped: "{name} снят и возвращён в инвентарь."
+  slotEmpty: "Слот уже пуст."
+  inventoryFull: "Инвентарь полон — невозможно снять предмет."
+
 heroStats:
   inventory: "Инвентарь"
   equipment: "Снаряжение"
