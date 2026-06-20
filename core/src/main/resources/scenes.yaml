@@ -165,10 +165,6 @@ rest:
   done: "Вы отдохнули! HP восстановлено."
 
 death:
-  enter:
-    text: "Вы погибли. Нажмите любую кнопку чтобы вернуться в лабиринт."
-    choices:
-      Respawn: "Продолжить"
   penalty: "Потери: -{expLost} опыта, -{goldLost} золота."
   itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
   trauma: "⚠ Новая травма: «{traumaName}». {description}"

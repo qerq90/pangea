@@ -62,13 +62,28 @@ class StateHandler(
         .orElseFail(new Throwable(s"Not found state of hero with id ${hero.id} of user ${user.userId}: state - ${hero.state}"))
 
       potentiallyNewState <- state.action(user, action, renderer)
-      newState <- ZIO
-        .fromOption(states.get(potentiallyNewState))
-        .orElseFail(new Throwable(s"Not found new state of hero with id ${hero.id} of user ${user.userId}: state - ${hero.state}"))
-
-      _ <- heroRepo.updateState(user.userId, potentiallyNewState).unless(potentiallyNewState == hero.state)
-      _ <- newState.enter(user, renderer).unless(potentiallyNewState == hero.state)
+      _ <- transitionTo(user, hero.state, potentiallyNewState, renderer)
     } yield ()
+
+  /**
+   * Performs a state transition (persist + enter) and follows any `autoAdvance`
+   * chain so effect nodes route onward without a player action. The fuel guard
+   * stops a misconfigured cycle of auto-advancing states.
+   */
+  private def transitionTo(user: User, from: StateType, to: StateType, renderer: Renderer, fuel: Int = 16): Task[Unit] =
+    if (to == from) ZIO.unit
+    else
+      for {
+        target <- ZIO
+          .fromOption(states.get(to))
+          .orElseFail(new Throwable(s"Not found state '$to' for user ${user.userId}"))
+        _ <- heroRepo.updateState(user.userId, to)
+        _ <- target.enter(user, renderer)
+        _ <- target.autoAdvance match {
+          case Some(next) if fuel > 0 => transitionTo(user, to, next, renderer, fuel - 1)
+          case _                      => ZIO.unit
+        }
+      } yield ()
 }
 
 object StateHandler {

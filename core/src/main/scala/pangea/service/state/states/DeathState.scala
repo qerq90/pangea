@@ -21,10 +21,12 @@ case class DeathState(
 
   override def targetStates: Set[StateType] = Set(StateType.Rest)
 
-  override def enter(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, content.screen("death.enter"))
+  // Death is an effect node, not a screen: entering it runs the full death event
+  // (penalties, trauma, drops) immediately — no "continue" button — then routes
+  // straight to Rest via autoAdvance.
+  override def autoAdvance: Option[StateType] = Some(StateType.Rest)
 
-  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+  override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
       now          <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero         <- heroDao.getHeroByUserId(user.userId)
@@ -76,7 +78,12 @@ case class DeathState(
       _            <- dropItems(user, hero.id, monsterName, renderer)
       deathRestMs   = hero.dungeonLevel.toLong * 2L * 60L * 1000L
       _            <- heroDao.writeSceneData(user.userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
-    } yield StateType.Rest
+    } yield ()
+
+  // Unused in the normal flow (Death routes onward via autoAdvance). Kept as a
+  // safe fallback so a hero somehow sitting in Death still moves to Rest.
+  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    ZIO.succeed(StateType.Rest)
 
   private def dropItems(user: User, heroId: pangea.model.hero.HeroId, monsterName: String, renderer: Renderer): Task[Unit] =
     for {
