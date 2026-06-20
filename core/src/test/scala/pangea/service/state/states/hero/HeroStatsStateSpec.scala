@@ -53,6 +53,32 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.text.contains("ИНТ"))
     },
 
+    test("enter с травмой → показывает текущее/максимум подебаффленного стата (СИЛ 5/10)") {
+      // «Сломанная рука» — -50% к силе; базовая СИЛ 10 → 5/10
+      val injured = TestFixtures.hero(userId).copy(
+        traumaUntil = Some(Long.MaxValue),
+        traumaNames = List("Сломанная рука")
+      )
+      for {
+        renderer <- TestRenderer.make
+        heroDao  <- TestHeroDao.withHero(userId, injured)
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HeroStatsState(heroDao, content)
+        _        <- state.enter(testUser, renderer)
+        screens  <- renderer.sentScreens
+      } yield assertTrue(screens.head.text.contains("СИЛ 5/10"))
+    },
+
+    test("статы зажаты снизу единицей (атака/точность/защита/уклонение, HP)") {
+      // у фикстуры defence = 0 → после зажима показывается 1; ни один стат не ниже 1
+      val eff = TestFixtures.hero(userId).effectiveFightStats(0L)
+      assertTrue(
+        eff.atk >= 1L, eff.accuracy >= 1L, eff.defence >= 1L, eff.evasion >= 1L,
+        eff.defence == 1L,                                   // был 0, стал 1
+        TestFixtures.hero(userId).effectiveMaxHp(0L) >= 1L
+      )
+    },
+
     test("enter с upgrade points → показывает кнопку Upgrade") {
       for {
         renderer <- TestRenderer.make

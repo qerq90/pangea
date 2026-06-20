@@ -33,16 +33,35 @@ case class Hero(
   def combinedPenalties(nowMs: Long): TraumaPenalties =
     activeTraumas(nowMs).foldLeft(TraumaPenalties.none)(_ + _.penalties)
 
-  def effectiveFightStats(nowMs: Long): FightStats = {
+  /** Боевые статы с заданными штрафами. Атака/защита/точность/уклонение зажаты
+   *  снизу единицей (не могут упасть ниже 1); броня может быть 0 (без экипировки). */
+  private def fightStatsWith(p: TraumaPenalties): FightStats = {
     val rf = race.factor
-    val p  = combinedPenalties(nowMs)
     fightStats.copy(
       atk           = (fightStats.atk * rf.attackFactor * (1.0 - p.atkPct)).toLong.max(1L),
-      defence       = (fightStats.defence * rf.defenceFactor * (1.0 - p.defPct)).toLong,
-      accuracy      = (fightStats.accuracy * rf.accuracyFactor * (1.0 - p.accPct)).toLong,
-      evasion       = (fightStats.evasion * rf.evasionFactor * (1.0 - p.evasionPct)).toLong,
-      concentration = ((fightStats.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong,
+      defence       = (fightStats.defence * rf.defenceFactor * (1.0 - p.defPct)).toLong.max(1L),
+      accuracy      = (fightStats.accuracy * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
+      evasion       = (fightStats.evasion * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
+      concentration = ((fightStats.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
       armor         = (fightStats.armor * (1.0 - p.armorPct)).toLong.max(0L)
+    )
+  }
+
+  /** Текущие боевые статы — с учётом активных травм. */
+  def effectiveFightStats(nowMs: Long): FightStats = fightStatsWith(combinedPenalties(nowMs))
+
+  /** Боевые статы без травм — «потолок», к которому стат вернётся после снятия травм. */
+  def maxFightStats: FightStats = fightStatsWith(TraumaPenalties.none)
+
+  /** Базовые характеристики с учётом травм (зажаты снизу единицей). Ловкость не
+   *  имеет штрафа от травм. */
+  def effectiveBaseStats(nowMs: Long): BaseStats = {
+    val p = combinedPenalties(nowMs)
+    BaseStats(
+      agi = baseStats.agi,
+      vit = (baseStats.vit * (1.0 - p.vitPct)).toLong.max(1L),
+      str = (baseStats.str * (1.0 - p.strPct)).toLong.max(1L),
+      int = (baseStats.int * (1.0 - p.intPct)).toLong.max(1L)
     )
   }
 
@@ -60,17 +79,23 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
+  // «текущее/максимум», если травма уронила стат ниже потолка; иначе просто число
+  private def withMax(cur: Long, max: Long): String =
+    if (cur < max) s"$cur/$max" else cur.toString
+
   def getInfo(nowMs: Long): String = {
+    val effB  = effectiveBaseStats(nowMs)
     val eff   = effectiveFightStats(nowMs)
+    val maxFS = maxFightStats
     val maxHp = effectiveMaxHp(nowMs)
     s"""${race.toString}, Уровень $lvl
        | $getLvlExp/$getNeededExp опыта
        |
-       | 💪 СИЛ ${baseStats.str}  ТЕЛО ${baseStats.vit}
-       | 🏃 ЛОВ ${baseStats.agi}  ИНТ ${baseStats.int}
+       | 💪 СИЛ ${withMax(effB.str, baseStats.str)}  ТЕЛО ${withMax(effB.vit, baseStats.vit)}
+       | 🏃 ЛОВ ${withMax(effB.agi, baseStats.agi)}  ИНТ ${withMax(effB.int, baseStats.int)}
        |
-       | ⚔ Атк ${eff.atk}  🎯 Точн ${eff.accuracy}
-       | 🛡 Защ ${eff.defence}  👁 Укл ${eff.evasion}
+       | ⚔ Атк ${withMax(eff.atk, maxFS.atk)}  🎯 Точн ${withMax(eff.accuracy, maxFS.accuracy)}
+       | 🛡 Защ ${withMax(eff.defence, maxFS.defence)}  👁 Укл ${withMax(eff.evasion, maxFS.evasion)}
        | ❤ ${fightStats.hp}/$maxHp
        |
        | Свободных очков: $upgradePoints
