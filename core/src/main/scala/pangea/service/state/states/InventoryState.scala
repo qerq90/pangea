@@ -238,11 +238,11 @@ object InventoryState {
 
   def applyDelta(base: FightStats, added: Item, removed: Item): FightStats =
     base.copy(
-      atk           = base.atk + added.attack - removed.attack,
-      armor         = base.armor + added.armor - removed.armor,
-      defence       = base.defence + added.defence - removed.defence,
-      evasion       = base.evasion + added.evasion - removed.evasion,
-      accuracy      = base.accuracy + added.accuracy - removed.accuracy,
-      concentration = base.concentration + added.concentration - removed.concentration
+      atk           = (base.atk + added.attack - removed.attack).max(0L),
+      armor         = (base.armor + added.armor - removed.armor).max(0L),
+      defence       = (base.defence + added.defence - removed.defence).max(0L),
+      evasion       = (base.evasion + added.evasion - removed.evasion).max(0L),
+      accuracy      = (base.accuracy + added.accuracy - removed.accuracy).max(0L),
+      concentration = (base.concentration + added.concentration - removed.concentration).max(0L)
     )
 }

@@ -260,6 +260,7 @@ maxArmor = equipment.allArmor × max(fightStats.defence, 1)
 - `equipment.allArmor` — сумма `armor` всех надетых предметов
 - `defence` — из предметов; при `defence = 0` множитель равен 1 (броня работает без вложений в защиту)
 - В бою броня поглощает урон первой и расходуется; на отдыхе восстанавливается до `maxArmor`
+- Пересчёт `fightStats` при надевании/снятии экипировки (`InventoryState.applyDelta`) зажимает каждую характеристику (`atk`, `armor`, `defence`, `evasion`, `accuracy`, `concentration`) в `.max(0L)` — снятие предмета не уводит текущие значения в минус
 
 ### Предметы и их ID
 Каждый предмет получает реальный `BIGSERIAL` ID в таблице `items` **в момент генерации** (через `ItemRepository.generate` / `ItemRepository.persist`), до попадания в инвентарь. В JSON-блобе инвентаря и слотах экипировки хранится предмет с уже настоящим ID. Это гарантирует уникальность при `removeItem`.
