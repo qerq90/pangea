@@ -174,8 +174,7 @@ object InventoryState {
 
   def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int, gold: Option[Long] = None): String = {
     val slotInfo = item.itemType match {
-      case ItemType.Trophy =>
-        item.race.fold("\nТрофей")(r => s"\nТрофей · раса: ${pangea.model.monster.Race.withName(r)}")
+      case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring =>
         val r1 = if (eq.firstRing.itemType  != ItemType.NoItem) s"Слот 1: ${eq.firstRing.name}"  else "Слот 1: свободен"
         val r2 = if (eq.secondRing.itemType != ItemType.NoItem) s"Слот 2: ${eq.secondRing.name}" else "Слот 2: свободен"
@@ -194,7 +193,8 @@ object InventoryState {
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
     val goldStr  = gold.fold("")(g => s" | 💰 $g")
-    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name} [${item.rarity}] Ур.${item.lvl}\n$statsStr$slotInfo"
+    val rarityStr = if (item.itemType == ItemType.Trophy) "" else s" [${item.rarity}]" // у трофеев нет редкости
+    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name}$rarityStr Ур.${item.lvl}\n$statsStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании

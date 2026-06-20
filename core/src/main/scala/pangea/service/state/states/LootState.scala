@@ -76,22 +76,21 @@ case class LootState(
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  private def itemLine(item: Item): String = {
-    val stats = List(
-      Option.when(item.attack > 0)(s"Атака +${item.attack}"),
-      Option.when(item.accuracy > 0)(s"Точность +${item.accuracy}"),
-      Option.when(item.concentration > 0)(s"Концентрация +${item.concentration}"),
-      Option.when(item.armor > 0)(s"Броня +${item.armor}"),
-      Option.when(item.defence > 0)(s"Защита +${item.defence}"),
-      Option.when(item.evasion > 0)(s"Уклонение +${item.evasion}")
-    ).flatten
-    val tail = item.itemType match {
-      case ItemType.Trophy => " (трофей)"
-      case _ if stats.nonEmpty => " — " + stats.mkString(", ")
-      case _ => ""
+  private def itemLine(item: Item): String =
+    if (item.itemType == ItemType.Trophy)
+      s"🎁 ${item.name} Ур.${item.lvl} (трофей)" // у трофеев нет редкости
+    else {
+      val stats = List(
+        Option.when(item.attack > 0)(s"Атака +${item.attack}"),
+        Option.when(item.accuracy > 0)(s"Точность +${item.accuracy}"),
+        Option.when(item.concentration > 0)(s"Концентрация +${item.concentration}"),
+        Option.when(item.armor > 0)(s"Броня +${item.armor}"),
+        Option.when(item.defence > 0)(s"Защита +${item.defence}"),
+        Option.when(item.evasion > 0)(s"Уклонение +${item.evasion}")
+      ).flatten
+      val tail = if (stats.nonEmpty) " — " + stats.mkString(", ") else ""
+      s"🎁 ${item.name} [${item.rarity}] Ур.${item.lvl}$tail"
     }
-    s"🎁 ${item.name} [${item.rarity}] Ур.${item.lvl}$tail"
-  }
 }
 
 object LootState {

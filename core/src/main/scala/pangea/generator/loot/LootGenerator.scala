@@ -132,7 +132,7 @@ object LootGenerator {
       case Category.Trophy =>
         val (name, r1) = pickWeighted(trophyWeights(tier), rng)
         val trophy = Item(
-          id = -1L, name = s"«$name» (${race.toString}) ур-$killLevel",
+          id = -1L, name = s"$name ${race.genitive}",
           lvl = killLevel.max(1L), rarity = ItemRarity.Gray, itemType = ItemType.Trophy,
           attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
           race = Some(race.entryName)

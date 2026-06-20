@@ -7,6 +7,7 @@ import pangea.model.monster.Race.RaceFactor
 sealed trait Race extends EnumEntry {
   val factor: RaceFactor
   val description: String
+  val genitive: String // родительный падеж названия расы («Демона») — для имён трофеев
 }
 
 object Race extends Enum[Race] with DoobieEnum[Race] {
@@ -23,6 +24,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Human extends Race {
     override def toString: String = "Человек"
+    val genitive: String          = "Человека"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -57,6 +59,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Elf extends Race {
     override def toString: String = "Эльф"
+    val genitive: String          = "Эльфа"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -90,6 +93,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Murloc extends Race {
     override def toString: String = "Мурлок"
+    val genitive: String          = "Мурлока"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -124,6 +128,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Orc extends Race {
     override def toString: String = "Орк"
+    val genitive: String          = "Орка"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -158,6 +163,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Goblin extends Race {
     override def toString: String = "Гоблин"
+    val genitive: String          = "Гоблина"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -190,6 +196,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Demon extends Race {
     override def toString: String = "Демон"
+    val genitive: String          = "Демона"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -220,6 +227,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Gnome extends Race {
     override def toString: String = "Гном"
+    val genitive: String          = "Гнома"
 
     val factor: RaceFactor =
       RaceFactor(
@@ -252,6 +260,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
 
   case object Khajiit extends Race {
     override def toString: String = "Каджит"
+    val genitive: String          = "Каджита"
 
     val factor: RaceFactor =
       RaceFactor(
