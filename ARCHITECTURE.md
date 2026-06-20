@@ -572,7 +572,7 @@ restDurationMs   = deathTimeMinutes × 60 000
 
 ### Трофеи
 
-Хранятся **как обычный предмет в инвентаре** (ответ 1): `ItemType.Trophy`, без статов, с полями `lvl = killLevel` и `race = Some(монстр.race.entryName)` (новое поле `Item.race: Option[String]`, обратносовместимо — старый JSON декодится в `None`). Имя — `«<тип>» (<раса>) ур-<killLevel>`. Трофей **не экипируется** (нет в `attackItems`/`defenceItems`; `InventoryState` блокирует «Надеть» сообщением `inventory.notEquippable`). «Коэффициент трофея» из спека не реализован (назначение не определено — отброшен).
+Хранятся **как обычный предмет в инвентаре** (ответ 1): `ItemType.Trophy`, без статов, с полями `lvl = killLevel` и `race = Some(монстр.race.entryName)` (новое поле `Item.race: Option[String]`, обратносовместимо — старый JSON декодится в `None`). Имя — `«<тип>» (<раса>)` (например, `«Талисман» (Эльф)`). Уровень в имя **не** включается — он показывается отдельно как `Ур.<lvl>` при выводе списка (`LootState`/`InventoryState`), чтобы не дублировать. Трофей **не экипируется** (нет в `attackItems`/`defenceItems`; `InventoryState` блокирует «Надеть» сообщением `inventory.notEquippable`). «Коэффициент трофея» из спека не реализован (назначение не определено — отброшен).
 
 Тип трофея катается по весам (`LootGenerator.trophyWeights`, суммы = 100):
 
