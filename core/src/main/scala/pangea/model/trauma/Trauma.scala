@@ -24,6 +24,26 @@ case class TraumaPenalties(
     defPct     = defPct     + o.defPct,
     intPct     = intPct     + o.intPct
   )
+
+  /** Каждый ненулевой штраф как «-X% характеристика», в порядке для показа. */
+  def minuses: List[String] = {
+    def fmt(pct: Double, label: String): Option[String] =
+      Option.when(pct != 0.0)(s"-${math.round(pct * 100)}% $label")
+    List(
+      fmt(atkPct,     "урон"),
+      fmt(strPct,     "сила"),
+      fmt(evasionPct, "уклонение"),
+      fmt(hpPct,      "HP"),
+      fmt(vitPct,     "телосложение"),
+      fmt(accPct,     "точность"),
+      fmt(concPct,    "сосредоточение"),
+      fmt(armorPct,   "броня"),
+      fmt(defPct,     "защита"),
+      fmt(intPct,     "интеллект")
+    ).flatten
+  }
+
+  def shortText: String = minuses.mkString(", ")
 }
 
 object TraumaPenalties {

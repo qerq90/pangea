@@ -129,6 +129,10 @@ heroStats:
   upgradeInt: "+1 Интеллект"
   backToStats: "Назад"
   traumaActive: "\n⚠ Активные травмы: {traumaNames}. Осталось: {remaining}."
+  traumas: "Травмы"
+  traumaScreenTitle: "⚠ Активные травмы. Осталось: {remaining}"
+  traumaLine: "• {name}: {penalties}"
+  traumaEmpty: "Активных травм нет."
 
 battle:
   enter:

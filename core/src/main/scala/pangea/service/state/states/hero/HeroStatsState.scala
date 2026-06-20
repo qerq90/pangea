@@ -16,6 +16,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       "Back"           -> Target.Goto(StateType.Dungeon),
       "OpenInventory"  -> Target.Goto(StateType.Inventory),
       "OpenEquipment"  -> Target.Goto(StateType.Equipment),
+      "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
       "UpgradeVit"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "vit") },
@@ -79,6 +80,28 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
               }
     } yield StateType.HeroStats
 
+  private def showTraumasScreen(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero <- getHero(user)
+      _    <- renderer.show(user, buildTraumasScreen(hero, now))
+    } yield ()
+
+  private def buildTraumasScreen(hero: Hero, nowMs: Long): Screen = {
+    val traumas = hero.activeTraumas(nowMs)
+    val back    = Choice("BackToStats", content.text("heroStats.backToStats"))
+    if (traumas.isEmpty)
+      Screen(content.text("heroStats.traumaEmpty"), List(back))
+    else {
+      val remaining = hero.traumaRemainingText(nowMs).getOrElse("—")
+      val header    = content.format("heroStats.traumaScreenTitle", "remaining" -> remaining)
+      val lines     = traumas.map { t =>
+        content.format("heroStats.traumaLine", "name" -> t.name, "penalties" -> t.penalties.shortText)
+      }
+      Screen(header + "\n" + lines.mkString("\n"), List(back))
+    }
+  }
+
   private def buildStatsScreen(hero: Hero, nowMs: Long): Screen = {
     val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
       val names = hero.activeTraumas(nowMs).map(_.name)
@@ -90,6 +113,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     val choices = List(
       Some(Choice("OpenInventory", content.text("heroStats.inventory"))),
       Some(Choice("OpenEquipment", content.text("heroStats.equipment"))),
+      Option.when(hero.activeTraumas(nowMs).nonEmpty)(Choice("OpenTraumas", content.text("heroStats.traumas"))),
       Option.when(hero.upgradePoints > 0)(Choice("Upgrade", content.text("heroStats.upgrade"))),
       Some(Choice("Back", content.text("heroStats.leave")))
     ).flatten
