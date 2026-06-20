@@ -76,7 +76,12 @@ case class DeathState(
                           "description" -> trauma.description), Nil))
 
       _            <- dropItems(user, hero.id, monsterName, renderer)
-      deathRestMs   = hero.dungeonLevel.toLong * 2L * 60L * 1000L
+      // Время в мёртвом режиме растёт с уровнем героя и асимптотически
+      // стремится к 90 минутам, не достигая их:
+      //   deathTimeMinutes = 90 - 89 * exp(-k * (level - 1))
+      // На 1 уровне == 1 минута; k — коэффициент роста.
+      deathRestMinutes = 90.0 - 89.0 * math.exp(-DeathState.RestGrowthK * (hero.lvl - 1L))
+      deathRestMs      = (deathRestMinutes * 60000.0).toLong
       _            <- heroDao.writeSceneData(user.userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
     } yield ()
 
@@ -103,4 +108,9 @@ case class DeathState(
                      }
                    }
     } yield ()
+}
+
+object DeathState {
+  // Коэффициент роста времени мёртвого режима по уровню героя (см. формулу в enter).
+  val RestGrowthK: Double = 0.01
 }

@@ -40,57 +40,65 @@ DI — через конструкторы + `ZLayer` (сервисы инжек
 
 ## 4. Слои архитектуры
 
+Фактическая раскладка по пакетам (`core/src/main/scala/pangea/…`):
+
 ```
-domain/   — чистое ядро: модели, бой, лут, статы, RNG (без ZIO)
-engine/   — модель сцен, интерпретатор, роутинг Input
-content/  — данные сцен + валидатор графа
-ports/    — Renderer, Players, Journal, Clock, Rng (интерфейсы)
-adapters/ — vk/ (вебхук + рендерер), postgres/ (репо, журнал), telegram/, test/
-app/      — сборка ZLayer, вебхук-сервер, диспетчер
+domain/      — Rng (чистый детерминированный генератор, без ZIO)
+generator/   — чистое ядро: item/, loot/, monster/ (явный Rng на входе)
+model/       — доменные модели: hero, item, monster, battle, trauma, stats, state…
+engine/      — движок сцен + порты: Screen, Choice, Beat, Branch, Narrative,
+               Target, SceneContent, GraphValidator, PartitionManager,
+               Renderer, Players, Journal (порты живут здесь, не в отдельном ports/)
+service/state/        — State, StateHandler, PlayerLock, UserAction + states/ (узлы графа)
+service/sender/vk/    — адаптеры: VkApi, VkRenderer, VkPlayers
+dao/ , repository/    — доступ к Postgres (включая dao/journal — JournalLive)
+resources/scenes.yaml — контент сцен (тексты + кнопки) как данные
+app/                  — Main (сборка ZLayer), server/ (вебхук-сервер ВК)
 ```
 
-Зависимости направлены внутрь: `adapters` → `ports` ← `engine` → `domain`. Ядро ни от чего наружу не зависит.
+Зависимости направлены внутрь: адаптеры (`service/sender/vk`, `dao`) → порты (`engine`) ← `service/state` → `generator`/`domain`/`model`. Ядро ни от чего наружу не зависит. Отдельных пакетов `ports/`, `content/`, `adapters/` нет — порты лежат в `engine`, контент в `resources/scenes.yaml`, адаптеры в `service/sender` и `dao`.
 
-### 4.1. Доменное ядро (`domain`)
+### 4.1. Доменное ядро (`domain` / `generator`)
 
-Чистые функции, без ZIO/IO, RNG передаётся явно:
+Чистые функции, без ZIO/IO, RNG передаётся явно как `domain.Rng`:
 
 ```scala
-final case class Rng(seed: Long) { def next: (Long, Rng) = ??? }
+case class Rng(seed: Long) {
+  def nextLong: (Long, Rng)
+  def between(min: Long, max: Long): (Long, Rng)   // [min, max)
+  def pick[A](list: List[A]): (A, Rng)
+}
 
-def resolveCombat(hero: Hero, enemy: Enemy, rng: Rng): (CombatResult, Rng)
-def rollLoot(level: Int, rng: Rng): (Item, Rng)
-def applyLevelUp(hero: Hero): Hero
+// generator/ — все принимают Rng и возвращают (результат, Rng)
+ItemGenerator.createItem(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng)
+LootGenerator.roll(tier, race, killLevel, rng: Rng): (List[LootDrop], Rng)
+MonsterGenerator.generate(dungeonLevel: Int, rng: Rng): (Monster, Rng)
 ```
 
-Тестируется property-тестами (HP не уходит в минус, лут уважает уровень). `ItemGenerator` — прообраз этого слоя; его надо очистить от скрытого `new Random()` и принимать `Rng` на вход.
+Тестируется property-тестами (`generator/*Spec`). Генераторы очищены от скрытого `Random` — `Rng` инжектится на вход. **Бой пока не вынесен в чистое ядро:** `BattleState` остаётся в shell и катает роллы через ZIO `Random` (см. §12).
 
 ### 4.2. Движок сцен (`engine`)
 
-Платформо-независимое представление экрана и ввода:
+Платформо-независимое представление экрана и ввода построено и используется всеми сценами:
 
 ```scala
-final case class Screen(text: String, choices: List[Choice])
-final case class Choice(id: ChoiceId, label: String, style: Style = Default)
-
-sealed trait Input
-object Input {
-  case class Tap(choice: ChoiceId) extends Input  // нажал кнопку
-  case class Say(text: String)     extends Input  // ввёл текст
-}
+case class Screen(text: String, choices: List[Choice])
+case class Choice(id: String, label: String, data: Map[String, String] = Map.empty)
 ```
 
-Один интерпретатор обходит граф; per-state матчей `action` и enum'ов `Action` на сцену больше нет.
+Ввод не вынесен в отдельный `sealed trait Input` — он приходит как `UserAction` (payload-кнопка или текст); `Branch` извлекает из payload ключ `action` и роутит. `Narrative` разворачивает цепочку `Beat`'ов в маршруты. Per-state матчей по enum'у `Action` на сцену больше нет: `Action`-энумы сохранились лишь как **кодеки payload-ключей** (строки в JSON кнопки), а диспетчеризацию ведёт `Branch` по строковому ключу.
 
-### 4.3. Порты и адаптеры (`ports` / `adapters`)
+### 4.3. Порты и адаптеры (`engine` / `service/sender/vk`)
+
+Порты объявлены в `engine`, реализации — в адаптерах:
 
 ```scala
-trait Renderer { def show(p: PlayerId, s: Screen): Task[Unit] } // ВК / Telegram / тест
-trait Players  { def load(id: PlayerId): Task[PlayerState]; def save(s: PlayerState): Task[Unit] }
-trait Journal  { def append(e: GameEvent): Task[Unit] }
+trait Renderer { def show(user: User, screen: Screen): Task[Unit] } // VkRenderer
+trait Players  { def getDisplayName(user: User): Task[String] }      // VkPlayers
+trait Journal  { def append(event: GameEvent): Task[Unit] }          // JournalLive
 ```
 
-ВК-адаптер превращает `Screen` в сообщение с клавиатурой и парсит входящий апдейт в `Update(playerId, Input)`. Telegram — второй адаптер той же формы, без дублирования логики.
+`VkRenderer` превращает `Screen` в сообщение ВК с клавиатурой; `VkApi` парсит входящий апдейт в `UserAction`. Сцены работают только через `Renderer`/`Screen` — `Keyboard`/`sendMessage` из них убраны, ВК больше не протекает в стейты. Telegram пока заглушка: `StateHandler.makeActionTelegram` есть, но отдельного рендерера/вебхука нет (использует `VkRenderer`).
 
 ## 5. Модель сцены
 
@@ -105,17 +113,19 @@ trait Journal  { def append(e: GameEvent): Task[Unit] }
 ```scala
 sealed trait Target
 object Target {
-  case class Goto(state: SceneId)                              extends Target // данные → в YAML/ресурс
-  case class Run(effect: (User, UserAction) => Task[StateType]) extends Target // код (эффект)
+  case class Goto(state: StateType)                                  extends Target // данные → ключ сцены
+  case class Run(f: (User, UserAction, Renderer) => Task[StateType]) extends Target // код (эффект)
 }
 ```
 
-**Граница данные/код проходит по `Target`.** `Goto` сериализуем (можно держать в данных), `Run` несёт функцию (эффект — всегда код). Сцена — «в основном данные с явными дырками под код».
+`Branch(routes: Map[String, Target], fallback: Target)` маршрутизирует по строковому ключу `action` из payload кнопки; `gotoTargets` отдаёт все `Goto`-цели для валидатора графа.
+
+**Граница данные/код проходит по `Target`.** `Goto` сериализуем (держит ключ сцены), `Run` несёт функцию (эффект — всегда код). Сцена — «в основном данные с явными дырками под код».
 
 **Правила для эффектов:**
 - Сервисы (api, dao, repo) **захватываются** (эффект — метод стейта с этими полями), а не передаются в сигнатуру.
-- Транспорт декодится **на границе**: эффект получает доменное значение (`Race`), а не `UserAction`. Хелпер `Run.decoded[A]` декодит payload и отдаёт чистый тип.
 - В shell остаётся оркестрация (вызвать ядро, сохранить, отрендерить, выбрать следующую сцену) — это его законная работа, её не «прячут».
+- Хелпера `Run.decoded[A]` (декод payload в доменный тип на границе) пока нет — эффекты, которым нужен payload (напр. выбор расы), читают `ua.payload` внутри себя. Это кандидат на будущее упрощение.
 
 ## 6. Модель состояния
 
@@ -139,12 +149,14 @@ object Target {
 
 ## 8. Надёжность чат-бота
 
-Чат-платформы передоставляют сообщения, игроки жмут дважды, апдейты приходят внахлёст. Решаем структурно:
+> **Статус: ✅ реализовано.** Чат-платформы передоставляют сообщения, игроки жмут дважды, апдейты приходят внахлёст. Решено структурно:
 
-- **Сериализация по игроку.** Per-user мейлбокс/семафор → переходы упорядочены, не гоняются. By construction убивает класс «два конкурентных перехода» (бывшие дубли `InProgress` событий).
-- **Идемпотентность.** Каждый апдейт несёт id → дедуп по «последний обработанный апдейт на игрока», либо эффекты делаются идемпотентными. Дабл-тап не ломает стейт.
+- **Сериализация по игроку.** `PlayerLock` — `Ref[Map[VkId, Semaphore]]`, по семафору на игрока (`withLock`). `StateHandler.makeActionVK` оборачивает всю обработку апдейта в `lock.withLock(vkId)` → переходы упорядочены, не гоняются. By construction убивает класс «два конкурентных перехода».
+- **Идемпотентность.** Апдейт несёт `eventId`; `userRepo.checkAndRecordEvent` атомарно пишет `users.last_event_id` через `UPDATE … WHERE last_event_id IS NULL OR last_event_id <> $eventId` и возвращает, новый ли это апдейт. Повтор того же `eventId` → `isNew = false`, обработка пропускается. Дабл-тап не ломает стейт.
 
 ## 9. Журнал и партиционирование
+
+> **Статус: ✅ реализовано.** Порт `engine.Journal` + `dao/journal/JournalLive` пишут в партиционированную `event_log` (миграция `20260617000000_event_log.sql`). `engine.PartitionManager.ensurePartitions` нарезает партиции на 3 месяца вперёд при старте `JournalLive`. `GameEvent` пишется в ключевых точках: `race_selected` (Registration), `item_found`/`item_left` (FoundItem), `loot_claimed` (Loot). Старая `events`-таблица как live-state выведена из обращения — live-состояние теперь в `heroes.scene_data`.
 
 Журнал — **append-only**: только `INSERT`, никаких `status`/`UPDATE`/`.unique`. Строка — это факт, который случился.
 
@@ -190,33 +202,44 @@ CREATE TABLE event_log (
 |---|---|---|
 | Базовый `State`-трейт, `StateHandler`, бутстрап юзера/героя | ✅ | Хороший фундамент, не трогаем |
 | Стек ZIO/doobie/Postgres/circe, DI через конструкторы | ✅ | Конвенция зафиксирована |
-| Сцены как классы (`DungeonState`, `RegistrationState`…) | 🟡 | Работает, но контент в коде; цель — данные + движок |
-| Движок сцен (нарратив/выбор/эффект) | 🔴🎯 | Прототип `Narrative` сделан; нужен `Branch` + интерпретатор |
-| Линейный нарратив как данные (цепочка Travel) | 🟡 | Прототип-рерайт `Registration` готов, не вкачен |
-| Контент вынесен из кода | 🔴🎯 | Сейчас строки в Scala; цель — ресурсные файлы |
-| Functional core (чистое ядро + явный RNG) | 🟡 | `ItemGenerator` близок, но со скрытым `Random` |
-| Порты/адаптеры (Renderer и т.д.), ВК как адаптер | 🔴🎯 | Сейчас ВК протекает в стейты |
-| Три вида состояния разведены | 🔴🎯 | Сейчас `events` смешивает live-state и журнал |
-| Live scene state на герое (`scene_data`) | 🔴🎯 | Заменяет start/get/endEvent |
-| Append-only журнал + партиционирование | 🔴🎯 | Текущая `events` не журнал |
-| Сериализация по игроку + идемпотентность | 🔴🎯 | Латентные баги дабл-тапа |
-| Валидатор графа на старте | 🔴🎯 | — |
-| Headless-тесты флоу | 🔴🎯 | Сейчас флоу почти не тестируем |
-| Кодоген клавиатур/Action (`kbgen`) | 🟡 | Вспомогательный инструмент; полезен, пока контент не уехал в данные |
+| Движок сцен (`Screen`/`Choice`/`Beat`/`Branch`/`Narrative`/`Target`) | ✅ | Построен и используется всеми сценами |
+| Сцены роутят через `Branch` (`Goto`/`Run`), а не per-state match | ✅ | `Action`-энумы остались только как кодеки payload-ключей |
+| Линейный нарратив как данные (цепочка Travel в `Registration`) | ✅ | `Narrative.toRoutes` развёрнут, вкачен |
+| Контент вынесен из кода (`resources/scenes.yaml` + `SceneContent`) | 🟡 | Все сцены читают yaml; часть текста ещё формируется в Scala (динамика) |
+| Functional core (чистое ядро + явный RNG) | 🟡 | `generator/*` чисты и принимают `Rng`; **бой ещё в shell на ZIO `Random`** |
+| Порты/адаптеры (`Renderer`/`Players`/`Journal`), ВК как адаптер | ✅ | `VkRenderer`/`VkPlayers`/`JournalLive`; ВК не протекает в стейты |
+| Три вида состояния разведены | ✅ | durable (`heroes`/инвентарь), live (`scene_data`), журнал (`event_log`) |
+| Live scene state на герое (`scene_data` JSONB) | ✅ | Используется Battle/Death/Rest/Loot/Inventory/Equipment/FoundItem |
+| Append-only журнал + партиционирование | ✅ | `event_log` + `PartitionManager.ensurePartitions` при старте |
+| Сериализация по игроку + идемпотентность | ✅ | `PlayerLock` (семафор) + `checkAndRecordEvent`/`last_event_id` |
+| Валидатор графа на старте | ✅ | `GraphValidator.validate` при сборке `StatesMap` |
+| Headless-тесты флоу | 🟡 | Есть `*Spec` на каждую сцену + `TestRenderer`/`TestPlayers`; нет сквозного бот-игрока по графу |
+| Бой как чистое доменное ядро (явный `Rng`) | 🔴🎯 | `BattleState` оркеструет и катает роллы прямо в shell |
+| `Run.decoded[A]` (декод payload на границе) | 🔴🎯 | Эффекты пока сами читают `ua.payload` |
+| Telegram-адаптер | 🟡 | `makeActionTelegram` есть, отдельного рендерера/вебхука нет |
 
-## 13. Путь миграции (инкрементально, без переписывания всего)
+## 13. Путь миграции — что сделано и что осталось
 
-1. **Движок рядом с `State`.** Ввести `Scene`/интерпретатор за существующим `State`-интерфейсом, не меняя `StateHandler`/схему БД.
-2. **`Registration` первой.** Цепочка Travel → линейный нарратив-данные (прототип готов). Максимум удаляемого кода при изолированном риске.
-3. **`Dungeon`, `HeroStats`, выбор расы** → узлы-выборы (`Branch` + `Goto`/`Run`).
-4. **`FoundItem`** → `onEnter`-эффект + кнопки-`Run`; логика инвентаря не меняется.
-5. **Состояние событий.** Завести `scene_data` на герое (live) и `event_log` (append-only журнал); вывести из обращения `events`-таблицу с её `.unique`/`status`.
-6. **Очистить ядро.** `ItemGenerator` и будущий бой — на явный `Rng`.
-7. **Вынести интерфейс в адаптер.** Ввести `Screen`/`Input`/`Renderer`; ВК-специфику убрать из стейтов.
-8. **Контент в ресурсы.** Тексты по ключам → файлы; i18n как бонус.
-9. **Надёжность.** Per-user сериализация + дедуп апдейтов.
+Исходный инкрементальный план почти полностью пройден. Состояние шагов:
 
-Порядок такой, что каждый шаг — самостоятельный PR с откатом, и ранние шаги дают наибольшее упрощение.
+1. ✅ **Движок рядом с `State`.** `Branch`/`Narrative`/`Target` встроены за `State`-интерфейсом, схему БД не ломали.
+2. ✅ **`Registration` первой.** Цепочка Travel → `Narrative.toRoutes`, вкачено.
+3. ✅ **`Dungeon`, `HeroStats`, выбор расы** → узлы-выборы (`Branch` + `Goto`/`Run`).
+4. ✅ **`FoundItem`** → `enter`-эффект + кнопки-`Run`; логика инвентаря не менялась.
+5. ✅ **Состояние событий.** `heroes.scene_data` (live) + `event_log` (append-only журнал); старая `events`-таблица выведена из обращения.
+6. 🟡 **Очистить ядро.** `generator/*` на явном `Rng`. **Осталось:** вынести бой из `BattleState` в чистое ядро на `Rng`.
+7. ✅ **Вынести интерфейс в адаптер.** `Screen`/`Renderer` введены, ВК-специфика убрана из стейтов; `VkRenderer`/`VkPlayers` — адаптеры.
+8. 🟡 **Контент в ресурсы.** `scenes.yaml` + `SceneContent` подключены ко всем сценам; часть динамических текстов ещё в Scala. i18n пока нет.
+9. ✅ **Надёжность.** `PlayerLock` (per-user сериализация) + `checkAndRecordEvent` (дедуп апдейтов).
+
+**Осталось (новый бэклог):**
+- Бой как functional core с явным `Rng` (журналирование роллов боя как следствие).
+- `Run.decoded[A]` — декод payload в доменный тип на границе эффекта.
+- Сквозные headless-тесты флоу (бот-игрок по графу через `Input`/`Screen`), а не только per-state `*Spec`.
+- Полноценный Telegram-адаптер (свой рендерер + вебхук), а не заглушка на `VkRenderer`.
+- Догнать контент: оставшиеся динамические тексты в `scenes.yaml`.
+
+Порядок такой, что каждый шаг — самостоятельный PR с откатом.
 
 ## 14. Принятые решения и обоснования
 
@@ -237,7 +260,7 @@ CREATE TABLE event_log (
 - **Микросервисы.** Один сервис + Postgres держит большую аудиторию.
 - **Свой DSL контента на старте.** Сначала данные (HOCON/ресурсы) + валидатор; DSL — когда заболит.
 - **Распределённая сериализация игроков.** Внутрипроцессной хватит, пока не упрёшься.
-- **Кодоген всего.** `kbgen` — временный помощник; целевой путь для flow — интерпретатор, а не генерация Scala.
+- **Кодоген всего.** Целевой путь для flow — интерпретатор сцен (`Branch`/`Narrative`), а не генерация Scala. Временный кодоген клавиатур (`kbgen`) в проекте отсутствует.
 
 ## 16. Боевая механика и формулы
 
@@ -409,7 +432,18 @@ while (exp >= lvl * 100L && lvl < 150L) {
 
 ### Отдых после смерти
 
-`restDurationMs = dungeonLevel × 2 × 60 000 мс` (2 минуты за уровень). Записывается в `scene_data`; `RestState` читает это значение и блокирует выход до истечения времени.
+Время мёртвого режима растёт по **уровню героя** и асимптотически стремится к 90 минутам, не достигая их:
+
+```
+deathTimeMinutes = 90 − 89 × exp(−k × (lvl − 1))      // k = DeathState.RestGrowthK = 0.01
+restDurationMs   = deathTimeMinutes × 60 000
+```
+
+- На 1 уровне — ровно **1 минута** (`90 − 89×exp(0) = 1`).
+- С ростом уровня время монотонно увеличивается, но строго меньше 90 минут (асимптота).
+- `k` (`DeathState.RestGrowthK`) задаёт скорость роста.
+
+Записывается в `scene_data`; `RestState` читает это значение и блокирует выход до истечения времени.
 
 ## 19. Инвентарь и экипировка
 

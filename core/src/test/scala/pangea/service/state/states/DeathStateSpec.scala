@@ -55,7 +55,20 @@ object DeathStateSpec extends ZIOSpecDefault {
               assertTrue(updated.exists(_.gold == 250L)) &&
               assertTrue(screens.exists(_.text.contains("опыта"))) &&
               assertTrue(screens.exists(_.text.contains("золота"))) &&
-              assertTrue(sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).isDefined)
+              // уровень 1 → ровно 1 минута (90 - 89*exp(0) = 1)
+              assertTrue(sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).contains(60000L))
+    },
+
+    test("restDurationMs растёт с уровнем героя и не достигает 90 минут") {
+      val highHero = TestFixtures.hero(userId).copy(lvl = 50L)
+      for {
+        triple                    <- makeState(highHero)
+        (state, heroDao, _, renderer) = triple
+        _                         <- state.enter(testUser, renderer)
+        sceneData                 <- heroDao.readSceneData(userId)
+        ms                         = sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).getOrElse(0L)
+      } yield assertTrue(ms > 60000L) &&            // больше, чем на 1 уровне
+              assertTrue(ms < 90L * 60000L)         // строго меньше асимптоты в 90 минут
     },
 
     test("enter → получает случайную именованную травму из списка") {
