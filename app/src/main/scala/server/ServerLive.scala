@@ -37,7 +37,7 @@ final class ServerLive(
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
         _     <- ZIO.logInfo(json.toString())
-        _ <- event match {
+        _ <- (event match {
           case Some(value) =>
             stateHandler
               .makeActionVK(
@@ -50,6 +50,8 @@ final class ServerLive(
               )
               .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
+        }).catchAll { err =>
+          ZIO.logError(s"error occurred: $err")
         }
         resp <- Ok("ok")
       } yield resp
