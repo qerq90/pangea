@@ -19,9 +19,12 @@ case class Item(
   evasion: Long,
   flaskEffect: Option[FlaskEffect] = None,
   charges:     Option[Int]         = None,
-  maxCharges:  Option[Int]         = None
+  maxCharges:  Option[Int]         = None,
+  race:        Option[String]      = None // раса моба для трофеев (entryName); None у обычных предметов
 ) {
   def withId(id: Long): Item = copy(id = id)
+
+  def withRace(race: String): Item = copy(race = Some(race))
 
   def withName(name: String): Item = copy(name = name)
 

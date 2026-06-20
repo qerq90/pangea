@@ -150,7 +150,7 @@ battle:
   miss: "Вы промахиваетесь!"
   mobHit: "{monster} наносит {damage} урона."
   mobMiss: "{monster} промахивается!"
-  victory: "{monster} повержен! Получено {exp} опыта и {gold} золота."
+  victory: "{monster} повержен! Получено {exp} опыта."
   death: "Вы погибли..."
   fled: "Вы успешно сбежали!"
   flaskUsed: "Восстановлено {healed} HP. Здоровье: {hp}/{max}"
@@ -185,6 +185,16 @@ foundItem:
   inventoryFull: "В инвентаре нет места"
   left: "Вы уходите, так и не забрав найденный предмет"
 
+loot:
+  header: "Осматривая добычу, вы находите следующее:"
+  empty: "Осматривая добычу, вы не находите ничего ценного."
+  gold: "💰 Золото: {amount}"
+  itemLost: "🎁 {name} — Инвентарь переполнен"
+  enter:
+    text: "Добыча"
+    choices:
+      Continue: "Продолжить"
+
 inventory:
   empty:
     text: "Инвентарь пуст."
@@ -193,3 +203,4 @@ inventory:
   equipped: "{name} надет! Прежний: {old}."
   dropped: "{name} выброшен."
   tooHighLevel: "❌ Недостаточный уровень! Требуется {required}, ваш уровень {current}."
+  notEquippable: "❌ Этот предмет нельзя надеть."

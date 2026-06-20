@@ -42,6 +42,10 @@ object ItemType extends Enum[ItemType] {
   case object Weapon           extends ItemType
   case object AdditionalWeapon extends ItemType
 
+  // Трофей с убитого моба: лежит в инвентаре как обычный предмет (раса + уровень),
+  // но не экипируется — не входит в attackItems/defenceItems.
+  case object Trophy extends ItemType
+
   case object NoItem extends ItemType
 
   implicit val encoder: Encoder[ItemType] =

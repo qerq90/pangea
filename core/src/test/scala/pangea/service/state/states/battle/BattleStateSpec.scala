@@ -78,7 +78,8 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.choices.map(_.id).contains("Flee"))
     },
 
-    test("Attack на монстра с 1 HP → победа, возврат в Dungeon, опыт и золото начислены") {
+    test("Attack на монстра с 1 HP → победа, переход в Loot, опыт начислен, лут в scene_data") {
+      import pangea.service.state.states.LootState.LootData
       for {
         triple               <- makeState(strongHero, weakBattle)
         (state, heroDao, renderer) = triple
@@ -86,12 +87,12 @@ object BattleStateSpec extends ZIOSpecDefault {
         screens              <- renderer.sentScreens
         updatedHero          <- heroDao.getHeroByUserId(userId)
         remainingBattle      <- heroDao.readActiveBattle(userId)
-      } yield assertTrue(result == StateType.Dungeon) &&
+        loot                 <- heroDao.readSceneData(userId)
+      } yield assertTrue(result == StateType.Loot) &&
               assertTrue(screens.exists(_.text.contains("опыта"))) &&
-              assertTrue(screens.exists(_.text.contains("золота"))) &&
               assertTrue(updatedHero.exists(_.exp > 0L)) &&
-              assertTrue(updatedHero.exists(_.gold > 0L)) &&
-              assertTrue(remainingBattle.isEmpty)
+              assertTrue(remainingBattle.isEmpty) &&
+              assertTrue(loot.flatMap(_.as[LootData].toOption).isDefined)
     },
 
     test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {

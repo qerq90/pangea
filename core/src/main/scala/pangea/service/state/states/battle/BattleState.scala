@@ -2,11 +2,14 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
+import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.generator.loot.LootGenerator
 import pangea.model.battle.ActiveBattle
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.service.state.states.LootState
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
@@ -103,7 +106,6 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def victory(user: User, hero: Hero, battle: ActiveBattle, renderer: Renderer): Task[StateType] =
     for {
       expGained        <- ZIO.succeed((hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L))
-      goldGained        = (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
       (newExp, newLevel, newPoints) = {
         var e = hero.exp + expGained
         var l = hero.lvl
@@ -111,18 +113,28 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         while (e >= l * 100L && l < 150L) { e -= l * 100L; l += 1L; p += 4L }
         (e, l, p)
       }
+      // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
+      seed             <- Random.nextLong
+      monster           = battle.toMonster
+      (drops, _)        = LootGenerator.roll(battle.rarity, monster.race, hero.dungeonLevel.toLong, Rng(seed))
+      lootData          = LootState.LootData(
+                            items = drops.collect {
+                              case LootGenerator.LootDrop.Gear(i)   => i
+                              case LootGenerator.LootDrop.Trophy(i) => i
+                            },
+                            golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a }
+                          )
       _                <- heroDao.clearActiveBattle(user.userId)
       _                <- heroDao.updateExpAndLevel(user.userId, newExp, newLevel, newPoints)
-      _                <- heroDao.updateGold(user.userId, hero.gold + goldGained)
+      _                <- heroDao.writeSceneData(user.userId, lootData.asJson)
       _                <- renderer.show(user, Screen(
                             content.format("battle.victory",
-                              "monster" -> battle.toMonster.name,
-                              "exp"     -> expGained.toString,
-                              "gold"    -> goldGained.toString), Nil))
+                              "monster" -> monster.name,
+                              "exp"     -> expGained.toString), Nil))
       _                <- ZIO.when(newLevel > hero.lvl)(
                             renderer.show(user, Screen(s"Вы получили новый уровень $newLevel!", Nil))
                           )
-    } yield StateType.Dungeon
+    } yield StateType.Loot
 
   private def heroDeath(user: User, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)

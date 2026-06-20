@@ -69,7 +69,9 @@ case class InventoryState(
       page   <- currentPage(user)
       _ <- ZIO.when(items.nonEmpty && page < items.size) {
         val item = items(page)
-        if (item.lvl > hero.lvl)
+        if (item.itemType == ItemType.Trophy)
+          renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil))
+        else if (item.lvl > hero.lvl)
           renderer.show(user, Screen(
             content.format("inventory.tooHighLevel",
               "required" -> item.lvl.toString,
@@ -172,6 +174,8 @@ object InventoryState {
 
   def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int, gold: Option[Long] = None): String = {
     val slotInfo = item.itemType match {
+      case ItemType.Trophy =>
+        item.race.fold("\nТрофей")(r => s"\nТрофей · раса: ${pangea.model.monster.Race.withName(r)}")
       case ItemType.Ring =>
         val r1 = if (eq.firstRing.itemType  != ItemType.NoItem) s"Слот 1: ${eq.firstRing.name}"  else "Слот 1: свободен"
         val r2 = if (eq.secondRing.itemType != ItemType.NoItem) s"Слот 2: ${eq.secondRing.name}" else "Слот 2: свободен"
@@ -212,6 +216,7 @@ object InventoryState {
     case ItemType.Flask            => eq.flask
     case ItemType.Weapon           => eq.weapon
     case ItemType.AdditionalWeapon => eq.additionalWeapon
+    case ItemType.Trophy           => Item.NoItem // трофей не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -233,6 +238,7 @@ object InventoryState {
     case ItemType.Flask            => eq.copy(flask = item)
     case ItemType.Weapon           => eq.copy(weapon = item)
     case ItemType.AdditionalWeapon => eq.copy(additionalWeapon = item)
+    case ItemType.Trophy           => eq // трофей не экипируется
     case ItemType.NoItem           => eq
   }
 

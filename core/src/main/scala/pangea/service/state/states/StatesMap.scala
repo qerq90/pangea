@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Inventory, Registration, Rest}
+import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Inventory, Loot, Registration, Rest}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.State
@@ -40,7 +40,8 @@ object StatesMap {
           Death        -> DeathState(heroDao, inventoryRepo, content),
           Rest         -> RestState(heroDao, content),
           Inventory    -> InventoryState(heroDao, inventoryRepo, content),
-          Equipment    -> EquipmentState(heroDao, inventoryRepo, content)
+          Equipment    -> EquipmentState(heroDao, inventoryRepo, content),
+          Loot         -> LootState(heroDao, inventoryRepo, itemRepo, journal, content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)
