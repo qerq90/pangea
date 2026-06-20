@@ -45,35 +45,27 @@ case class DeathState(
       // traumas that are still active are kept; expired ones reset to empty list
       existingNames = if (hero.traumaActive(now)) hero.traumaNames else Nil
 
-      // pick the right tier: light → medium → heavy (progression)
+      // pick the right tier: light → medium → heavy (progression); empty pool
+      // means every trauma is already collected (max reached)
       hasAllLight   = Trauma.light.forall(t => existingNames.contains(t.name))
       hasAllMedium  = Trauma.medium.forall(t => existingNames.contains(t.name))
       pool          = if (!hasAllLight)
                         Trauma.light.filterNot(t => existingNames.contains(t.name))
                       else if (!hasAllMedium)
                         Trauma.medium.filterNot(t => existingNames.contains(t.name))
-                      else {
-                        val remaining = Trauma.heavy.filterNot(t => existingNames.contains(t.name))
-                        if (remaining.isEmpty) Trauma.heavy else remaining
-                      }
+                      else
+                        Trauma.heavy.filterNot(t => existingNames.contains(t.name))
 
-      traumaIdx    <- Random.nextIntBetween(0, pool.length)
-      trauma        = pool(traumaIdx)
       traumaUntil   = now + 8L * 3600 * 1000
-      newTraumaNames = existingNames :+ trauma.name
 
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateGold(user.userId, newGold)
-      _            <- heroDao.updateTrauma(user.userId, Some(traumaUntil), newTraumaNames)
       _            <- heroDao.clearActiveBattle(user.userId)
       _            <- renderer.show(user, Screen(
                         content.format("death.penalty",
                           "expLost"  -> expLost.toString,
                           "goldLost" -> goldLost.toString), Nil))
-      _            <- renderer.show(user, Screen(
-                        content.format("death.trauma",
-                          "traumaName"  -> trauma.name,
-                          "description" -> trauma.description), Nil))
+      _            <- applyTrauma(user, existingNames, pool, traumaUntil, renderer)
 
       _            <- dropItems(user, hero.id, monsterName, renderer)
       // Время в мёртвом режиме растёт с уровнем героя и асимптотически
@@ -89,6 +81,30 @@ case class DeathState(
   // safe fallback so a hero somehow sitting in Death still moves to Rest.
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     ZIO.succeed(StateType.Rest)
+
+  // Даёт новую травму из текущего тира; если пул пуст (все травмы уже собраны —
+  // максимум), новую не выдаёт, лишь продлевает таймер снятия на 8 часов и
+  // показывает соответствующее сообщение.
+  private def applyTrauma(
+    user:          User,
+    existingNames: List[String],
+    pool:          Seq[Trauma],
+    traumaUntil:   Long,
+    renderer:      Renderer
+  ): Task[Unit] =
+    if (pool.isEmpty)
+      heroDao.updateTrauma(user.userId, Some(traumaUntil), existingNames) *>
+        renderer.show(user, Screen(content.text("death.traumaMax"), Nil))
+    else
+      for {
+        idx   <- Random.nextIntBetween(0, pool.length)
+        trauma = pool(idx)
+        _     <- heroDao.updateTrauma(user.userId, Some(traumaUntil), existingNames :+ trauma.name)
+        _     <- renderer.show(user, Screen(
+                   content.format("death.trauma",
+                     "traumaName"  -> trauma.name,
+                     "description" -> trauma.description), Nil))
+      } yield ()
 
   private def dropItems(user: User, heroId: pangea.model.hero.HeroId, monsterName: String, renderer: Renderer): Task[Unit] =
     for {

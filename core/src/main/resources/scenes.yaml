@@ -172,6 +172,7 @@ death:
   penalty: "Потери: -{expLost} опыта, -{goldLost} золота."
   itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
   trauma: "⚠ Новая травма: «{traumaName}». {description}"
+  traumaMax: "На вас не осталось живого места.."
 
 foundItem:
   header: "Вы находите предмет!"

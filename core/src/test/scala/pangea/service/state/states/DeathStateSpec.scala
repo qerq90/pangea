@@ -84,6 +84,23 @@ object DeathStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("травм")))
     },
 
+    test("enter при максимуме травм → новую не даёт, продлевает таймер, сообщает «не осталось живого места»") {
+      val allNames = pangea.model.trauma.Trauma.all.map(_.name).toList
+      val maxedHero = richHero.copy(
+        traumaUntil = Some(Long.MaxValue),       // травмы ещё активны
+        traumaNames = allNames
+      )
+      for {
+        triple                    <- makeState(maxedHero)
+        (state, heroDao, _, renderer) = triple
+        _                         <- state.enter(testUser, renderer)
+        updated                   <- heroDao.getHeroByUserId(userId)
+        screens                   <- renderer.sentScreens
+      } yield assertTrue(updated.exists(_.traumaNames == allNames)) &&        // список не вырос
+              assertTrue(updated.exists(_.traumaUntil.exists(_ != Long.MaxValue))) && // таймер обновлён
+              assertTrue(screens.exists(_.text.contains("не осталось живого места")))
+    },
+
     test("enter без предметов → очищает бой, не падает") {
       for {
         triple                        <- makeState(richHero, items = Nil)
