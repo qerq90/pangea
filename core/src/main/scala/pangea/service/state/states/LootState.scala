@@ -4,12 +4,13 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, Json}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Journal, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, Journal, Renderer, SceneContent, Screen, Target}
 import pangea.model.GameEvent
+import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
+import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.{State, UserAction}
@@ -18,8 +19,9 @@ import zio.{Task, ZIO}
 /**
  * Промежуточный экран добычи после победы. `BattleState.victory` уже прокатал лут
  * (чистый `LootGenerator`) и положил его в scene_data; здесь мы «осматриваем добычу»:
- * предметы кладём в инвентарь (переполнен → предмет теряется), золото начисляем,
- * показываем итог и кнопку «Продолжить» → Dungeon.
+ * показываем, что выпало, и двумя inline-кнопками внутри сообщения спрашиваем
+ * «Забрать»/«Оставить». Забрать → золото в кошелёк, предметы в инвентарь (переполнен →
+ * предмет теряется). Оставить → добыча выбрасывается. Оба исхода ведут в Dungeon.
  */
 case class LootState(
   heroDao:             HeroDao,
@@ -30,7 +32,11 @@ case class LootState(
 ) extends State {
 
   private val branch = new Branch(
-    routes   = Map("Continue" -> Target.Goto(StateType.Dungeon)),
+    routes = Map(
+      "Take"     -> Target.Run { (user, _, renderer) => claimLoot(user, renderer) },
+      "Leave"    -> Target.Run { (user, _, renderer) => leaveLoot(user, renderer) },
+      "Continue" -> Target.Goto(StateType.Dungeon)
+    ),
     fallback = Target.Goto(StateType.Dungeon)
   )
 
@@ -38,43 +44,76 @@ case class LootState(
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      hero <- heroDao.getHeroByUserId(user.userId)
-                .flatMap(ZIO.fromOption(_))
-                .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
-      raw  <- heroDao.readSceneData(user.userId)
-      loot  = raw.flatMap(_.as[LootData].toOption).getOrElse(LootData(Nil, Nil))
+      hero <- getHero(user)
+      loot <- readLoot(user)
 
-      // золото
+      // золото забирается всегда и сразу, без выбора
       goldTotal = loot.golds.sum
       _        <- ZIO.when(goldTotal > 0L)(heroDao.updateGold(user.userId, hero.gold + goldTotal))
+      goldLines = loot.golds.map { g => content.format("loot.gold", "amount" -> g.toString) }
 
-      // предметы: персист (реальный id) → в инвентарь; переполнен → теряется
+      _ <- if (loot.items.isEmpty) {
+             // выбирать нечего — только золото (или совсем пусто)
+             val text = if (goldLines.isEmpty) content.text("loot.empty")
+                        else content.text("loot.header") + "\n\n" + goldLines.mkString("\n")
+             journal.append(GameEvent(user.userId, "loot_claimed",
+               Json.obj("gold" -> goldTotal.asJson, "items" -> loot.items.map(_.name).asJson))) *>
+               renderer.show(user, Screen(text, content.screen("loot.enter").choices))
+           } else {
+             // золото уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
+             val preview = goldLines ++ loot.items.map(itemLine)
+             val text    = content.text("loot.header") + "\n\n" + preview.mkString("\n")
+             val choices = List(
+               Choice("Take",  content.text("loot.takeLabel")),
+               Choice("Leave", content.text("loot.leaveLabel"))
+             )
+             renderer.show(user, Screen(text, choices, inline = true))
+           }
+    } yield ()
+
+  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    branch.act(user, ua, renderer)
+
+  // «Забрать»: предметы в инвентарь (переполнен → предмет теряется). Золото уже забрано в enter.
+  private def claimLoot(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      loot <- readLoot(user)
+
       itemLines <- ZIO.foreach(loot.items) { item =>
                      for {
                        persisted <- itemRepository.persist(hero.id, item)
                        added     <- inventoryRepository.addItem(hero.id, persisted).as(true)
-                                      .catchAll {
-                                        case InventoryRepoError.NoMorePlaceForItems => ZIO.succeed(false)
-                                        case _                                      => ZIO.succeed(false)
-                                      }
+                                      .catchAll(_ => ZIO.succeed(false))
                      } yield
                        if (added) itemLine(persisted)
                        else content.format("loot.itemLost", "name" -> persisted.name)
                    }
 
-      goldLines = loot.golds.map { g => content.format("loot.gold", "amount" -> g.toString) }
-      lines     = goldLines ++ itemLines
-
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
-             Json.obj("gold" -> goldTotal.asJson, "items" -> loot.items.map(_.name).asJson)))
+             Json.obj("gold" -> loot.golds.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
 
-      text = if (lines.isEmpty) content.text("loot.empty")
-             else content.text("loot.header") + "\n\n" + lines.mkString("\n")
-      _ <- renderer.show(user, Screen(text, content.screen("loot.enter").choices))
-    } yield ()
+      text = if (itemLines.isEmpty) content.text("loot.empty")
+             else content.text("loot.claimed") + "\n\n" + itemLines.mkString("\n")
+      _ <- renderer.show(user, Screen(text, Nil))
+    } yield StateType.Dungeon
 
-  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
-    branch.act(user, ua, renderer)
+  // «Оставить»: предметы выбрасываются (золото уже забрано в enter).
+  private def leaveLoot(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      loot <- readLoot(user)
+      _    <- journal.append(GameEvent(user.userId, "loot_left",
+                Json.obj("gold" -> loot.golds.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
+      _    <- renderer.show(user, Screen(content.text("loot.left"), Nil))
+    } yield StateType.Dungeon
+
+  private def readLoot(user: User): Task[LootData] =
+    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LootData].toOption).getOrElse(LootData(Nil, Nil)))
+
+  private def getHero(user: User): Task[Hero] =
+    heroDao.getHeroByUserId(user.userId)
+      .flatMap(ZIO.fromOption(_))
+      .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
 
   private def itemLine(item: Item): String =
     if (item.itemType == ItemType.Trophy)

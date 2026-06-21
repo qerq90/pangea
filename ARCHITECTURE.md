@@ -98,7 +98,7 @@ trait Players  { def getDisplayName(user: User): Task[String] }      // VkPlayer
 trait Journal  { def append(event: GameEvent): Task[Unit] }          // JournalLive
 ```
 
-`VkRenderer` превращает `Screen` в сообщение ВК с клавиатурой; `VkApi` парсит входящий апдейт в `UserAction`. Сцены работают только через `Renderer`/`Screen` — `Keyboard`/`sendMessage` из них убраны, ВК больше не протекает в стейты. Telegram пока заглушка: `StateHandler.makeActionTelegram` есть, но отдельного рендерера/вебхука нет (использует `VkRenderer`).
+`VkRenderer` превращает `Screen` в сообщение ВК с клавиатурой; `VkApi` парсит входящий апдейт в `UserAction`. Флаг `Screen.inline` управляет видом клавиатуры: `false` (по умолчанию) — обычная клавиатура снизу, `true` — inline-кнопки внутри самого сообщения (`Keyboard.withInline`); используется на экране добычи (`LootState`). Сцены работают только через `Renderer`/`Screen` — `Keyboard`/`sendMessage` из них убраны, ВК больше не протекает в стейты. Telegram пока заглушка: `StateHandler.makeActionTelegram` есть, но отдельного рендерера/вебхука нет (использует `VkRenderer`).
 
 ## 5. Модель сцены
 
@@ -527,8 +527,10 @@ restDurationMs   = deathTimeMinutes × 60 000
 
 1. `BattleState.victory` начисляет опыт/уровень (как раньше), затем катает лут `LootGenerator.roll(монстр.rarity, монстр.race, killLevel, Rng(seed))`. `killLevel = hero.dungeonLevel`.
 2. Непросохранённые предметы (id = −1) + список золотых выпадений кладутся в `scene_data` (`LootState.LootData`), `victory` возвращает `StateType.Loot`.
-3. `LootState.enter` («осматривая добычу, вы находите следующее:») персистит каждый предмет (реальный id) и кладёт в инвентарь; начисляет золото; показывает итог и кнопку «Продолжить» → `Dungeon`.
-4. Полный инвентарь → предмет **теряется**, в списке строка «{name} — Инвентарь переполнен». Пустой лут → «вы не находите ничего ценного».
+3. `LootState.enter` («осматривая добычу, вы находите следующее:») **сразу начисляет золото** (золото забирается всегда, без выбора). Если выпали и предметы — показывает превью (золото + предметы) и двумя **inline-кнопками внутри сообщения** спрашивает «Забрать»/«Оставить» по предметам (`Screen(text, choices, inline = true)`).
+4. **«Забрать»** (`Take`) — персистит каждый предмет (реальный id) и кладёт в инвентарь, пишет `loot_claimed`, показывает итог → `Dungeon`. Полный инвентарь → предмет **теряется**, в списке строка «{name} — Инвентарь переполнен». Золото не трогает (уже забрано в `enter`).
+5. **«Оставить»** (`Leave`) — предметы выбрасываются (золото остаётся забранным), пишет `loot_left` → `Dungeon`.
+6. Только золото / пустой лут → нет выбора: показывается «вы не находите ничего ценного» или список золота с кнопкой «Продолжить» (`Continue`) → `Dungeon`.
 
 **Золото теперь не гарантировано** — старая постоянная награда `goldGained` убрана из `victory`, золото падает только как категория лута (решение игрока, ответ 3).
 
@@ -594,7 +596,7 @@ restDurationMs   = deathTimeMinutes × 60 000
 - `service/state/states/battle/BattleState.scala` — `victory` катает лут и уходит в `Loot`.
 - `model/item/Item.scala` (`race`), `model/item/ItemType.scala` (`Trophy`), `model/state/StateType.scala` (`Loot`).
 
-Дроп пишется в журнал (`loot_claimed`: золото + имена предметов), как и `FoundItemState`.
+Решение игрока пишется в журнал: `loot_claimed` (забрал — золото + имена предметов) или `loot_left` (оставил), как и `FoundItemState`.
 
 ## 21. Глоссарий
 

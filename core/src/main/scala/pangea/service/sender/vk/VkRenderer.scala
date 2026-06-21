@@ -12,7 +12,7 @@ class VkRenderer(api: Api) extends Renderer {
     val kbOpt =
       if (screen.choices.isEmpty) None
       else {
-        val kb = screen.choices.foldLeft(Keyboard.default) { (kb, choice) =>
+        val kb = screen.choices.foldLeft(Keyboard.default.withInline(screen.inline)) { (kb, choice) =>
           val payload = (Map("action" -> choice.id) ++ choice.data).asJson
           kb.addRow().addButton(Button.withAction(VkAction.Text(choice.label, Some(payload))))
         }
