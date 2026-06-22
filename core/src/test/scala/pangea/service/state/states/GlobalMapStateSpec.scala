@@ -22,7 +22,7 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
     } yield (GlobalMapState(heroDao, content), heroDao, renderer)
 
   private val baseHero    = TestFixtures.hero(userId)
-  private val fullHp      = baseHero.baseStats.vit * 16L  // 160
+  private val fullHp      = baseHero.baseStats.vit * 24L  // 240
   private val richHero    = baseHero.copy(gold = 500L, fightStats = baseHero.fightStats.copy(hp = fullHp))
   private val poorHero    = baseHero.copy(gold = 0L,   fightStats = baseHero.fightStats.copy(hp = 10L))
   private val damagedHero = baseHero.copy(gold = 500L, fightStats = baseHero.fightStats.copy(hp = 10L))

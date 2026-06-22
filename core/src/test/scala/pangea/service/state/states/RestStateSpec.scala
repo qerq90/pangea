@@ -60,7 +60,7 @@ object RestStateSpec extends ZIOSpecDefault {
         updatedHero         <- heroDao.getHeroByUserId(userId)
         screens             <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(updatedHero.exists(_.fightStats.hp == updatedHero.get.baseStats.vit * 16L)) &&
+              assertTrue(updatedHero.exists(_.fightStats.hp == updatedHero.get.baseStats.vit * 24L)) &&
               assertTrue(screens.exists(_.text.contains("отдохнули")))
     },
 

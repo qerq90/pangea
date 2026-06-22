@@ -248,19 +248,20 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     test("травма на броню режет МАКСИМУМ брони, а не текущий запас (регресс)") {
-      // Шлем даёт allArmor=30, defence=8 → maxArmor=240. Травма CutAchilles: -15% броня, -15% защита.
+      // Шлем даёт allArmor=30, defence=8 → maxArmor = 30 × max(8/2,1) = 120 (защита влияет вдвое слабее).
+      // Травма CutAchilles: -15% броня, -15% защита.
       val helmet = Item(1L, "Шлем", 1L, ItemRarity.Gray, ItemType.Helmet,
                         attack = 0, accuracy = 0, concentration = 0, armor = 30, defence = 0, evasion = 0)
       val base = TestFixtures.hero(userId).copy(
         equipment  = TestFixtures.hero(userId).equipment.copy(helmet = helmet),
-        fightStats = TestFixtures.hero(userId).fightStats.copy(defence = 8, armor = 240)
+        fightStats = TestFixtures.hero(userId).fightStats.copy(defence = 8, armor = 120)
       )
       val injured = base.copy(traumaUntil = Some(Long.MaxValue),
                               traumaNames = List("Порезанное ахиллесово сухожилие"))
       assertTrue(
-        base.effectiveMaxArmor(0L) == 240L,            // без травмы — как раньше
-        injured.effectiveMaxArmor(0L) < 240L,          // травма уронила потолок
-        injured.effectiveFightStats(0L).armor == 240L  // текущий запас травма НЕ режет
+        base.effectiveMaxArmor(0L) == 120L,            // без травмы
+        injured.effectiveMaxArmor(0L) < 120L,          // травма уронила потолок
+        injured.effectiveFightStats(0L).armor == 120L  // текущий запас травма НЕ режет
       )
     },
 

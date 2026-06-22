@@ -22,15 +22,16 @@ case class Hero(
   traumaUntil: Option[Long],
   traumaNames: List[String]
 ) {
-  def maxArmor: Long = equipment.allArmor * fightStats.defence.max(1L)
+  // Множитель брони от защиты: влияние защиты вдвое слабее (defence / 2), но не ниже 1.
+  def maxArmor: Long = (equipment.allArmor * (fightStats.defence / 2.0).max(1.0)).toLong
 
   /** Максимум брони с учётом травм: штраф на броню и на защиту режут потолок.
    *  Без травм равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою
    *  и восстанавливается до этого значения на отдыхе. */
   def effectiveMaxArmor(nowMs: Long): Long = {
     val p      = combinedPenalties(nowMs)
-    val effDef = (fightStats.defence * (1.0 - p.defPct)).toLong.max(1L)
-    (equipment.allArmor * (1.0 - p.armorPct)).toLong * effDef
+    val effDef = (fightStats.defence * (1.0 - p.defPct) / 2.0).max(1.0)
+    ((equipment.allArmor * (1.0 - p.armorPct)) * effDef).toLong
   }
 
   def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)
@@ -78,7 +79,7 @@ case class Hero(
 
   def effectiveMaxHp(nowMs: Long): Long = {
     val p    = combinedPenalties(nowMs)
-    val base = baseStats.vit * 16L
+    val base = baseStats.vit * 24L
     (base * race.factor.hpFactor * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L)
   }
 
