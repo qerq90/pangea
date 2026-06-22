@@ -311,34 +311,33 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(updated.exists(_.fightStats.hp == 500L))  // урон поглощён баффом
     },
 
-    test("playerHitChance: огромная точность → не превышает 95%") {
-      val chance = BattleState.playerHitChance(accuracy = 999999L, monsterEvasion = 1L)
-      assertTrue(chance == 0.95)
+    test("dodgeChance: одна формула для обеих сторон (попадание по любому юниту идентично)") {
+      // моб без ловкости (agi=0) уклоняется по той же формуле, что и игрок
+      val mobDodge    = BattleState.dodgeChance(agi = 0L,  evasion = 20L, defence = 10L, attackerAccuracy = 10L)
+      val playerDodge = BattleState.dodgeChance(agi = 0L,  evasion = 20L, defence = 10L, attackerAccuracy = 10L)
+      assertTrue(mobDodge == playerDodge)
     },
 
-    test("playerHitChance: нулевая точность → минимум 5%") {
-      val chance = BattleState.playerHitChance(accuracy = 0L, monsterEvasion = 999999L)
-      assertTrue(chance == 0.05)
+    test("dodgeChance: огромная точность моба + нулевое уклонение → минимум 5%") {
+      val chance = BattleState.dodgeChance(agi = 0L, evasion = 0L, defence = 0L, attackerAccuracy = 999999L)
+      assertTrue(chance == 5.0)
     },
 
-    test("playerHitChance: точность равна уклонению → 100%, зажато до 95%") {
-      val chance = BattleState.playerHitChance(accuracy = 100L, monsterEvasion = 100L)
-      assertTrue(chance == 0.95)
+    test("dodgeChance: огромное уклонение + нулевая точность моба → максимум 95%") {
+      val chance = BattleState.dodgeChance(agi = 999999L, evasion = 999999L, defence = 0L, attackerAccuracy = 0L)
+      assertTrue(chance == 95.0)
     },
 
-    test("playerHitChance: точность вдвое меньше уклонения → 50%") {
-      val chance = BattleState.playerHitChance(accuracy = 50L, monsterEvasion = 100L)
-      assertTrue(chance == 0.50)
+    test("dodgeChance: формула 100*(agi+evasion)/(agi+evasion+def+acc*1.5)") {
+      // agi+evasion=20, знаменатель = 20 + 10 + 10*1.5 = 45 → 2000/45 ≈ 44.44
+      val chance = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 10L, attackerAccuracy = 10L)
+      assertTrue(math.abs(chance - 2000.0 / 45.0) < 1e-9)
     },
 
-    test("mobHitChance: огромная точность моба → не превышает 95%") {
-      val chance = BattleState.mobHitChance(agi = 0L, evasion = 0L, monsterAccuracy = 999999L)
-      assertTrue(chance == 0.95)
-    },
-
-    test("mobHitChance: нулевая точность моба → минимум 5%") {
-      val chance = BattleState.mobHitChance(agi = 999999L, evasion = 999999L, monsterAccuracy = 0L)
-      assertTrue(chance == 0.05)
+    test("dodgeChance: защита и точность моба снижают уклонение") {
+      val low  = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 50L, attackerAccuracy = 50L)
+      val high = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 0L,  attackerAccuracy = 0L)
+      assertTrue(low < high)
     }
   )
 }

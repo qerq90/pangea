@@ -45,9 +45,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       monster   = battle.toMonster
 
       hitRoll   <- Random.nextIntBetween(1, 101)
-      hitChance  = playerHitChance(buffedEff.accuracy, battle)
+      mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
 
-      result <- if (hitRoll <= (hitChance * 100).toInt) {
+      result <- if (hitRoll > mobDodge) { // моб не увернулся → игрок попал
         for {
           spread <- Random.nextLongBetween(80L, 121L)
           noWeapon = hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
@@ -77,9 +77,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       buffedEff = ticked.heroBattleState.applyTo(eff)
       monster   = ticked.toMonster
       hitRoll  <- Random.nextIntBetween(1, 101)
-      hitChance = mobHitChance(hero.baseStats.agi, buffedEff.evasion, ticked)
+      dodge     = playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, ticked)
 
-      result <- if (hitRoll <= (hitChance * 100).toInt) {
+      result <- if (hitRoll > dodge) { // игрок не увернулся → моб попал
         for {
           spread      <- Random.nextLongBetween(80L, 121L)
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
@@ -152,7 +152,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       monster   = battle.toMonster
       hitRoll  <- Random.nextIntBetween(1, 101)
 
-      result <- if (hitRoll <= (mobHitChance(hero.baseStats.agi, buffedEff.evasion, battle) * 100).toInt) {
+      result <- if (hitRoll > playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, battle)) {
         for {
           spread      <- Random.nextLongBetween(80L, 121L)
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
@@ -239,8 +239,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def buildBattleScreen(hero: Hero, battle: ActiveBattle, maxHp: Long, nowMs: Long): Screen = {
     val eff             = hero.effectiveFightStats(nowMs)
     val buffedEff       = battle.heroBattleState.applyTo(eff)
-    val mobHitPct       = (mobHitChance(hero.baseStats.agi, buffedEff.evasion, battle) * 100).toInt
-    val monsterDodgePct = ((1.0 - playerHitChance(buffedEff.accuracy, battle)) * 100).toInt
+    val mobHitPct       = (100.0 - playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, battle)).toInt
+    val monsterDodgePct = mobDodgeChance(buffedEff.accuracy, battle).toInt
     val text = content.format("battle.enter.text",
       "monster"      -> battle.toMonster.name,
       "monsterRace"  -> battle.toMonster.race.toString,
@@ -271,19 +271,30 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       .orElseFail(new Throwable(s"No active battle for user ${user.userId}"))
       .flatMap(json => ZIO.fromEither(json.as[ActiveBattle]))
 
-  private def playerHitChance(accuracy: Long, battle: ActiveBattle): Double =
-    BattleState.playerHitChance(accuracy, battle.monsterStats.evasion)
+  // Уклонение игрока от удара моба: защита игрока в знаменателе, точность моба ×1.5.
+  private def playerDodgeChance(agi: Long, evasion: Long, defence: Long, battle: ActiveBattle): Double =
+    BattleState.dodgeChance(agi, evasion, defence, battle.monsterStats.accuracy)
 
-  private def mobHitChance(agi: Long, evasion: Long, battle: ActiveBattle): Double =
-    BattleState.mobHitChance(agi, evasion, battle.monsterStats.accuracy)
+  // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
+  // в знаменателе его защита и точность игрока ×1.5.
+  private def mobDodgeChance(heroAccuracy: Long, battle: ActiveBattle): Double =
+    BattleState.dodgeChance(0L, battle.monsterStats.evasion, battle.monsterStats.defence, heroAccuracy)
 }
 
 object BattleState {
-  def playerHitChance(accuracy: Long, monsterEvasion: Long): Double =
-    (accuracy.toDouble / monsterEvasion.toDouble).max(0.05).min(0.95)
 
-  def mobHitChance(agi: Long, evasion: Long, monsterAccuracy: Long): Double = {
-    val evade = agi * 2.5 + evasion.toDouble
-    (monsterAccuracy.toDouble / evade).max(0.05).min(0.95)
+  /**
+   * Шанс уклонения защищающегося юнита от удара атакующего, в процентах, зажат в [5, 95]:
+   *   100 * (agi + evasion) / (agi + evasion + defence * 1 + attackerAccuracy * 1.5)
+   * Единая логика «попадания по юниту» для обеих сторон: положительные параметры
+   * (числитель) — ловкость и уклонение защищающегося; отрицательные (знаменатель) —
+   * защита защищающегося (×1) и точность атакующего (×1.5). Атакующий попадает,
+   * если бросок 1..100 больше уклонения.
+   */
+  def dodgeChance(agi: Long, evasion: Long, defence: Long, attackerAccuracy: Long): Double = {
+    val positive = (agi + evasion).toDouble
+    val denom    = positive + defence * 1.0 + attackerAccuracy * 1.5
+    val raw      = if (denom <= 0.0) 0.0 else 100.0 * positive / denom
+    raw.max(5.0).min(95.0)
   }
 }
