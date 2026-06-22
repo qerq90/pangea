@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{ActiveBattle, Buff, HeroBattleState}
 import pangea.model.hero.Equipment
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -245,6 +245,23 @@ object BattleStateSpec extends ZIOSpecDefault {
         _             <- s2.action(testUser, tap("Attack"), r2)
         glassHp       <- hd2.getHeroByUserId(userId).map(_.map(_.fightStats.hp).getOrElse(0L))
       } yield assertTrue(tankHp > glassHp)
+    },
+
+    test("травма на броню режет МАКСИМУМ брони, а не текущий запас (регресс)") {
+      // Шлем даёт allArmor=30, defence=8 → maxArmor=240. Травма CutAchilles: -15% броня, -15% защита.
+      val helmet = Item(1L, "Шлем", 1L, ItemRarity.Gray, ItemType.Helmet,
+                        attack = 0, accuracy = 0, concentration = 0, armor = 30, defence = 0, evasion = 0)
+      val base = TestFixtures.hero(userId).copy(
+        equipment  = TestFixtures.hero(userId).equipment.copy(helmet = helmet),
+        fightStats = TestFixtures.hero(userId).fightStats.copy(defence = 8, armor = 240)
+      )
+      val injured = base.copy(traumaUntil = Some(Long.MaxValue),
+                              traumaNames = List("Порезанное ахиллесово сухожилие"))
+      assertTrue(
+        base.effectiveMaxArmor(0L) == 240L,            // без травмы — как раньше
+        injured.effectiveMaxArmor(0L) < 240L,          // травма уронила потолок
+        injured.effectiveFightStats(0L).armor == 240L  // текущий запас травма НЕ режет
+      )
     },
 
     test("armor поглощает урон → HP не уменьшается если armor достаточен") {

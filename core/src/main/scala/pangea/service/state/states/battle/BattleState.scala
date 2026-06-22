@@ -85,10 +85,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
           buffReduct   = math.min(ticked.heroBattleState.armorBonus, rawDamage)
           afterBuff    = rawDamage - buffReduct
-          effArmor     = eff.armor
-          armorAbsorb  = math.min(effArmor, afterBuff)
+          curArmor     = hero.fightStats.armor.max(0L) // текущая броня тратится как есть; травма режет её ПОТОЛОК (refill), не текущий запас
+          armorAbsorb  = math.min(curArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
-          newArmor     = effArmor - armorAbsorb
+          newArmor     = curArmor - armorAbsorb
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           newStats     = hero.fightStats.copy(hp = newHp, armor = newArmor)
           _           <- heroDao.updateFightStats(user.userId, newStats)
@@ -158,10 +158,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
           buffReduct   = math.min(battle.heroBattleState.armorBonus, rawDamage)
           afterBuff    = rawDamage - buffReduct
-          effArmor     = eff.armor
-          armorAbsorb  = math.min(effArmor, afterBuff)
+          curArmor     = hero.fightStats.armor.max(0L)
+          armorAbsorb  = math.min(curArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
-          newArmor     = effArmor - armorAbsorb
+          newArmor     = curArmor - armorAbsorb
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           _           <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = newHp, armor = newArmor))
           _           <- renderer.show(user, Screen(
@@ -253,8 +253,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "monsterDodge" -> s"$monsterDodgePct%",
       "heroHp"       -> hero.fightStats.hp.toString,
       "heroMax"      -> maxHp.toString,
-      "heroArmor"    -> hero.fightStats.armor.toString,
-      "heroMaxArmor" -> hero.maxArmor.toString,
+      "heroArmor"    -> hero.fightStats.armor.min(hero.effectiveMaxArmor(nowMs)).toString,
+      "heroMaxArmor" -> hero.effectiveMaxArmor(nowMs).toString,
       "flaskCharges" -> hero.equipment.flask.charges.getOrElse(0).toString
     )
     Screen(text, content.screen("battle.enter").choices)

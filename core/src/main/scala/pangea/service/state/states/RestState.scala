@@ -52,7 +52,7 @@ case class RestState(heroDao: HeroDao, content: SceneContent) extends State {
 
   private def wakeUp(user: User, nowMs: Long, hero: pangea.model.hero.Hero, renderer: Renderer): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
-    val maxArmor = hero.maxArmor
+    val maxArmor = hero.effectiveMaxArmor(nowMs)
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor))
       _ <- heroDao.writeSceneData(user.userId, Json.Null)

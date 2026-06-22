@@ -24,6 +24,15 @@ case class Hero(
 ) {
   def maxArmor: Long = equipment.allArmor * fightStats.defence.max(1L)
 
+  /** Максимум брони с учётом травм: штраф на броню и на защиту режут потолок.
+   *  Без травм равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою
+   *  и восстанавливается до этого значения на отдыхе. */
+  def effectiveMaxArmor(nowMs: Long): Long = {
+    val p      = combinedPenalties(nowMs)
+    val effDef = (fightStats.defence * (1.0 - p.defPct)).toLong.max(1L)
+    (equipment.allArmor * (1.0 - p.armorPct)).toLong * effDef
+  }
+
   def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)
 
   def activeTraumas(nowMs: Long): List[Trauma] =
@@ -34,7 +43,9 @@ case class Hero(
     activeTraumas(nowMs).foldLeft(TraumaPenalties.none)(_ + _.penalties)
 
   /** Боевые статы с заданными штрафами. Атака/защита/точность/уклонение зажаты
-   *  снизу единицей (не могут упасть ниже 1); броня может быть 0 (без экипировки). */
+   *  снизу единицей (не могут упасть ниже 1). Броня здесь — текущее значение как
+   *  есть: штраф травмы на броню влияет на её ПОТОЛОК (`effectiveMaxArmor`), а не
+   *  режет текущий запас при каждом чтении (иначе урон считался бы неверно). */
   private def fightStatsWith(p: TraumaPenalties): FightStats = {
     val rf = race.factor
     fightStats.copy(
@@ -43,7 +54,7 @@ case class Hero(
       accuracy      = (fightStats.accuracy * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
       evasion       = (fightStats.evasion * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
       concentration = ((fightStats.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
-      armor         = (fightStats.armor * (1.0 - p.armorPct)).toLong.max(0L)
+      armor         = fightStats.armor.max(0L)
     )
   }
 
@@ -84,10 +95,12 @@ case class Hero(
     if (cur < max) s"$cur/$max" else cur.toString
 
   def getInfo(nowMs: Long): String = {
-    val effB  = effectiveBaseStats(nowMs)
-    val eff   = effectiveFightStats(nowMs)
-    val maxFS = maxFightStats
-    val maxHp = effectiveMaxHp(nowMs)
+    val effB     = effectiveBaseStats(nowMs)
+    val eff      = effectiveFightStats(nowMs)
+    val maxFS    = maxFightStats
+    val maxHp    = effectiveMaxHp(nowMs)
+    val maxArm   = effectiveMaxArmor(nowMs)
+    val curArm   = fightStats.armor.min(maxArm)
     s"""${race.toString}, Уровень $lvl
        | $getLvlExp/$getNeededExp опыта
        |
@@ -96,7 +109,7 @@ case class Hero(
        |
        | ⚔ Атк ${withMax(eff.atk, maxFS.atk)}  🎯 Точн ${withMax(eff.accuracy, maxFS.accuracy)}
        | 🛡 Защ ${withMax(eff.defence, maxFS.defence)}  👁 Укл ${withMax(eff.evasion, maxFS.evasion)}
-       | ❤ ${fightStats.hp}/$maxHp
+       | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm
        |
        | Свободных очков: $upgradePoints
        |""".stripMargin
