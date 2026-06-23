@@ -62,8 +62,16 @@ object ItemGenerator {
   }
 
   def createItem(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) = {
-    val (itemLvl, rng1)            = getModifiedLvl(lvl, rng)
-    val (numberOfExtraParams, rng2) = rarity.getNumOfExtraParams(rng1)
+    val (itemLvl, rng1) = getModifiedLvl(lvl, rng)
+    buildAtLevel(itemLvl, rarity, rng1)
+  }
+
+  /** Создаёт предмет ровно на заданный уровень, без разброса (для магазина). */
+  def createItemAtLevel(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) =
+    buildAtLevel(lvl.max(1L).min(150L), rarity, rng)
+
+  private def buildAtLevel(itemLvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) = {
+    val (numberOfExtraParams, rng2) = rarity.getNumOfExtraParams(rng)
     val (isAttack, rng3)           = rng2.nextBoolean
 
     val (item, rng4) =

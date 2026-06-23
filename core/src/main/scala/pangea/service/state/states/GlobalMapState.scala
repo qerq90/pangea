@@ -20,6 +20,10 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
                              renderer.show(user, Screen(content.text("globalMap.construction"), Nil)).as(StateType.GlobalMap) },
       "ReturnToDungeon" -> Target.Goto(StateType.Dungeon),
       "Heal"            -> Target.Run { (user, _, renderer) => heal(user, renderer) },
+      "StreetMerchants" -> Target.Run { (user, _, renderer) =>
+                             renderer.show(user, content.screen("globalMap.streetMerchants")).as(StateType.GlobalMap) },
+      "MerchantRichelieu" -> Target.Goto(StateType.Merchant),
+      "ReturnToCity"    -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) },
       "LeaveTavern"     -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }

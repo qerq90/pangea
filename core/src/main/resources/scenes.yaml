@@ -77,7 +77,13 @@ globalMap:
       Tavern: "Таверна"
       Guild: "Гильдия Искателей"
       Construction: "Стройка"
+      StreetMerchants: "Уличные торговцы"
       ReturnToDungeon: "В лабиринт"
+  streetMerchants:
+    text: "Уличные торговцы зазывают прохожих к своим лоткам."
+    choices:
+      MerchantRichelieu: "Торговец Ришелье"
+      ReturnToCity: "Назад"
   tavern:
     text: "Таверна «Золотой якорь».\nПолное исцеление и снятие травм стоит {cost} золота.\nУ вас: {gold} золота."
     choices:
@@ -88,6 +94,29 @@ globalMap:
   alreadyFull: "Вы и так здоровы — незачем тратить золото."
   guild: "🏛 Гильдия приключенцев — здесь пока никого нет. Загляните позже."
   construction: "🏗 Стройка активно ведётся. Пока здесь нечего делать."
+
+merchant:
+  richelieu:
+    header: "Торговец Ришелье раскладывает товар:"
+  buyLabel: "Купить {n}"
+  boughtLine: "{n}) ✅ {name} — куплено"
+  refreshLabel: "🔄 Обновить товар"
+  sellLabel: "Продать снаряжение"
+  backLabel: "↩ Назад"
+  confirmBuy: "Вы уверены что хотите купить предмет {name} за {price} золота?"
+  confirmYes: "Да"
+  confirmNo: "Нет"
+  bought: "Вы купили предмет {name}."
+  notEnoughGold: "Ага конечно, как будет достаточно звонких монет тогда и продам."
+  inventoryFull: "В инвентаре нет места для покупки."
+  refreshCooldown: "Ришелье уже недавно обновлял товар. Загляните примерно через {mins} мин."
+  sellHeader: "Продажа ({page}/{total}) | 💰 {gold}"
+  sellEmpty: "У вас нет вещей на продажу."
+  sellItemLabel: "💰 Продать"
+  sellBackLabel: "↩ Назад"
+  sold: "Вы продали {name} за {price} золота."
+  prevLabel: "◀ Пред."
+  nextLabel: "След. ▶"
 
 dungeon:
   enter:

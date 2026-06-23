@@ -3,13 +3,14 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Inventory, Loot, Registration, Rest}
+import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Inventory, Loot, Merchant, Registration, Rest}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.item.FoundItemState
+import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.registration.RegistrationState
 import pangea.service.state.states.hero.HeroStatsState
 import zio.{ZIO, ZLayer}
@@ -41,7 +42,8 @@ object StatesMap {
           Rest         -> RestState(heroDao, content),
           Inventory    -> InventoryState(heroDao, inventoryRepo, content),
           Equipment    -> EquipmentState(heroDao, inventoryRepo, content),
-          Loot         -> LootState(heroDao, inventoryRepo, itemRepo, journal, content)
+          Loot         -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
+          Merchant     -> MerchantState(heroDao, inventoryRepo, itemRepo, content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)

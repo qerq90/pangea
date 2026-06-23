@@ -31,6 +31,10 @@ trait HeroDao {
   // Live scene state: temporary scratchpad overwritten on each scene transition
   def writeSceneData(userId: UserId, data: Json): Task[Unit]
   def readSceneData(userId: UserId): Task[Option[Json]]
+
+  // Durable merchant stock (fixed until refresh; survives scene transitions)
+  def writeMerchantData(userId: UserId, data: Json): Task[Unit]
+  def readMerchantData(userId: UserId): Task[Option[Json]]
 }
 
 object HeroDao {

@@ -72,4 +72,10 @@ object Queries {
 
   def readSceneData(userId: UserId): Fragment =
     sql"select scene_data from $tableName where user_id = $userId"
+
+  def writeMerchantData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set merchant_data = $data where user_id = $userId"
+
+  def readMerchantData(userId: UserId): Fragment =
+    sql"select merchant_data from $tableName where user_id = $userId"
 }
