@@ -13,10 +13,11 @@ case class ActiveBattle(
   monsterCurrentHp:    Long,
   monsterCurrentArmor: Long,
   heroBattleState:     HeroBattleState = HeroBattleState.empty,
-  flaskUsedThisRound:  Boolean = false
+  flaskUsedThisRound:  Boolean = false,
+  monsterMarked:       Boolean = false
 ) {
   def toMonster: Monster =
-    Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats)
+    Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
 
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
@@ -30,7 +31,8 @@ object ActiveBattle {
     monsterRarity       = monster.rarity.entryName,
     monsterStats        = monster.fightStats,
     monsterCurrentHp    = monster.fightStats.hp,
-    monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L)
+    monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L),
+    monsterMarked       = monster.marked
   )
 
   implicit val encoder: Encoder[ActiveBattle] = deriveEncoder
@@ -46,6 +48,7 @@ object ActiveBattle {
       monsterCurrentArmor <- c.get[Long]("monsterCurrentArmor")
       heroBattleState     <- c.getOrElse[HeroBattleState]("heroBattleState")(HeroBattleState.empty)
       flaskUsedThisRound  <- c.getOrElse[Boolean]("flaskUsedThisRound")(false)
+      monsterMarked       <- c.getOrElse[Boolean]("monsterMarked")(false)
     } yield ActiveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
-                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, flaskUsedThisRound)
+                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, flaskUsedThisRound, monsterMarked)
 }

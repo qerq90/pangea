@@ -9,6 +9,10 @@ object MonsterGenerator {
 
   private val N = 1.1
 
+  // Модификатор «Отмеченный тьмой»: 5% шанс, +20% ко всем показателям.
+  private val MarkedChance     = 5L
+  private val MarkedMultiplier = 1.2
+
   // Weighted pool: 50% Common, 25% Uncommon, 15% Rare, 7% Mythical, 3% Legendary
   private val rarityPool: List[Rarity] =
     List.fill(50)(Common) ++
@@ -21,8 +25,23 @@ object MonsterGenerator {
     val (race,   rng1) = rng.pick(Race.values.toList)
     val (rarity, rng2) = rng1.pick(rarityPool)
     val stats          = buildStats(dungeonLevel, rarity, race)
-    (Monster(0L, dungeonLevel.toLong, race, rarity, stats), rng2)
+    val (markRoll, rng3) = rng2.between(0L, 100L)
+    val marked         = markRoll < MarkedChance
+    val finalStats     = if (marked) boost(stats, MarkedMultiplier) else stats
+    (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked), rng3)
   }
+
+  // +X% ко всем показателям (атака/HP зажаты снизу единицей, как в buildStats).
+  private def boost(s: FightStats, factor: Double): FightStats =
+    FightStats(
+      atk           = (s.atk * factor).toLong.max(1L),
+      hp            = (s.hp * factor).toLong.max(1L),
+      armor         = (s.armor * factor).toLong,
+      defence       = (s.defence * factor).toLong,
+      evasion       = (s.evasion * factor).toLong,
+      accuracy      = (s.accuracy * factor).toLong,
+      concentration = (s.concentration * factor).toLong
+    )
 
   private def buildStats(level: Int, rarity: Rarity, race: Race): FightStats = {
     val base = level.toDouble * rarity.factor * N

@@ -65,7 +65,32 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
 
     test("name возвращает строку из редкости и расы") {
       val (monster, _) = MonsterGenerator.generate(1, Rng(42L))
-      assertTrue(monster.name == s"${monster.rarity} ${monster.race}")
+      val expected =
+        if (monster.marked) s"Отмеченный тьмой ${monster.rarity} ${monster.race}"
+        else s"${monster.rarity} ${monster.race}"
+      assertTrue(monster.name == expected)
+    },
+
+    test("модификатор «Отмеченный тьмой»: встречается ~5%, добавляет префикс") {
+      val n        = 3000
+      val monsters = (1 to n).map(i => MonsterGenerator.generate(10, Rng(i.toLong))._1)
+      val marked   = monsters.filter(_.marked)
+      val rate     = marked.size.toDouble / n
+      assertTrue(marked.nonEmpty) &&
+      assertTrue(marked.forall(_.name.startsWith("Отмеченный тьмой "))) &&
+      assertTrue(monsters.filterNot(_.marked).forall(!_.name.startsWith("Отмеченный тьмой"))) &&
+      assertTrue(rate > 0.02 && rate < 0.09) // около 5%
+    },
+
+    test("отмеченный монстр сильнее обычного той же расы/редкости/уровня (+20%)") {
+      val n        = 5000
+      val monsters = (1 to n).map(i => MonsterGenerator.generate(10, Rng(i.toLong))._1)
+      val pairOpt = monsters.find(_.marked).flatMap { mk =>
+        monsters.find(m => !m.marked && m.race == mk.race && m.rarity == mk.rarity).map((mk, _))
+      }
+      assertTrue(pairOpt.exists { case (mk, plain) =>
+        math.abs(mk.fightStats.hp - (plain.fightStats.hp * 1.2).toLong) <= 1L
+      })
     }
   )
 }

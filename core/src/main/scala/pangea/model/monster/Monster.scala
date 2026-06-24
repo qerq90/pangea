@@ -7,7 +7,15 @@ case class Monster(
   lvl: Long,
   race: Race,
   rarity: Rarity,
-  fightStats: FightStats
+  fightStats: FightStats,
+  marked: Boolean = false // модификатор «Отмеченный тьмой»
 ) {
-  def name: String = s"${rarity} ${race}"
+  def name: String = {
+    val base = s"${rarity} ${race}"
+    if (marked) s"${Monster.MarkedPrefix} $base" else base
+  }
+}
+
+object Monster {
+  val MarkedPrefix: String = "Отмеченный тьмой"
 }
