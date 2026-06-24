@@ -177,7 +177,7 @@ heroStats:
   upgradeApplied: "Характеристика улучшена!"
   noPoints: "Нет свободных очков характеристик."
   upgradeStr: "+1 Сила (урон +8%)"
-  upgradeVit: "+1 Телосложение (HP +16)"
+  upgradeVit: "+1 Телосложение (HP +24)"
   upgradeAgi: "+1 Ловкость (уклонение +2.5)"
   upgradeInt: "+1 Интеллект"
   backToStats:

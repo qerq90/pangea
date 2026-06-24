@@ -374,18 +374,19 @@ Item.maxCharges:  Option[Int]           // максимум зарядов
 `hero.exp` хранит опыт **внутри текущего уровня** — не суммарный накопленный. При достижении порога уровня exp сбрасывается в 0, уровень растёт.
 
 ```
-neededExp = lvl × 100        // порог для уровня 1 → 100, уровня 2 → 200, ...
+neededExp(lvl) = 100 × fib(lvl)   // fib(1)=1, fib(2)=2, fib(n)=fib(n-1)+fib(n-2)
+                                  // → 100, 200, 300, 500, 800, 1300, …
 ```
 
-Отображение: `exp / neededExp` (например, `37/100` на уровне 1).
+`Hero.neededExpForLevel(lvl)` — единый источник порога (использует и `getNeededExp`, и level-up). Отображение: `exp / neededExp` (например, `37/100` на уровне 1).
 
 ### Level-up
 
 Происходит в `BattleState.victory` через цикл, который обрабатывает несколько уровней за раз:
 
 ```scala
-while (exp >= lvl * 100L && lvl < 150L) {
-  exp  -= lvl * 100L
+while (exp >= Hero.neededExpForLevel(lvl) && lvl < 150L) {
+  exp  -= Hero.neededExpForLevel(lvl)
   lvl  += 1L
   upgradePoints += 4L
 }

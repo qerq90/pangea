@@ -116,6 +116,27 @@ case class Hero(
        |""".stripMargin
   }
 
-  def getNeededExp: Long = lvl * 100L
+  def getNeededExp: Long = Hero.neededExpForLevel(lvl)
   def getLvlExp: Long    = exp
+}
+
+object Hero {
+  /** Порог опыта для уровня по Фибоначчи: 100, 200, 300, 500, 800, 1300, …
+   *  (= 100 × fib(lvl), где fib(1)=1, fib(2)=2, fib(n)=fib(n-1)+fib(n-2)). */
+  def neededExpForLevel(lvl: Long): Long = fib(lvl) * 100L
+
+  private def fib(n: Long): Long =
+    if (n <= 1L) 1L
+    else {
+      var prev = 1L // fib(1)
+      var cur  = 2L // fib(2)
+      var i    = 2L
+      while (i < n) {
+        val next = prev + cur
+        prev = cur
+        cur = next
+        i += 1L
+      }
+      cur
+    }
 }

@@ -110,7 +110,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         var e = hero.exp + expGained
         var l = hero.lvl
         var p = hero.upgradePoints
-        while (e >= l * 100L && l < 150L) { e -= l * 100L; l += 1L; p += 4L }
+        while (e >= Hero.neededExpForLevel(l) && l < 150L) { e -= Hero.neededExpForLevel(l); l += 1L; p += 4L }
         (e, l, p)
       }
       // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
