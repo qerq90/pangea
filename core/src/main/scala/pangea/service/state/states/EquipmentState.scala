@@ -4,7 +4,7 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.Item
 import pangea.model.state.StateType
@@ -89,10 +89,10 @@ case class EquipmentState(
                   else EquipmentState.itemStats(item)
     val text = s"🎽 ${content.text("equipment.header")} (${page + 1}/${EquipmentState.slots.size})\n\n${slot.name}\n$itemLine"
     val choices = List(
-      Option.when(page > 0)(Choice("Prev", "◀ Пред.")),
-      Option.when(!isEmpty)(Choice("Unequip", content.text("equipment.unequipBtn"))),
-      Option.when(page < EquipmentState.slots.size - 1)(Choice("Next", "След. ▶")),
-      Some(Choice("BackFromEquip", content.text("equipment.back")))
+      Option.when(page > 0)(content.choice("Prev", "common.prev")),
+      Option.when(!isEmpty)(content.choice("Unequip", "equipment.unequipBtn")),
+      Option.when(page < EquipmentState.slots.size - 1)(content.choice("Next", "common.next")),
+      Some(content.choice("BackFromEquip", "equipment.back"))
     ).flatten
     renderer.show(user, Screen(text, choices))
   }

@@ -82,11 +82,14 @@ MonsterGenerator.generate(dungeonLevel: Int, rng: Rng): (Monster, Rng)
 Платформо-независимое представление экрана и ввода построено и используется всеми сценами:
 
 ```scala
-case class Screen(text: String, choices: List[Choice])
-case class Choice(id: String, label: String, data: Map[String, String] = Map.empty)
+case class Screen(text: String, choices: List[Choice], inline: Boolean = false)
+case class Choice(id: String, label: String, data: Map[String, String] = Map.empty,
+                  color: ChoiceColor = ChoiceColor.Primary)
 ```
 
 Ввод не вынесен в отдельный `sealed trait Input` — он приходит как `UserAction` (payload-кнопка или текст); `Branch` извлекает из payload ключ `action` и роутит. `Narrative` разворачивает цепочку `Beat`'ов в маршруты. Per-state матчей по enum'у `Action` на сцену больше нет: `Action`-энумы сохранились лишь как **кодеки payload-ключей** (строки в JSON кнопки), а диспетчеризацию ведёт `Branch` по строковому ключу.
+
+**Цвет кнопки — данные, не код.** `ChoiceColor` (`Primary`/`Secondary`/`Negative`/`Positive`) задаётся **в yaml на самой кнопке**, дефолт `Primary`; `VkRenderer.toButtonColor` маппит его в `ButtonColor` (negative = красный). В yaml кнопка — либо `id: "label"` (→ primary), либо `id: { label: "...", color: "negative" }`. Динамические кнопки, собираемые в коде, тоже берут метку **и** цвет из yaml-ключа через `content.choice(id, key, args*)` (id — это action; метка/цвет — из данных). Цвет нигде не выводится по эвристике из текста метки — только явный параметр. Кнопки-«отступления» (Уйти/Назад/Оставить/Сбежать и т.п.) помечены `negative`.
 
 ### 4.3. Порты и адаптеры (`engine` / `service/sender/vk`)
 

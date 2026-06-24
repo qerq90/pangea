@@ -8,6 +8,11 @@ trait SceneContent {
   def text(key: String): String
   def format(key: String, args: (String, String)*): String
   def beats(key: String): List[(String, Beat)]
+
+  /** Кнопка для динамических экранов: метку и цвет берём из yaml-ключа
+   *  (строка → primary, либо `{label, color}`), id (action) задаётся в коде.
+   *  `args` подставляются в метку как `{key}` → value. */
+  def choice(id: String, key: String, args: (String, String)*): Choice
 }
 
 object SceneContent {
@@ -35,12 +40,28 @@ object SceneContent {
         id -> Beat.simple(t, choicesOf(node))
       }
 
+    def choice(id: String, key: String, args: (String, String)*): Choice = {
+      val c = buildChoice(id, at(key))
+      if (args.isEmpty) c
+      else c.copy(label = args.foldLeft(c.label) { case (s, (k, v)) => s.replace(s"{$k}", v) })
+    }
+
+    // Кнопка в yaml: либо `id: "label"`, либо `id: { label: "...", color: "negative" }`.
     private def choicesOf(node: Json): List[Choice] =
       node.hcursor.downField("choices").focus
         .flatMap(_.asObject)
         .toList
         .flatMap(_.toList)
-        .map { case (id, lbl) => Choice(id, lbl.asString.getOrElse("")) }
+        .map { case (id, value) => buildChoice(id, value) }
+
+    private def buildChoice(id: String, value: Json): Choice =
+      value.asString match {
+        case Some(label) => Choice(id, label)
+        case None =>
+          val label = value.hcursor.get[String]("label").getOrElse("")
+          val color = value.hcursor.get[String]("color").map(ChoiceColor.fromString).getOrElse(ChoiceColor.Primary)
+          Choice(id, label, color = color)
+      }
   }
 
   def load(): SceneContent = {

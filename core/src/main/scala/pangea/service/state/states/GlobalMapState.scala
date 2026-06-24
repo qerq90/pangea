@@ -3,7 +3,7 @@ package pangea.service.state.states
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -87,7 +87,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
   private def showRoom(user: User, renderer: Renderer): Task[Unit] =
     renderer.show(user, Screen(
       content.text("globalMap.room.text"),
-      List(Choice("LeaveRoom", content.text("globalMap.room.leaveLabel")))))
+      List(content.choice("LeaveRoom", "globalMap.room.leaveLabel"))))
 
   // Уйти из комнаты: спустя 3 часа — лечим травмы; раньше — спрашиваем подтверждение.
   private def leaveRoom(user: User, renderer: Renderer): Task[StateType] =
@@ -111,8 +111,8 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
                renderer.show(user, Screen(
                  content.format("globalMap.roomConfirmLeave", "remaining" -> remaining),
                  List(
-                   Choice("ConfirmLeaveRoom", content.text("globalMap.roomLeaveYes")),
-                   Choice("CancelLeaveRoom",  content.text("globalMap.roomLeaveNo")))))
+                   content.choice("ConfirmLeaveRoom", "globalMap.roomLeaveYes"),
+                   content.choice("CancelLeaveRoom",  "globalMap.roomLeaveNo"))))
            }
     } yield StateType.GlobalMap
 

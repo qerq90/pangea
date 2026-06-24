@@ -1,3 +1,7 @@
+common:
+  prev: "◀ Пред."
+  next: "След. ▶"
+
 registration:
   welcome:
     text: |
@@ -11,10 +15,13 @@ registration:
       Race: "Начать"
 
   raceSelect: "Теперь, выберите свою расу. Позже её можно будет сменить."
+  nameLabel: "Меня зовут {name}"
 
   raceDescription:
     confirmLabel: "Подтвердить расу"
-    backLabel: "Вернуться к выбору расы"
+    backLabel:
+      label: "Вернуться к выбору расы"
+      color: "negative"
 
   preTravel:
     text: "Вы открываете глаза. Практически ничего не видно, только сверху проблёскивает свет звёзд. Тяжело дышать, вы замкнуты и стеснены в движениях, рядом лишь камни и земля, кажется ваших сил хватит что бы выбраться наверх."
@@ -83,15 +90,21 @@ globalMap:
     text: "Уличные торговцы зазывают прохожих к своим лоткам."
     choices:
       MerchantRichelieu: "Торговец Ришелье"
-      ReturnToCity: "Назад"
+      ReturnToCity:
+        label: "Назад"
+        color: "negative"
   tavern:
     text: "Таверна «Золотой якорь».\nСнять комнату (через 3 часа все травмы пройдут) — {cost} золота.\nУ вас: {gold} золота."
     choices:
       RentRoom: "Снять комнату"
-      LeaveTavern: "Уйти"
+      LeaveTavern:
+        label: "Уйти"
+        color: "negative"
   room:
     text: "Вы сняли комнату в таверне, что бы отдохнуть и привести себя в порядок. Через 3 часа все травмы пропадут."
-    leaveLabel: "Уйти"
+    leaveLabel:
+      label: "Уйти"
+      color: "negative"
   roomConfirmLeave: "До исцеления от травм осталось {remaining}, вы уверены?"
   roomLeaveYes: "Да"
   roomLeaveNo: "Нет"
@@ -107,7 +120,9 @@ merchant:
   boughtLine: "{n}) ✅ {name} — куплено"
   refreshLabel: "🔄 Обновить товар"
   sellLabel: "Продать снаряжение"
-  backLabel: "↩ Назад"
+  backLabel:
+    label: "↩ Назад"
+    color: "negative"
   confirmBuy: "Вы уверены что хотите купить предмет {name} за {price} золота?"
   confirmYes: "Да"
   confirmNo: "Нет"
@@ -118,10 +133,10 @@ merchant:
   sellHeader: "Продажа ({page}/{total}) | 💰 {gold}"
   sellEmpty: "У вас нет вещей на продажу."
   sellItemLabel: "💰 Продать"
-  sellBackLabel: "↩ Назад"
+  sellBackLabel:
+    label: "↩ Назад"
+    color: "negative"
   sold: "Вы продали {name} за {price} золота."
-  prevLabel: "◀ Пред."
-  nextLabel: "След. ▶"
 
 dungeon:
   enter:
@@ -144,7 +159,9 @@ equipment:
   header: "Снаряжение"
   empty: "Пусто"
   unequipBtn: "🔓 Снять"
-  back: "↩ Назад"
+  back:
+    label: "↩ Назад"
+    color: "negative"
   unequipped: "{name} снят и возвращён в инвентарь."
   slotEmpty: "Слот уже пуст."
   inventoryFull: "Инвентарь полон — невозможно снять предмет."
@@ -153,7 +170,9 @@ heroStats:
   inventory: "Инвентарь"
   equipment: "Снаряжение"
   upgrade: "Распределить характеристики"
-  leave: "Покинуть костер"
+  leave:
+    label: "Покинуть костер"
+    color: "negative"
   upgradeScreen: "Распределите характеристики. Свободных очков: {points}"
   upgradeApplied: "Характеристика улучшена!"
   noPoints: "Нет свободных очков характеристик."
@@ -161,7 +180,9 @@ heroStats:
   upgradeVit: "+1 Телосложение (HP +16)"
   upgradeAgi: "+1 Ловкость (уклонение +2.5)"
   upgradeInt: "+1 Интеллект"
-  backToStats: "Назад"
+  backToStats:
+    label: "Назад"
+    color: "negative"
   traumaActive: "\n⚠ Активные травмы: {traumaNames}. Осталось: {remaining}."
   traumas: "Травмы"
   traumaScreenTitle: "⚠ Активные травмы. Осталось: {remaining}"
@@ -174,7 +195,9 @@ battle:
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
-      Flee: "Сбежать"
+      Flee:
+        label: "Сбежать"
+        color: "negative"
   fleeConfirm:
     text: "Подтвердить побег? Враг успеет нанести один удар!"
     choices:
@@ -214,7 +237,9 @@ foundItem:
     text: "Вы находите предмет"
     choices:
       TakeItem: "Забрать"
-      DontTakeItem: "Оставить"
+      DontTakeItem:
+        label: "Оставить"
+        color: "negative"
   taken: "Вы получили {name}"
   cantTake: "Вы не смогли забрать {name}, вы уходите ни с чем..."
   inventoryFull: "В инвентаре нет места"
@@ -228,7 +253,9 @@ loot:
   gold: "💰 Вы нашли {amount} золота"
   itemLost: "🎁 {name} — Инвентарь переполнен"
   takeLabel: "Забрать"
-  leaveLabel: "Оставить"
+  leaveLabel:
+    label: "Оставить"
+    color: "negative"
   enter:
     text: "Добыча"
     choices:
@@ -238,7 +265,14 @@ inventory:
   empty:
     text: "Инвентарь пуст."
     choices:
-      BackFromInventory: "↩ Выйти"
+      BackFromInventory:
+        label: "↩ Выйти"
+        color: "negative"
+  equip: "✅ Надеть"
+  drop: "🗑 Выбросить"
+  exit:
+    label: "↩ Выйти"
+    color: "negative"
   equipped: "{name} надет! Прежний: {old}."
   dropped: "{name} выброшен."
   tooHighLevel: "❌ Недостаточный уровень! Требуется {required}, ваш уровень {current}."

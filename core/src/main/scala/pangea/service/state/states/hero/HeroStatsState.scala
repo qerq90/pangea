@@ -2,7 +2,7 @@ package pangea.service.state.states.hero
 
 import java.util.concurrent.TimeUnit
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -48,11 +48,11 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
               else {
                 val text = content.format("heroStats.upgradeScreen", "points" -> hero.upgradePoints.toString)
                 val choices = List(
-                  Choice("UpgradeStr", content.text("heroStats.upgradeStr")),
-                  Choice("UpgradeVit", content.text("heroStats.upgradeVit")),
-                  Choice("UpgradeAgi", content.text("heroStats.upgradeAgi")),
-                  Choice("UpgradeInt", content.text("heroStats.upgradeInt")),
-                  Choice("BackToStats", content.text("heroStats.backToStats"))
+                  content.choice("UpgradeStr", "heroStats.upgradeStr"),
+                  content.choice("UpgradeVit", "heroStats.upgradeVit"),
+                  content.choice("UpgradeAgi", "heroStats.upgradeAgi"),
+                  content.choice("UpgradeInt", "heroStats.upgradeInt"),
+                  content.choice("BackToStats", "heroStats.backToStats")
                 )
                 renderer.show(user, Screen(text, choices))
               }
@@ -89,7 +89,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   private def buildTraumasScreen(hero: Hero, nowMs: Long): Screen = {
     val traumas = hero.activeTraumas(nowMs)
-    val back    = Choice("BackToStats", content.text("heroStats.backToStats"))
+    val back    = content.choice("BackToStats", "heroStats.backToStats")
     if (traumas.isEmpty)
       Screen(content.text("heroStats.traumaEmpty"), List(back))
     else {
@@ -111,11 +111,11 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
         "remaining"   -> remaining)
     }.getOrElse("")
     val choices = List(
-      Some(Choice("OpenInventory", content.text("heroStats.inventory"))),
-      Some(Choice("OpenEquipment", content.text("heroStats.equipment"))),
-      Option.when(hero.activeTraumas(nowMs).nonEmpty)(Choice("OpenTraumas", content.text("heroStats.traumas"))),
-      Option.when(hero.upgradePoints > 0)(Choice("Upgrade", content.text("heroStats.upgrade"))),
-      Some(Choice("Back", content.text("heroStats.leave")))
+      Some(content.choice("OpenInventory", "heroStats.inventory")),
+      Some(content.choice("OpenEquipment", "heroStats.equipment")),
+      Option.when(hero.activeTraumas(nowMs).nonEmpty)(content.choice("OpenTraumas", "heroStats.traumas")),
+      Option.when(hero.upgradePoints > 0)(content.choice("Upgrade", "heroStats.upgrade")),
+      Some(content.choice("Back", "heroStats.leave"))
     ).flatten
     Screen(hero.getInfo(nowMs) + traumaLine, choices)
   }

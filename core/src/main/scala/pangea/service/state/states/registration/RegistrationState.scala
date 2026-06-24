@@ -35,7 +35,7 @@ case class RegistrationState(
       case ("Travel7", beat) =>
         "Travel7" -> Beat(
           beat.text,
-          user => players.getDisplayName(user).map(name => List(Choice("Travel8", s"Меня зовут $name")))
+          user => players.getDisplayName(user).map(name => List(content.choice("Travel8", "registration.nameLabel", "name" -> name)))
         )
       case other => other
     }
@@ -82,8 +82,8 @@ case class RegistrationState(
     Race.withNameOption(raceName) match {
       case Some(r) =>
         val choices = List(
-          Choice("Travel", content.text("registration.raceDescription.confirmLabel"), Map("race" -> r.entryName)),
-          Choice("Race",   content.text("registration.raceDescription.backLabel"))
+          content.choice("Travel", "registration.raceDescription.confirmLabel").copy(data = Map("race" -> r.entryName)),
+          content.choice("Race", "registration.raceDescription.backLabel")
         )
         renderer.show(user, Screen(r.description, choices)).as(Registration)
       case None =>

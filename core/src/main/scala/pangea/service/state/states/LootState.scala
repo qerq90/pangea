@@ -4,7 +4,7 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, Json}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Journal, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Journal, Renderer, SceneContent, Screen, Target}
 import pangea.model.GameEvent
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemType}
@@ -64,8 +64,8 @@ case class LootState(
              val preview = goldLines ++ loot.items.map(itemLine)
              val text    = content.text("loot.header") + "\n\n" + preview.mkString("\n")
              val choices = List(
-               Choice("Take",  content.text("loot.takeLabel")),
-               Choice("Leave", content.text("loot.leaveLabel"))
+               content.choice("Take", "loot.takeLabel"),
+               content.choice("Leave", "loot.leaveLabel")
              )
              renderer.show(user, Screen(text, choices, inline = true))
            }

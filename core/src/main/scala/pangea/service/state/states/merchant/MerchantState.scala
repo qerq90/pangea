@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, Rarity}
@@ -70,8 +70,8 @@ case class MerchantState(
       _ <- data.items.lift(idx.getOrElse(-1)) match {
              case Some(mi) if !mi.bought =>
                val choices = List(
-                 Choice("ConfirmBuy", content.text("merchant.confirmYes"), Map("idx" -> idx.get.toString)),
-                 Choice("CancelBuy",  content.text("merchant.confirmNo"))
+                 content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = Map("idx" -> idx.get.toString)),
+                 content.choice("CancelBuy", "merchant.confirmNo")
                )
                renderer.show(user, Screen(
                  content.format("merchant.confirmBuy", "name" -> mi.item.name, "price" -> mi.price.toString),
@@ -129,7 +129,7 @@ case class MerchantState(
       items <- inventoryItems(hero)
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("merchant.sellEmpty"),
-               List(Choice("BackFromSell", content.text("merchant.sellBackLabel")))))
+               List(content.choice("BackFromSell", "merchant.sellBackLabel"))))
            else {
              val p = page.max(0).min(items.size - 1)
              heroDao.writeSceneData(user.userId, SellPage(p).asJson) *>
@@ -173,12 +173,12 @@ case class MerchantState(
     val text = content.text("merchant.richelieu.header") + "\n\n" + lines.mkString("\n\n")
     val buyButtons = data.items.zipWithIndex.collect {
       case (mi, i) if !mi.bought =>
-        Choice("Buy", content.format("merchant.buyLabel", "n" -> (i + 1).toString), Map("idx" -> i.toString))
+        content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
     }
     val choices = buyButtons ++ List(
-      Choice("Refresh", content.text("merchant.refreshLabel")),
-      Choice("Sell",    content.text("merchant.sellLabel")),
-      Choice("Back",    content.text("merchant.backLabel"))
+      content.choice("Refresh", "merchant.refreshLabel"),
+      content.choice("Sell",    "merchant.sellLabel"),
+      content.choice("Back",    "merchant.backLabel")
     )
     Screen(text, choices)
   }
@@ -191,10 +191,10 @@ case class MerchantState(
       "total" -> items.size.toString,
       "gold"  -> hero.gold.toString) + s"\n\n${itemDesc(item)}\n💰 Цена продажи: $price"
     val choices = List(
-      Option.when(page > 0)(Choice("SellPrev", content.text("merchant.prevLabel"))),
-      Some(Choice("SellItem", content.text("merchant.sellItemLabel"))),
-      Option.when(page < items.size - 1)(Choice("SellNext", content.text("merchant.nextLabel"))),
-      Some(Choice("BackFromSell", content.text("merchant.sellBackLabel")))
+      Option.when(page > 0)(content.choice("SellPrev", "common.prev")),
+      Some(content.choice("SellItem", "merchant.sellItemLabel")),
+      Option.when(page < items.size - 1)(content.choice("SellNext", "common.next")),
+      Some(content.choice("BackFromSell", "merchant.sellBackLabel"))
     ).flatten
     Screen(text, choices)
   }

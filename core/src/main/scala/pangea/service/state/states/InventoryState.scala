@@ -4,7 +4,7 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
@@ -138,11 +138,11 @@ case class InventoryState(
     val item    = items(page)
     val text    = InventoryState.itemText(item, hero.equipment, page + 1, items.size, Some(hero.gold))
     val choices = List(
-      Option.when(page > 0)(Choice("Prev", "◀ Пред.")),
-      Some(Choice("Equip", "✅ Надеть")),
-      Some(Choice("Drop",  "🗑 Выбросить")),
-      Option.when(page < items.size - 1)(Choice("Next", "След. ▶")),
-      Some(Choice("BackFromInventory", "↩ Выйти"))
+      Option.when(page > 0)(content.choice("Prev", "common.prev")),
+      Some(content.choice("Equip", "inventory.equip")),
+      Some(content.choice("Drop",  "inventory.drop")),
+      Option.when(page < items.size - 1)(content.choice("Next", "common.next")),
+      Some(content.choice("BackFromInventory", "inventory.exit"))
     ).flatten
     renderer.show(user, Screen(text, choices))
   }
