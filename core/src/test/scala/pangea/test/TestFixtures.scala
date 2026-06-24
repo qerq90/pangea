@@ -14,7 +14,7 @@ object TestFixtures {
     noItem, noItem, noItem, noItem, noItem, noItem, noItem
   )
 
-  def hero(userId: UserId, state: StateType = StateType.Dungeon, dungeonLevel: Int = 1): Hero = Hero(
+  def hero(userId: UserId, state: StateType = StateType.Dungeon, dungeonLevel: Int = 1, maxDungeonLevel: Int = 150): Hero = Hero(
     id           = HeroId(1L),
     userId       = userId,
     state        = state,
@@ -25,7 +25,8 @@ object TestFixtures {
     baseStats    = BaseStats(agi = 10, vit = 10, str = 10, int = 10),
     fightStats   = FightStats(atk = 10, hp = 100, armor = 0, defence = 0, evasion = 5, accuracy = 10, concentration = 5),
     equipment    = emptyEquipment,
-    dungeonLevel = dungeonLevel,
+    dungeonLevel    = dungeonLevel,
+    maxDungeonLevel = maxDungeonLevel,
     gold         = 0L,
     traumaUntil  = None,
     traumaNames  = Nil

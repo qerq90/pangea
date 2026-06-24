@@ -60,6 +60,14 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       .transact(xa)
       .unit
 
+  override def updateMaxDungeonLevel(userId: UserId, level: Int): Task[Unit] =
+    Queries
+      .updateMaxDungeonLevel(userId, level)
+      .update
+      .run
+      .transact(xa)
+      .unit
+
   override def updateFightStats(userId: UserId, stats: FightStats): Task[Unit] =
     Queries.updateFightStats(userId, stats).update.run.transact(xa).unit
 

@@ -18,10 +18,19 @@ case class Hero(
   fightStats: FightStats,
   equipment: Equipment,
   dungeonLevel: Int,
+  maxDungeonLevel: Int,
   gold: Long,
   traumaUntil: Option[Long],
   traumaNames: List[String]
 ) {
+  /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
+   *  текущем (== максимально доступному) была повержена тьма — тогда
+   *  `maxDungeonLevel` уже сдвинут вперёд. Этажи ≤ `maxDungeonLevel` доступны всегда. */
+  def canGoDarker: Boolean = dungeonLevel < maxDungeonLevel
+
+  /** Можно ли двигаться к свету (выше): на первом этаже выше уже некуда. */
+  def canGoLighter: Boolean = dungeonLevel > 1
+
   // Множитель брони от защиты: влияние защиты вдвое слабее (defence / 2), но не ниже 1.
   def maxArmor: Long = (equipment.allArmor * (fightStats.defence / 2.0).max(1.0)).toLong
 

@@ -16,6 +16,7 @@ trait HeroDao {
   def updateState(userId: UserId, potentiallyNewState: StateType): Task[Unit]
 
   def updateDungeonLevel(userId: UserId, level: Int): Task[Unit]
+  def updateMaxDungeonLevel(userId: UserId, level: Int): Task[Unit]
   def updateFightStats(userId: UserId, stats: FightStats): Task[Unit]
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
   def updateGold(userId: UserId, gold: Long): Task[Unit]

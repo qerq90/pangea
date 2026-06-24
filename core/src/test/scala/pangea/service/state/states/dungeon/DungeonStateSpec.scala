@@ -18,13 +18,17 @@ object DungeonStateSpec extends ZIOSpecDefault {
   private def isValidFindOutcome(s: StateType): Boolean =
     s == StateType.Battle || s == StateType.FoundItem || s == StateType.Dungeon
 
-  private def makeState(dungeonLevel: Int = 1) =
+  private def makeState(dungeonLevel: Int = 1, maxDungeonLevel: Int = 150) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, dungeonLevel = dungeonLevel))
+      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, dungeonLevel = dungeonLevel, maxDungeonLevel = maxDungeonLevel))
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
       invRepo   = TestInventoryRepository.accepting
     } yield (DungeonState(heroDao, invRepo, content), heroDao, renderer, invRepo)
+
+  import pangea.engine.ChoiceColor
+  private def colorOf(s: pangea.engine.Screen, id: String): Option[ChoiceColor] =
+    s.choices.find(_.id == id).map(_.color)
 
   override def spec = suite("DungeonState")(
 
@@ -171,6 +175,60 @@ object DungeonStateSpec extends ZIOSpecDefault {
         _                                 <- state.action(testUser, tap("GoDarker"), renderer)
         updatedHero                       <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(updatedHero.exists(_.dungeonLevel == 150))
+    },
+
+    test("enter на максимально доступном этаже → кнопка «к тьме» красная") {
+      for {
+        quad                      <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, _, renderer, _)    = quad
+        _                         <- state.enter(testUser, renderer)
+        screens                   <- renderer.sentScreens
+      } yield assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Negative)) &&
+              assertTrue(colorOf(screens.head, "GoLighter").contains(ChoiceColor.Primary))
+    },
+
+    test("enter на первом этаже → кнопка «к свету» красная") {
+      for {
+        quad                      <- makeState(dungeonLevel = 1, maxDungeonLevel = 3)
+        (state, _, renderer, _)    = quad
+        _                         <- state.enter(testUser, renderer)
+        screens                   <- renderer.sentScreens
+      } yield assertTrue(colorOf(screens.head, "GoLighter").contains(ChoiceColor.Negative)) &&
+              assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Primary))
+    },
+
+    test("GoDarker без поверженной тьмы → не двигается, сообщение про тьму") {
+      for {
+        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, _)  = quad
+        result                        <- state.action(testUser, tap("GoDarker"), renderer)
+        screens                       <- renderer.sentScreens
+        updatedHero                   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("Тьма этого этажа ещё не повержена"))) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 5))
+    },
+
+    test("GoDarker с поверженной тьмой (этаж < max) → спускается глубже") {
+      for {
+        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 6)
+        (state, heroDao, renderer, _)  = quad
+        result                        <- state.action(testUser, tap("GoDarker"), renderer)
+        updatedHero                   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 6))
+    },
+
+    test("GoLighter на первом этаже → не двигается, сообщение «выше некуда»") {
+      for {
+        quad                          <- makeState(dungeonLevel = 1, maxDungeonLevel = 3)
+        (state, heroDao, renderer, _)  = quad
+        result                        <- state.action(testUser, tap("GoLighter"), renderer)
+        screens                       <- renderer.sentScreens
+        updatedHero                   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("Выше уже некуда"))) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 1))
     },
 
     test("Rest → переходит в Rest без сообщений") {

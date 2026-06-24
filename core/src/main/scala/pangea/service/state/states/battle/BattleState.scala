@@ -127,10 +127,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       _                <- heroDao.clearActiveBattle(user.userId)
       _                <- heroDao.updateExpAndLevel(user.userId, newExp, newLevel, newPoints)
       _                <- heroDao.writeSceneData(user.userId, lootData.asJson)
+      // победа над «Отмеченным тьмой» на текущем этаже открывает путь вглубь
+      newMaxDungeon     = math.min(150, hero.dungeonLevel + 1)
+      unlocksDarkness   = battle.monsterMarked && newMaxDungeon > hero.maxDungeonLevel
+      _                <- ZIO.when(unlocksDarkness)(heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon))
       _                <- renderer.show(user, Screen(
                             content.format("battle.victory",
                               "monster" -> monster.name,
                               "exp"     -> expGained.toString), Nil))
+      _                <- ZIO.when(unlocksDarkness)(
+                            renderer.show(user, Screen(content.text("battle.darknessConquered"), Nil))
+                          )
       _                <- ZIO.when(newLevel > hero.lvl)(
                             renderer.show(user, Screen(s"Вы получили новый уровень $newLevel!", Nil))
                           )

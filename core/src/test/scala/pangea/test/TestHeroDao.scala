@@ -30,6 +30,9 @@ class TestHeroDao(
   def updateDungeonLevel(userId: UserId, level: Int): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(dungeonLevel = level))))
 
+  def updateMaxDungeonLevel(userId: UserId, level: Int): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(maxDungeonLevel = level))))
+
   def updateFightStats(userId: UserId, stats: FightStats): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(fightStats = stats))))
 

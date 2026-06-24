@@ -44,6 +44,9 @@ object BattleStateSpec extends ZIOSpecDefault {
     monsterCurrentArmor = 0L
   )
 
+  // «Отмеченный тьмой» монстр с 1 HP — победа над ним открывает путь вглубь
+  private val markedWeakBattle = weakBattle.copy(monsterMarked = true)
+
   // Сильный монстр для теста побега
   private val strongBattle = ActiveBattle(
     monsterLvl          = 1L,
@@ -93,6 +96,32 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(updatedHero.exists(_.exp > 0L)) &&
               assertTrue(remainingBattle.isEmpty) &&
               assertTrue(loot.flatMap(_.as[LootData].toOption).isDefined)
+    },
+
+    test("Attack убивает Отмеченного тьмой на максимальном этаже → открывается путь вглубь") {
+      val hero = strongHero.copy(dungeonLevel = 5, maxDungeonLevel = 5)
+      for {
+        triple               <- makeState(hero, markedWeakBattle)
+        (state, heroDao, renderer) = triple
+        result               <- state.action(testUser, tap("Attack"), renderer)
+        screens              <- renderer.sentScreens
+        updatedHero          <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(screens.exists(_.text.contains("Путь вглубь лабиринта открыт"))) &&
+              assertTrue(updatedHero.exists(_.maxDungeonLevel == 6)) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 5))
+    },
+
+    test("Attack убивает обычного монстра → путь вглубь не открывается") {
+      val hero = strongHero.copy(dungeonLevel = 5, maxDungeonLevel = 5)
+      for {
+        triple               <- makeState(hero, weakBattle)
+        (state, heroDao, renderer) = triple
+        _                    <- state.action(testUser, tap("Attack"), renderer)
+        screens              <- renderer.sentScreens
+        updatedHero          <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(!screens.exists(_.text.contains("Путь вглубь"))) &&
+              assertTrue(updatedHero.exists(_.maxDungeonLevel == 5))
     },
 
     test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {

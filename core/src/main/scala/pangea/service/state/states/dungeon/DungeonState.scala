@@ -3,7 +3,7 @@ package pangea.service.state.states.dungeon
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.ActiveBattle
 import pangea.model.hero.Hero
@@ -32,12 +32,23 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now      <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero     <- getHero(user)
-      enterScr  = content.screen("dungeon.enter")
-      text      = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
-      _        <- renderer.show(user, Screen(text, enterScr.choices))
+      hero <- getHero(user)
+      _    <- renderer.show(user, enterScreen(hero))
     } yield ()
+
+  /** Экран этажа. Кнопки движения красим в красный (negative), если ход недоступен:
+   *  «к тьме» заблокирована, пока на этаже не повержена тьма; «к свету» — на первом этаже. */
+  private def enterScreen(hero: Hero): Screen = {
+    val text = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
+    val choices = content.screen("dungeon.enter").choices.map { c =>
+      c.id match {
+        case "GoDarker"  if !hero.canGoDarker  => c.copy(color = ChoiceColor.Negative)
+        case "GoLighter" if !hero.canGoLighter => c.copy(color = ChoiceColor.Negative)
+        case _                                 => c
+      }
+    }
+    Screen(text, choices)
+  }
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -88,12 +99,17 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 
   private def changeDungeonLevel(user: User, renderer: Renderer, delta: Int): Task[StateType] =
     for {
-      hero     <- getHero(user)
-      newLevel  = math.max(1, math.min(150, hero.dungeonLevel + delta))
-      _        <- heroDao.updateDungeonLevel(user.userId, newLevel)
-      enterScr  = content.screen("dungeon.enter")
-      text      = content.format("dungeon.enter.text", "level" -> newLevel.toString)
-      _        <- renderer.show(user, Screen(text, enterScr.choices))
+      hero    <- getHero(user)
+      allowed  = if (delta > 0) hero.canGoDarker else hero.canGoLighter
+      _ <- if (!allowed) {
+             val msg = if (delta > 0) "dungeon.darknessNotDefeated" else "dungeon.alreadyAtTop"
+             renderer.show(user, Screen(content.text(msg), Nil)) *>
+               renderer.show(user, enterScreen(hero))
+           } else {
+             val newLevel = math.max(1, math.min(150, hero.dungeonLevel + delta))
+             heroDao.updateDungeonLevel(user.userId, newLevel) *>
+               renderer.show(user, enterScreen(hero.copy(dungeonLevel = newLevel)))
+           }
     } yield StateType.Dungeon
 
   private def getHero(user: User): Task[Hero] =

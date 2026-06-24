@@ -60,7 +60,8 @@ object HeroRepositoryLive {
         NoItem,
         NoItem
       ),
-      dungeonLevel = 1,
+      dungeonLevel    = 1,
+      maxDungeonLevel = 1,
       gold         = 0L,
       traumaUntil  = None,
       traumaNames  = Nil
