@@ -8,6 +8,8 @@ import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
 import zio.ZIO
 import zio.test._
 
+import java.time.Duration
+
 object GlobalMapStateSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
@@ -25,7 +27,6 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
   private val fullHp      = baseHero.baseStats.vit * 24L  // 240
   private val richHero    = baseHero.copy(gold = 500L, fightStats = baseHero.fightStats.copy(hp = fullHp))
   private val poorHero    = baseHero.copy(gold = 0L,   fightStats = baseHero.fightStats.copy(hp = 10L))
-  private val damagedHero = baseHero.copy(gold = 500L, fightStats = baseHero.fightStats.copy(hp = 10L))
   private val traumaHero  = baseHero.copy(gold = 500L, traumaUntil = Some(Long.MaxValue))
 
   override def spec = suite("GlobalMapState")(
@@ -50,43 +51,34 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Dungeon)
     },
 
-    test("Tavern → показывает экран таверны с ценой и кнопкой Heal") {
+    test("Tavern → экран таверны с кнопкой «Снять комнату» (RentRoom)") {
       for {
         triple              <- makeState(richHero)
         (state, _, renderer) = triple
         result              <- state.action(testUser, tap("Tavern"), renderer)
         screens             <- renderer.sentScreens
       } yield assertTrue(result == StateType.GlobalMap) &&
-              assertTrue(screens.exists(_.choices.map(_.id).contains("Heal")))
+              assertTrue(screens.exists(_.choices.map(_.id).contains("RentRoom")))
     },
 
-    test("Heal при достаточном gold → восстанавливает HP, снимает травму, списывает gold") {
+    test("RentRoom → списывает gold, показывает комнату с кнопкой «Уйти»") {
       for {
-        triple               <- makeState(damagedHero)
+        triple               <- makeState(richHero)
         (state, heroDao, renderer) = triple
-        result               <- state.action(testUser, tap("Heal"), renderer)
+        result               <- state.action(testUser, tap("RentRoom"), renderer)
         updated              <- heroDao.getHeroByUserId(userId)
         screens              <- renderer.sentScreens
       } yield assertTrue(result == StateType.GlobalMap) &&
-              assertTrue(updated.exists(_.fightStats.hp > 10L)) &&
-              assertTrue(updated.exists(_.gold < damagedHero.gold)) &&
-              assertTrue(screens.exists(_.text.contains("исцелились")))
+              assertTrue(updated.exists(_.gold < 500L)) &&
+              assertTrue(screens.exists(_.text.contains("сняли комнату"))) &&
+              assertTrue(screens.last.choices.map(_.id) == List("LeaveRoom"))
     },
 
-    test("Heal снимает травму") {
-      for {
-        triple               <- makeState(traumaHero)
-        (state, heroDao, renderer) = triple
-        _                    <- state.action(testUser, tap("Heal"), renderer)
-        updated              <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(updated.exists(_.traumaUntil.isEmpty))
-    },
-
-    test("Heal при недостаточном gold → показывает ошибку, gold не меняется") {
+    test("RentRoom без золота → ошибка, gold не меняется") {
       for {
         triple               <- makeState(poorHero)
         (state, heroDao, renderer) = triple
-        result               <- state.action(testUser, tap("Heal"), renderer)
+        result               <- state.action(testUser, tap("RentRoom"), renderer)
         updated              <- heroDao.getHeroByUserId(userId)
         screens              <- renderer.sentScreens
       } yield assertTrue(result == StateType.GlobalMap) &&
@@ -94,27 +86,42 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Недостаточно")))
     },
 
-    test("Heal при полном HP и без травмы → показывает «и так здоровы»") {
+    test("LeaveRoom раньше 3 часов → подтверждение Да/Нет, травма не снята") {
       for {
-        triple              <- makeState(richHero)
-        (state, _, renderer) = triple
-        result              <- state.action(testUser, tap("Heal"), renderer)
-        screens             <- renderer.sentScreens
+        triple               <- makeState(traumaHero)
+        (state, heroDao, renderer) = triple
+        _                    <- state.action(testUser, tap("RentRoom"), renderer)
+        result               <- state.action(testUser, tap("LeaveRoom"), renderer)
+        updated              <- heroDao.getHeroByUserId(userId)
+        screens              <- renderer.sentScreens
       } yield assertTrue(result == StateType.GlobalMap) &&
-              assertTrue(screens.exists(_.text.contains("здоровы")))
+              assertTrue(screens.last.text.contains("уверены")) &&
+              assertTrue(screens.last.choices.map(_.id).toSet == Set("ConfirmLeaveRoom", "CancelLeaveRoom")) &&
+              assertTrue(updated.exists(_.traumaUntil.isDefined))
     },
 
-    test("Heal восстанавливает armor до maxArmor") {
-      val depletedArmor = damagedHero.copy(
-        fightStats = damagedHero.fightStats.copy(armor = 0L)
-      )
+    test("ConfirmLeaveRoom → прерывает без исцеления, травма остаётся") {
       for {
-        triple               <- makeState(depletedArmor)
+        triple               <- makeState(traumaHero)
         (state, heroDao, renderer) = triple
-        hero                 <- heroDao.getHeroByUserId(userId)
-        _                    <- state.action(testUser, tap("Heal"), renderer)
+        _                    <- state.action(testUser, tap("RentRoom"), renderer)
+        _                    <- state.action(testUser, tap("ConfirmLeaveRoom"), renderer)
         updated              <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(updated.exists(_.fightStats.armor == updated.get.maxArmor))
+      } yield assertTrue(updated.exists(_.traumaUntil.isDefined))
+    },
+
+    test("LeaveRoom спустя 3 часа → лечит травмы и возвращает в таверну") {
+      for {
+        triple               <- makeState(traumaHero)
+        (state, heroDao, renderer) = triple
+        _                    <- state.action(testUser, tap("RentRoom"), renderer)
+        _                    <- TestClock.adjust(Duration.ofHours(3).plusSeconds(1))
+        result               <- state.action(testUser, tap("LeaveRoom"), renderer)
+        updated              <- heroDao.getHeroByUserId(userId)
+        screens              <- renderer.sentScreens
+      } yield assertTrue(result == StateType.GlobalMap) &&
+              assertTrue(updated.exists(_.traumaUntil.isEmpty)) &&
+              assertTrue(screens.exists(_.text.contains("излечены")))
     },
 
     test("LeaveTavern → возвращается к экрану города") {

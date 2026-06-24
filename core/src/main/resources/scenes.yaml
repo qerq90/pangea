@@ -85,13 +85,18 @@ globalMap:
       MerchantRichelieu: "Торговец Ришелье"
       ReturnToCity: "Назад"
   tavern:
-    text: "Таверна «Золотой якорь».\nПолное исцеление и снятие травм стоит {cost} золота.\nУ вас: {gold} золота."
+    text: "Таверна «Золотой якорь».\nСнять комнату (через 3 часа все травмы пройдут) — {cost} золота.\nУ вас: {gold} золота."
     choices:
-      Heal: "Вылечиться"
+      RentRoom: "Снять комнату"
       LeaveTavern: "Уйти"
-  healed: "Вы отдохнули и полностью исцелились! Все травмы сняты."
+  room:
+    text: "Вы сняли комнату в таверне, что бы отдохнуть и привести себя в порядок. Через 3 часа все травмы пропадут."
+    leaveLabel: "Уйти"
+  roomConfirmLeave: "До исцеления от травм осталось {remaining}, вы уверены?"
+  roomLeaveYes: "Да"
+  roomLeaveNo: "Нет"
+  roomHealed: "Ваши травмы успешно излечены."
   notEnoughGold: "Недостаточно золота. Нужно {cost}, у вас {gold}."
-  alreadyFull: "Вы и так здоровы — незачем тратить золото."
   guild: "🏛 Гильдия приключенцев — здесь пока никого нет. Загляните позже."
   construction: "🏗 Стройка активно ведётся. Пока здесь нечего делать."
 
@@ -165,7 +170,7 @@ heroStats:
 
 battle:
   enter:
-    text: "⚔ {monster}\nРаса: {monsterRace} | ❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n🎯 Попадание: {mobHit} | 💨 Уворот: {monsterDodge}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor}\n🧪 Фляга: {flaskCharges}"
+    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n🎯 Попадание: {mobHit} | 💨 Уворот: {monsterDodge}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor}\n🧪 Фляга: {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
