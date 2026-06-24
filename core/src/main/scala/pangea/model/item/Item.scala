@@ -17,6 +17,7 @@ case class Item(
   armor: Long,
   defence: Long,
   evasion: Long,
+  hp: Long = 0, // обязательная прибавка к максимуму HP (доспех)
   flaskEffect: Option[FlaskEffect] = None,
   charges:     Option[Int]         = None,
   maxCharges:  Option[Int]         = None,
@@ -44,11 +45,13 @@ case class Item(
   def withDefence(defence: Long): Item = copy(defence = defence)
 
   def withEvasion(evasion: Long): Item = copy(evasion = evasion)
+
+  def withHp(hp: Long): Item = copy(hp = hp)
 }
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, None, None, None)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

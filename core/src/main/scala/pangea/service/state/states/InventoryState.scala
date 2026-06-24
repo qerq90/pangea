@@ -189,7 +189,8 @@ object InventoryState {
       Option.when(item.concentration > 0)(s"Концентрация: +${item.concentration}"),
       Option.when(item.armor > 0)(s"Броня: +${item.armor}"),
       Option.when(item.defence > 0)(s"Защита: +${item.defence}"),
-      Option.when(item.evasion > 0)(s"Уклонение: +${item.evasion}")
+      Option.when(item.evasion > 0)(s"Уклонение: +${item.evasion}"),
+      Option.when(item.hp > 0)(s"HP: +${item.hp}")
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
     val goldStr  = gold.fold("")(g => s" | 💰 $g")

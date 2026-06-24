@@ -80,7 +80,7 @@ case class Hero(
   def effectiveMaxHp(nowMs: Long): Long = {
     val p    = combinedPenalties(nowMs)
     val base = baseStats.vit * 24L
-    (base * race.factor.hpFactor * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L)
+    (base * race.factor.hpFactor * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L) + equipment.allHp
   }
 
   def traumaRemainingText(nowMs: Long): Option[String] =

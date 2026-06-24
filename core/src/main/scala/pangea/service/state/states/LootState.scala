@@ -125,7 +125,8 @@ case class LootState(
         Option.when(item.concentration > 0)(s"Концентрация +${item.concentration}"),
         Option.when(item.armor > 0)(s"Броня +${item.armor}"),
         Option.when(item.defence > 0)(s"Защита +${item.defence}"),
-        Option.when(item.evasion > 0)(s"Уклонение +${item.evasion}")
+        Option.when(item.evasion > 0)(s"Уклонение +${item.evasion}"),
+        Option.when(item.hp > 0)(s"HP +${item.hp}")
       ).flatten
       val tail = if (stats.nonEmpty) " — " + stats.mkString(", ") else ""
       s"🎁 ${item.name} [${item.rarity}] Ур.${item.lvl}$tail"

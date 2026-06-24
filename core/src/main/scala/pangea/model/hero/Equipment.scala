@@ -27,6 +27,13 @@ case class Equipment(
     gloves.armor + pants.armor + boots.armor + amulet.armor +
     firstRing.armor + secondRing.armor + belt.armor + flask.armor +
     weapon.armor + additionalWeapon.armor
+
+  // Суммарная прибавка к HP от экипировки (сейчас её даёт только нагрудник)
+  def allHp: Long =
+    helmet.hp + shoulderPads.hp + chestPlate.hp + bracelets.hp +
+    gloves.hp + pants.hp + boots.hp + amulet.hp +
+    firstRing.hp + secondRing.hp + belt.hp + flask.hp +
+    weapon.hp + additionalWeapon.hp
 }
 
 object Equipment {

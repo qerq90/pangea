@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.Rarity
+import pangea.model.item.{ItemType, Rarity}
 import zio.test._
 
 object ItemGeneratorSpec extends ZIOSpecDefault {
@@ -42,6 +42,32 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       val low  = ItemGenerator.rarityForLevel(1,   Rng(42L))._1
       val high = ItemGenerator.rarityForLevel(150, Rng(42L))._1
       assertTrue(low != high)
+    },
+
+    test("оружие всегда получает обязательную атаку (>0)") {
+      val weapons = (1L to 500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
+        .filter(_.itemType == ItemType.Weapon)
+      assertTrue(weapons.nonEmpty) && assertTrue(weapons.forall(_.attack > 0L))
+    },
+
+    test("нагрудник даёт обязательный HP ≈ lvl×(12+R1)±10%") {
+      val lvl  = 10L
+      val base = lvl * (12.0 + Rarity.Green.factorR1) // R1 = 0.2 → 122
+      val lo   = (base * 0.9).toLong
+      val hi   = (base * 1.1).toLong + 1
+      val chests = (1L to 800L)
+        .map(s => ItemGenerator.createItemAtLevel(lvl, Rarity.Green, Rng(s))._1)
+        .filter(_.itemType == ItemType.ChestPlate)
+      assertTrue(chests.nonEmpty) &&
+      assertTrue(chests.forall(c => c.hp >= lo && c.hp <= hi))
+    },
+
+    test("HP-прибавку получает только нагрудник, остальные hp = 0") {
+      val items = (1L to 500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Blue, Rng(s))._1)
+      assertTrue(items.filter(_.itemType != ItemType.ChestPlate).forall(_.hp == 0L)) &&
+      assertTrue(items.filter(_.itemType == ItemType.ChestPlate).forall(_.hp > 0L))
     }
   )
 }

@@ -15,10 +15,27 @@ object ItemGenerator {
     (scaled, next)
   }
 
-  private def modifyParameter(param: Double, rng: Rng): (Long, Rng) = {
-    val (pct, next)  = rng.between(-10L, 11L)
-    val percentValue = (param / 100.0) * pct
-    ((param + percentValue).toLong, next)
+  private def modifyParameter(param: Double, rng: Rng): (Long, Rng) = modifySpread(param, rng, 10L)
+
+  // param ± spread% (равномерный разброс)
+  private def modifySpread(param: Double, rng: Rng, spread: Long): (Long, Rng) = {
+    val (pct, next) = rng.between(-spread, spread + 1L)
+    ((param + param / 100.0 * pct).toLong, next)
+  }
+
+  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(5+R1) ±20%;
+  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R1) ±10%. R1 = rarity.factorR1.
+  private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
+    val r1 = item.rarity.factorR1
+    item.itemType match {
+      case ItemType.Weapon =>
+        val (bonus, next) = modifySpread(item.lvl * (5.0 + r1), rng, 20L)
+        (item.withAttack(item.attack + bonus), next)
+      case ItemType.ChestPlate =>
+        val (bonus, next) = modifySpread(item.lvl * (12.0 + r1), rng, 10L)
+        (item.withHp(item.hp + bonus), next)
+      case _ => (item, rng)
+    }
   }
 
   @tailrec
@@ -91,8 +108,9 @@ object ItemGenerator {
           armor = 0, defence = 0, evasion = evasion), rng3c)
       }
 
-    val (withExtras, rng5)   = updateExtraParams(numberOfExtraParams, item, rng4)
-    val (name, rng6)         = ItemNameGenerator.generate(withExtras.itemType, rarity, rng5)
-    (withExtras.withName(name), rng6)
+    val (withExtras, rng5)     = updateExtraParams(numberOfExtraParams, item, rng4)
+    val (withMandatory, rng5b) = applyMandatory(withExtras, rng5)
+    val (name, rng6)           = ItemNameGenerator.generate(withMandatory.itemType, rarity, rng5b)
+    (withMandatory.withName(name), rng6)
   }
 }
