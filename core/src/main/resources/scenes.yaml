@@ -140,7 +140,7 @@ merchant:
 
 dungeon:
   enter:
-    text: "Вы в великом лабиринте. Уровень: {level}"
+    text: "Великий лабиринт. Уровень: {level}"
     choices:
       FindEvent: "Исследовать уровень"
       GoDarker: "Двигаться к тьме"

@@ -22,7 +22,7 @@ object LootStateSpec extends ZIOSpecDefault {
          attack = 0, accuracy = 0, concentration = 0, armor = 7, defence = 1, evasion = 0)
 
   private def trophy =
-    Item(-1L, "«Голова» (Человек) ур-5", 5L, Rarity.Gray, ItemType.Trophy,
+    Item(-1L, "Голова (Человек)", 5L, Rarity.Gray, ItemType.Trophy,
          attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
          race = Some("Human"))
 
