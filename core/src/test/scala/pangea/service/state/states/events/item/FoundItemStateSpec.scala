@@ -58,7 +58,7 @@ object FoundItemStateSpec extends ZIOSpecDefault {
         result              <- state.action(testUser, tap("TakeItem"), renderer)
         screens             <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(screens.exists(_.text.contains("нет места")))
+              assertTrue(screens.exists(_.text.contains("Сумка странника переполнена")))
     },
 
     test("DontTakeItem → отказывается от предмета, переходит в Dungeon") {

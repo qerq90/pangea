@@ -1,6 +1,8 @@
 common:
   prev: "◀ Пред."
   next: "След. ▶"
+  freeSlots: "👝 Свободных слотов в сумке: {free}/{max}"
+  inventoryFull: "❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места."
 
 registration:
   welcome:
@@ -147,6 +149,7 @@ innkeeper:
 merchant:
   richelieu:
     header: "Торговец Ришелье раскладывает товар:"
+  soldOut: "Торговец Ришелье на данный момент занят подготовкой новой партии, однако вы всегда можете продать ему ненужное снаряжение."
   buyLabel: "Купить {n}"
   boughtLine: "{n}) ✅ {name} — куплено"
   refreshLabel: "🔄 Обновить товар"
@@ -159,7 +162,6 @@ merchant:
   confirmNo: "Нет"
   bought: "Вы купили предмет {name}."
   notEnoughGold: "Ага конечно, как будет достаточно звонких монет тогда и продам."
-  inventoryFull: "В инвентаре нет места для покупки."
   refreshCooldown: "Ришелье уже недавно обновлял товар. Загляните примерно через {mins} мин."
   sellHeader: "Продажа ({page}/{total}) | 💰 {gold}"
   sellEmpty: "У вас нет вещей на продажу."
@@ -197,7 +199,6 @@ equipment:
     color: "negative"
   unequipped: "{name} снят и возвращён в инвентарь."
   slotEmpty: "Слот уже пуст."
-  inventoryFull: "Инвентарь полон — невозможно снять предмет."
 
 heroStats:
   inventory: "Инвентарь"
@@ -275,8 +276,6 @@ foundItem:
         label: "Оставить"
         color: "negative"
   taken: "Вы получили {name}"
-  cantTake: "Вы не смогли забрать {name}, вы уходите ни с чем..."
-  inventoryFull: "В инвентаре нет места"
   left: "Вы уходите, так и не забрав найденный предмет"
 
 loot:
@@ -285,7 +284,6 @@ loot:
   claimed: "Вы забираете добычу:"
   left: "Вы оставляете предметы и идёте дальше."
   gold: "💰 Вы нашли {amount} золота"
-  itemLost: "🎁 {name} — Инвентарь переполнен"
   takeLabel: "Забрать"
   leaveLabel:
     label: "Оставить"

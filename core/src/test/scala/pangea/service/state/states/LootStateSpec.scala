@@ -80,14 +80,14 @@ object LootStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Вы забираете добычу")))
     },
 
-    test("Take с переполненным инвентарём → предмет теряется, сообщение «Инвентарь переполнен»") {
+    test("Take с переполненным инвентарём → предмет теряется, сообщение про переполненную сумку") {
       for {
         t <- makeState(LootData(items = List(gear("Шлем")), golds = Nil), canAdd = false)
         (state, renderer, _, invRepo) = t
         _       <- state.action(testUser, tap("Take"), renderer)
         screens <- renderer.sentScreens
       } yield assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(screens.exists(_.text.contains("Инвентарь переполнен")))
+              assertTrue(screens.exists(_.text.contains("Сумка странника переполнена")))
     },
 
     test("Leave → предметы не кладутся, золото не трогается, сообщение «оставляете», уход в Dungeon") {

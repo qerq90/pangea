@@ -13,7 +13,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.LootState.LootData
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -80,22 +80,24 @@ case class LootState(
       hero <- getHero(user)
       loot <- readLoot(user)
 
-      itemLines <- ZIO.foreach(loot.items) { item =>
-                     for {
-                       persisted <- itemRepository.persist(hero.id, item)
-                       added     <- inventoryRepository.addItem(hero.id, persisted).as(true)
-                                      .catchAll(_ => ZIO.succeed(false))
-                     } yield
-                       if (added) itemLine(persisted)
-                       else content.format("loot.itemLost", "name" -> persisted.name)
-                   }
+      results <- ZIO.foreach(loot.items) { item =>
+                   for {
+                     persisted <- itemRepository.persist(hero.id, item)
+                     added     <- inventoryRepository.addItem(hero.id, persisted).as(true)
+                                    .catchAll(_ => ZIO.succeed(false))
+                   } yield (persisted, added)
+                 }
 
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
              Json.obj("gold" -> loot.golds.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
 
-      text = if (itemLines.isEmpty) content.text("loot.empty")
-             else content.text("loot.claimed") + "\n\n" + itemLines.mkString("\n")
-      _ <- renderer.show(user, Screen(text, Nil))
+      takenLines = results.collect { case (item, true) => itemLine(item) }
+      anyLost    = results.exists { case (_, added) => !added }
+      slots     <- InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id)
+      taken      = if (takenLines.isEmpty) content.text("loot.empty")
+                   else content.text("loot.claimed") + "\n\n" + takenLines.mkString("\n")
+      full       = if (anyLost) "\n\n" + content.text("common.inventoryFull") else ""
+      _ <- renderer.show(user, Screen(taken + full + "\n\n" + slots, Nil))
     } yield StateType.Dungeon
 
   // «Оставить»: предметы выбрасываются (золото уже забрано в enter).

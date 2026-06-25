@@ -14,7 +14,7 @@ import pangea.model.item.Item
 class InventoryDaoLive(xa: Transactor[Task]) extends InventoryDao {
 
   override def create(heroId: HeroId): Task[Unit] =
-    sql"insert into inventories(hero_id, max_items, items) values($heroId, 30, ${Items(List.empty[Item])})".update.run
+    sql"insert into inventories(hero_id, max_items, items) values($heroId, ${Inventory.DefaultCapacity}, ${Items(List.empty[Item])})".update.run
       .transact(xa)
       .unit
 

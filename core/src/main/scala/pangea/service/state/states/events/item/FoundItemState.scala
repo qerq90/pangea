@@ -15,7 +15,7 @@ import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState
 import pangea.service.state.states.events.item.FoundItemState.FoundItemData
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 case class FoundItemState(
@@ -81,15 +81,15 @@ case class FoundItemState(
       added <- inventoryRepository
         .addItem(hero.id, item)
         .as(true)
-        .tapSomeError { case InventoryRepoError.NoMorePlaceForItems =>
-          renderer.show(user, Screen(content.text("foundItem.inventoryFull"), Nil))
-        }
         .catchAll(_ => ZIO.succeed(false))
       _ <- journal.append(GameEvent(user.userId,
               if (added) "item_taken" else "item_cant_take",
               Json.obj("name" -> item.name.asJson)))
-      _ <- ZIO.when(added)(renderer.show(user, Screen(content.format("foundItem.taken",    "name" -> item.name), Nil)))
-      _ <- ZIO.when(!added)(renderer.show(user, Screen(content.format("foundItem.cantTake", "name" -> item.name), Nil)))
+      _ <- if (added)
+             InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id).flatMap(slots =>
+               renderer.show(user, Screen(content.format("foundItem.taken", "name" -> item.name) + "\n" + slots, Nil)))
+           else
+             renderer.show(user, Screen(content.text("common.inventoryFull"), Nil))
     } yield StateType.Dungeon
 
   private def dontTakeItem(user: User, renderer: Renderer): Task[StateType] =

@@ -18,9 +18,15 @@ case class Inventory(
     copy(items = items.copy(data = items.data.appended(item)))
 
   def withItems(items: List[Item]): Inventory = copy(items = Items(items))
+
+  /** Свободных слотов в сумке (не уходит ниже нуля). */
+  def freeSlots: Long = (maxItems - items.data.length).max(0L)
 }
 
 object Inventory {
+  /** Вместимость сумки по умолчанию (слотов). */
+  val DefaultCapacity: Long = 20L
+
   case class Items(data: List[Item])
 
   implicit val encoderForItems: Encoder[Items] = deriveEncoder[Items]

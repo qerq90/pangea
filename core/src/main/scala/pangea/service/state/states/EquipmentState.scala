@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.EquipmentState.EquipmentPage
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 case class EquipmentState(
@@ -61,13 +61,14 @@ case class EquipmentState(
              renderer.show(user, Screen(content.text("equipment.slotEmpty"), Nil))
            else
              inventoryRepo.addItem(hero.id, item).foldZIO(
-               _ => renderer.show(user, Screen(content.text("equipment.inventoryFull"), Nil)),
+               _ => renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)),
                _ => {
                  val newEq    = slot.clear(hero.equipment)
                  val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
                  heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-                   renderer.show(user, Screen(
-                     content.format("equipment.unequipped", "name" -> item.name), Nil))
+                   InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
+                     renderer.show(user, Screen(
+                       content.format("equipment.unequipped", "name" -> item.name) + "\n" + slots, Nil)))
                }
              )
       hero2 <- getHero(user)

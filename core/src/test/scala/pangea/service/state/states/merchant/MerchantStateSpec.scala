@@ -122,7 +122,7 @@ object MerchantStateSpec extends ZIOSpecDefault {
     },
 
     test("Sell → показывает предмет и цену продажи; SellItem начисляет золото и убирает предмет") {
-      // green helmet lvl 5 → sellPrice = (5+5)*2*4 = 80
+      // green helmet lvl 5 → sellPrice = (5+5)*1.2*4 = 48
       val helmet = Item(7L, "Шлем", 5L, Rarity.Green, ItemType.Helmet,
         attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 1, evasion = 0)
       for {
@@ -132,9 +132,24 @@ object MerchantStateSpec extends ZIOSpecDefault {
         sellScr <- renderer.sentScreens.map(_.last)
         _       <- state.action(testUser, tap("SellItem"), renderer)
         hero    <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(sellScr.text.contains("80")) &&
+      } yield assertTrue(sellScr.text.contains("48")) &&
               assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(hero.exists(_.gold == 100L + 80L))
+              assertTrue(hero.exists(_.gold == 100L + 48L))
+    },
+
+    test("всё снаряжение куплено → сообщение «занят подготовкой новой партии», есть Продать/Назад") {
+      for {
+        t <- makeState(richHero)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        _       <- state.action(testUser, tapIdx("ConfirmBuy", 0), renderer)
+        _       <- state.action(testUser, tapIdx("ConfirmBuy", 1), renderer)
+        _       <- state.action(testUser, tapIdx("ConfirmBuy", 2), renderer)
+        screens <- renderer.sentScreens
+        ids      = screens.last.choices.map(_.id)
+      } yield assertTrue(screens.last.text.contains("занят подготовкой новой партии")) &&
+              assertTrue(!ids.contains("Buy")) &&
+              assertTrue(ids.contains("Sell") && ids.contains("Back"))
     },
 
     test("Back → переход в GlobalMap") {

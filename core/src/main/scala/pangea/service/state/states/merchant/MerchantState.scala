@@ -14,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -98,10 +98,11 @@ case class MerchantState(
                           val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
                           heroDao.updateGold(user.userId, hero.gold - mi.price) *>
                             heroDao.writeMerchantData(user.userId, newData.asJson) *>
-                            renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name), Nil)) *>
+                            InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
+                              renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil))) *>
                             showMenu(user, renderer)
                         } else
-                          renderer.show(user, Screen(content.text("merchant.inventoryFull"), Nil)) *> showMenu(user, renderer)
+                          renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showMenu(user, renderer)
                  } yield ()
              case _ => showMenu(user, renderer)
            }
@@ -170,7 +171,9 @@ case class MerchantState(
       if (mi.bought) content.format("merchant.boughtLine", "n" -> (i + 1).toString, "name" -> mi.item.name)
       else s"${i + 1}) ${itemDesc(mi.item)}\n💰 Цена: ${mi.price}"
     }
-    val text = content.text("merchant.richelieu.header") + "\n\n" + lines.mkString("\n\n")
+    val text =
+      if (data.items.nonEmpty && data.items.forall(_.bought)) content.text("merchant.soldOut")
+      else content.text("merchant.richelieu.header") + "\n\n" + lines.mkString("\n\n")
     val buyButtons = data.items.zipWithIndex.collect {
       case (mi, i) if !mi.bought =>
         content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
@@ -247,17 +250,17 @@ case class MerchantState(
     (rarity, next)
   }
 
-  // (lvl + 10) × 2 × R(редкость) ±20%
+  // (lvl + 20) × 4 × R(редкость) ±20%
   private def rollPrice(heroLvl: Long, rarity: Rarity, rng: Rng): (Long, Rng) = {
-    val base        = (heroLvl + 10) * 2 * rarity.factorR
+    val base        = (heroLvl + 20) * 4 * rarity.factorR
     val (pct, next) = rng.between(-20L, 21L)
     val price       = (base + base * pct / 100.0).toLong.max(1L)
     (price, next)
   }
 
-  // (lvl(снаряжения) + 5) × 2 × R(редкость)
+  // (lvl(снаряжения) + 5) × 1.2 × R(редкость) — продажа дешевле покупки
   private def sellPrice(item: Item): Long =
-    ((item.lvl + 5) * 2 * item.rarity.factorR).toLong.max(1L)
+    ((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L)
 
   private def inventoryItems(hero: Hero): Task[List[Item]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data)
