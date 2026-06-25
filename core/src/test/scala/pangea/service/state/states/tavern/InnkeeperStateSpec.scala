@@ -42,7 +42,7 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
         (state, _, _, renderer) = t
         _       <- state.enter(testUser, renderer)
         screens <- renderer.sentScreens
-      } yield assertTrue(screens.last.choices.map(_.id).toSet == Set("TurnInQuest", "BackFromInnkeeper"))
+      } yield assertTrue(screens.last.choices.map(_.id).toSet == Set("TurnInQuest", "OpenCharacter", "BackFromInnkeeper"))
     },
 
     test("TurnInQuest без активного задания → сообщение об отсутствии задания") {

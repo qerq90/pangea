@@ -3,6 +3,7 @@ common:
   next: "След. ▶"
   freeSlots: "👝 Свободных слотов в сумке: {free}/{max}"
   inventoryFull: "❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места."
+  character: "Персонаж"
 
 registration:
   welcome:
@@ -87,6 +88,7 @@ globalMap:
       Guild: "Гильдия Искателей"
       Construction: "Стройка"
       StreetMerchants: "Уличные торговцы"
+      OpenCharacter: "Персонаж"
       ReturnToDungeon: "В лабиринт"
   streetMerchants:
     text: "Уличные торговцы зазывают прохожих к своим лоткам."
@@ -105,6 +107,7 @@ tavern:
       RentRoom: "Снять комнату"
       QuestBoard: "Доска заданий"
       Innkeeper: "Трактирщик"
+      OpenCharacter: "Персонаж"
       LeaveTavern:
         label: "Уйти"
         color: "negative"
@@ -179,8 +182,7 @@ dungeon:
       GoDarker: "Двигаться к тьме"
       GoLighter: "Двигаться к свету"
       GoToCity: "В портал"
-      OpenInventory: "Инвентарь"
-      CharacterInfo: "Персонаж"
+      OpenCharacter: "Персонаж"
       Rest: "Отдых"
 
   darknessNotDefeated: "Тьма этого этажа ещё не повержена. Найдите и одолейте Отмеченного тьмой, чтобы спуститься глубже."

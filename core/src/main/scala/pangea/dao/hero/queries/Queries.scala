@@ -87,4 +87,10 @@ object Queries {
 
   def readQuestData(userId: UserId): Fragment =
     sql"select quest_data from $tableName where user_id = $userId"
+
+  def writeReturnState(userId: UserId, state: Option[StateType]): Fragment =
+    sql"update $tableName set return_state = $state where user_id = $userId"
+
+  def readReturnState(userId: UserId): Fragment =
+    sql"select return_state from $tableName where user_id = $userId"
 }

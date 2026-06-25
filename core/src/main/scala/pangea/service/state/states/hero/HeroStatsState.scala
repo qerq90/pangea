@@ -13,7 +13,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   private val branch = new Branch(
     routes = Map(
-      "Back"           -> Target.Goto(StateType.Dungeon),
+      "Back"           -> Target.Run { (user, _, _) => returnToCaller(user) },
       "OpenInventory"  -> Target.Goto(StateType.Inventory),
       "OpenEquipment"  -> Target.Goto(StateType.Equipment),
       "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
@@ -27,7 +27,16 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.HeroStats) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  // «Назад» возвращает в локацию-источник (`return_state`), поэтому в targetStates —
+  // все хабы, из которых можно открыть «Персонаж», плюс под-экраны инвентаря/снаряжения.
+  override def targetStates: Set[StateType] =
+    branch.gotoTargets ++ Set(
+      StateType.Dungeon, StateType.GlobalMap, StateType.Tavern,
+      StateType.Merchant, StateType.QuestBoard, StateType.Innkeeper)
+
+  // Куда вернуться из «Персонажа»: читаем return_state, по умолчанию — лабиринт.
+  private def returnToCaller(user: User): Task[StateType] =
+    heroDao.readReturnState(user.userId).map(_.getOrElse(StateType.Dungeon))
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

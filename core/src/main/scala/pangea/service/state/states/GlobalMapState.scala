@@ -5,7 +5,7 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -22,12 +22,13 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
       "StreetMerchants" -> Target.Run { (user, _, renderer) =>
                              renderer.show(user, content.screen("globalMap.streetMerchants")).as(StateType.GlobalMap) },
       "MerchantRichelieu" -> Target.Goto(StateType.Merchant),
-      "ReturnToCity"    -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }
+      "ReturnToCity"    -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) },
+      "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.GlobalMap) }
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

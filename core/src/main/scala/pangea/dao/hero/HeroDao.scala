@@ -40,6 +40,10 @@ trait HeroDao {
   // Durable quest board state (per-player; refreshes on its own timer)
   def writeQuestData(userId: UserId, data: Json): Task[Unit]
   def readQuestData(userId: UserId): Task[Option[Json]]
+
+  // Куда вернуться после «модального» экрана «Персонаж» (открывается из любой локации)
+  def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit]
+  def readReturnState(userId: UserId): Task[Option[StateType]]
 }
 
 object HeroDao {

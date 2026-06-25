@@ -14,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{InventoryFeedback, State, UserAction}
+import pangea.service.state.{CharacterMenu, InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -43,12 +43,13 @@ case class MerchantState(
       "SellNext"     -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
       "SellItem"     -> Target.Run { (u, _,  r) => doSell(u, r) },
       "BackFromSell" -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
+      "OpenCharacter"-> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
       "Back"         -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.Merchant) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.GlobalMap, StateType.Merchant)
+  override def targetStates: Set[StateType] = Set(StateType.GlobalMap, StateType.Merchant, StateType.HeroStats)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -179,9 +180,10 @@ case class MerchantState(
         content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
     }
     val choices = buyButtons ++ List(
-      content.choice("Refresh", "merchant.refreshLabel"),
-      content.choice("Sell",    "merchant.sellLabel"),
-      content.choice("Back",    "merchant.backLabel")
+      content.choice("Refresh",       "merchant.refreshLabel"),
+      content.choice("Sell",          "merchant.sellLabel"),
+      content.choice("OpenCharacter", "common.character"),
+      content.choice("Back",          "merchant.backLabel")
     )
     Screen(text, choices)
   }

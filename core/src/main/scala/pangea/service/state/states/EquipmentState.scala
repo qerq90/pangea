@@ -25,7 +25,7 @@ case class EquipmentState(
       "Prev"          -> Target.Run { (user, _, renderer) => navigate(user, renderer, -1) },
       "Next"          -> Target.Run { (user, _, renderer) => navigate(user, renderer, +1) },
       "Unequip"       -> Target.Run { (user, _, renderer) => unequip(user, renderer) },
-      "BackFromEquip" -> Target.Run { (user, _, _)        => ZIO.succeed(StateType.HeroStats) }
+      "BackFromEquip" -> Target.Goto(StateType.HeroStats)
     ),
     fallback = Target.Run { (user, _, renderer) => showCurrentSlot(user, renderer) }
   )

@@ -7,7 +7,7 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -32,12 +32,13 @@ case class TavernState(heroDao: HeroDao, content: SceneContent) extends State {
       "CancelLeaveRoom" -> Target.Run { (user, _, renderer) => showRoom(user, renderer).as(StateType.Tavern) },
       "QuestBoard"      -> Target.Goto(StateType.QuestBoard),
       "Innkeeper"       -> Target.Goto(StateType.Innkeeper),
+      "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Tavern) },
       "LeaveTavern"     -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Tavern) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
 
   // Вход в таверну: если комната уже снята — показываем комнату, иначе меню.
   override def enter(user: User, renderer: Renderer): Task[Unit] =

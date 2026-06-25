@@ -10,7 +10,7 @@ import pangea.model.quest.QuestData
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -27,12 +27,13 @@ case class InnkeeperState(
   private val branch = new Branch(
     routes = Map(
       "TurnInQuest"      -> Target.Run { (user, _, renderer) => turnInQuest(user, renderer) },
+      "OpenCharacter"    -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Innkeeper) },
       "BackFromInnkeeper"-> Target.Goto(StateType.Tavern)
     ),
     fallback = Target.Run { (user, _, renderer) => showMenu(user, renderer).as(StateType.Innkeeper) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = showMenu(user, renderer)
 
@@ -44,6 +45,7 @@ case class InnkeeperState(
       content.text("innkeeper.text"),
       List(
         content.choice("TurnInQuest",       "innkeeper.turnInLabel"),
+        content.choice("OpenCharacter",     "common.character"),
         content.choice("BackFromInnkeeper", "innkeeper.backLabel"))))
 
   // Сдать квест: забираем первый подходящий трофей, начисляем опыт, закрываем задание.

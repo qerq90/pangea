@@ -75,13 +75,13 @@ object InventoryStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.last.text.contains(sword.name))
     },
 
-    test("BackFromInventory → возврат в Dungeon") {
+    test("BackFromInventory → возврат в HeroStats") {
       for {
         quad                    <- makeState(baseHero, List(sword))
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
         result                  <- state.action(testUser, tap("BackFromInventory"), renderer)
-      } yield assertTrue(result == StateType.Dungeon)
+      } yield assertTrue(result == StateType.HeroStats)
     },
 
     test("Equip оружия в пустой слот → надет, удалён из инвентаря, atk обновлён") {

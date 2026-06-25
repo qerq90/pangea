@@ -18,7 +18,7 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("HeroStatsState")(
 
-    test("Back → переходит в Dungeon") {
+    test("Back без return_state → по умолчанию Dungeon") {
       for {
         renderer <- TestRenderer.make
         heroDao  <- TestHeroDao.make
@@ -26,6 +26,17 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
         state     = HeroStatsState(heroDao, content)
         result   <- state.action(testUser, tap("Back"), renderer)
       } yield assertTrue(result == StateType.Dungeon)
+    },
+
+    test("Back с return_state = Merchant → возврат к Ришелье") {
+      for {
+        renderer <- TestRenderer.make
+        heroDao  <- TestHeroDao.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HeroStatsState(heroDao, content)
+        _        <- heroDao.writeReturnState(userId, Some(StateType.Merchant))
+        result   <- state.action(testUser, tap("Back"), renderer)
+      } yield assertTrue(result == StateType.Merchant)
     },
 
     test("неизвестный ввод → перерисовывает статы, остаётся в HeroStats") {

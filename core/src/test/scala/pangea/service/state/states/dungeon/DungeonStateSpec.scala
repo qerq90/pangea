@@ -241,23 +241,15 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(screens.isEmpty)
     },
 
-    test("OpenInventory → переходит в Inventory без сообщений") {
+    test("OpenCharacter → переходит в HeroStats и запоминает Dungeon как return_state") {
       for {
-        quad                      <- makeState()
-        (state, _, renderer, _)    = quad
-        result                    <- state.action(testUser, tap("OpenInventory"), renderer)
-        screens                   <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Inventory) &&
-              assertTrue(screens.isEmpty)
-    },
-
-    test("CharacterInfo → переходит в HeroStats без сообщений") {
-      for {
-        quad                      <- makeState()
-        (state, _, renderer, _)    = quad
-        result                    <- state.action(testUser, tap("CharacterInfo"), renderer)
-        screens                   <- renderer.sentScreens
+        quad                            <- makeState()
+        (state, heroDao, renderer, _)    = quad
+        result                          <- state.action(testUser, tap("OpenCharacter"), renderer)
+        returnState                     <- heroDao.readReturnState(userId)
+        screens                         <- renderer.sentScreens
       } yield assertTrue(result == StateType.HeroStats) &&
+              assertTrue(returnState.contains(StateType.Dungeon)) &&
               assertTrue(screens.isEmpty)
     },
 

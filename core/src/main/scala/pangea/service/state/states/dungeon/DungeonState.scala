@@ -9,7 +9,7 @@ import pangea.model.battle.ActiveBattle
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -21,14 +21,13 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       "GoDarker"      -> Target.Run { (user, _, renderer) => changeDungeonLevel(user, renderer, +1) },
       "GoLighter"     -> Target.Run { (user, _, renderer) => changeDungeonLevel(user, renderer, -1) },
       "GoToCity"       -> Target.Goto(StateType.GlobalMap),
-      "OpenInventory"  -> Target.Goto(StateType.Inventory),
-      "CharacterInfo"  -> Target.Goto(StateType.HeroStats),
+      "OpenCharacter"  -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Dungeon) },
       "Rest"           -> Target.Goto(StateType.Rest)
     ),
     fallback = Target.Goto(StateType.Dungeon)
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

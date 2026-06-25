@@ -23,7 +23,7 @@ case class InventoryState(
 
   private val branch = new Branch(
     routes = Map(
-      "BackFromInventory" -> Target.Run { (user, _, _)        => ZIO.succeed(StateType.Dungeon) },
+      "BackFromInventory" -> Target.Goto(StateType.HeroStats),
       "Next"              -> Target.Run { (user, _, renderer) => navigate(user, renderer, +1) },
       "Prev"              -> Target.Run { (user, _, renderer) => navigate(user, renderer, -1) },
       "Equip"             -> Target.Run { (user, _, renderer) => equipCurrent(user, renderer) },
@@ -32,7 +32,7 @@ case class InventoryState(
     fallback = Target.Run { (user, _, renderer) => showCurrentPage(user, renderer) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.Inventory)
+  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
