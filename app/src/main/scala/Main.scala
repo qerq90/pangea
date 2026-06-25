@@ -6,12 +6,14 @@ import pangea.dao.hero.HeroDao
 import pangea.dao.inventory.InventoryDao
 import pangea.dao.item.ItemDao
 import pangea.dao.journal.JournalLive
+import pangea.dao.schedule.ScheduledTaskDao
 import pangea.dao.user.UserDao
 import pangea.engine.{Journal, Players, SceneContent}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.service.schedule.{Scheduler, SchedulerPoller}
 import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
 import pangea.service.sender.vk.VkPlayers
@@ -27,7 +29,7 @@ object Main extends ZIOAppDefault {
   override val bootstrap: ZLayer[ZIOAppArgs, Nothing, Unit] =
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j
 
-  private type Env = Server
+  private type Env = Server with SchedulerPoller
 
   private val env =
     ZLayer.make[Env](
@@ -40,6 +42,7 @@ object Main extends ZIOAppDefault {
       UserDao.live,
       InventoryDao.live,
       ItemDao.live,
+      ScheduledTaskDao.live,
       ItemRepository.live,
       JournalLive.live,
       SceneContent.live,
@@ -48,12 +51,18 @@ object Main extends ZIOAppDefault {
       UserRepository.live,
       InventoryRepository.live,
       StateHandler.live,
+      Scheduler.live,
+      SchedulerPoller.live,
       ServerConfig.live,
       Server.live
     )
 
   private val program =
-    ZIO.serviceWithZIO[Server](_.run())
+    for {
+      poller <- ZIO.service[SchedulerPoller]
+      _      <- poller.start.forkDaemon
+      _      <- ZIO.serviceWithZIO[Server](_.run())
+    } yield ()
 
   override def run: ZIO[ZIOAppArgs with Scope, Any, Any] =
     program.provideLayer(env)

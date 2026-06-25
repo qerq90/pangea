@@ -10,6 +10,12 @@ import zio.Task
 
 class UserDaoLive(xa: Transactor[Task]) extends UserDao {
 
+  override def getUserById(userId: UserId): Task[Option[User]] =
+    sql"select id, vk_id, telegram_id from users where id = ${userId.value}"
+      .query[User]
+      .option
+      .transact(xa)
+
   override def getUserByVkId(vkId: VkId): Task[Option[User]] =
     sql"select id, vk_id, telegram_id from users where vk_id = ${vkId.value}"
       .query[User]

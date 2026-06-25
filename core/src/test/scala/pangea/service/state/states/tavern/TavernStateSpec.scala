@@ -1,10 +1,11 @@
 package pangea.service.state.states.tavern
 
 import pangea.engine.SceneContent
+import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestRenderer, TestScheduler}
 import zio.ZIO
 import zio.test._
 
@@ -18,10 +19,11 @@ object TavernStateSpec extends ZIOSpecDefault {
 
   private def makeState(hero: pangea.model.hero.Hero) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, hero)
-      renderer <- TestRenderer.make
-      content  <- ZIO.attempt(SceneContent.load())
-    } yield (TavernState(heroDao, content), heroDao, renderer)
+      heroDao   <- TestHeroDao.withHero(userId, hero)
+      renderer  <- TestRenderer.make
+      scheduler <- TestScheduler.make
+      content   <- ZIO.attempt(SceneContent.load())
+    } yield (TavernState(heroDao, scheduler, content), heroDao, renderer)
 
   private val baseHero   = TestFixtures.hero(userId, state = StateType.Tavern)
   private val richHero   = baseHero.copy(gold = 500L)
@@ -126,6 +128,47 @@ object TavernStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Tavern) &&
               assertTrue(updated.exists(_.traumaUntil.isEmpty)) &&
               assertTrue(screens.exists(_.text.contains("излечены")))
+    },
+
+    test("RentRoom → планирует push-исцеление TavernHeal на now+3ч, expectedState=Tavern") {
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, richHero)
+        renderer  <- TestRenderer.make
+        scheduler <- TestScheduler.make
+        content   <- ZIO.attempt(SceneContent.load())
+        state      = TavernState(heroDao, scheduler, content)
+        _         <- state.action(testUser, tap("RentRoom"), renderer)
+        scheduled <- scheduler.scheduled
+      } yield assertTrue(scheduled.size == 1) &&
+              assertTrue(scheduled.head.kind == TaskKind.TavernHeal) &&
+              assertTrue(scheduled.head.expectedState == StateType.Tavern)
+    },
+
+    test("ConfirmLeaveRoom → снимает отложенный TavernHeal") {
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, traumaHero)
+        renderer  <- TestRenderer.make
+        scheduler <- TestScheduler.make
+        content   <- ZIO.attempt(SceneContent.load())
+        state      = TavernState(heroDao, scheduler, content)
+        _         <- state.action(testUser, tap("RentRoom"), renderer)
+        _         <- state.action(testUser, tap("ConfirmLeaveRoom"), renderer)
+        cancelled <- scheduler.cancelled
+      } yield assertTrue(cancelled.contains(userId -> TaskKind.TavernHeal))
+    },
+
+    test("LeaveRoom спустя 3 часа → снимает отложенный TavernHeal") {
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, traumaHero)
+        renderer  <- TestRenderer.make
+        scheduler <- TestScheduler.make
+        content   <- ZIO.attempt(SceneContent.load())
+        state      = TavernState(heroDao, scheduler, content)
+        _         <- state.action(testUser, tap("RentRoom"), renderer)
+        _         <- TestClock.adjust(Duration.ofHours(3).plusSeconds(1))
+        _         <- state.action(testUser, tap("LeaveRoom"), renderer)
+        cancelled <- scheduler.cancelled
+      } yield assertTrue(cancelled.contains(userId -> TaskKind.TavernHeal))
     }
   )
 }

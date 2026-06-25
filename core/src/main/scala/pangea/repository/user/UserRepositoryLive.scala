@@ -23,6 +23,9 @@ case class UserRepositoryLive(userDao: UserDao) extends UserRepository {
       .insertUser(newTelegramUser(telegramId))
       .map(userId => User(userId, nullVkId, telegramId))
 
+  override def getUserById(userId: UserId): Task[Option[User]] =
+    userDao.getUserById(userId)
+
   override def getUserByVkId(vkId: VkId): Task[Option[User]] =
     userDao.getUserByVkId(vkId)
 

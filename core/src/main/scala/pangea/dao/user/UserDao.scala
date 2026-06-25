@@ -6,6 +6,7 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import zio.{Task, ZLayer}
 
 trait UserDao {
+  def getUserById(userId: UserId): Task[Option[User]]
   def getUserByVkId(vkId: VkId): Task[Option[User]]
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
   def insertUser(user: User): Task[UserId]

@@ -5,8 +5,10 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
+import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.service.schedule.Scheduler
 import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -18,11 +20,15 @@ import java.util.concurrent.TimeUnit
  * хранится в `scene_data` (транзиентно) — пока она снята, меню заменяется экраном
  * комнаты.
  */
-case class TavernState(heroDao: HeroDao, content: SceneContent) extends State {
+case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
 
   // Снятая комната исцеляет травмы спустя 3 часа реального времени.
   private val RoomDurationMs = 3L * 60L * 60L * 1000L
   private val RoomStartKey   = "tavernRoomStartedAt"
+
+  // payload синтетического пробуждения комнаты: маршрутизируется `Branch` в
+  // `LeaveRoom`, который по истечении 3 часов исцеляет травмы.
+  private val HealAction = """{"action":"LeaveRoom"}"""
 
   private val branch = new Branch(
     routes = Map(
@@ -69,6 +75,10 @@ case class TavernState(heroDao: HeroDao, content: SceneContent) extends State {
            else
              heroDao.updateGold(user.userId, hero.gold - cost) *>
                heroDao.writeSceneData(user.userId, Json.obj(RoomStartKey -> now.asJson)) *>
+               // push-исцеление: поллер сам выполнит LeaveRoom через 3 часа, если
+               // игрок всё ещё в таверне; иначе исцеление забирается вручную при
+               // возврате (scene_data сохраняется). Перепланирование снимает прежнее.
+               scheduler.schedule(user.userId, now + RoomDurationMs, TaskKind.TavernHeal, StateType.Tavern, HealAction) *>
                showRoom(user, renderer)
     } yield StateType.Tavern
 
@@ -92,6 +102,7 @@ case class TavernState(heroDao: HeroDao, content: SceneContent) extends State {
                heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor)) *>
                  heroDao.updateTrauma(user.userId, None, Nil) *>
                  heroDao.writeSceneData(user.userId, Json.Null) *>
+                 scheduler.cancel(user.userId, TaskKind.TavernHeal) *>
                  renderer.show(user, Screen(content.text("tavern.roomHealed"), Nil)) *>
                  enter(user, renderer)
              case Some(start) =>
@@ -107,6 +118,7 @@ case class TavernState(heroDao: HeroDao, content: SceneContent) extends State {
   // Да: прерываем без исцеления — чистим комнату и возвращаемся в меню таверны.
   private def confirmLeaveRoom(user: User, renderer: Renderer): Task[StateType] =
     heroDao.writeSceneData(user.userId, Json.Null) *>
+      scheduler.cancel(user.userId, TaskKind.TavernHeal) *>
       enter(user, renderer).as(StateType.Tavern)
 
   private def roomStartedAt(user: User): Task[Option[Long]] =

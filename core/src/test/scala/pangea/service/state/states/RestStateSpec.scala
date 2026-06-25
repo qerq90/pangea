@@ -3,10 +3,11 @@ package pangea.service.state.states
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
+import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestRenderer, TestScheduler}
 import zio.ZIO
 import zio.test._
 import zio.test.TestClock
@@ -19,10 +20,11 @@ object RestStateSpec extends ZIOSpecDefault {
 
   private def makeState(hero: pangea.model.hero.Hero) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, hero)
-      renderer <- TestRenderer.make
-      content  <- ZIO.attempt(SceneContent.load())
-    } yield (RestState(heroDao, content), heroDao, renderer)
+      heroDao   <- TestHeroDao.withHero(userId, hero)
+      renderer  <- TestRenderer.make
+      scheduler <- TestScheduler.make
+      content   <- ZIO.attempt(SceneContent.load())
+    } yield (RestState(heroDao, scheduler, content), heroDao, renderer)
 
   override def spec = suite("RestState")(
 
@@ -88,10 +90,11 @@ object RestStateSpec extends ZIOSpecDefault {
       for {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
         renderer <- TestRenderer.make
+        scheduler <- TestScheduler.make
         content  <- ZIO.attempt(SceneContent.load())
         // simulate what DeathState writes before transitioning to Rest
         _        <- heroDao.writeSceneData(userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
-        state     = RestState(heroDao, content)
+        state     = RestState(heroDao, scheduler, content)
         _        <- state.enter(testUser, renderer)
         // 30 seconds not enough for post-death recovery
         _        <- TestClock.adjust(java.time.Duration.ofSeconds(31))
@@ -101,6 +104,35 @@ object RestStateSpec extends ZIOSpecDefault {
         resultDone  <- state.action(testUser, anyAction, renderer)
       } yield assertTrue(resultEarly == StateType.Rest) &&
               assertTrue(resultDone  == StateType.Dungeon)
+    },
+
+    test("enter → планирует push-пробуждение Revive на now+duration, expectedState=Rest") {
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        renderer  <- TestRenderer.make
+        scheduler <- TestScheduler.make
+        content   <- ZIO.attempt(SceneContent.load())
+        state      = RestState(heroDao, scheduler, content)
+        _         <- state.enter(testUser, renderer)
+        scheduled <- scheduler.scheduled
+      } yield assertTrue(scheduled.size == 1) &&
+              assertTrue(scheduled.head.kind == TaskKind.Revive) &&
+              assertTrue(scheduled.head.expectedState == StateType.Rest)
+    },
+
+    test("пробуждение снимает отложенный Revive") {
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        renderer  <- TestRenderer.make
+        scheduler <- TestScheduler.make
+        content   <- ZIO.attempt(SceneContent.load())
+        state      = RestState(heroDao, scheduler, content)
+        _         <- state.enter(testUser, renderer)
+        _         <- TestClock.adjust(java.time.Duration.ofSeconds(31))
+        result    <- state.action(testUser, anyAction, renderer)
+        cancelled <- scheduler.cancelled
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(cancelled.contains(userId -> TaskKind.Revive))
     }
   )
 }
