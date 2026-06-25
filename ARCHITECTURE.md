@@ -694,7 +694,7 @@ restDurationMs   = deathTimeMinutes × 60 000
 
 - Модель: `MerchantData(items: List[MerchantItem], refreshedAt: Long)`, `MerchantItem(item, price, bought)`.
 - Генерация (при первом входе или обновлении): каждый предмет катается **ровно на уровень героя без разброса** (`ItemGenerator.createItemAtLevel`, в отличие от `createItem` с разбросом −0..6).
-- Редкость: **Белая 20% · Зелёная 30% · Синяя 30% · Фиолетовая 20%**.
+- Редкость: **Белая 20% · Зелёная 50% · Синяя 30%**.
 - Цена покупки: `(lvl_героя + 20) × 4 × R(редкость) ±20%`, где `R = Rarity.factorR` (White 3, Green 4, Blue 6, Purple 8). `±20%` фиксируется при генерации и хранится в стоке (показанная цена = списываемая).
 
 ### Кнопки (6)

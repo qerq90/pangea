@@ -241,14 +241,13 @@ case class MerchantState(
       (acc :+ MerchantItem(item, price, bought = false), r3)
     }._1
 
-  // Белая 20% · Зелёная 30% · Синяя 30% · Фиолетовая 20%
+  // Белая 20% · Зелёная 50% · Синяя 30%
   private def rollRarity(rng: Rng): (Rarity, Rng) = {
     val (roll, next) = rng.between(0L, 100L)
     val rarity =
       if (roll < 20) Rarity.White
-      else if (roll < 50) Rarity.Green
-      else if (roll < 80) Rarity.Blue
-      else Rarity.Purple
+      else if (roll < 70) Rarity.Green
+      else Rarity.Blue
     (rarity, next)
   }
 
