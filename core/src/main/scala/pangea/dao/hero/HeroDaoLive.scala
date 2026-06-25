@@ -119,4 +119,10 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def readMerchantData(userId: UserId): Task[Option[Json]] =
     Queries.readMerchantData(userId).query[Option[Json]].unique.transact(xa)
 
+  override def writeQuestData(userId: UserId, data: Json): Task[Unit] =
+    Queries.writeQuestData(userId, data).update.run.transact(xa).unit
+
+  override def readQuestData(userId: UserId): Task[Option[Json]] =
+    Queries.readQuestData(userId).query[Option[Json]].unique.transact(xa)
+
 }

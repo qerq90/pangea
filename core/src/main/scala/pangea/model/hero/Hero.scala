@@ -127,9 +127,27 @@ case class Hero(
 
   def getNeededExp: Long = Hero.neededExpForLevel(lvl)
   def getLvlExp: Long    = exp
+
+  /** Начисление опыта с прокачкой уровней по лестнице Фибоначчи. Возвращает героя
+   *  с обновлёнными `exp`/`lvl`/`upgradePoints` (4 очка характеристик за уровень,
+   *  кап на `Hero.MaxLevel`). Единственное место расчёта прокачки. */
+  def gainExp(amount: Long): Hero = {
+    var e = exp + amount
+    var l = lvl
+    var p = upgradePoints
+    while (e >= Hero.neededExpForLevel(l) && l < Hero.MaxLevel) {
+      e -= Hero.neededExpForLevel(l)
+      l += 1L
+      p += Hero.PointsPerLevel
+    }
+    copy(exp = e, lvl = l, upgradePoints = p)
+  }
 }
 
 object Hero {
+  val MaxLevel: Long       = 150L
+  val PointsPerLevel: Long = 4L
+
   /** Порог опыта для уровня по Фибоначчи: 100, 200, 300, 500, 800, 1300, …
    *  (= 100 × fib(lvl), где fib(1)=1, fib(2)=2, fib(n)=fib(n-1)+fib(n-2)). */
   def neededExpForLevel(lvl: Long): Long = fib(lvl) * 100L

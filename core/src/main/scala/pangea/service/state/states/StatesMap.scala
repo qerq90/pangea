@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Inventory, Loot, Merchant, Registration, Rest}
+import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, HeroStats, Innkeeper, Inventory, Loot, Merchant, QuestBoard, Registration, Rest, Tavern}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.State
@@ -13,6 +13,7 @@ import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.registration.RegistrationState
 import pangea.service.state.states.hero.HeroStatsState
+import pangea.service.state.states.tavern.{InnkeeperState, QuestBoardState, TavernState}
 import zio.{ZIO, ZLayer}
 
 case class StatesMap(states: Map[StateType, State])
@@ -43,7 +44,10 @@ object StatesMap {
           Inventory    -> InventoryState(heroDao, inventoryRepo, content),
           Equipment    -> EquipmentState(heroDao, inventoryRepo, content),
           Loot         -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
-          Merchant     -> MerchantState(heroDao, inventoryRepo, itemRepo, content)
+          Merchant     -> MerchantState(heroDao, inventoryRepo, itemRepo, content),
+          Tavern       -> TavernState(heroDao, content),
+          QuestBoard   -> QuestBoardState(heroDao, content),
+          Innkeeper    -> InnkeeperState(heroDao, inventoryRepo, content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)

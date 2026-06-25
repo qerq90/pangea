@@ -36,6 +36,10 @@ trait HeroDao {
   // Durable merchant stock (fixed until refresh; survives scene transitions)
   def writeMerchantData(userId: UserId, data: Json): Task[Unit]
   def readMerchantData(userId: UserId): Task[Option[Json]]
+
+  // Durable quest board state (per-player; refreshes on its own timer)
+  def writeQuestData(userId: UserId, data: Json): Task[Unit]
+  def readQuestData(userId: UserId): Task[Option[Json]]
 }
 
 object HeroDao {

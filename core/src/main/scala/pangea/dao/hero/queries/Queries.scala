@@ -81,4 +81,10 @@ object Queries {
 
   def readMerchantData(userId: UserId): Fragment =
     sql"select merchant_data from $tableName where user_id = $userId"
+
+  def writeQuestData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set quest_data = $data where user_id = $userId"
+
+  def readQuestData(userId: UserId): Fragment =
+    sql"select quest_data from $tableName where user_id = $userId"
 }

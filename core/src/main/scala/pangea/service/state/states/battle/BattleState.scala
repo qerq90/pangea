@@ -106,13 +106,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def victory(user: User, hero: Hero, battle: ActiveBattle, renderer: Renderer): Task[StateType] =
     for {
       expGained        <- ZIO.succeed((hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L))
-      (newExp, newLevel, newPoints) = {
-        var e = hero.exp + expGained
-        var l = hero.lvl
-        var p = hero.upgradePoints
-        while (e >= Hero.neededExpForLevel(l) && l < 150L) { e -= Hero.neededExpForLevel(l); l += 1L; p += 4L }
-        (e, l, p)
-      }
+      leveled           = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
       seed             <- Random.nextLong
       monster           = battle.toMonster
@@ -125,7 +119,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                             golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a }
                           )
       _                <- heroDao.clearActiveBattle(user.userId)
-      _                <- heroDao.updateExpAndLevel(user.userId, newExp, newLevel, newPoints)
+      _                <- heroDao.updateExpAndLevel(user.userId, leveled.exp, leveled.lvl, leveled.upgradePoints)
       _                <- heroDao.writeSceneData(user.userId, lootData.asJson)
       // победа над «Отмеченным тьмой» на текущем этаже открывает путь вглубь
       newMaxDungeon     = math.min(150, hero.dungeonLevel + 1)
@@ -138,8 +132,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       _                <- ZIO.when(unlocksDarkness)(
                             renderer.show(user, Screen(content.text("battle.darknessConquered"), Nil))
                           )
-      _                <- ZIO.when(newLevel > hero.lvl)(
-                            renderer.show(user, Screen(s"Вы получили новый уровень $newLevel!", Nil))
+      _                <- ZIO.when(leveled.lvl > hero.lvl)(
+                            renderer.show(user, Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil))
                           )
     } yield StateType.Loot
 
