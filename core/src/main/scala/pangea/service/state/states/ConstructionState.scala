@@ -54,7 +54,24 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
     branch.act(user, ua, renderer)
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, content.screen("construction.menu"))
+    renderer.show(user, Screen(
+      content.text("construction.menu.text"),
+      List(
+        content.choice("CarryStone",        "construction.carryStoneLabel", "duration" -> formatHours(Job.CarryStone.hours)),
+        content.choice("BreakWall",         "construction.breakWallLabel",  "duration" -> formatHours(Job.BreakWall.hours)),
+        content.choice("BuildWall",         "construction.buildWallLabel",  "duration" -> formatHours(Job.BuildWall.hours)),
+        content.choice("LeaveConstruction", "construction.back")
+      )))
+
+  // Локальная склонения для подписи кнопки: «1 час», «4 часа», «8 часов».
+  private def formatHours(h: Int): String = {
+    val word = h % 10 match {
+      case 1 if h % 100 != 11                    => "час"
+      case 2 | 3 | 4 if !(h % 100 >= 12 && h % 100 <= 14) => "часа"
+      case _                                     => "часов"
+    }
+    s"$h $word"
+  }
 
   private def showWork(user: User, renderer: Renderer): Task[Unit] =
     renderer.show(user, Screen(

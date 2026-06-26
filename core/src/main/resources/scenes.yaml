@@ -157,13 +157,12 @@ guild:
 construction:
   menu:
     text: "🏗 Городская стройка. Выберите работу:"
-    choices:
-      CarryStone: "Переносить камень (1 час)"
-      BreakWall:  "Ломать стену (4 часа)"
-      BuildWall:  "Строить стену (8 часов)"
-      LeaveConstruction:
-        label: "↩ Назад"
-        color: "negative"
+  carryStoneLabel: "Переносить камень ({duration})"
+  breakWallLabel:  "Ломать стену ({duration})"
+  buildWallLabel:  "Строить стену ({duration})"
+  back:
+    label: "↩ Назад"
+    color: "negative"
   work:
     text: "Вы заняты работой на стройке."
     choices:
@@ -350,7 +349,7 @@ death:
 
 goldVein:
   enter:
-    text: "Проходя возле горной местности, вы заметили золотистый блеск, и решили приступить к добыче."
+    text: "Проходя возле горной местности, вы заметили золотистый блеск, и решили приступить к добыче. Вы понимаете, что это займёт примерно {duration}."
     choices:
       LeaveVein:
         label: "Уйти"

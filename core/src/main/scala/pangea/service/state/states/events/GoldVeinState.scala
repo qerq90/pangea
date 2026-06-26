@@ -50,7 +50,7 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
 
   private def showVein(user: User, renderer: Renderer): Task[Unit] =
     renderer.show(user, Screen(
-      content.text("goldVein.enter.text"),
+      content.format("goldVein.enter.text", "duration" -> formatRemaining(HarvestDurationMs)),
       content.screen("goldVein.enter").choices))
 
   // Ручная попытка уйти: до конца добычи показываем confirm c остатком времени;
