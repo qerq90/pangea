@@ -6,11 +6,15 @@ import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
-/** Заглушка тренировочного зала: содержание будет позже. */
+/** Меню тренировочного зала: Мастер Горн, Наставник Казимир, возврат в гильдию. */
 case class TrainingHallState(content: SceneContent) extends State {
 
   private val branch = new Branch(
-    routes   = Map("LeaveTrainingHall" -> Target.Goto(StateType.Guild)),
+    routes = Map(
+      "MasterHorn"        -> Target.Goto(StateType.MasterHorn),
+      "MentorKazimir"     -> Target.Goto(StateType.MentorKazimir),
+      "LeaveTrainingHall" -> Target.Goto(StateType.Guild)
+    ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.TrainingHall) }
   )
 

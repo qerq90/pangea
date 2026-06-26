@@ -21,6 +21,7 @@ trait HeroDao {
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
   def updateGold(userId: UserId, gold: Long): Task[Unit]
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
+  def updateMasterHornBoosts(userId: UserId, boosts: Map[String, Int]): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit]
   def updateEquipment(userId: UserId, eq: Equipment): Task[Unit]

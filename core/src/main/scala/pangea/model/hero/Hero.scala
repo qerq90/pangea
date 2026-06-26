@@ -22,7 +22,8 @@ case class Hero(
   gold: Long,
   traumaUntil: Option[Long],
   traumaNames: List[String],
-  guildReputation: Long
+  guildReputation: Long,
+  masterHornBoosts: Map[String, Int]
 ) {
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда

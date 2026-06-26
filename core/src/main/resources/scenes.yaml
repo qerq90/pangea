@@ -115,9 +115,40 @@ guild:
         label: "↩ Назад"
         color: "negative"
   trainingHall:
-    text: "🥊 Тренировочный зал. Пока здесь нечего делать."
+    text: "🥊 Тренировочный зал. К кому пойдём?"
     choices:
+      MasterHorn:    "Мастер Горн"
+      MentorKazimir: "Наставник Казимир"
       LeaveTrainingHall:
+        label: "↩ Назад"
+        color: "negative"
+  masterHorn:
+    menu:
+      text: "Мастер Горн имеет знания как сделать даже самый дырявый доспех и ржавую вилку, более надёжным…\n\nЗдесь за репутацию охотников вы можете повысить следующие характеристики."
+      choices:
+        ImproveArmor:         "Броня"
+        ImproveEvasion:       "Уклонение"
+        ImproveAttack:        "Атака"
+        ImproveDefence:       "Защита"
+        ImproveConcentration: "Концентрация"
+        ImproveInventory:     "Вместимость инвентаря"
+        LeaveMasterHorn:
+          label: "↩ Назад"
+          color: "negative"
+    confirm:
+      text: "Вы можете улучшить «{stat}» на +1 за {cost} очков репутации."
+      choices:
+        ConfirmImprove: "Улучшить"
+        CancelImprove:
+          label: "↩ Назад"
+          color: "negative"
+    applied: "✅ «{stat}» улучшена на +1. Списано {cost} очков репутации."
+    notEnough: "Недостаточно репутации: нужно {cost} очков."
+    notReady: "Мастер Горн ждёт, пока вы выберете характеристику."
+  mentorKazimir:
+    text: "🧙 Наставник Казимир задумчиво смотрит в окно. Пока ему нечего вам предложить."
+    choices:
+      LeaveMentorKazimir:
         label: "↩ Назад"
         color: "negative"
   noTrophies: "В вашем рюкзаке нет трофеев."

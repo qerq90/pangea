@@ -39,6 +39,14 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
       _         <- inventoryDao.update(inventory.withItems(refilled)).orElseFail(InventoryRepoError.CantUpdateInventory)
     } yield ()
 
+  def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit] =
+    for {
+      inventory <- inventoryDao.get(heroId).orElseFail(InventoryRepoError.CantFindInventory)
+      _         <- inventoryDao
+                     .update(inventory.copy(maxItems = inventory.maxItems + delta))
+                     .orElseFail(InventoryRepoError.CantUpdateInventory)
+    } yield ()
+
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =
     for {
       inventory <- inventoryDao

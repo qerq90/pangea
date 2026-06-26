@@ -34,4 +34,6 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Guild          extends StateType
   case object TrophyExchange extends StateType
   case object TrainingHall   extends StateType
+  case object MasterHorn     extends StateType
+  case object MentorKazimir  extends StateType
 }

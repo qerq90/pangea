@@ -9,8 +9,13 @@ import zio.{IO, ZIO}
 class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = Nil)
     extends InventoryRepository {
 
+  private var capacity: Long = 20L
+
   def get(heroId: HeroId): IO[InventoryRepoError, Inventory] =
-    ZIO.succeed(Inventory(1L, heroId, 20L, Inventory.Items(items)))
+    ZIO.succeed(Inventory(1L, heroId, capacity, Inventory.Items(items)))
+
+  def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit] =
+    ZIO.succeed { capacity += delta }
 
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
     if (canAdd) ZIO.succeed { items = items :+ item }

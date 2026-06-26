@@ -30,6 +30,7 @@ object TestFixtures {
     gold         = 0L,
     traumaUntil  = None,
     traumaNames  = Nil,
-    guildReputation = 0L
+    guildReputation = 0L,
+    masterHornBoosts = Map.empty
   )
 }
