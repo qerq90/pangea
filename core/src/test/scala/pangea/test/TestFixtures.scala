@@ -29,6 +29,7 @@ object TestFixtures {
     maxDungeonLevel = maxDungeonLevel,
     gold         = 0L,
     traumaUntil  = None,
-    traumaNames  = Nil
+    traumaNames  = Nil,
+    guildReputation = 0L
   )
 }

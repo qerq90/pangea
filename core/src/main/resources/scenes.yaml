@@ -97,7 +97,31 @@ globalMap:
       ReturnToCity:
         label: "Назад"
         color: "negative"
-  guild: "🏛 Гильдия приключенцев — здесь пока никого нет. Загляните позже."
+guild:
+  menu:
+    text: "🏛 Гильдия Искателей. Выберите действие:"
+    choices:
+      TrophyExchange: "Приём трофеев"
+      TrainingHall:   "Тренировочный зал"
+      OpenCharacter:  "Персонаж"
+      LeaveGuild:
+        label: "↩ Назад"
+        color: "negative"
+  trophyExchange:
+    text: "Здесь сдаются боевые трофеи в гильдию и выдаются гильдейские задания. При достаточной репутации местные мастера могут помочь вам стать сильнее."
+    choices:
+      SubmitTrophies: "Сдать трофеи"
+      LeaveTrophyExchange:
+        label: "↩ Назад"
+        color: "negative"
+  trainingHall:
+    text: "🥊 Тренировочный зал. Пока здесь нечего делать."
+    choices:
+      LeaveTrainingHall:
+        label: "↩ Назад"
+        color: "negative"
+  noTrophies: "В вашем рюкзаке нет трофеев."
+  trophiesSubmitted: "Гильдия принимает {count} трофеев. Репутация искателя: +{gained} (всего {total})."
 
 construction:
   menu:

@@ -15,9 +15,9 @@ import pangea.model.user.UserId
 
 object Queries {
   private val fields: Fragment =
-    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names"
+    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation"
   private val fieldInsert: Fragment =
-    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names"
+    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation"
   private val tableName: Fragment = sql"heroes"
 
   private val selectAll = fr"select $fields from $tableName"
@@ -26,7 +26,10 @@ object Queries {
     selectAll ++ sql"where user_id = $userId"
 
   def insert(hero: Hero): Fragment =
-    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaNames})"
+    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation})"
+
+  def updateGuildReputation(userId: UserId, value: Long): Fragment =
+    sql"update $tableName set guild_reputation = $value where user_id = $userId"
 
   def updateGold(userId: UserId, gold: Long): Fragment =
     sql"update $tableName set gold = $gold where user_id = $userId"

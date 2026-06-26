@@ -65,14 +65,12 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.choices.map(_.id).contains("Construction"))
     },
 
-    test("Guild → показывает заглушку, остаётся в GlobalMap") {
+    test("Guild → переходит в Guild") {
       for {
         triple              <- makeState(baseHero)
         (state, _, renderer) = triple
         result              <- state.action(testUser, tap("Guild"), renderer)
-        screens             <- renderer.sentScreens
-      } yield assertTrue(result == StateType.GlobalMap) &&
-              assertTrue(screens.exists(_.text.contains("Гильдия")))
+      } yield assertTrue(result == StateType.Guild)
     },
 
     test("Construction → переходит в Construction") {

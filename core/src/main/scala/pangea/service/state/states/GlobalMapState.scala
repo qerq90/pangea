@@ -14,8 +14,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
   private val branch = new Branch(
     routes = Map(
       "Tavern"          -> Target.Goto(StateType.Tavern),
-      "Guild"           -> Target.Run { (user, _, renderer) =>
-                             renderer.show(user, Screen(content.text("globalMap.guild"), Nil)).as(StateType.GlobalMap) },
+      "Guild"           -> Target.Goto(StateType.Guild),
       "Construction"    -> Target.Goto(StateType.Construction),
       "ReturnToDungeon" -> Target.Goto(StateType.Dungeon),
       "StreetMerchants" -> Target.Run { (user, _, renderer) =>

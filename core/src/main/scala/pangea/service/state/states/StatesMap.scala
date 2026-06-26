@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, HeroStats, Innkeeper, Inventory, Loot, Merchant, QuestBoard, Registration, Rest, Tavern}
+import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HeroStats, Innkeeper, Inventory, Loot, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
@@ -11,6 +11,7 @@ import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.GoldVeinState
+import pangea.service.state.states.guild.{GuildState, TrainingHallState, TrophyExchangeState}
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.registration.RegistrationState
@@ -52,7 +53,10 @@ object StatesMap {
           QuestBoard   -> QuestBoardState(heroDao, content),
           Innkeeper    -> InnkeeperState(heroDao, inventoryRepo, content),
           GoldVein     -> GoldVeinState(heroDao, scheduler, content),
-          Construction -> ConstructionState(heroDao, scheduler, content)
+          Construction   -> ConstructionState(heroDao, scheduler, content),
+          Guild          -> GuildState(heroDao, content),
+          TrophyExchange -> TrophyExchangeState(heroDao, inventoryRepo, content),
+          TrainingHall   -> TrainingHallState(content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)

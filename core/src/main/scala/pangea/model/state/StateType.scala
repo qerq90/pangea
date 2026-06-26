@@ -29,6 +29,9 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Tavern     extends StateType
   case object QuestBoard extends StateType
   case object Innkeeper  extends StateType
-  case object GoldVein     extends StateType
-  case object Construction extends StateType
+  case object GoldVein       extends StateType
+  case object Construction   extends StateType
+  case object Guild          extends StateType
+  case object TrophyExchange extends StateType
+  case object TrainingHall   extends StateType
 }

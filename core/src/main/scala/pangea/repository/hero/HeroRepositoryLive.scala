@@ -64,7 +64,8 @@ object HeroRepositoryLive {
       maxDungeonLevel = 1,
       gold         = 0L,
       traumaUntil  = None,
-      traumaNames  = Nil
+      traumaNames  = Nil,
+      guildReputation = 0L
     )
 
 }
