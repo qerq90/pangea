@@ -98,7 +98,32 @@ globalMap:
         label: "Назад"
         color: "negative"
   guild: "🏛 Гильдия приключенцев — здесь пока никого нет. Загляните позже."
-  construction: "🏗 Стройка активно ведётся. Пока здесь нечего делать."
+
+construction:
+  menu:
+    text: "🏗 Городская стройка. Выберите работу:"
+    choices:
+      CarryStone: "Переносить камень (1 час)"
+      BreakWall:  "Ломать стену (4 часа)"
+      BuildWall:  "Строить стену (8 часов)"
+      LeaveConstruction:
+        label: "↩ Назад"
+        color: "negative"
+  work:
+    text: "Вы заняты работой на стройке."
+    choices:
+      LeaveWork:
+        label: "Уйти"
+        color: "negative"
+  confirmLeave:
+    text: "До конца работы осталось {remaining}. Если всё таки хотите уйти, подтвердите своё действие."
+    choices:
+      ConfirmLeaveWork:
+        label: "Уйти"
+        color: "negative"
+      CancelLeaveWork: "Остаться"
+  left: "Вы бросили работу и ушли со стройки."
+  done: "Вы внесли свой вклад в развитие этого города! Можете гордиться собой! Вы получили {gold} золота."
 
 tavern:
   menu:

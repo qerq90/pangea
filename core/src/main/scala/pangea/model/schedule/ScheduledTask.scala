@@ -35,6 +35,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object TavernHeal extends TaskKind
   // Завершение добычи на Золотой жиле спустя 15 минут — выдача золота.
   case object Harvest extends TaskKind
+  // Завершение работы на стройке (1/4/8 часов) — выдача золота.
+  case object Construction extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

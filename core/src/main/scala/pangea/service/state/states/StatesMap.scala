@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, HeroStats, Innkeeper, Inventory, Loot, Merchant, QuestBoard, Registration, Rest, Tavern}
+import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, HeroStats, Innkeeper, Inventory, Loot, Merchant, QuestBoard, Registration, Rest, Tavern}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
@@ -51,7 +51,8 @@ object StatesMap {
           Tavern       -> TavernState(heroDao, scheduler, content),
           QuestBoard   -> QuestBoardState(heroDao, content),
           Innkeeper    -> InnkeeperState(heroDao, inventoryRepo, content),
-          GoldVein     -> GoldVeinState(heroDao, scheduler, content)
+          GoldVein     -> GoldVeinState(heroDao, scheduler, content),
+          Construction -> ConstructionState(heroDao, scheduler, content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)
