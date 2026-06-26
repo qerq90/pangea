@@ -207,7 +207,7 @@ heroStats:
   equipment: "Снаряжение"
   upgrade: "Распределить характеристики"
   leave:
-    label: "Покинуть костер"
+    label: "↩ Назад"
     color: "negative"
   upgradeScreen: "Распределите характеристики. Свободных очков: {points}"
   upgradeApplied: "Характеристика улучшена!"
@@ -267,6 +267,23 @@ death:
   itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
   trauma: "⚠ Новая травма: «{traumaName}». {description}"
   traumaMax: "На вас не осталось живого места.."
+
+goldVein:
+  enter:
+    text: "Проходя возле горной местности, вы заметили золотистый блеск, и решили приступить к добыче."
+    choices:
+      LeaveVein:
+        label: "Уйти"
+        color: "negative"
+  confirmLeave:
+    text: "До конца добычи осталось {remaining}. Если всё таки хотите уйти, подтвердите своё действие."
+    choices:
+      ConfirmLeaveVein:
+        label: "Уйти"
+        color: "negative"
+      CancelLeaveVein: "Остаться"
+  left: "Вы прервали добычу и отправились дальше."
+  done: "Кажется больше не добыть. Вы получили {gold} золота."
 
 foundItem:
   header: "Вы находите предмет!"
