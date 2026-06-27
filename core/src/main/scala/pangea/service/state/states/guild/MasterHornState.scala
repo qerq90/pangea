@@ -67,6 +67,8 @@ case class MasterHornState(
 
   // Применяет прокачку: проверяет репутацию, списывает её, повышает
   // характеристику на +1 и инкрементирует счётчик прокачек этого стата.
+  // После прокачки/неудачи остаёмся на confirm-экране того же стата — игрок может
+  // продолжить вкачивать одну и ту же характеристику без возврата в меню.
   private def confirmImprove(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero      <- getHero(user)
@@ -74,18 +76,22 @@ case class MasterHornState(
       statOpt    = sceneData
                      .flatMap(_.hcursor.get[String](StatKey).toOption)
                      .flatMap(Stat.withNameOption)
-      _ <- statOpt match {
-        case None => renderer.show(user, Screen(content.text("guild.masterHorn.notReady"), Nil))
+      next <- statOpt match {
+        case None =>
+          // Sentinel: scene_data пустой — confirm-сценарий не начат. Возвращаемся в меню.
+          renderer.show(user, Screen(content.text("guild.masterHorn.notReady"), Nil)) *>
+            enter(user, renderer).as(StateType.MasterHorn)
         case Some(stat) =>
           val price = cost(hero, stat)
           if (hero.guildReputation < price)
             renderer.show(user, Screen(
-              content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil))
-          else applyBoost(user, hero, stat, price, renderer)
+              content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil)) *>
+              askImprove(user, renderer, stat)
+          else
+            applyBoost(user, hero, stat, price, renderer) *>
+              askImprove(user, renderer, stat)
       }
-      _ <- heroDao.writeSceneData(user.userId, Json.Null)
-      _ <- enter(user, renderer)
-    } yield StateType.MasterHorn
+    } yield next
 
   // Бусты Горна не пишутся в `fightStats` напрямую — они хранятся в
   // `masterHornBoosts` и прибавляются на чтение в `Hero.fightStatsWith` /

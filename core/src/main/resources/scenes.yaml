@@ -99,7 +99,7 @@ globalMap:
         color: "negative"
 guild:
   menu:
-    text: "🏛 Гильдия Искателей. Выберите действие:"
+    text: "🏛 Гильдия Искателей.\n🎖 Репутация: {reputation}\n\nВыберите действие:"
     choices:
       TrophyExchange: "Приём трофеев"
       TrainingHall:   "Тренировочный зал"
@@ -307,7 +307,7 @@ heroStats:
 
 battle:
   enter:
-    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота: {monsterDodge}\n🌀 Шанс применения умения: {mobSkillHit}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor} (−{heroReduction} урона)\n🎯 Шанс попадания: {heroHit} | 💨 Шанс уворота: {heroDodge}\n🌀 Шанс применения умения: {heroSkillHit}\n🧪 Фляга: {flaskCharges}"
+    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота: {monsterDodge}\n🌀 Шанс применения умения: {mobSkillHit}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor} 🛡 {heroReduction}\n🎯 Шанс попадания: {heroHit} | 💨 Шанс уворота: {heroDodge}\n🌀 Шанс применения умения: {heroSkillHit}\n🧪 Фляга: {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"

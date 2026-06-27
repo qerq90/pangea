@@ -8,9 +8,9 @@ import zio.test._
 object ItemNameGeneratorSpec extends ZIOSpecDefault {
 
   private val titles = Set(
-    "рыцаря", "командира", "дворянина", "аристократа", "гвардейца",
-    "кавалериста", "стражника", "охранника", "повара", "стрелка",
-    "разведчика", "оруженосца", "бойца", "вождя"
+    "Рыцаря", "Командира", "Дворянина", "Аристократа", "Гвардейца",
+    "Кавалериста", "Стражника", "Охранника", "Повара", "Стрелка",
+    "Разведчика", "Оруженосца", "Бойца", "Вождя"
   )
 
   override def spec = suite("ItemNameGenerator")(
@@ -33,12 +33,12 @@ object ItemNameGeneratorSpec extends ZIOSpecDefault {
       assertTrue(name.startsWith("🟠"))
     },
 
-    test("прилагательное и тип — с заглавной, титул — с маленькой") {
+    test("прилагательное, тип и титул — все с заглавной") {
       val (name, _) = ItemNameGenerator.generate(ItemType.ChestPlate, Rarity.Green, Rng(7L))
       val parts = name.split(' ').toList
       assertTrue(parts(1).head.isUpper) &&
         assertTrue(parts(2).head.isUpper) &&
-        assertTrue(parts(3).head.isLower)
+        assertTrue(parts(3).head.isUpper)
     },
 
     test("разные seeds дают разные имена для одного типа") {
