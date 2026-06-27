@@ -4,6 +4,7 @@ import pangea.model.user.User
 import pangea.model.vk.Attachment
 import pangea.model.vk.keyboard.Keyboard
 import pangea.model.vk.model.UserResponse
+import pangea.dao.sendfailure.SendFailureDao
 import pangea.service.sender.vk.VkApi
 import pangea.service.sender.vk.config.VkConfig
 import zio.{Task, ZIO, ZLayer}
@@ -20,8 +21,9 @@ trait Api {
 }
 
 object Api {
-  val vk: ZLayer[VkConfig, Throwable, VkApi] = ZLayer.fromZIO(for {
-    config <- ZIO.service[VkConfig]
-    client <- pangea.client.Client.make
-  } yield new VkApi(client, config))
+  val vk: ZLayer[VkConfig with SendFailureDao, Throwable, VkApi] = ZLayer.fromZIO(for {
+    config   <- ZIO.service[VkConfig]
+    failures <- ZIO.service[SendFailureDao]
+    client   <- pangea.client.Client.make
+  } yield new VkApi(client, config, failures))
 }

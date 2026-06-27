@@ -7,6 +7,7 @@ import pangea.dao.inventory.InventoryDao
 import pangea.dao.item.ItemDao
 import pangea.dao.journal.JournalLive
 import pangea.dao.schedule.ScheduledTaskDao
+import pangea.dao.sendfailure.SendFailureDao
 import pangea.dao.user.UserDao
 import pangea.engine.{Journal, Players, SceneContent}
 import pangea.repository.hero.HeroRepository
@@ -43,6 +44,7 @@ object Main extends ZIOAppDefault {
       InventoryDao.live,
       ItemDao.live,
       ScheduledTaskDao.live,
+      SendFailureDao.live,
       ItemRepository.live,
       JournalLive.live,
       SceneContent.live,
