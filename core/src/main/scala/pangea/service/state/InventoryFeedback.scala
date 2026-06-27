@@ -21,6 +21,5 @@ object InventoryFeedback {
     inventoryRepo.get(heroId)
       .mapError(e => new Throwable(e.toString))
       .map(inv => content.format("common.freeSlots",
-        "free" -> inv.freeSlots.toString,
-        "max"  -> inv.maxItems.toString))
+        "free" -> inv.freeSlots.toString))
 }

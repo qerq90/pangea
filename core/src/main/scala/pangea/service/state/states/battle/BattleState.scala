@@ -46,6 +46,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
       hitRoll   <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
+      heroHitPct = (100.0 - mobDodge).toInt
 
       result <- if (hitRoll > mobDodge) { // моб не увернулся → игрок попал
         for {
@@ -53,23 +54,36 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           noWeapon = hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
           weaponMod: Double = if (noWeapon) 0.5 else 1.0
           concBonus: Double = 1.0 + buffedEff.concentration * 0.005
-          damage  = (((buffedEff.atk + hero.baseStats.str) * spread / 100L) * weaponMod * concBonus).toLong.max(1L)
-          _      <- renderer.show(user, Screen(
-                      content.format("battle.hit", "damage" -> damage.toString, "monster" -> monster.name), Nil))
+          damage    = (((buffedEff.atk + hero.baseStats.str) * spread / 100L) * weaponMod * concBonus).toLong.max(1L)
+          playerLine = content.format("battle.hit", "damage" -> damage.toString, "monster" -> monster.name)
           armorDmg  = math.min(battle.monsterCurrentArmor, damage)
           hpDmg     = damage - armorDmg
           newArmor  = battle.monsterCurrentArmor - armorDmg
           newHp     = (battle.monsterCurrentHp - hpDmg).max(0L)
-          r <- if (newHp <= 0) victory(user, hero, battle, renderer)
-               else monsterAttacks(user, hero, battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor), now, renderer)
+          r <- if (newHp <= 0)
+                 renderer.show(user, Screen(playerLine, Nil)) *> victory(user, hero, battle, renderer)
+               else
+                 monsterAttacks(user, hero, battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor), now, renderer, playerLine)
         } yield r
       } else {
-        renderer.show(user, Screen(content.text("battle.miss"), Nil)) *>
-          monsterAttacks(user, hero, battle, now, renderer)
+        val playerLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
+        monsterAttacks(user, hero, battle, now, renderer, playerLine)
       }
     } yield result
 
-  private def monsterAttacks(user: User, hero: Hero, battle: ActiveBattle, nowMs: Long, renderer: Renderer): Task[StateType] =
+  /**
+   * Ход моба после атаки игрока. `playerLine` — заранее посчитанная строка о
+   * результате удара игрока; mob-line склеивается с ней и выводится одним
+   * сообщением, чтобы избежать спама.
+   */
+  private def monsterAttacks(
+    user:       User,
+    hero:       Hero,
+    battle:     ActiveBattle,
+    nowMs:      Long,
+    renderer:   Renderer,
+    playerLine: String
+  ): Task[StateType] =
     for {
       ticked   <- ZIO.succeed(battle.tickBuffs)
       _        <- heroDao.writeActiveBattle(user.userId, ticked.asJson)
@@ -78,6 +92,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       monster   = ticked.toMonster
       hitRoll  <- Random.nextIntBetween(1, 101)
       dodge     = playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, ticked)
+      mobHitPct = (100.0 - dodge).toInt
 
       result <- if (hitRoll > dodge) { // игрок не увернулся → моб попал
         for {
@@ -92,13 +107,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           newStats     = hero.fightStats.copy(hp = newHp, armor = newArmor)
           _           <- heroDao.updateFightStats(user.userId, newStats)
-          _           <- renderer.show(user, Screen(
-                           content.format("battle.mobHit", "damage" -> rawDamage.toString, "monster" -> monster.name), Nil))
+          mobLine      = content.format("battle.mobHit", "damage" -> rawDamage.toString, "monster" -> monster.name)
+          _           <- renderer.show(user, Screen(playerLine + "\n\n" + mobLine, Nil))
           r <- if (newHp <= 0) heroDeath(user, renderer)
                else showScreen(user, renderer).as(StateType.Battle)
         } yield r
       } else {
-        renderer.show(user, Screen(content.format("battle.mobMiss", "monster" -> monster.name), Nil)) *>
+        val mobLine = content.format("battle.mobMiss", "monster" -> monster.name, "chance" -> mobHitPct.toString)
+        renderer.show(user, Screen(playerLine + "\n\n" + mobLine, Nil)) *>
           showScreen(user, renderer).as(StateType.Battle)
       }
     } yield result
@@ -240,8 +256,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def buildBattleScreen(hero: Hero, battle: ActiveBattle, maxHp: Long, nowMs: Long): Screen = {
     val eff             = hero.effectiveFightStats(nowMs)
     val buffedEff       = battle.heroBattleState.applyTo(eff)
-    val mobHitPct       = (100.0 - playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, battle)).toInt
+    val playerDodgePct  = playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, battle).toInt
     val monsterDodgePct = mobDodgeChance(buffedEff.accuracy, battle).toInt
+    val mobHitPct       = 100 - playerDodgePct
+    val heroHitPct      = 100 - monsterDodgePct
     val text = content.format("battle.enter.text",
       "monster"      -> battle.toMonster.name,
       "monsterRace"  -> battle.toMonster.race.toString,
@@ -252,6 +270,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "monsterAtk"      -> battle.monsterStats.atk.toString,
       "mobHit"       -> s"$mobHitPct%",
       "monsterDodge" -> s"$monsterDodgePct%",
+      "heroHit"      -> s"$heroHitPct%",
+      "heroDodge"    -> s"$playerDodgePct%",
       "heroHp"       -> hero.fightStats.hp.toString,
       "heroMax"      -> maxHp.toString,
       "heroArmor"    -> hero.fightStats.armor.min(hero.effectiveMaxArmor(nowMs)).toString,

@@ -1,7 +1,7 @@
 common:
   prev: "◀ Пред."
   next: "След. ▶"
-  freeSlots: "👝 Свободных слотов в сумке: {free}/{max}"
+  freeSlots: "👝 Свободных слотов в сумке: {free}"
   inventoryFull: "❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места."
   character: "Персонаж"
 
@@ -306,7 +306,7 @@ heroStats:
 
 battle:
   enter:
-    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n🎯 Попадание: {mobHit} | 💨 Уворот: {monsterDodge}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor}\n🧪 Фляга: {flaskCharges}"
+    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота моба: {monsterDodge}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor}\n🎯 Ваш шанс попадания: {heroHit} | 💨 Ваш шанс уворота: {heroDodge}\n🧪 Фляга: {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -318,10 +318,10 @@ battle:
     choices:
       ConfirmFlee: "Подтвердить"
       CancelFlee: "Остаться"
-  hit: "Вы наносите {damage} урона по {monster}."
-  miss: "Вы промахиваетесь!"
-  mobHit: "{monster} наносит {damage} урона."
-  mobMiss: "{monster} промахивается!"
+  hit: "✅ Вы наносите {damage} урона по {monster}."
+  miss: "❌ Вы промахиваетесь (шанс попадания был {chance}%)."
+  mobHit: "👹 {monster} наносит {damage} урона."
+  mobMiss: "🛡 {monster} промахивается (шанс попадания был {chance}%)."
   victory: "{monster} повержен! Получено {exp} опыта."
   darknessConquered: "🌑 Тьма этого этажа повержена! Путь вглубь лабиринта открыт."
   death: "Вы погибли..."
