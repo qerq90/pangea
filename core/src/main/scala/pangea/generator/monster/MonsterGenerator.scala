@@ -10,8 +10,11 @@ object MonsterGenerator {
   private val N = 1.1
 
   // Модификатор «Отмеченный тьмой»: 5% шанс, +20% ко всем показателям.
+  // Доступен только мобам редкости Rare и выше — обычные/необычные «отмеченными»
+  // не бывают.
   private val MarkedChance     = 5L
   private val MarkedMultiplier = 1.2
+  private val MarkedRarities: Set[Rarity] = Set(Rare, Mythical, Legendary)
 
   // Weighted pool: 50% Common, 25% Uncommon, 15% Rare, 7% Mythical, 3% Legendary
   private val rarityPool: List[Rarity] =
@@ -26,7 +29,7 @@ object MonsterGenerator {
     val (rarity, rng2) = rng1.pick(rarityPool)
     val stats          = buildStats(dungeonLevel, rarity, race)
     val (markRoll, rng3) = rng2.between(0L, 100L)
-    val marked         = markRoll < MarkedChance
+    val marked         = MarkedRarities.contains(rarity) && markRoll < MarkedChance
     val finalStats     = if (marked) boost(stats, MarkedMultiplier) else stats
     (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked), rng3)
   }

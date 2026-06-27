@@ -71,15 +71,18 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
       assertTrue(monster.name == expected)
     },
 
-    test("модификатор «Отмеченный тьмой»: встречается ~5%, добавляет префикс") {
-      val n        = 3000
+    test("модификатор «Отмеченный тьмой»: только Rare+, ~1.25%, добавляет префикс") {
+      import pangea.model.monster.Rarity
+      val n        = 8000
       val monsters = (1 to n).map(i => MonsterGenerator.generate(10, Rng(i.toLong))._1)
       val marked   = monsters.filter(_.marked)
       val rate     = marked.size.toDouble / n
+      val allowed: Set[Rarity] = Set(Rarity.Rare, Rarity.Mythical, Rarity.Legendary)
       assertTrue(marked.nonEmpty) &&
       assertTrue(marked.forall(_.name.startsWith("Отмеченный тьмой "))) &&
+      assertTrue(marked.forall(m => allowed.contains(m.rarity))) &&
       assertTrue(monsters.filterNot(_.marked).forall(!_.name.startsWith("Отмеченный тьмой"))) &&
-      assertTrue(rate > 0.02 && rate < 0.09) // около 5%
+      assertTrue(rate > 0.005 && rate < 0.025) // 5% от ~25% Rare+ ≈ 1.25%
     },
 
     test("отмеченный монстр сильнее обычного той же расы/редкости/уровня (+20%)") {
