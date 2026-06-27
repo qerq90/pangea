@@ -215,7 +215,7 @@ case class MerchantState(
       Option.when(item.hp > 0)(s"HP +${item.hp}")
     ).flatten
     val tail = if (stats.isEmpty) "" else "\n" + stats.mkString(", ")
-    s"${item.name} [${item.rarity}] Ур.${item.lvl}$tail"
+    s"${item.name} Ур.${item.lvl}$tail"
   }
 
   private def loadOrInit(user: User, now: Long): Task[MerchantData] =

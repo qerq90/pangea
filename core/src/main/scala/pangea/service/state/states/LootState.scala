@@ -131,7 +131,7 @@ case class LootState(
         Option.when(item.hp > 0)(s"HP +${item.hp}")
       ).flatten
       val tail = if (stats.nonEmpty) " — " + stats.mkString(", ") else ""
-      s"🎁 ${item.name} [${item.rarity}] Ур.${item.lvl}$tail"
+      s"🎁 ${item.name} Ур.${item.lvl}$tail"
     }
 }
 

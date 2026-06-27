@@ -194,8 +194,7 @@ object InventoryState {
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
     val goldStr  = gold.fold("")(g => s" | 💰 $g")
-    val rarityStr = if (item.itemType == ItemType.Trophy) "" else s" [${item.rarity}]" // у трофеев нет редкости
-    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name}$rarityStr Ур.${item.lvl}\n$statsStr$slotInfo"
+    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name} Ур.${item.lvl}\n$statsStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании

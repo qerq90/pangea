@@ -146,6 +146,6 @@ object EquipmentState {
       Option.when(item.hp > 0)(s"HP: +${item.hp}")
     ).flatten
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    s"${item.name} [${item.rarity}] Ур.${item.lvl}\n$statsStr"
+    s"${item.name} Ур.${item.lvl}\n$statsStr"
   }
 }
