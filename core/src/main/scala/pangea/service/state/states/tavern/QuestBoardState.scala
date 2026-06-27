@@ -9,7 +9,7 @@ import pangea.model.quest.QuestData
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.tavern.QuestBoardState._
-import pangea.service.state.{CharacterMenu, State, UserAction}
+import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -26,13 +26,12 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
     routes = Map(
       "TakeQuest"     -> Target.Run { (user, _, renderer) => takeQuest(user, renderer) },
       "AbandonQuest"  -> Target.Run { (user, _, renderer) => abandonQuest(user, renderer) },
-      "OpenCharacter" -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.QuestBoard) },
       "BackFromQuest" -> Target.Goto(StateType.Tavern)
     ),
     fallback = Target.Run { (user, _, renderer) => showBoard(user, renderer).as(StateType.QuestBoard) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
+  override def targetStates: Set[StateType] = branch.gotoTargets
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = showBoard(user, renderer)
 
@@ -61,7 +60,6 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
         Screen(text, List(
           content.choice("TakeQuest",     "quest.takeLabel"),
           content.choice("AbandonQuest",  "quest.abandonLabel"),
-          content.choice("OpenCharacter", "common.character"),
           content.choice("BackFromQuest", "quest.backLabel")))
       case None =>
         val text = content.format("quest.empty",
@@ -69,7 +67,6 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
           "active"    -> activeLine)
         val buttons =
           (if (data.active.isDefined) List(content.choice("AbandonQuest", "quest.abandonLabel")) else Nil) ++ List(
-            content.choice("OpenCharacter", "common.character"),
             content.choice("BackFromQuest", "quest.backLabel"))
         Screen(text, buttons)
     }

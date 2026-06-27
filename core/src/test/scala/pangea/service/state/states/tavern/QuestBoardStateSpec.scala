@@ -42,7 +42,7 @@ object QuestBoardStateSpec extends ZIOSpecDefault {
       } yield assertTrue(data.remaining == 3) &&
               assertTrue(data.current.isDefined) &&
               assertTrue(data.active.isEmpty) &&
-              assertTrue(ids.toSet == Set("TakeQuest", "AbandonQuest", "OpenCharacter", "BackFromQuest"))
+              assertTrue(ids.toSet == Set("TakeQuest", "AbandonQuest", "BackFromQuest"))
     },
 
     test("TakeQuest → списывает слот, делает задание активным, роллит следующее") {
