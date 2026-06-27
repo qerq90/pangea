@@ -43,7 +43,15 @@ object HeroRepositoryLive {
       exp = 0,
       upgradePoints = 0,
       baseStats = BaseStats(4, 4, 4, 4),
-      fightStats = FightStats(atk = 4, hp = 96, armor = 0, defence = 0, evasion = 0, accuracy = 0, concentration = 0),
+      fightStats = FightStats(
+        atk = 4,
+        hp = 96,
+        armor = 1,
+        defence = 1,
+        evasion = 1,
+        accuracy = 1,
+        concentration = 1
+      ),
       equipment = Equipment(
         NoItem,
         NoItem,
@@ -60,11 +68,11 @@ object HeroRepositoryLive {
         NoItem,
         NoItem
       ),
-      dungeonLevel    = 1,
+      dungeonLevel = 1,
       maxDungeonLevel = 1,
-      gold         = 0L,
-      traumaUntil  = None,
-      traumaNames  = Nil,
+      gold = 0L,
+      traumaUntil = None,
+      traumaNames = Nil,
       guildReputation = 0L,
       masterHornBoosts = MasterHornBoosts.empty
     )

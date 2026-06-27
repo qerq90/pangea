@@ -23,7 +23,7 @@ object ActiveBattleSkillsSpec extends ZIOSpecDefault {
       val b   = stub(List(
         SkillSlotState(1L, Skill.SweepingStrike, cooldown = 2),
         SkillSlotState(2L, Skill.MinorHeal,      cooldown = 0)
-      )).tickBuffs
+      )).tickBuffs()
       val ws  = b.slotByItem(1L).get
       val hs  = b.slotByItem(2L).get
       assertTrue(ws.cooldown == 1) && assertTrue(hs.cooldown == 0)

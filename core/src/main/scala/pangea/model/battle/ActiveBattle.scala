@@ -39,10 +39,16 @@ case class ActiveBattle(
 
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
-  def tickBuffs: ActiveBattle = copy(
+  /** Тик в конце хода игрока. `skipSlots` — itemId слотов, кулдауны которых не
+   *  должны декрементиться (например, слот, скил из которого только что
+   *  использован — его cd должен начать отсчитываться со СЛЕДУЮЩЕГО хода). */
+  def tickBuffs(skipSlots: Set[Long] = Set.empty): ActiveBattle = copy(
     heroBattleState    = heroBattleState.tick,
     flaskUsedThisRound = false,
-    skillSlots         = skillSlots.map(s => s.copy(cooldown = (s.cooldown - 1).max(0)))
+    skillSlots         = skillSlots.map(s =>
+      if (skipSlots.contains(s.itemId)) s
+      else s.copy(cooldown = (s.cooldown - 1).max(0))
+    )
   )
 
   def slotByItem(itemId: Long): Option[SkillSlotState] = skillSlots.find(_.itemId == itemId)

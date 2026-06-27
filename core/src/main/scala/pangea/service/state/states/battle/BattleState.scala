@@ -49,34 +49,52 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       now     <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero    <- getHero(user)
       battle  <- getBattle(user)
-      eff       = hero.effectiveFightStats(now)
-      buffedEff = battle.heroBattleState.applyTo(eff)
-      monster   = battle.toMonster
+      result  <- playerBasicAttack(user, hero, battle, now, renderer, prefix = "", skipSlots = Set.empty)
+    } yield result
 
+  /** Базовая атака игрока. `prefix` приклеивается перед строкой об атаке —
+   *  используется, когда базовая атака идёт после применения скилла (тогда
+   *  prefix содержит описание самого скилла). `skipSlots` пробрасывается в
+   *  `monsterAttacks → tickBuffs`, чтобы только что использованный слот не
+   *  тикался в этом же ходу (см. ActiveBattle.tickBuffs). */
+  private def playerBasicAttack(
+    user:      User,
+    hero:      Hero,
+    battle:    ActiveBattle,
+    nowMs:     Long,
+    renderer:  Renderer,
+    prefix:    String,
+    skipSlots: Set[Long]
+  ): Task[StateType] =
+    for {
+      eff       <- ZIO.succeed(hero.effectiveFightStats(nowMs))
+      buffedEff  = battle.heroBattleState.applyTo(eff)
+      monster    = battle.toMonster
       hitRoll   <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
       heroHitPct = (100.0 - mobDodge).toInt
-
-      result <- if (hitRoll > mobDodge) { // моб не увернулся → игрок попал
+      result <- if (hitRoll > mobDodge) {
         for {
           spread <- Random.nextLongBetween(80L, 121L)
           noWeapon = hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
           weaponMod: Double = if (noWeapon) 0.5 else 1.0
-          concBonus: Double = 1.0 + buffedEff.concentration * 0.005
-          damage    = (((buffedEff.atk + hero.baseStats.str) * spread / 100L) * weaponMod * concBonus).toLong.max(1L)
-          playerLine = content.format("battle.hit", "damage" -> damage.toString, "monster" -> monster.name)
+          damage    = (((buffedEff.atk + hero.baseStats.str) * spread / 100L) * weaponMod).toLong.max(1L)
+          attackLine = content.format("battle.hit", "damage" -> damage.toString, "monster" -> monster.name)
           armorDmg  = math.min(battle.monsterCurrentArmor, damage)
           hpDmg     = damage - armorDmg
           newArmor  = battle.monsterCurrentArmor - armorDmg
           newHp     = (battle.monsterCurrentHp - hpDmg).max(0L)
+          updated   = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
           r <- if (newHp <= 0)
-                 renderer.show(user, Screen(playerLine, Nil)) *> victory(user, hero, battle, renderer)
+                 heroDao.writeActiveBattle(user.userId, updated.asJson) *>
+                   renderer.show(user, Screen(prefix + attackLine, Nil)) *>
+                   victory(user, hero, updated, renderer)
                else
-                 monsterAttacks(user, hero, battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor), now, renderer, playerLine)
+                 monsterAttacks(user, hero, updated, nowMs, renderer, prefix + attackLine, skipSlots)
         } yield r
       } else {
-        val playerLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
-        monsterAttacks(user, hero, battle, now, renderer, playerLine)
+        val attackLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
+        monsterAttacks(user, hero, battle, nowMs, renderer, prefix + attackLine, skipSlots)
       }
     } yield result
 
@@ -127,6 +145,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   else                   skillMiss(user, hero, battle, slot, nowMs, renderer, hitPct)
     } yield result
 
+  // После применения скилла (hit/miss) — всегда идёт базовая атака игрока, как
+  // и у моба сейчас. Кулдаун использованного слота не должен тикаться в этом же
+  // ходу — передаём его в `skipSlots` цепочке вызовов (см. tickBuffs).
   private def skillHit(
     user:     User,
     hero:     Hero,
@@ -140,29 +161,32 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       base    = slot.skill.baseValue(hero, nowMs)
       value   = (base * spread / 100.0).toLong.max(1L)
       bumpedBattle = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
+      skip    = Set(slot.itemId)
       result <- slot.skill.kind match {
         case Skill.Kind.Damage =>
-          val playerLine = slot.skill.hitTemplate.replace("{}", value.toString)
-          val armorDmg   = math.min(battle.monsterCurrentArmor, value)
-          val hpDmg      = value - armorDmg
-          val newArmor   = battle.monsterCurrentArmor - armorDmg
-          val newHp      = (battle.monsterCurrentHp - hpDmg).max(0L)
-          val updated    = bumpedBattle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+          val skillLine = slot.skill.hitTemplate.replace("{}", value.toString)
+          val armorDmg  = math.min(battle.monsterCurrentArmor, value)
+          val hpDmg     = value - armorDmg
+          val newArmor  = battle.monsterCurrentArmor - armorDmg
+          val newHp     = (battle.monsterCurrentHp - hpDmg).max(0L)
+          val updated   = bumpedBattle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
           if (newHp <= 0)
+            // Моб убит самим скиллом — базовая атака не нужна.
             heroDao.writeActiveBattle(user.userId, updated.asJson) *>
-              renderer.show(user, Screen(playerLine, Nil)) *>
+              renderer.show(user, Screen(skillLine, Nil)) *>
               victory(user, hero, updated, renderer)
           else
-            monsterAttacks(user, hero, updated, nowMs, renderer, playerLine)
+            playerBasicAttack(user, hero, updated, nowMs, renderer, prefix = skillLine + "\n", skipSlots = skip)
 
         case Skill.Kind.Heal =>
           val maxHp     = hero.effectiveMaxHp(nowMs)
           val newHp     = (hero.fightStats.hp + value).min(maxHp)
           val healed    = newHp - hero.fightStats.hp
           val newStats  = hero.fightStats.copy(hp = newHp)
-          val playerLine = slot.skill.hitTemplate.replace("{}", healed.toString)
+          val skillLine = slot.skill.hitTemplate.replace("{}", healed.toString)
           heroDao.updateFightStats(user.userId, newStats) *>
-            monsterAttacks(user, hero.copy(fightStats = newStats), bumpedBattle, nowMs, renderer, playerLine)
+            playerBasicAttack(user, hero.copy(fightStats = newStats), bumpedBattle, nowMs, renderer,
+                              prefix = skillLine + "\n", skipSlots = skip)
       }
     } yield result
 
@@ -175,9 +199,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     renderer: Renderer,
     hitPct:   Int
   ): Task[StateType] = {
-    // Промах: cd НЕ выставляется (uses тоже не растёт); ход всё равно завершается.
-    val playerLine = content.format("battle.skillMiss", "skill" -> slot.skill.label, "chance" -> hitPct.toString)
-    monsterAttacks(user, hero, battle, nowMs, renderer, playerLine)
+    // Промах: cd НЕ выставляется (uses не растёт); ход всё равно завершается —
+    // делаем базовую атаку и ход моба.
+    val skillLine = content.format("battle.skillMiss", "skill" -> slot.skill.label, "chance" -> hitPct.toString)
+    playerBasicAttack(user, hero, battle, nowMs, renderer, prefix = skillLine + "\n", skipSlots = Set.empty)
   }
 
   /**
@@ -191,10 +216,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     battle:     ActiveBattle,
     nowMs:      Long,
     renderer:   Renderer,
-    playerLine: String
+    playerLine: String,
+    skipSlots:  Set[Long] = Set.empty
   ): Task[StateType] =
     for {
-      ticked   <- ZIO.succeed(battle.tickBuffs)
+      ticked   <- ZIO.succeed(battle.tickBuffs(skipSlots))
       eff       = hero.effectiveFightStats(nowMs)
       buffedEff = ticked.heroBattleState.applyTo(eff)
       monster   = ticked.toMonster

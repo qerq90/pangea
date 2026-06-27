@@ -99,8 +99,10 @@ object BattleSkillsSpec extends ZIOSpecDefault {
         after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption).get)
       } yield assertTrue(result == StateType.Battle || result == StateType.Loot) &&
               assertTrue(after.monsterCurrentHp <= before) &&
-              // cd ставится в skill.cooldown и тикается tickBuffs до (skill.cooldown - 1)
-              assertTrue(after.slotByItem(101L).exists(s => s.cooldown == Skill.SweepingStrike.cooldown - 1)) &&
+              // cd ставится в skill.cooldown; в этом же ходу slot пропускается в tickBuffs,
+              // значит после хода cd остаётся равным skill.cooldown — отсчёт начнётся со
+              // СЛЕДУЮЩЕГО хода игрока (cd=1 → можно использовать каждые 2 хода).
+              assertTrue(after.slotByItem(101L).exists(s => s.cooldown == Skill.SweepingStrike.cooldown)) &&
               assertTrue(after.slotByItem(101L).exists(_.uses == 1))
     },
 

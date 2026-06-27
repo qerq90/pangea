@@ -275,13 +275,12 @@ CREATE TABLE event_log (
 
 ### Урон игрока
 ```
-damage = (atk + str) × spread / 100 × weaponMod × concBonus
+damage = (atk + str) × spread / 100 × weaponMod
 ```
 - `atk` — `fightStats.atk`, растёт от оружия и баффов
 - `str` — `baseStats.str`, растёт от прокачки
 - `spread` — равномерное случайное значение 80–120 (разброс ±20%)
 - `weaponMod` — 0.5 без оружия, 1.0 с оружием
-- `concBonus` — `1 + concentration × 0.005`
 
 **Важно:** формула аддитивна (`atk + str`), не мультипликативна. Умножение (`atk × str`) давало квадратичный рост и было исправлено.
 
