@@ -2,7 +2,7 @@ package pangea.repository.hero
 
 import pangea.dao.hero.HeroDao
 import pangea.dao.inventory.InventoryDao
-import pangea.model.hero.{Equipment, Hero, HeroId}
+import pangea.model.hero.{Equipment, Hero, HeroId, MasterHornBoosts}
 import pangea.model.item.Item.NoItem
 import pangea.model.monster.Race.Human
 import pangea.model.state.StateType
@@ -66,7 +66,7 @@ object HeroRepositoryLive {
       traumaUntil  = None,
       traumaNames  = Nil,
       guildReputation = 0L,
-      masterHornBoosts = Map.empty
+      masterHornBoosts = MasterHornBoosts.empty
     )
 
 }

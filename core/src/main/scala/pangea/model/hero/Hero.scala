@@ -23,7 +23,7 @@ case class Hero(
   traumaUntil: Option[Long],
   traumaNames: List[String],
   guildReputation: Long,
-  masterHornBoosts: Map[String, Int]
+  masterHornBoosts: MasterHornBoosts
 ) {
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда
@@ -34,16 +34,18 @@ case class Hero(
   def canGoLighter: Boolean = dungeonLevel > 1
 
   // Защита больше не умножает броню (теперь она снижает урон процентно — см.
-  // `BattleState.damageReduction`). Максимум брони — сумма брони со снаряжения.
-  def maxArmor: Long = equipment.allArmor
+  // `BattleState.damageReduction`). Максимум брони — сумма брони со снаряжения
+  // плюс прокачка у Мастера Горна.
+  def maxArmor: Long = equipment.allArmor + masterHornBoosts.armor
 
   /** Максимум брони с учётом травм: штраф на броню режет потолок. Без травм
    *  равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою и
    *  восстанавливается до этого значения на отдыхе. */
   def effectiveMaxArmor(nowMs: Long): Long = {
     val p = combinedPenalties(nowMs)
-    (equipment.allArmor * (1.0 - p.armorPct)).toLong.max(0L)
+    (maxArmor * (1.0 - p.armorPct)).toLong.max(0L)
   }
+
 
   def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)
 
@@ -61,11 +63,11 @@ case class Hero(
   private def fightStatsWith(p: TraumaPenalties): FightStats = {
     val rf = race.factor
     fightStats.copy(
-      atk           = (fightStats.atk * rf.attackFactor * (1.0 - p.atkPct)).toLong.max(1L),
-      defence       = (fightStats.defence * rf.defenceFactor * (1.0 - p.defPct)).toLong.max(1L),
-      accuracy      = (fightStats.accuracy * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
-      evasion       = (fightStats.evasion * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
-      concentration = ((fightStats.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
+      atk           = ((fightStats.atk + masterHornBoosts.attack) * rf.attackFactor * (1.0 - p.atkPct)).toLong.max(1L),
+      defence       = ((fightStats.defence + masterHornBoosts.defence) * rf.defenceFactor * (1.0 - p.defPct)).toLong.max(1L),
+      accuracy      = ((fightStats.accuracy + masterHornBoosts.accuracy) * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
+      evasion       = ((fightStats.evasion + masterHornBoosts.evasion) * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
+      concentration = ((fightStats.concentration + masterHornBoosts.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
       armor         = fightStats.armor.max(0L)
     )
   }

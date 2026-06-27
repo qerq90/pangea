@@ -2,7 +2,7 @@ package pangea.dao.hero
 
 import doobie.util.transactor
 import io.circe.Json
-import pangea.model.hero.{Equipment, Hero, HeroId}
+import pangea.model.hero.{Equipment, Hero, HeroId, MasterHornBoosts}
 import pangea.model.stats.FightStats
 import pangea.model.monster.Race
 import pangea.model.state.StateType
@@ -21,7 +21,7 @@ trait HeroDao {
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
   def updateGold(userId: UserId, gold: Long): Task[Unit]
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
-  def updateMasterHornBoosts(userId: UserId, boosts: Map[String, Int]): Task[Unit]
+  def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit]
   def updateEquipment(userId: UserId, eq: Equipment): Task[Unit]

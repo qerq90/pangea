@@ -130,6 +130,7 @@ guild:
         ImproveEvasion:       "Уклонение"
         ImproveAttack:        "Атака"
         ImproveDefence:       "Защита"
+        ImproveAccuracy:      "Точность"
         ImproveConcentration: "Концентрация"
         ImproveInventory:     "Вместимость инвентаря"
         LeaveMasterHorn:

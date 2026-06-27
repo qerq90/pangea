@@ -1,6 +1,6 @@
 package pangea.test
 
-import pangea.model.hero.{Equipment, Hero, HeroId}
+import pangea.model.hero.{Equipment, Hero, HeroId, MasterHornBoosts}
 import pangea.model.item.Item
 import pangea.model.monster.Race
 import pangea.model.state.StateType
@@ -31,6 +31,6 @@ object TestFixtures {
     traumaUntil  = None,
     traumaNames  = Nil,
     guildReputation = 0L,
-    masterHornBoosts = Map.empty
+    masterHornBoosts = MasterHornBoosts.empty
   )
 }

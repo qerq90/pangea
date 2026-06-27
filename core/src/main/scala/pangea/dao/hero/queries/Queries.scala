@@ -6,9 +6,8 @@ import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
 import io.circe.Json
 import io.circe.syntax.EncoderOps
-import pangea.dao.hero.MasterHornInstances._
 import pangea.dao.hero.TraumaInstances._
-import pangea.model.hero.{Equipment, Hero}
+import pangea.model.hero.{Equipment, Hero, MasterHornBoosts}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -32,7 +31,7 @@ object Queries {
   def updateGuildReputation(userId: UserId, value: Long): Fragment =
     sql"update $tableName set guild_reputation = $value where user_id = $userId"
 
-  def updateMasterHornBoosts(userId: UserId, boosts: Map[String, Int]): Fragment =
+  def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Fragment =
     sql"update $tableName set master_horn_boosts = $boosts where user_id = $userId"
 
   def updateGold(userId: UserId, gold: Long): Fragment =

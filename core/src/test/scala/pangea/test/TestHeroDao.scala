@@ -2,7 +2,7 @@ package pangea.test
 
 import io.circe.Json
 import pangea.dao.hero.HeroDao
-import pangea.model.hero.{Equipment, Hero, HeroId}
+import pangea.model.hero.{Equipment, Hero, HeroId, MasterHornBoosts}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -48,7 +48,7 @@ class TestHeroDao(
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(guildReputation = value))))
 
-  def updateMasterHornBoosts(userId: UserId, boosts: Map[String, Int]): Task[Unit] =
+  def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(masterHornBoosts = boosts))))
 
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit] =

@@ -6,9 +6,8 @@ import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
 import io.circe.Json
 import io.circe.syntax.EncoderOps
-import pangea.dao.hero.MasterHornInstances._
 import pangea.dao.hero.TraumaInstances._
-import pangea.model.hero.Equipment
+import pangea.model.hero.{Equipment, MasterHornBoosts}
 import pangea.model.stats.FightStats
 import pangea.dao.hero.queries.Queries
 import pangea.model.hero.{Hero, HeroId}
@@ -81,7 +80,7 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def updateGuildReputation(userId: UserId, value: Long): Task[Unit] =
     Queries.updateGuildReputation(userId, value).update.run.transact(xa).unit
 
-  override def updateMasterHornBoosts(userId: UserId, boosts: Map[String, Int]): Task[Unit] =
+  override def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit] =
     Queries.updateMasterHornBoosts(userId, boosts).update.run.transact(xa).unit
 
   override def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit] =

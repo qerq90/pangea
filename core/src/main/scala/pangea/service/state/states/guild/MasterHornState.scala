@@ -4,7 +4,7 @@ import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
-import pangea.model.hero.Hero
+import pangea.model.hero.{Hero, MasterHornBoosts}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -31,6 +31,7 @@ case class MasterHornState(
       "ImproveEvasion"       -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Evasion) },
       "ImproveAttack"        -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Attack) },
       "ImproveDefence"       -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Defence) },
+      "ImproveAccuracy"      -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Accuracy) },
       "ImproveConcentration" -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Concentration) },
       "ImproveInventory"     -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Inventory) },
       "ConfirmImprove"       -> Target.Run { (u, _, r) => confirmImprove(u, r) },
@@ -86,24 +87,15 @@ case class MasterHornState(
       _ <- enter(user, renderer)
     } yield StateType.MasterHorn
 
+  // Бусты Горна не пишутся в `fightStats` напрямую — они хранятся в
+  // `masterHornBoosts` и прибавляются на чтение в `Hero.fightStatsWith` /
+  // `maxArmor`. Единственное исключение — Inventory: вместимость живёт в
+  // отдельном репозитории.
   private def applyBoost(user: User, hero: Hero, stat: Stat, price: Long, renderer: Renderer): Task[Unit] =
     for {
       _ <- heroDao.updateGuildReputation(user.userId, hero.guildReputation - price)
-      _ <- stat match {
-        case Stat.Inventory => inventoryRepo.increaseCapacity(hero.id, 1L).orElse(ZIO.unit)
-        case other =>
-          val fs    = hero.fightStats
-          val newFs = other match {
-            case Stat.Armor         => fs.copy(armor = fs.armor + 1)
-            case Stat.Evasion       => fs.copy(evasion = fs.evasion + 1)
-            case Stat.Attack        => fs.copy(atk = fs.atk + 1)
-            case Stat.Defence       => fs.copy(defence = fs.defence + 1)
-            case Stat.Concentration => fs.copy(concentration = fs.concentration + 1)
-            case Stat.Inventory     => fs
-          }
-          heroDao.updateFightStats(user.userId, newFs)
-      }
-      newBoosts = hero.masterHornBoosts.updated(stat.entryName, boostsFor(hero, stat) + 1)
+      _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, 1L).orElse(ZIO.unit))
+      newBoosts = bumped(hero.masterHornBoosts, stat)
       _ <- heroDao.updateMasterHornBoosts(user.userId, newBoosts)
       _ <- renderer.show(user, Screen(
         content.format("guild.masterHorn.applied",
@@ -126,13 +118,33 @@ object MasterHornState {
     case object Evasion       extends Stat("Уклонение")
     case object Attack        extends Stat("Атака")
     case object Defence       extends Stat("Защита")
+    case object Accuracy      extends Stat("Точность")
     case object Concentration extends Stat("Концентрация")
     case object Inventory     extends Stat("Вместимость инвентаря")
   }
 
   /** Сколько раз герой уже улучшал этот стат у Мастера Горна. */
-  def boostsFor(hero: Hero, stat: Stat): Int =
-    hero.masterHornBoosts.getOrElse(stat.entryName, 0)
+  def boostsFor(hero: Hero, stat: Stat): Long = boostsFor(hero.masterHornBoosts, stat)
+
+  private def boostsFor(b: MasterHornBoosts, stat: Stat): Long = stat match {
+    case Stat.Armor         => b.armor
+    case Stat.Evasion       => b.evasion
+    case Stat.Attack        => b.attack
+    case Stat.Defence       => b.defence
+    case Stat.Accuracy      => b.accuracy
+    case Stat.Concentration => b.concentration
+    case Stat.Inventory     => b.inventory
+  }
+
+  private def bumped(b: MasterHornBoosts, stat: Stat): MasterHornBoosts = stat match {
+    case Stat.Armor         => b.copy(armor         = b.armor + 1)
+    case Stat.Evasion       => b.copy(evasion       = b.evasion + 1)
+    case Stat.Attack        => b.copy(attack        = b.attack + 1)
+    case Stat.Defence       => b.copy(defence       = b.defence + 1)
+    case Stat.Accuracy      => b.copy(accuracy      = b.accuracy + 1)
+    case Stat.Concentration => b.copy(concentration = b.concentration + 1)
+    case Stat.Inventory     => b.copy(inventory     = b.inventory + 1)
+  }
 
   /**
    * Цена следующей прокачки в очках репутации:
