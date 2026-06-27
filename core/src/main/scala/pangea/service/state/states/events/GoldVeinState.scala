@@ -49,9 +49,16 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
     branch.act(user, ua, renderer)
 
   private def showVein(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(
-      content.format("goldVein.enter.text", "duration" -> formatRemaining(HarvestDurationMs)),
-      content.screen("goldVein.enter").choices))
+    for {
+      now     <- nowMs
+      started <- startedAt(user)
+      // При повторном входе на экран (например, после CancelLeaveVein) показываем
+      // реальный остаток времени до конца добычи, а не полную длительность.
+      remaining = started.map(s => (HarvestDurationMs - (now - s)).max(0L)).getOrElse(HarvestDurationMs)
+      _       <- renderer.show(user, Screen(
+                   content.format("goldVein.enter.text", "duration" -> formatRemaining(remaining)),
+                   content.screen("goldVein.enter").choices))
+    } yield ()
 
   // Ручная попытка уйти: до конца добычи показываем confirm c остатком времени;
   // если поллер ещё не успел сработать после `fireAt` — сами выдадим золото.
