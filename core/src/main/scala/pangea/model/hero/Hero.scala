@@ -104,25 +104,20 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
-  // «текущее/максимум», если травма уронила стат ниже потолка; иначе просто число
-  private def withMax(cur: Long, max: Long): String =
-    if (cur < max) s"$cur/$max" else cur.toString
-
   def getInfo(nowMs: Long): String = {
     val effB     = effectiveBaseStats(nowMs)
     val eff      = effectiveFightStats(nowMs)
-    val maxFS    = maxFightStats
     val maxHp    = effectiveMaxHp(nowMs)
     val maxArm   = effectiveMaxArmor(nowMs)
     val curArm   = fightStats.armor.min(maxArm)
     s"""${race.toString}, Уровень $lvl
        | $getLvlExp/$getNeededExp опыта
        |
-       | 💪 СИЛ ${withMax(effB.str, baseStats.str)}  ТЕЛО ${withMax(effB.vit, baseStats.vit)}
-       | 🏃 ЛОВ ${withMax(effB.agi, baseStats.agi)}  ИНТ ${withMax(effB.int, baseStats.int)}
+       | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
+       | 🏃 ЛОВ ${effB.agi}  ИНТ ${effB.int}
        |
-       | ⚔ Атк ${withMax(eff.atk, maxFS.atk)}  🎯 Точн ${withMax(eff.accuracy, maxFS.accuracy)}
-       | 🛡 Защ ${withMax(eff.defence, maxFS.defence)}  👁 Укл ${withMax(eff.evasion, maxFS.evasion)}
+       | ⚔ Атк ${eff.atk}  🎯 Точн ${eff.accuracy}
+       | 🛡 Защ ${eff.defence}  👁 Укл ${eff.evasion}
        | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm
        |
        | Свободных очков: $upgradePoints
