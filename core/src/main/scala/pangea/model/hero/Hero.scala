@@ -33,16 +33,16 @@ case class Hero(
   /** Можно ли двигаться к свету (выше): на первом этаже выше уже некуда. */
   def canGoLighter: Boolean = dungeonLevel > 1
 
-  // Множитель брони от защиты: влияние защиты вдвое слабее (defence / 2), но не ниже 1.
-  def maxArmor: Long = (equipment.allArmor * (fightStats.defence / 2.0).max(1.0)).toLong
+  // Защита больше не умножает броню (теперь она снижает урон процентно — см.
+  // `BattleState.damageReduction`). Максимум брони — сумма брони со снаряжения.
+  def maxArmor: Long = equipment.allArmor
 
-  /** Максимум брони с учётом травм: штраф на броню и на защиту режут потолок.
-   *  Без травм равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою
-   *  и восстанавливается до этого значения на отдыхе. */
+  /** Максимум брони с учётом травм: штраф на броню режет потолок. Без травм
+   *  равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою и
+   *  восстанавливается до этого значения на отдыхе. */
   def effectiveMaxArmor(nowMs: Long): Long = {
-    val p      = combinedPenalties(nowMs)
-    val effDef = (fightStats.defence * (1.0 - p.defPct) / 2.0).max(1.0)
-    ((equipment.allArmor * (1.0 - p.armorPct)) * effDef).toLong
+    val p = combinedPenalties(nowMs)
+    (equipment.allArmor * (1.0 - p.armorPct)).toLong.max(0L)
   }
 
   def traumaActive(nowMs: Long): Boolean = traumaUntil.exists(_ > nowMs)

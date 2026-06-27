@@ -98,8 +98,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         for {
           spread      <- Random.nextLongBetween(80L, 121L)
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
-          buffReduct   = math.min(ticked.heroBattleState.armorBonus, rawDamage)
-          afterBuff    = rawDamage - buffReduct
+          // Процентное снижение урона от защиты игрока: см. BattleState.damageReduction.
+          reduction    = BattleState.damageReduction(
+                           protection      = buffedEff.defence,
+                           defenderInt     = hero.baseStats.int,
+                           attackerInt     = monster.fightStats.concentration
+                         )
+          reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+          buffReduct   = math.min(ticked.heroBattleState.armorBonus, reducedDamage)
+          afterBuff    = reducedDamage - buffReduct
           curArmor     = hero.fightStats.armor.max(0L) // текущая броня тратится как есть; травма режет её ПОТОЛОК (refill), не текущий запас
           armorAbsorb  = math.min(curArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
@@ -107,7 +114,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           newStats     = hero.fightStats.copy(hp = newHp, armor = newArmor)
           _           <- heroDao.updateFightStats(user.userId, newStats)
-          mobLine      = content.format("battle.mobHit", "damage" -> rawDamage.toString, "monster" -> monster.name)
+          mobLine      = content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)
           _           <- renderer.show(user, Screen(playerLine + "\n\n" + mobLine, Nil))
           r <- if (newHp <= 0) heroDeath(user, renderer)
                else showScreen(user, renderer).as(StateType.Battle)
@@ -173,8 +180,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         for {
           spread      <- Random.nextLongBetween(80L, 121L)
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
-          buffReduct   = math.min(battle.heroBattleState.armorBonus, rawDamage)
-          afterBuff    = rawDamage - buffReduct
+          reduction    = BattleState.damageReduction(
+                           protection      = buffedEff.defence,
+                           defenderInt     = hero.baseStats.int,
+                           attackerInt     = monster.fightStats.concentration
+                         )
+          reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+          buffReduct   = math.min(battle.heroBattleState.armorBonus, reducedDamage)
+          afterBuff    = reducedDamage - buffReduct
           curArmor     = hero.fightStats.armor.max(0L)
           armorAbsorb  = math.min(curArmor, afterBuff)
           hpDmg        = afterBuff - armorAbsorb
@@ -182,7 +195,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           newHp        = (hero.fightStats.hp - hpDmg).max(0L)
           _           <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = newHp, armor = newArmor))
           _           <- renderer.show(user, Screen(
-                           content.format("battle.mobHit", "damage" -> rawDamage.toString, "monster" -> monster.name), Nil))
+                           content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name), Nil))
           r <- if (newHp <= 0) heroDeath(user, renderer)
                else heroDao.clearActiveBattle(user.userId) *>
                       renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
@@ -312,6 +325,20 @@ object BattleState {
    * защита защищающегося (×1) и точность атакующего (×1.5). Атакующий попадает,
    * если бросок 1..100 больше уклонения.
    */
+  /**
+   * Процентное снижение урона, наносимого защищающемуся юниту:
+   *   reduction = (P + Iₚ) / (P + Iₚ + Iₑ × 2),  зажато сверху 0.7.
+   * Где `P` — защита защитника, `Iₚ` — его интеллект, `Iₑ` — интеллект
+   * атакующего. Применяется к чистому урону до брони. Соотношение «×2 для
+   * интеллекта атакующего» — из ТЗ. Возврат — доля [0; 0.7].
+   */
+  def damageReduction(protection: Long, defenderInt: Long, attackerInt: Long): Double = {
+    val numer = (protection + defenderInt).toDouble
+    val denom = numer + attackerInt * 2.0
+    val raw   = if (denom <= 0.0) 0.0 else numer / denom
+    raw.max(0.0).min(0.7)
+  }
+
   def dodgeChance(agi: Long, evasion: Long, defence: Long, attackerAccuracy: Long): Double = {
     val positive = (agi + evasion).toDouble
     val denom    = positive + defence * 1.0 + attackerAccuracy * 1.5
