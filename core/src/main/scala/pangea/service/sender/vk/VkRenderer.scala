@@ -1,7 +1,7 @@
 package pangea.service.sender.vk
 
 import io.circe.syntax.EncoderOps
-import pangea.engine.{ChoiceColor, Renderer, Screen}
+import pangea.engine.{Choice, ChoiceColor, Renderer, Screen}
 import pangea.model.user.User
 import pangea.model.vk.keyboard.{Action => VkAction, Button, ButtonColor, Keyboard}
 import pangea.service.sender.Api
@@ -12,15 +12,34 @@ class VkRenderer(api: Api) extends Renderer {
     val kbOpt =
       if (screen.choices.isEmpty) None
       else {
-        val kb = screen.choices.foldLeft(Keyboard.default.withInline(screen.inline)) { (kb, choice) =>
-          val payload = (Map("action" -> choice.id) ++ choice.data).asJson
-          val button  = Button.withAction(VkAction.Text(choice.label, Some(payload)))
-                          .withColor(VkRenderer.toButtonColor(choice.color))
-          kb.addRow().addButton(button)
-        }
+        // Если хотя бы у одной кнопки задан `row` — рендерим ряды: choices группируются
+        // по row, ряды отсортированы по возрастанию. Кнопки без row идут каждая в свою
+        // строку (старое поведение — сохранено для совместимости).
+        val hasRows = screen.choices.exists(_.row.isDefined)
+        val kbInit  = Keyboard.default.withInline(screen.inline)
+        val kb =
+          if (!hasRows) screen.choices.foldLeft(kbInit) { (acc, choice) =>
+            acc.addRow().addButton(toButton(choice))
+          }
+          else {
+            val grouped = screen.choices.zipWithIndex
+              .groupBy { case (c, _) => c.row.getOrElse(Int.MaxValue) }
+              .toList
+              .sortBy(_._1)
+              .map { case (_, items) => items.sortBy(_._2).map(_._1) }
+            grouped.foldLeft(kbInit) { (acc, rowChoices) =>
+              rowChoices.foldLeft(acc.addRow()) { (k, choice) => k.addButton(toButton(choice)) }
+            }
+          }
         Some(kb)
       }
     api.sendMessage(user, screen.text, List.empty, kbOpt)
+  }
+
+  private def toButton(choice: Choice): Button = {
+    val payload = (Map("action" -> choice.id) ++ choice.data).asJson
+    Button.withAction(VkAction.Text(choice.label, Some(payload)))
+      .withColor(VkRenderer.toButtonColor(choice.color))
   }
 }
 
