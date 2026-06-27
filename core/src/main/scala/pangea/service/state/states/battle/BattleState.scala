@@ -273,6 +273,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val monsterDodgePct = mobDodgeChance(buffedEff.accuracy, battle).toInt
     val mobHitPct       = 100 - playerDodgePct
     val heroHitPct      = 100 - monsterDodgePct
+    val reductionPct    = (BattleState.damageReduction(
+                            protection  = buffedEff.defence,
+                            defenderInt = hero.baseStats.int,
+                            attackerInt = battle.monsterStats.concentration
+                          ) * 100.0).toInt
     val text = content.format("battle.enter.text",
       "monster"      -> battle.toMonster.name,
       "monsterRace"  -> battle.toMonster.race.toString,
@@ -289,6 +294,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroMax"      -> maxHp.toString,
       "heroArmor"    -> hero.fightStats.armor.min(hero.effectiveMaxArmor(nowMs)).toString,
       "heroMaxArmor" -> hero.effectiveMaxArmor(nowMs).toString,
+      "heroReduction" -> s"$reductionPct%",
       "flaskCharges" -> hero.equipment.flask.charges.getOrElse(0).toString
     )
     Screen(text, content.screen("battle.enter").choices)
