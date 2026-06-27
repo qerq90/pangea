@@ -3,6 +3,7 @@ package pangea.generator.item
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
 import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
 
@@ -110,7 +111,20 @@ object ItemGenerator {
 
     val (withExtras, rng5)     = updateExtraParams(numberOfExtraParams, item, rng4)
     val (withMandatory, rng5b) = applyMandatory(withExtras, rng5)
-    val (name, rng6)           = ItemNameGenerator.generate(withMandatory.itemType, rarity, rng5b)
-    (withMandatory.withName(name), rng6)
+    val (withSkill, rng5c)     = applyActiveSkill(withMandatory, rng5b)
+    val (name, rng6)           = ItemNameGenerator.generate(withSkill.itemType, rarity, rng5c)
+    (withSkill.withName(name), rng6)
+  }
+
+  // Активный навык падает только на Weapon (один из weaponSkills) и на ChestPlate
+  // (один из armorSkills), равновероятно среди допустимых для слота.
+  private def applyActiveSkill(item: Item, rng: Rng): (Item, Rng) = item.itemType match {
+    case ItemType.Weapon =>
+      val (skill, next) = rng.pick(Skill.weaponSkills)
+      (item.copy(activeSkill = Some(skill)), next)
+    case ItemType.ChestPlate =>
+      val (skill, next) = rng.pick(Skill.armorSkills)
+      (item.copy(activeSkill = Some(skill)), next)
+    case _ => (item, rng)
   }
 }

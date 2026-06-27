@@ -5,8 +5,9 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.{ActiveBattle, SkillSlotState}
 import pangea.model.hero.Hero
+import pangea.model.skill.{MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState
@@ -24,7 +25,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "ConfirmFlee" -> Target.Run { (user, _, renderer) => confirmFlee(user, renderer) },
       "CancelFlee"  -> Target.Run { (user, _, renderer) => showScreen(user, renderer).as(StateType.Battle) }
     ),
-    fallback = Target.Run { (user, _, renderer) => showScreen(user, renderer).as(StateType.Battle) }
+    fallback = Target.Run { (user, ua, renderer) =>
+      // Кнопки способностей именуются Skill_<itemId> и роутятся динамически: id
+      // указывает на конкретный предмет, поэтому два предмета с «одним» Skill
+      // имеют независимые cd/uses.
+      BattleState.parseSkillAction(ua) match {
+        case Some(itemId) => useSkill(user, renderer, itemId)
+        case None         => showScreen(user, renderer).as(StateType.Battle)
+      }
+    }
   )
 
   override def targetStates: Set[StateType] = branch.gotoTargets
@@ -71,6 +80,106 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       }
     } yield result
 
+  /** Применение активного навыка. Логика:
+   *   - проверяем, что слот существует, готов (cd=0) и связан с экипированным предметом;
+   *   - кидаем шанс попадания умением (см. `heroSkillHitChance`);
+   *   - на попадании: применяем эффект (Damage/Heal) с ±20% разбросом, ставим cd
+   *     и инкрементируем uses;
+   *   - на промахе: cd не выставляется, uses не растёт; но ход завершается (как
+   *     обычная атака — далее моб бьёт).
+   */
+  private def useSkill(user: User, renderer: Renderer, itemId: Long): Task[StateType] =
+    for {
+      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero   <- getHero(user)
+      battle <- getBattle(user)
+      result <- battle.slotByItem(itemId) match {
+        case None =>
+          renderer.show(user, Screen(content.text("battle.skillUnavailable"), Nil)) *>
+            showScreen(user, renderer).as(StateType.Battle)
+        case Some(slot) if slot.cooldown > 0 =>
+          renderer.show(user, Screen(content.text("battle.skillOnCooldown"), Nil)) *>
+            showScreen(user, renderer).as(StateType.Battle)
+        case Some(slot) =>
+          castSkill(user, hero, battle, slot, now, renderer)
+      }
+    } yield result
+
+  private def castSkill(
+    user:     User,
+    hero:     Hero,
+    battle:   ActiveBattle,
+    slot:     SkillSlotState,
+    nowMs:    Long,
+    renderer: Renderer
+  ): Task[StateType] =
+    for {
+      effHero  <- ZIO.succeed(hero.effectiveFightStats(nowMs))
+      buffed    = battle.heroBattleState.applyTo(effHero)
+      hitChance = BattleState.heroSkillHitChance(
+                    heroConc     = buffed.concentration,
+                    heroInt      = hero.baseStats.int,
+                    monsterConc  = battle.monsterStats.concentration,
+                    rarityFactor = battle.rarity.factor)
+      roll     <- Random.nextIntBetween(1, 101)
+      hitPct    = hitChance.toInt
+      result   <- if (roll <= hitChance) skillHit(user, hero, battle, slot, nowMs, renderer)
+                  else                   skillMiss(user, hero, battle, slot, nowMs, renderer, hitPct)
+    } yield result
+
+  private def skillHit(
+    user:     User,
+    hero:     Hero,
+    battle:   ActiveBattle,
+    slot:     SkillSlotState,
+    nowMs:    Long,
+    renderer: Renderer
+  ): Task[StateType] =
+    for {
+      spread <- Random.nextLongBetween(80L, 121L)
+      base    = slot.skill.baseValue(hero, nowMs)
+      value   = (base * spread / 100.0).toLong.max(1L)
+      bumpedBattle = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
+      result <- slot.skill.kind match {
+        case Skill.Kind.Damage =>
+          val playerLine = slot.skill.hitTemplate.replace("{}", value.toString)
+          val armorDmg   = math.min(battle.monsterCurrentArmor, value)
+          val hpDmg      = value - armorDmg
+          val newArmor   = battle.monsterCurrentArmor - armorDmg
+          val newHp      = (battle.monsterCurrentHp - hpDmg).max(0L)
+          val updated    = bumpedBattle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+          if (newHp <= 0)
+            heroDao.writeActiveBattle(user.userId, updated.asJson) *>
+              renderer.show(user, Screen(playerLine, Nil)) *>
+              victory(user, hero, updated, renderer)
+          else
+            monsterAttacks(user, hero, updated, nowMs, renderer, playerLine)
+
+        case Skill.Kind.Heal =>
+          val maxHp     = hero.effectiveMaxHp(nowMs)
+          val newHp     = (hero.fightStats.hp + value).min(maxHp)
+          val healed    = newHp - hero.fightStats.hp
+          val newStats  = hero.fightStats.copy(hp = newHp)
+          val playerLine = slot.skill.hitTemplate.replace("{}", healed.toString)
+          heroDao.updateFightStats(user.userId, newStats) *>
+            monsterAttacks(user, hero.copy(fightStats = newStats), bumpedBattle, nowMs, renderer, playerLine)
+      }
+    } yield result
+
+  private def skillMiss(
+    user:     User,
+    hero:     Hero,
+    battle:   ActiveBattle,
+    slot:     SkillSlotState,
+    nowMs:    Long,
+    renderer: Renderer,
+    hitPct:   Int
+  ): Task[StateType] = {
+    // Промах: cd НЕ выставляется (uses тоже не растёт); ход всё равно завершается.
+    val playerLine = content.format("battle.skillMiss", "skill" -> slot.skill.label, "chance" -> hitPct.toString)
+    monsterAttacks(user, hero, battle, nowMs, renderer, playerLine)
+  }
+
   /**
    * Ход моба после атаки игрока. `playerLine` — заранее посчитанная строка о
    * результате удара игрока; mob-line склеивается с ней и выводится одним
@@ -86,7 +195,6 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   ): Task[StateType] =
     for {
       ticked   <- ZIO.succeed(battle.tickBuffs)
-      _        <- heroDao.writeActiveBattle(user.userId, ticked.asJson)
       eff       = hero.effectiveFightStats(nowMs)
       buffedEff = ticked.heroBattleState.applyTo(eff)
       monster   = ticked.toMonster
@@ -94,37 +202,57 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       dodge     = playerDodgeChance(hero.baseStats.agi, buffedEff.evasion, buffedEff.defence, ticked)
       mobHitPct = (100.0 - dodge).toInt
 
-      result <- if (hitRoll > dodge) { // игрок не увернулся → моб попал
+      // 1) Обычная атака моба — обновляем hp/armor героя.
+      atkResult <- if (hitRoll > dodge) {
         for {
           spread      <- Random.nextLongBetween(80L, 121L)
           rawDamage    = (monster.fightStats.atk * spread / 100L).max(1L)
-          // Процентное снижение урона от защиты игрока: см. BattleState.damageReduction.
           reduction    = BattleState.damageReduction(
                            protection      = buffedEff.defence,
                            defenderInt     = hero.baseStats.int,
                            attackerInt     = monster.fightStats.concentration
                          )
           reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
-          buffReduct   = math.min(ticked.heroBattleState.armorBonus, reducedDamage)
-          afterBuff    = reducedDamage - buffReduct
-          curArmor     = hero.fightStats.armor.max(0L) // текущая броня тратится как есть; травма режет её ПОТОЛОК (refill), не текущий запас
-          armorAbsorb  = math.min(curArmor, afterBuff)
-          hpDmg        = afterBuff - armorAbsorb
-          newArmor     = curArmor - armorAbsorb
-          newHp        = (hero.fightStats.hp - hpDmg).max(0L)
-          newStats     = hero.fightStats.copy(hp = newHp, armor = newArmor)
-          _           <- heroDao.updateFightStats(user.userId, newStats)
-          mobLine      = content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)
-          _           <- renderer.show(user, Screen(playerLine + "\n\n" + mobLine, Nil))
-          r <- if (newHp <= 0) heroDeath(user, renderer)
-               else showScreen(user, renderer).as(StateType.Battle)
-        } yield r
-      } else {
-        val mobLine = content.format("battle.mobMiss", "monster" -> monster.name, "chance" -> mobHitPct.toString)
-        renderer.show(user, Screen(playerLine + "\n\n" + mobLine, Nil)) *>
-          showScreen(user, renderer).as(StateType.Battle)
-      }
-    } yield result
+          (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(ticked, hero, reducedDamage)
+        } yield (newHp, newArmor, content.format("battle.mobHit",
+                  "damage" -> reducedDamage.toString, "monster" -> monster.name))
+      } else ZIO.succeed((hero.fightStats.hp, hero.fightStats.armor,
+                          content.format("battle.mobMiss", "monster" -> monster.name, "chance" -> mobHitPct.toString)))
+      (hpAfterAtk, armorAfterAtk, mobLine) = atkResult
+      heroAfterAtk = hero.copy(fightStats = hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk))
+
+      // 2) Каст скилла моба — независимый бросок шанса применения умения. Если
+      // прокнул — равновероятно выбираем applicable скилл из 4. Скилл применяется
+      // ПОВЕРХ обычной атаки и может быть как уроном (CrushingStrike — мимо брони
+      // и damageReduction), так и хилом/починкой моба.
+      castResult <- if (heroAfterAtk.fightStats.hp <= 0) ZIO.succeed((ticked, heroAfterAtk, ""))
+        else for {
+          skillRoll  <- Random.nextIntBetween(1, 101)
+          skillChance = BattleState.monsterSkillHitChance(
+                          monsterConc  = monster.fightStats.concentration,
+                          rarityFactor = ticked.rarity.factor,
+                          heroConc     = buffedEff.concentration,
+                          heroInt      = hero.baseStats.int)
+          applicable  = MonsterSkill.values.filter(_.applicable(ticked)).toVector
+          out <- if (skillRoll <= skillChance && applicable.nonEmpty)
+                   for {
+                     idx <- Random.nextIntBetween(0, applicable.size)
+                     ms   = applicable(idx)
+                     cast = ms.cast(ticked, heroAfterAtk, nowMs)
+                   } yield (cast.battle, heroAfterAtk.copy(
+                              fightStats = heroAfterAtk.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)),
+                            "\n" + cast.line)
+                 else ZIO.succeed((ticked, heroAfterAtk, ""))
+        } yield out
+      (finalBattle, finalHero, skillLine) = castResult
+
+      _ <- heroDao.updateFightStats(user.userId, finalHero.fightStats)
+      _ <- heroDao.writeActiveBattle(user.userId, finalBattle.asJson)
+      _ <- renderer.show(user, Screen(playerLine + "\n\n" + mobLine + skillLine, Nil))
+
+      r <- if (finalHero.fightStats.hp <= 0) heroDeath(user, renderer)
+           else showScreen(user, renderer).as(StateType.Battle)
+    } yield r
 
   private def victory(user: User, hero: Hero, battle: ActiveBattle, renderer: Renderer): Task[StateType] =
     for {
@@ -278,6 +406,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                             defenderInt = hero.baseStats.int,
                             attackerInt = battle.monsterStats.concentration
                           ) * 100.0).toInt
+    val heroSkillHitPct = BattleState.heroSkillHitChance(
+                            heroConc     = buffedEff.concentration,
+                            heroInt      = hero.baseStats.int,
+                            monsterConc  = battle.monsterStats.concentration,
+                            rarityFactor = battle.rarity.factor).toInt
+    val mobSkillHitPct  = BattleState.monsterSkillHitChance(
+                            monsterConc  = battle.monsterStats.concentration,
+                            rarityFactor = battle.rarity.factor,
+                            heroConc     = buffedEff.concentration,
+                            heroInt      = hero.baseStats.int).toInt
     val text = content.format("battle.enter.text",
       "monster"      -> battle.toMonster.name,
       "monsterRace"  -> battle.toMonster.race.toString,
@@ -295,9 +433,21 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroArmor"    -> hero.fightStats.armor.min(hero.effectiveMaxArmor(nowMs)).toString,
       "heroMaxArmor" -> hero.effectiveMaxArmor(nowMs).toString,
       "heroReduction" -> s"$reductionPct%",
+      "heroConc"      -> buffedEff.concentration.toString,
+      "monsterConc"   -> battle.monsterStats.concentration.toString,
+      "heroSkillHit"  -> s"$heroSkillHitPct%",
+      "mobSkillHit"   -> s"$mobSkillHitPct%",
       "flaskCharges" -> hero.equipment.flask.charges.getOrElse(0).toString
     )
-    Screen(text, content.screen("battle.enter").choices)
+    val skillButtons = battle.skillSlots.collect {
+      case slot if slot.cooldown <= 0 =>
+        pangea.engine.Choice(
+          id    = s"Skill_${slot.itemId}",
+          label = slot.skill.label,
+          color = pangea.engine.ChoiceColor.Negative
+        )
+    }
+    Screen(text, skillButtons ++ content.screen("battle.enter").choices)
   }
 
   private def getHero(user: User): Task[Hero] =
@@ -322,6 +472,35 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 }
 
 object BattleState {
+
+  /** Шанс игрока попасть способностью по мобу, в процентах [5; 95]:
+   *   100 · (heroConc · 0.75·heroInt) / (0.5·monsterConc · monster.rarity.factor). */
+  def heroSkillHitChance(heroConc: Long, heroInt: Long, monsterConc: Long, rarityFactor: Double): Double = {
+    val numer = heroConc.toDouble * (0.75 * heroInt.toDouble)
+    val denom = (0.5 * monsterConc.toDouble) * rarityFactor.max(0.0001)
+    val raw   = if (denom <= 0.0) 100.0 else 100.0 * numer / denom
+    raw.max(5.0).min(95.0)
+  }
+
+  /** Шанс моба попасть способностью по игроку, в процентах [5; 95]:
+   *   100 · (monsterConc · rarity.factor) / (0.25·heroConc · 0.75·heroInt). */
+  def monsterSkillHitChance(monsterConc: Long, rarityFactor: Double, heroConc: Long, heroInt: Long): Double = {
+    val numer = monsterConc.toDouble * rarityFactor
+    val denom = (0.25 * heroConc.toDouble) * (0.75 * heroInt.toDouble)
+    val raw   = if (denom <= 0.0) 100.0 else 100.0 * numer / denom
+    raw.max(5.0).min(95.0)
+  }
+
+  /** Из payload UserAction достаём itemId, если action имеет вид `Skill_<id>`. */
+  def parseSkillAction(ua: pangea.service.state.UserAction): Option[Long] = {
+    val key = ua.payload
+      .flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
+      .getOrElse("")
+    key match {
+      case s"Skill_$rest" => rest.toLongOption
+      case _              => None
+    }
+  }
 
   /**
    * Шанс уклонения защищающегося юнита от удара атакующего, в процентах, зажат в [5, 95]:

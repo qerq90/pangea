@@ -15,12 +15,12 @@ object ItemNameGeneratorSpec extends ZIOSpecDefault {
 
   override def spec = suite("ItemNameGenerator")(
 
-    test("формат: кружок + тип + титул") {
+    test("формат: кружок + прилагательное + тип + титул") {
       val (name, _) = ItemNameGenerator.generate(ItemType.Weapon, Rarity.Gray, Rng(42L))
       val parts = name.split(' ').toList
-      assertTrue(parts.length == 3) &&
+      assertTrue(parts.length == 4) &&
         assertTrue(parts.head == "⚫") &&
-        assertTrue(titles.contains(parts(2)))
+        assertTrue(titles.contains(parts(3)))
     },
 
     test("Blue Weapon начинается с синего кружка") {
@@ -33,11 +33,12 @@ object ItemNameGeneratorSpec extends ZIOSpecDefault {
       assertTrue(name.startsWith("🟠"))
     },
 
-    test("тип — с заглавной, титул — с маленькой") {
+    test("прилагательное и тип — с заглавной, титул — с маленькой") {
       val (name, _) = ItemNameGenerator.generate(ItemType.ChestPlate, Rarity.Green, Rng(7L))
       val parts = name.split(' ').toList
       assertTrue(parts(1).head.isUpper) &&
-        assertTrue(parts(2).head.isLower)
+        assertTrue(parts(2).head.isUpper) &&
+        assertTrue(parts(3).head.isLower)
     },
 
     test("разные seeds дают разные имена для одного типа") {

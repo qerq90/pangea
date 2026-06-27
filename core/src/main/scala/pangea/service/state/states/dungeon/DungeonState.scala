@@ -92,7 +92,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     for {
       seed         <- Random.nextLong
       (monster, _)  = MonsterGenerator.generate(hero.dungeonLevel, Rng(seed))
-      battle        = ActiveBattle.fromMonster(monster)
+      slots         = List(hero.equipment.weapon, hero.equipment.chestPlate)
+                        .flatMap(it => it.activeSkill.map(s => pangea.model.battle.SkillSlotState(it.id, s)))
+      battle        = ActiveBattle.fromMonster(monster).copy(skillSlots = slots)
       _            <- heroDao.writeActiveBattle(user.userId, battle.asJson)
     } yield StateType.Battle
 

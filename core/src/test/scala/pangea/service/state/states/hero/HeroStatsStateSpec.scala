@@ -64,8 +64,8 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.text.contains("ИНТ"))
     },
 
-    test("enter с травмой → показывает текущее/максимум подебаффленного стата (СИЛ 5/10)") {
-      // «Сломанная рука» — -50% к силе; базовая СИЛ 10 → 5/10
+    test("enter с травмой → показывает текущее значение подебаффленного стата (СИЛ 5)") {
+      // «Сломанная рука» — -50% к силе; базовая СИЛ 10 → отображается просто «СИЛ 5»
       val injured = TestFixtures.hero(userId).copy(
         traumaUntil = Some(Long.MaxValue),
         traumaNames = List("Сломанная рука")
@@ -77,7 +77,7 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
         state     = HeroStatsState(heroDao, content)
         _        <- state.enter(testUser, renderer)
         screens  <- renderer.sentScreens
-      } yield assertTrue(screens.head.text.contains("СИЛ 5/10"))
+      } yield assertTrue(screens.head.text.contains("СИЛ 5"))
     },
 
     test("статы зажаты снизу единицей (атака/точность/защита/уклонение, HP)") {

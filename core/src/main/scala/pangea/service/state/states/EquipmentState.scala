@@ -136,15 +136,7 @@ object EquipmentState {
   )
 
   def itemStats(item: Item): String = {
-    val stats = List(
-      Option.when(item.attack > 0)(s"Атака: +${item.attack}"),
-      Option.when(item.accuracy > 0)(s"Точность: +${item.accuracy}"),
-      Option.when(item.concentration > 0)(s"Концентрация: +${item.concentration}"),
-      Option.when(item.armor > 0)(s"Броня: +${item.armor}"),
-      Option.when(item.defence > 0)(s"Защита: +${item.defence}"),
-      Option.when(item.evasion > 0)(s"Уклонение: +${item.evasion}"),
-      Option.when(item.hp > 0)(s"HP: +${item.hp}")
-    ).flatten
+    val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
     s"${item.name} Ур.${item.lvl}\n$statsStr"
   }

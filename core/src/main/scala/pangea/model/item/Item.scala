@@ -4,6 +4,7 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import pangea.model.skill.Skill
 
 case class Item(
   id: Long,
@@ -21,7 +22,8 @@ case class Item(
   flaskEffect: Option[FlaskEffect] = None,
   charges:     Option[Int]         = None,
   maxCharges:  Option[Int]         = None,
-  race:        Option[String]      = None // раса моба для трофеев (entryName); None у обычных предметов
+  race:        Option[String]      = None, // раса моба для трофеев (entryName); None у обычных предметов
+  activeSkill: Option[Skill]       = None  // активный навык: только на Weapon (один из weaponSkills) и ChestPlate (один из armorSkills)
 ) {
   def withId(id: Long): Item = copy(id = id)
 
@@ -47,11 +49,27 @@ case class Item(
   def withEvasion(evasion: Long): Item = copy(evasion = evasion)
 
   def withHp(hp: Long): Item = copy(hp = hp)
+
+  /** Строки характеристик для отображения (инвентарь/снаряжение/дроп). Активный
+   *  навык — последней строкой ниже всех статов; пустая строка возвращается, если
+   *  у предмета нет ни статов, ни навыка. */
+  def statsLines: List[String] = {
+    val numeric = List(
+      Option.when(attack > 0)(s"Атака: +$attack"),
+      Option.when(accuracy > 0)(s"Точность: +$accuracy"),
+      Option.when(concentration > 0)(s"Концентрация: +$concentration"),
+      Option.when(armor > 0)(s"Броня: +$armor"),
+      Option.when(defence > 0)(s"Защита: +$defence"),
+      Option.when(evasion > 0)(s"Уклонение: +$evasion"),
+      Option.when(hp > 0)(s"HP: +$hp")
+    ).flatten
+    numeric ++ activeSkill.map(s => s"""Активный навык: «${s.label}»""").toList
+  }
 }
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

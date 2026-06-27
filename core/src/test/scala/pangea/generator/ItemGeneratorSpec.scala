@@ -3,6 +3,7 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
 import pangea.model.item.{ItemType, Rarity}
+import pangea.model.skill.Skill
 import zio.test._
 
 object ItemGeneratorSpec extends ZIOSpecDefault {
@@ -68,6 +69,39 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Blue, Rng(s))._1)
       assertTrue(items.filter(_.itemType != ItemType.ChestPlate).forall(_.hp == 0L)) &&
       assertTrue(items.filter(_.itemType == ItemType.ChestPlate).forall(_.hp > 0L))
+    },
+
+    test("Weapon всегда имеет activeSkill из weaponSkills") {
+      val weapons = (1L to 500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
+        .filter(_.itemType == ItemType.Weapon)
+      assertTrue(weapons.nonEmpty) &&
+      assertTrue(weapons.forall(_.activeSkill.exists(Skill.weaponSkills.contains)))
+    },
+
+    test("ChestPlate всегда имеет activeSkill из armorSkills") {
+      val chests = (1L to 500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
+        .filter(_.itemType == ItemType.ChestPlate)
+      assertTrue(chests.nonEmpty) &&
+      assertTrue(chests.forall(_.activeSkill.exists(Skill.armorSkills.contains)))
+    },
+
+    test("Остальные слоты не получают activeSkill") {
+      val others = (1L to 500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Blue, Rng(s))._1)
+        .filter(i => i.itemType != ItemType.Weapon && i.itemType != ItemType.ChestPlate)
+      assertTrue(others.forall(_.activeSkill.isEmpty))
+    },
+
+    test("Распределение оружейных навыков примерно равномерно") {
+      val skills = (1L to 1500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
+        .filter(_.itemType == ItemType.Weapon)
+        .flatMap(_.activeSkill)
+      val counts = Skill.weaponSkills.map(s => skills.count(_ == s))
+      // У всех 3 навыков ненулевая выборка — каждое значение хотя бы изредка выпало.
+      assertTrue(counts.forall(_ > 0))
     }
   )
 }

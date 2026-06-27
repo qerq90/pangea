@@ -13,6 +13,7 @@ import pangea.service.state.UserAction
 import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
 import zio.ZIO
 import zio.test._
+import zio.test.TestRandom
 
 object BattleStateSpec extends ZIOSpecDefault {
 
@@ -295,16 +296,18 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     test("armor поглощает урон → HP не уменьшается если armor достаточен") {
-      // hero с armor=1000, defence=0, hp=1000; моб atk=1 → damage=1 → поглощается armor
+      // hero с armor=1000, defence=0, hp=1000; моб atk=1 → damage=1 → поглощается armor.
+      // feedInts: (1) heroHitRoll, (2) mobHitRoll, (3) mobSkillRoll=100 — каст моба не прокает,
+      // иначе мог бы выпасть CrushingStrike, который игнорирует броню.
       val armoredHero = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 1000L, armor = 1000L, defence = 0, evasion = 0),
         baseStats  = strongHero.baseStats.copy(agi = 0)
       )
-      // слабый монстр с atk=1 и accuracy=9999 (всегда попадает), не умирает (hp=9999)
       val slowBattle = strongBattle
       for {
         triple               <- makeState(armoredHero, slowBattle)
         (state, heroDao, renderer) = triple
+        _                    <- TestRandom.feedInts(50, 50, 100)
         _                    <- state.action(testUser, tap("Attack"), renderer)
         updated              <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(updated.exists(_.fightStats.hp == 1000L)) &&
@@ -326,7 +329,8 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     test("buff armor снижает урон без уменьшения физической брони") {
-      // Герой без armor и без defence, но с buff.armor=9999 → не должен получать HP урон
+      // Герой без armor и без defence, но с buff.armor=9999 → не должен получать HP урон.
+      // mobSkillRoll=100 → каст моба не прокает (иначе CrushingStrike пробил бы баф).
       val noArmorHero = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 500L, armor = 0L, defence = 0, evasion = 0),
         baseStats  = strongHero.baseStats.copy(agi = 0)
@@ -336,6 +340,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       for {
         triple               <- makeState(noArmorHero, buffedBattle)
         (state, heroDao, renderer) = triple
+        _                    <- TestRandom.feedInts(50, 50, 100)
         _                    <- state.action(testUser, tap("Attack"), renderer)
         updated              <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(updated.exists(_.fightStats.hp == 500L))  // урон поглощён баффом
