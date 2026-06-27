@@ -472,17 +472,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           row   = Some(0)
         )
     }
-    // Ряды кнопок (см. ТЗ): row 0 — активные навыки (несколько в одной строке);
-    // row 1 — Атака + заглушка дополнительного слота; row 2 — Фляга + стиль атаки;
-    // row 3 — Сбежать + сменить цель. Заглушки имеют id с префиксом "Stub_" и в
-    // fallback роутятся в showScreen — клик ничего не делает.
+    // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Фляга; row 3 —
+    // Сбежать. Места под заглушки (доп. слот, стиль атаки, сменить цель) пока скрыты.
     val mainButtons = List(
-      pangea.engine.Choice("Attack",     "Атака",                                 row = Some(1)),
-      pangea.engine.Choice("StubExtraSkill", "Применение умения доп. слота",      color = pangea.engine.ChoiceColor.Secondary, row = Some(1)),
-      pangea.engine.Choice("UseFlask",   "Использовать флягу",                    row = Some(2)),
-      pangea.engine.Choice("StubAttackStyle", "Стиль атаки",                      color = pangea.engine.ChoiceColor.Secondary, row = Some(2)),
-      pangea.engine.Choice("Flee",       "Сбежать",                               color = pangea.engine.ChoiceColor.Negative,  row = Some(3)),
-      pangea.engine.Choice("StubChangeTarget", "Сменить цель атаки",              color = pangea.engine.ChoiceColor.Secondary, row = Some(3))
+      pangea.engine.Choice("Attack",   "Атака",              row = Some(1)),
+      pangea.engine.Choice("UseFlask", "Использовать флягу", row = Some(2)),
+      pangea.engine.Choice("Flee",     "Сбежать",            color = pangea.engine.ChoiceColor.Negative, row = Some(3))
     )
     Screen(text, skillButtons ++ mainButtons)
   }
