@@ -433,8 +433,6 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroArmor"    -> hero.fightStats.armor.min(hero.effectiveMaxArmor(nowMs)).toString,
       "heroMaxArmor" -> hero.effectiveMaxArmor(nowMs).toString,
       "heroReduction" -> s"$reductionPct%",
-      "heroConc"      -> buffedEff.concentration.toString,
-      "monsterConc"   -> battle.monsterStats.concentration.toString,
       "heroSkillHit"  -> s"$heroSkillHitPct%",
       "mobSkillHit"   -> s"$mobSkillHitPct%",
       "flaskCharges" -> hero.equipment.flask.charges.getOrElse(0).toString

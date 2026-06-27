@@ -307,7 +307,7 @@ heroStats:
 
 battle:
   enter:
-    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота: {monsterDodge}\n🌀 Конц {monsterConc} | Шанс применения умения: {mobSkillHit}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor} (−{heroReduction} урона)\n🎯 Шанс попадания: {heroHit} | 💨 Шанс уворота: {heroDodge}\n🌀 Конц {heroConc} | Шанс применения умения: {heroSkillHit}\n🧪 Фляга: {flaskCharges}"
+    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота: {monsterDodge}\n🌀 Шанс применения умения: {mobSkillHit}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor} (−{heroReduction} урона)\n🎯 Шанс попадания: {heroHit} | 💨 Шанс уворота: {heroDodge}\n🌀 Шанс применения умения: {heroSkillHit}\n🧪 Фляга: {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"

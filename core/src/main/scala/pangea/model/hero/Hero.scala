@@ -67,7 +67,7 @@ case class Hero(
       defence       = ((fightStats.defence + masterHornBoosts.defence) * rf.defenceFactor * (1.0 - p.defPct)).toLong.max(1L),
       accuracy      = ((fightStats.accuracy + masterHornBoosts.accuracy) * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
       evasion       = ((fightStats.evasion + masterHornBoosts.evasion) * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
-      concentration = ((fightStats.concentration + masterHornBoosts.concentration + baseStats.int * (1.0 - p.intPct)) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
+      concentration = ((fightStats.concentration + masterHornBoosts.concentration) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
       armor         = fightStats.armor.max(0L)
     )
   }
