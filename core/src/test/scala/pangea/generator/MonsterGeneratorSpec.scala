@@ -63,11 +63,10 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
       assertTrue(rarities.contains(Rarity.Legendary))
     },
 
-    test("name возвращает строку из редкости и расы") {
+    test("name возвращает пафосное имя из таблицы Monster.namesByRaceRarity") {
       val (monster, _) = MonsterGenerator.generate(1, Rng(42L))
-      val expected =
-        if (monster.marked) s"Отмеченный тьмой ${monster.rarity} ${monster.race}"
-        else s"${monster.rarity} ${monster.race}"
+      val base         = pangea.model.monster.Monster.namesByRaceRarity((monster.race, monster.rarity))
+      val expected     = if (monster.marked) s"Отмеченный тьмой $base" else base
       assertTrue(monster.name == expected)
     },
 

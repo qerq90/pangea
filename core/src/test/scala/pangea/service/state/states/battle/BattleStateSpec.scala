@@ -76,7 +76,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         _                   <- state.enter(testUser, renderer)
         screens             <- renderer.sentScreens
       } yield assertTrue(screens.nonEmpty) &&
-              assertTrue(screens.head.text.contains("Обычный")) &&
+              assertTrue(screens.head.text.contains("Человек-раб")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Attack")) &&
               assertTrue(screens.head.choices.map(_.id).contains("UseFlask")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Flee"))
