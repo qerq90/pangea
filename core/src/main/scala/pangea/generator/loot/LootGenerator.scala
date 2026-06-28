@@ -2,7 +2,7 @@ package pangea.generator.loot
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemType, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.item.{Rarity => ItemRarity}
 
@@ -101,43 +101,43 @@ object LootGenerator {
         )
     }
 
-  // Тип трофея (название) и веса (в %, сумма = 100) по тиру моба.
-  private def trophyWeights(tier: MobRarity): List[(String, Int)] =
+  // Вид трофея и веса (в %, сумма = 100) по тиру моба.
+  private def trophyWeights(tier: MobRarity): List[(TrophyKind, Int)] =
     tier match {
       case MobRarity.Common =>
         List(
-          "Реликвия"          -> 1,
-          "Талисман"          -> 9,
-          "Голова"            -> 20,
-          "Мешок с пожитками" -> 70
+          TrophyKind.Relic    -> 1,
+          TrophyKind.Talisman -> 9,
+          TrophyKind.Head     -> 20,
+          TrophyKind.Sack     -> 70
         )
       case MobRarity.Uncommon =>
         List(
-          "Реликвия"          -> 5,
-          "Талисман"          -> 15,
-          "Голова"            -> 20,
-          "Мешок с пожитками" -> 60
+          TrophyKind.Relic    -> 5,
+          TrophyKind.Talisman -> 15,
+          TrophyKind.Head     -> 20,
+          TrophyKind.Sack     -> 60
         )
       case MobRarity.Rare =>
         List(
-          "Реликвия"          -> 15,
-          "Талисман"          -> 20,
-          "Голова"            -> 25,
-          "Мешок с пожитками" -> 40
+          TrophyKind.Relic    -> 15,
+          TrophyKind.Talisman -> 20,
+          TrophyKind.Head     -> 25,
+          TrophyKind.Sack     -> 40
         )
       case MobRarity.Mythical =>
         List(
-          "Реликвия"          -> 15,
-          "Талисман"          -> 25,
-          "Голова"            -> 30,
-          "Мешок с пожитками" -> 30
+          TrophyKind.Relic    -> 15,
+          TrophyKind.Talisman -> 25,
+          TrophyKind.Head     -> 30,
+          TrophyKind.Sack     -> 30
         )
       case MobRarity.Legendary =>
         List(
-          "Реликвия"          -> 25,
-          "Талисман"          -> 45,
-          "Голова"            -> 20,
-          "Мешок с пожитками" -> 10
+          TrophyKind.Relic    -> 25,
+          TrophyKind.Talisman -> 45,
+          TrophyKind.Head     -> 20,
+          TrophyKind.Sack     -> 10
         )
     }
 
@@ -205,10 +205,10 @@ object LootGenerator {
         (LootDrop.Gear(item), r2)
 
       case Category.Trophy =>
-        val (name, r1) = pickWeighted(trophyWeights(tier), rng)
+        val (kind, r1) = pickWeighted(trophyWeights(tier), rng)
         val trophy = Item(
           id = -1L,
-          name = s"$name (${race.toString})",
+          name = s"${kind.displayName} (${race.toString})",
           lvl = killLevel.max(1L),
           rarity = ItemRarity.Gray,
           itemType = ItemType.Trophy,
@@ -218,7 +218,8 @@ object LootGenerator {
           armor = 0,
           defence = 0,
           evasion = 0,
-          race = Some(race.entryName)
+          race = Some(race.entryName),
+          trophyKind = Some(kind)
         )
         (LootDrop.Trophy(trophy), r1)
 

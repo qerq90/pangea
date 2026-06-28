@@ -2,7 +2,7 @@ package pangea.service.state.states.tavern
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Item, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest.QuestData
 import pangea.model.state.StateType
@@ -18,11 +18,11 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  // Трофей: серая редкость (factorR = 2), нужная раса.
-  private def trophy(id: Long, race: Race, lvl: Long): Item =
-    Item(id, s"Голова (${race.toString})", lvl, Rarity.Gray, ItemType.Trophy,
+  // Трофей нужной расы; по умолчанию вид = Голова (coef = 1.0).
+  private def trophy(id: Long, race: Race, lvl: Long, kind: TrophyKind = TrophyKind.Head): Item =
+    Item(id, s"${kind.displayName} (${race.toString})", lvl, Rarity.Gray, ItemType.Trophy,
       attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
-      race = Some(race.entryName))
+      race = Some(race.entryName), trophyKind = Some(kind))
 
   private def makeState(items: List[Item], active: Option[Race]) =
     for {
@@ -56,7 +56,7 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
     },
 
     test("TurnInQuest с подходящим трофеем → забирает предмет, начисляет опыт, закрывает задание") {
-      // lvl 3, Gray factorR=2 → exp = ceil(5 + 3*2) = 11
+      // lvl 3, Голова (coef=1.0) → exp = ceil(5 + 3*1.0) = 8
       for {
         t <- makeState(List(trophy(1L, Race.Orc, 3L)), active = Some(Race.Orc))
         (state, heroDao, invRepo, renderer) = t
@@ -65,7 +65,7 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
         quests  <- heroDao.readQuestData(userId).map(_.flatMap(_.as[QuestData].toOption))
         screens <- renderer.sentScreens
       } yield assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(hero.exists(_.exp == 11L)) &&
+              assertTrue(hero.exists(_.exp == 8L)) &&
               assertTrue(quests.exists(_.active.isEmpty)) &&
               assertTrue(screens.exists(_.text.contains("Задание выполнено")))
     },

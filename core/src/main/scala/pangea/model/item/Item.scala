@@ -23,6 +23,7 @@ case class Item(
   charges:     Option[Int]         = None,
   maxCharges:  Option[Int]         = None,
   race:        Option[String]      = None, // раса моба для трофеев (entryName); None у обычных предметов
+  trophyKind:  Option[TrophyKind]  = None, // вид трофея; None у обычных предметов
   activeSkill: Option[Skill]       = None  // активный навык: только на Weapon (один из weaponSkills) и ChestPlate (один из armorSkills)
 ) {
   def withId(id: Long): Item = copy(id = id)
@@ -69,7 +70,7 @@ case class Item(
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

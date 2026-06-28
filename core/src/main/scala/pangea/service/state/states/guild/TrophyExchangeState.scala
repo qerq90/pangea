@@ -12,8 +12,8 @@ import zio.{Task, ZIO}
 /**
  * Приём трофеев в Гильдии Искателей. Кнопка «Сдать трофеи» забирает все
  * предметы с `itemType == Trophy` из инвентаря и начисляет за каждый
- * `ceil(5 + lvl × coef)` репутации, где `coef` зависит от вида трофея
- * (Реликвия 4 · Талисман 2 · Голова 1 · Мешок с пожитками 0.5).
+ * `ceil(5 + lvl × coef)` репутации, где `coef` берётся из
+ * [[pangea.model.item.TrophyKind]].
  */
 case class TrophyExchangeState(
   heroDao:       HeroDao,
@@ -58,19 +58,7 @@ case class TrophyExchangeState(
 }
 
 object TrophyExchangeState {
-  // Коэффициенты по виду трофея. Имя trophy формируется LootGenerator как
-  // "<категория> (<раса>)" — категория = первое слово до пробела.
-  private val coefficients: Map[String, Double] = Map(
-    "Реликвия"          -> 4.0,
-    "Талисман"          -> 2.0,
-    "Голова"            -> 1.0,
-    "Мешок с пожитками" -> 0.5
-  )
-
-  /** Репутация за один трофей: `ceil(5 + lvl × coef)`. Неизвестный вид → coef = 1. */
-  def reputationFor(item: Item): Long = {
-    val category = item.name.split(" \\(").headOption.getOrElse(item.name)
-    val coef     = coefficients.getOrElse(category, 1.0)
-    math.ceil(5.0 + item.lvl.toDouble * coef).toLong
-  }
+  /** Репутация за один трофей: `ceil(5 + lvl × coef)`, где `coef` — у вида трофея. */
+  def reputationFor(item: Item): Long =
+    math.ceil(5.0 + item.lvl.toDouble * item.trophyKind.get.coef).toLong
 }
