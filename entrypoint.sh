@@ -7,4 +7,4 @@ echo "Running migrations..."
 goose -dir /app/migrations postgres "$GOOSE_URL" up
 
 echo "Starting application..."
-exec java -jar /app/app.jar
+exec java -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -jar /app/app.jar
