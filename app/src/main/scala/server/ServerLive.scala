@@ -1,5 +1,6 @@
 package server
 
+import cats.syntax.semigroupk._
 import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
@@ -57,7 +58,7 @@ final class ServerLive(
       } yield resp
   }
 
-  private val httpApp: HttpApp[Task] = routes.orNotFound
+  private val httpApp: HttpApp[Task] = (routes <+> LogsRoutes.routes).orNotFound
 
   override def run(): UIO[Unit] =
     EmberServerBuilder
