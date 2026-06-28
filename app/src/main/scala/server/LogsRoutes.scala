@@ -4,7 +4,7 @@ import cats.effect.kernel.Ref
 import fs2.Stream
 import org.http4s.dsl.Http4sDsl
 import org.http4s.headers.`Content-Type`
-import org.http4s.{HttpRoutes, MediaType, ServerSentEvent}
+import org.http4s.{Charset, HttpRoutes, MediaType, ServerSentEvent}
 import zio.Task
 import zio.interop.catz._
 
@@ -27,7 +27,7 @@ object LogsRoutes {
       for {
         lines <- zio.ZIO.attempt(tailLines(LogFile, n))
         filtered = grep.fold(lines)(g => lines.filter(_.contains(g)))
-        resp <- Ok(filtered.mkString("\n"), `Content-Type`(MediaType.text.plain))
+        resp <- Ok(filtered.mkString("\n"), `Content-Type`(MediaType.text.plain, Charset.`UTF-8`))
       } yield resp
 
     case GET -> Root / "logs" / "stream" :? GrepParam(grep) =>
