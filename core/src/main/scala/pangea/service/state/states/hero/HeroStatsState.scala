@@ -2,7 +2,7 @@ package pangea.service.state.states.hero
 
 import java.util.concurrent.TimeUnit
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -120,11 +120,13 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
         "remaining"   -> remaining)
     }.getOrElse("")
     val choices = List(
-      Some(content.choice("OpenInventory", "heroStats.inventory")),
-      Some(content.choice("OpenEquipment", "heroStats.equipment")),
-      Option.when(hero.activeTraumas(nowMs).nonEmpty)(content.choice("OpenTraumas", "heroStats.traumas")),
-      Option.when(hero.upgradePoints > 0)(content.choice("Upgrade", "heroStats.upgrade")),
-      Some(content.choice("Back", "heroStats.leave"))
+      Some(content.choice("OpenInventory", "heroStats.inventory").copy(row = Some(0))),
+      Some(content.choice("OpenEquipment", "heroStats.equipment").copy(row = Some(0))),
+      Option.when(hero.activeTraumas(nowMs).nonEmpty)(
+        content.choice("OpenTraumas", "heroStats.traumas").copy(color = ChoiceColor.Secondary, row = Some(1))),
+      Option.when(hero.upgradePoints > 0)(
+        content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
+      Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
     ).flatten
     Screen(hero.getInfo(nowMs) + traumaLine, choices)
   }

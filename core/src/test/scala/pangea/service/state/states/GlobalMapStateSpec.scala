@@ -55,14 +55,14 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Tavern)
     },
 
-    test("enter → показывает кнопки Guild и Construction") {
+    test("enter → показывает кнопки Guild и MarketSquare") {
       for {
         triple              <- makeState(baseHero)
         (state, _, renderer) = triple
         _                   <- state.enter(testUser, renderer)
         screens             <- renderer.sentScreens
       } yield assertTrue(screens.head.choices.map(_.id).contains("Guild")) &&
-              assertTrue(screens.head.choices.map(_.id).contains("Construction"))
+              assertTrue(screens.head.choices.map(_.id).contains("MarketSquare"))
     },
 
     test("Guild → переходит в Guild") {
@@ -73,12 +73,12 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Guild)
     },
 
-    test("Construction → переходит в Construction") {
+    test("MarketSquare → переходит в MarketSquare") {
       for {
         triple              <- makeState(baseHero)
         (state, _, renderer) = triple
-        result              <- state.action(testUser, tap("Construction"), renderer)
-      } yield assertTrue(result == StateType.Construction)
+        result              <- state.action(testUser, tap("MarketSquare"), renderer)
+      } yield assertTrue(result == StateType.MarketSquare)
     }
   )
 }

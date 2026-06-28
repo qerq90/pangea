@@ -84,17 +84,35 @@ globalMap:
   enter:
     text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor}\n💰 Золото: {gold}"
     choices:
+      HarborQuarter: "Портовый квартал"
+      MarketSquare: "Торговая площадь"
       Tavern: "Таверна"
-      Guild: "Гильдия Искателей"
-      Construction: "Стройка"
-      StreetMerchants: "Уличные торговцы"
+      Guild: "Гильдия искателей"
       OpenCharacter: "Персонаж"
       ReturnToDungeon: "В лабиринт"
+      LeaveCity: "За город"
+  leaveCity: "Дороги за город пока закрыты."
+
+harborQuarter:
+  enter:
+    text: "Портовый квартал. Соль на ветру, скрип канатов и тяжёлый запах смолы."
+    choices:
+      UnassumingBarrel: "Неприметная бочка"
+      BackToCity: "Назад"
+  unassumingBarrel: "Из-под бочки доносится приглушённое бормотание. Пока сюда не пускают — заходите позже."
+
+marketSquare:
+  enter:
+    text: "Торговая площадь. Шумно от лоточников и стука молотков со стройки."
+    choices:
+      StreetMerchants: "Уличные торговцы"
+      Construction: "Стройка"
+      BackToCity: "Назад"
   streetMerchants:
     text: "Уличные торговцы зазывают прохожих к своим лоткам."
     choices:
       MerchantRichelieu: "Торговец Ришелье"
-      ReturnToCity:
+      BackToMarketSquare:
         label: "Назад"
         color: "negative"
 guild:

@@ -36,7 +36,7 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       "ConfirmLeaveWork" -> Target.Run { (user, _, renderer) => confirmLeave(user, renderer) },
       "CancelLeaveWork"  -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Construction) },
       "Finish"           -> Target.Run { (user, _, renderer) => finish(user, renderer) },
-      "LeaveConstruction" -> Target.Goto(StateType.GlobalMap)
+      "LeaveConstruction" -> Target.Goto(StateType.MarketSquare)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Construction) }
   )
@@ -113,12 +113,12 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
   private def confirmLeave(user: User, renderer: Renderer): Task[StateType] =
     scheduler.cancel(user.userId, TaskKind.Construction) *>
       heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.text("construction.left"), Nil)).as(StateType.GlobalMap)
+      renderer.show(user, Screen(content.text("construction.left"), Nil)).as(StateType.MarketSquare)
 
   // Завершение работы — выдача золота и финальный текст. Возврат в GlobalMap.
   private def finish(user: User, renderer: Renderer): Task[StateType] =
     activeJob(user).flatMap {
-      case None => ZIO.succeed(StateType.GlobalMap)
+      case None => ZIO.succeed(StateType.MarketSquare)
       case Some((job, _)) =>
         for {
           hero    <- getHero(user)
@@ -131,7 +131,7 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
           _       <- heroDao.writeSceneData(user.userId, Json.Null)
           _       <- renderer.show(user, Screen(
                        content.format("construction.done", "gold" -> reward.toString), Nil))
-        } yield StateType.GlobalMap
+        } yield StateType.MarketSquare
     }
 
   private def activeJob(user: User): Task[Option[(Job, Long)]] =

@@ -1,7 +1,7 @@
 package pangea.service.state.states
 
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -15,13 +15,13 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
     routes = Map(
       "Tavern"          -> Target.Goto(StateType.Tavern),
       "Guild"           -> Target.Goto(StateType.Guild),
-      "Construction"    -> Target.Goto(StateType.Construction),
+      "HarborQuarter"   -> Target.Goto(StateType.HarborQuarter),
+      "MarketSquare"    -> Target.Goto(StateType.MarketSquare),
       "ReturnToDungeon" -> Target.Goto(StateType.Dungeon),
-      "StreetMerchants" -> Target.Run { (user, _, renderer) =>
-                             renderer.show(user, content.screen("globalMap.streetMerchants")).as(StateType.GlobalMap) },
-      "MerchantRichelieu" -> Target.Goto(StateType.Merchant),
-      "ReturnToCity"    -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) },
-      "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.GlobalMap) }
+      "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.GlobalMap) },
+      "LeaveCity"       -> Target.Run { (user, _, renderer) =>
+                             renderer.show(user, Screen(content.text("globalMap.leaveCity"), Nil)) *>
+                               enter(user, renderer).as(StateType.GlobalMap) }
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }
   )
@@ -33,11 +33,21 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       text  = content.format("globalMap.enter.text",
-                "heroHp"  -> hero.fightStats.hp.toString,
-                "heroMax" -> hero.effectiveMaxHp(now).toString,
+                "heroHp"    -> hero.fightStats.hp.toString,
+                "heroMax"   -> hero.effectiveMaxHp(now).toString,
                 "heroArmor" -> hero.fightStats.armor.toString,
-                "gold"    -> hero.gold.toString)
-      _    <- renderer.show(user, Screen(text, content.screen("globalMap.enter").choices))
+                "gold"      -> hero.gold.toString)
+      byId  = content.screen("globalMap.enter").choices.map(c => c.id -> c).toMap
+      choices = List(
+        byId("HarborQuarter").copy(row = Some(0)),
+        byId("MarketSquare").copy(row = Some(0)),
+        byId("Tavern").copy(color = ChoiceColor.Positive, row = Some(1)),
+        byId("Guild").copy(color = ChoiceColor.Positive, row = Some(1)),
+        byId("OpenCharacter").copy(row = Some(2)),
+        byId("ReturnToDungeon").copy(row = Some(2)),
+        byId("LeaveCity").copy(color = ChoiceColor.Negative, row = Some(3))
+      )
+      _ <- renderer.show(user, Screen(text, choices))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

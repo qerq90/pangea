@@ -44,12 +44,12 @@ case class MerchantState(
       "SellItem"     -> Target.Run { (u, _,  r) => doSell(u, r) },
       "BackFromSell" -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "OpenCharacter"-> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
-      "Back"         -> Target.Goto(StateType.GlobalMap)
+      "Back"         -> Target.Goto(StateType.MarketSquare)
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.Merchant) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.GlobalMap, StateType.Merchant, StateType.HeroStats)
+  override def targetStates: Set[StateType] = Set(StateType.MarketSquare, StateType.Merchant, StateType.HeroStats)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

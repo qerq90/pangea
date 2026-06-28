@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HeroStats, Innkeeper, Inventory, Loot, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange}
+import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HarborQuarter, HeroStats, Innkeeper, Inventory, Loot, MarketSquare, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange}
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
@@ -37,7 +37,9 @@ object StatesMap {
         content       <- ZIO.service[SceneContent]
         scheduler     <- ZIO.service[Scheduler]
         states = Map[StateType, State](
-          GlobalMap    -> GlobalMapState(heroDao, content),
+          GlobalMap     -> GlobalMapState(heroDao, content),
+          HarborQuarter -> HarborQuarterState(content),
+          MarketSquare  -> MarketSquareState(content),
           Registration -> RegistrationState(players, heroDao, inventoryRepo, itemRepo, journal, content),
           Dungeon      -> DungeonState(heroDao, inventoryRepo, content),
           HeroStats    -> HeroStatsState(heroDao, content),

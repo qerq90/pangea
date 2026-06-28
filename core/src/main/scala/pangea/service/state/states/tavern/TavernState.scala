@@ -3,7 +3,7 @@ package pangea.service.state.states.tavern
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -55,7 +55,15 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
           val text = content.format("tavern.menu.text",
             "cost" -> roomCost(hero).toString,
             "gold" -> hero.gold.toString)
-          renderer.show(user, Screen(text, content.screen("tavern.menu").choices))
+          val byId = content.screen("tavern.menu").choices.map(c => c.id -> c).toMap
+          val choices = List(
+            byId("RentRoom").copy(row = Some(0)),
+            byId("QuestBoard").copy(color = ChoiceColor.Positive, row = Some(1)),
+            byId("Innkeeper").copy(color = ChoiceColor.Positive, row = Some(1)),
+            byId("OpenCharacter").copy(row = Some(2)),
+            byId("LeaveTavern").copy(color = ChoiceColor.Negative, row = Some(3))
+          )
+          renderer.show(user, Screen(text, choices))
         }
     }
 

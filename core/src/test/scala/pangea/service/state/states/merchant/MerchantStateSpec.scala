@@ -152,12 +152,12 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(ids.contains("Sell") && ids.contains("Back"))
     },
 
-    test("Back → переход в GlobalMap") {
+    test("Back → переход в MarketSquare") {
       for {
         t <- makeState(richHero)
         (state, _, _, renderer) = t
         result <- state.action(testUser, tap("Back"), renderer)
-      } yield assertTrue(result == StateType.GlobalMap)
+      } yield assertTrue(result == StateType.MarketSquare)
     }
   )
 }
