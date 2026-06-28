@@ -10,9 +10,7 @@ case class HarborQuarterState(content: SceneContent) extends State {
 
   private val branch = new Branch(
     routes = Map(
-      "UnassumingBarrel" -> Target.Run { (user, _, renderer) =>
-                              renderer.show(user, Screen(content.text("harborQuarter.unassumingBarrel"), Nil)) *>
-                                enter(user, renderer).as(StateType.HarborQuarter) },
+      "UnassumingBarrel" -> Target.Goto(StateType.UnassumingBarrel),
       "BackToCity"       -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.HarborQuarter) }

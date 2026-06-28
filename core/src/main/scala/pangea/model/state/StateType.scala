@@ -13,8 +13,9 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
     List.fill(45)(Battle) ++ List.fill(22)(FoundItem) ++ List.fill(23)(Spring) ++ List.fill(10)(GoldVein)
 
   case object GlobalMap     extends StateType
-  case object HarborQuarter extends StateType
-  case object MarketSquare  extends StateType
+  case object HarborQuarter    extends StateType
+  case object MarketSquare     extends StateType
+  case object UnassumingBarrel extends StateType
   case object Registration extends StateType
   case object Dungeon      extends StateType
   case object HeroStats    extends StateType

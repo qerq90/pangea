@@ -99,7 +99,34 @@ harborQuarter:
     choices:
       UnassumingBarrel: "Неприметная бочка"
       BackToCity: "Назад"
-  unassumingBarrel: "Из-под бочки доносится приглушённое бормотание. Пока сюда не пускают — заходите позже."
+
+barrel:
+  menu:
+    text: "🪵 Неприметная бочка.\n📦 {items}/{maxItems} предметов · 💰 {gold}/{maxGold} золота"
+    depositItems:    "Положить вещи"
+    withdrawItems:   "Забрать вещи"
+    depositGold:     "Положить золото"
+    withdrawGold:    "Забрать золото"
+    leave:           "Назад"
+  depositItemsHeader:  "Выберите предмет, чтобы переложить из инвентаря в бочку.\n📦 Свободно в бочке: {free}\nСтраница {page}/{total}"
+  withdrawItemsHeader: "Выберите предмет, чтобы забрать из бочки в инвентарь.\n🎒 Свободно в инвентаре: {free}"
+  emptyInventory: "Инвентарь пуст — нечего перекладывать."
+  emptyBarrel:    "Бочка пуста."
+  back: "Назад"
+  inventoryFull: "В инвентаре нет места."
+  barrelFull:    "В бочке нет места."
+  itemDeposited: "{name} убран в бочку."
+  itemWithdrawn: "{name} забран из бочки."
+  depositGoldPrompt:  "Напишите сумму, которую хотите положить в бочку.\n💰 У вас: {heroGold}. Свободно в бочке: {free}."
+  withdrawGoldPrompt: "Напишите сумму, которую хотите забрать из бочки.\n💰 В бочке: {barrelGold}."
+  cancelGold:        "Отмена"
+  goldNotANumber:    "Это не число. Напишите положительное целое число."
+  goldNonPositive:   "Сумма должна быть положительной."
+  goldOverflow:      "В бочке нет столько места."
+  goldNotEnoughHero: "У вас нет столько золота."
+  goldNotEnoughBarrel: "В бочке нет столько золота."
+  goldDeposited: "💰 {amount} убрано в бочку."
+  goldWithdrawn: "💰 {amount} забрано из бочки."
 
 marketSquare:
   enter:

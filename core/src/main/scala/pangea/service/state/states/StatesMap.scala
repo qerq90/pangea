@@ -3,7 +3,8 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HarborQuarter, HeroStats, Innkeeper, Inventory, Loot, MarketSquare, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange}
+import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HarborQuarter, HeroStats, Innkeeper, Inventory, Loot, MarketSquare, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange, UnassumingBarrel}
+import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
@@ -23,7 +24,7 @@ case class StatesMap(states: Map[StateType, State])
 
 object StatesMap {
   val live: ZLayer[
-    Players with HeroDao with InventoryRepository with ItemRepository with Journal with SceneContent with Scheduler,
+    Players with HeroDao with InventoryRepository with BarrelRepository with ItemRepository with Journal with SceneContent with Scheduler,
     Throwable,
     StatesMap
   ] =
@@ -32,14 +33,16 @@ object StatesMap {
         players       <- ZIO.service[Players]
         heroDao       <- ZIO.service[HeroDao]
         inventoryRepo <- ZIO.service[InventoryRepository]
+        barrelRepo    <- ZIO.service[BarrelRepository]
         itemRepo      <- ZIO.service[ItemRepository]
         journal       <- ZIO.service[Journal]
         content       <- ZIO.service[SceneContent]
         scheduler     <- ZIO.service[Scheduler]
         states = Map[StateType, State](
           GlobalMap     -> GlobalMapState(heroDao, content),
-          HarborQuarter -> HarborQuarterState(content),
-          MarketSquare  -> MarketSquareState(content),
+          HarborQuarter    -> HarborQuarterState(content),
+          MarketSquare     -> MarketSquareState(content),
+          UnassumingBarrel -> UnassumingBarrelState(heroDao, inventoryRepo, barrelRepo, content),
           Registration -> RegistrationState(players, heroDao, inventoryRepo, itemRepo, journal, content),
           Dungeon      -> DungeonState(heroDao, inventoryRepo, content),
           HeroStats    -> HeroStatsState(heroDao, content),
