@@ -184,7 +184,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         _                         <- state.enter(testUser, renderer)
         screens                   <- renderer.sentScreens
       } yield assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Negative)) &&
-              assertTrue(colorOf(screens.head, "GoLighter").contains(ChoiceColor.Primary))
+              assertTrue(colorOf(screens.head, "GoLighter").contains(ChoiceColor.Positive))
     },
 
     test("enter на первом этаже → кнопка «к свету» красная") {
@@ -194,7 +194,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         _                         <- state.enter(testUser, renderer)
         screens                   <- renderer.sentScreens
       } yield assertTrue(colorOf(screens.head, "GoLighter").contains(ChoiceColor.Negative)) &&
-              assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Primary))
+              assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Positive))
     },
 
     test("GoDarker без поверженной тьмы → не двигается, сообщение про тьму") {

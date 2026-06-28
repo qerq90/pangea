@@ -35,17 +35,24 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       _    <- renderer.show(user, enterScreen(hero))
     } yield ()
 
-  /** Экран этажа. Кнопки движения красим в красный (negative), если ход недоступен:
-   *  «к тьме» заблокирована, пока на этаже не повержена тьма; «к свету» — на первом этаже. */
+  /** Экран этажа. Раскладка по рядам:
+   *   - row 0: «Исследовать уровень» (зелёная);
+   *   - row 1: «Двигаться к тьме»/«…к свету» — зелёные если ход открыт, красные если закрыт;
+   *   - row 2: «В портал», «Персонаж»;
+   *   - row 3: «Отдых» (зелёная). */
   private def enterScreen(hero: Hero): Screen = {
-    val text = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
-    val choices = content.screen("dungeon.enter").choices.map { c =>
-      c.id match {
-        case "GoDarker"  if !hero.canGoDarker  => c.copy(color = ChoiceColor.Negative)
-        case "GoLighter" if !hero.canGoLighter => c.copy(color = ChoiceColor.Negative)
-        case _                                 => c
-      }
-    }
+    val text       = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
+    val byId       = content.screen("dungeon.enter").choices.map(c => c.id -> c).toMap
+    def mv(id: String, open: Boolean): pangea.engine.Choice =
+      byId(id).copy(color = if (open) ChoiceColor.Positive else ChoiceColor.Negative, row = Some(1))
+    val choices = List(
+      byId("FindEvent").copy(color     = ChoiceColor.Positive, row = Some(0)),
+      mv("GoDarker",  hero.canGoDarker),
+      mv("GoLighter", hero.canGoLighter),
+      byId("GoToCity").copy(row        = Some(2)),
+      byId("OpenCharacter").copy(row   = Some(2)),
+      byId("Rest").copy(color          = ChoiceColor.Positive, row = Some(3))
+    )
     Screen(text, choices)
   }
 
