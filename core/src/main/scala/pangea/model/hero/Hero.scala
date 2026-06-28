@@ -60,17 +60,15 @@ case class Hero(
    *  снизу единицей (не могут упасть ниже 1). Броня здесь — текущее значение как
    *  есть: штраф травмы на броню влияет на её ПОТОЛОК (`effectiveMaxArmor`), а не
    *  режет текущий запас при каждом чтении (иначе урон считался бы неверно). */
-  private def fightStatsWith(p: TraumaPenalties): FightStats = {
-    val rf = race.factor
+  private def fightStatsWith(p: TraumaPenalties): FightStats =
     fightStats.copy(
-      atk           = ((fightStats.atk + masterHornBoosts.attack) * rf.attackFactor * (1.0 - p.atkPct)).toLong.max(1L),
-      defence       = ((fightStats.defence + masterHornBoosts.defence) * rf.defenceFactor * (1.0 - p.defPct)).toLong.max(1L),
-      accuracy      = ((fightStats.accuracy + masterHornBoosts.accuracy) * rf.accuracyFactor * (1.0 - p.accPct)).toLong.max(1L),
-      evasion       = ((fightStats.evasion + masterHornBoosts.evasion) * rf.evasionFactor * (1.0 - p.evasionPct)).toLong.max(1L),
-      concentration = ((fightStats.concentration + masterHornBoosts.concentration) * rf.concentrationFactor * (1.0 - p.concPct)).toLong.max(1L),
+      atk           = ((fightStats.atk + masterHornBoosts.attack) * (1.0 - p.atkPct)).toLong.max(1L),
+      defence       = ((fightStats.defence + masterHornBoosts.defence) * (1.0 - p.defPct)).toLong.max(1L),
+      accuracy      = ((fightStats.accuracy + masterHornBoosts.accuracy) * (1.0 - p.accPct)).toLong.max(1L),
+      evasion       = ((fightStats.evasion + masterHornBoosts.evasion) * (1.0 - p.evasionPct)).toLong.max(1L),
+      concentration = ((fightStats.concentration + masterHornBoosts.concentration) * (1.0 - p.concPct)).toLong.max(1L),
       armor         = fightStats.armor.max(0L)
     )
-  }
 
   /** Текущие боевые статы — с учётом активных травм. */
   def effectiveFightStats(nowMs: Long): FightStats = fightStatsWith(combinedPenalties(nowMs))
@@ -78,22 +76,25 @@ case class Hero(
   /** Боевые статы без травм — «потолок», к которому стат вернётся после снятия травм. */
   def maxFightStats: FightStats = fightStatsWith(TraumaPenalties.none)
 
-  /** Базовые характеристики с учётом травм (зажаты снизу единицей). Ловкость не
-   *  имеет штрафа от травм. */
+  /** Базовые характеристики с учётом расового бафа и травм (зажаты снизу единицей).
+   *  Ловкость не имеет штрафа от травм. Расовый множитель применяется до травм с
+   *  округлением вверх. */
   def effectiveBaseStats(nowMs: Long): BaseStats = {
     val p = combinedPenalties(nowMs)
+    val b = HeroRaceBuff.of(race)
     BaseStats(
-      agi = baseStats.agi,
-      vit = (baseStats.vit * (1.0 - p.vitPct)).toLong.max(1L),
-      str = (baseStats.str * (1.0 - p.strPct)).toLong.max(1L),
-      int = (baseStats.int * (1.0 - p.intPct)).toLong.max(1L)
+      agi = b.applyAgi(baseStats.agi),
+      vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct)).toLong.max(1L),
+      str = (b.applyStr(baseStats.str) * (1.0 - p.strPct)).toLong.max(1L),
+      int = (b.applyInt(baseStats.int) * (1.0 - p.intPct)).toLong.max(1L)
     )
   }
 
   def effectiveMaxHp(nowMs: Long): Long = {
-    val p    = combinedPenalties(nowMs)
-    val base = baseStats.vit * 24L
-    (base * race.factor.hpFactor * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L) + equipment.allHp
+    val p           = combinedPenalties(nowMs)
+    val effectiveVit = HeroRaceBuff.of(race).applyVit(baseStats.vit)
+    val base        = effectiveVit * 24L
+    (base * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L) + equipment.allHp
   }
 
   def traumaRemainingText(nowMs: Long): Option[String] =

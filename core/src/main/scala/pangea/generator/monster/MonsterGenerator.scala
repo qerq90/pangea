@@ -2,7 +2,7 @@ package pangea.generator.monster
 
 import pangea.domain.Rng
 import pangea.model.monster.Rarity._
-import pangea.model.monster.{Monster, Race, Rarity}
+import pangea.model.monster.{Monster, MonsterRaceFactor, Race, Rarity}
 import pangea.model.stats.FightStats
 
 object MonsterGenerator {
@@ -48,7 +48,7 @@ object MonsterGenerator {
 
   private def buildStats(level: Int, rarity: Rarity, race: Race): FightStats = {
     val base = level.toDouble * rarity.factor * N
-    val f    = race.factor
+    val f    = MonsterRaceFactor.of(race)
     FightStats(
       atk = (16.0 * base * f.attackFactor).toLong.max(1L),
       hp = (32.0 * base * f.hpFactor).toLong.max(1L),
