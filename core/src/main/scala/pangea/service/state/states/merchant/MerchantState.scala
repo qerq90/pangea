@@ -135,15 +135,16 @@ case class MerchantState(
                List(content.choice("BackFromSell", "merchant.sellBackLabel"))))
            else {
              val (pageItems, totalPages, p) = ItemMenu.page(items, page)
-             heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *> {
-               val header  = content.format("merchant.sellHeader",
-                 "page"  -> (p + 1).toString,
-                 "total" -> totalPages.toString,
-                 "gold"  -> hero.gold.toString)
-               val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
-               val nav     = sellNavRow(p, totalPages)
-               renderer.show(user, Screen(header, btns ++ nav))
-             }
+             ZIO.logInfo(s"sell user=${user.userId.value} req=$page → norm=$p total=$totalPages items=${items.size} pageItemIds=${pageItems.map(_.id)}") *>
+               heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *> {
+                 val header  = content.format("merchant.sellHeader",
+                   "page"  -> (p + 1).toString,
+                   "total" -> totalPages.toString,
+                   "gold"  -> hero.gold.toString)
+                 val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
+                 val nav     = sellNavRow(p, totalPages)
+                 renderer.show(user, Screen(header, btns ++ nav))
+               }
            }
     } yield StateType.Merchant
 
@@ -167,7 +168,10 @@ case class MerchantState(
     } yield StateType.Merchant
 
   private def navigateSell(user: User, renderer: Renderer, delta: Int): Task[StateType] =
-    currentSellPage(user).flatMap(p => showSellList(user, renderer, p + delta))
+    currentSellPage(user).flatMap { p =>
+      ZIO.logInfo(s"sell-nav user=${user.userId.value} cur=$p delta=$delta → ${p + delta}") *>
+        showSellList(user, renderer, p + delta)
+    }
 
   private def doSell(user: User, renderer: Renderer): Task[StateType] =
     for {
