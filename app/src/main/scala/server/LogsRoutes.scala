@@ -34,7 +34,8 @@ object LogsRoutes {
       val stream = tailStream(LogFile)
         .filter(line => grep.forall(line.contains))
         .map(line => ServerSentEvent(data = Some(line)))
-      Ok(stream)
+      // SSE по умолчанию уходит без charset → латиница ломает кириллицу. Явно UTF-8.
+      Ok(stream).map(_.withContentType(`Content-Type`(MediaType.`text/event-stream`, Charset.`UTF-8`)))
   }
 
   private def tailLines(path: String, n: Int): List[String] = {

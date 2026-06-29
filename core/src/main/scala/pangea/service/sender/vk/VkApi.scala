@@ -72,8 +72,9 @@ class VkApi(client: Client[Task], config: VkConfig, failures: SendFailureDao) ex
         for {
           _    <- attempts.update(_ + 1)
           body <- res.bodyText.compile.toList.map(_.mkString(""))
-          _    <- ZIO.log(body)
-          _    <- VkApi.failOnApiError(body)
+          // успешный ответ ВК не логируем (шумно). При ошибке тело попадёт
+          // в сообщение исключения через [[VkApiError]].
+          _    <- VkApi.failOnApiError(body).tapError(_ => ZIO.logError(s"vk response: $body"))
         } yield ()
       }
       _ <- send.retry(sendRetry).tapError(err =>
