@@ -31,8 +31,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
+      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
-      _    <- renderer.show(user, enterScreen(hero))
+      _    <- renderer.show(user, enterScreen(hero, now))
     } yield ()
 
   /** Экран этажа. Раскладка по рядам:
@@ -40,8 +41,13 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
    *   - row 1: «Двигаться к тьме»/«…к свету» — зелёные если ход открыт, красные если закрыт;
    *   - row 2: «В портал», «Персонаж»;
    *   - row 3: «Отдых» (зелёная). */
-  private def enterScreen(hero: Hero): Screen = {
-    val text       = content.format("dungeon.enter.text", "level" -> hero.dungeonLevel.toString)
+  private def enterScreen(hero: Hero, nowMs: Long): Screen = {
+    val text       = content.format("dungeon.enter.text",
+      "level"    -> hero.dungeonLevel.toString,
+      "hp"       -> hero.fightStats.hp.toString,
+      "maxHp"    -> hero.effectiveMaxHp(nowMs).toString,
+      "armor"    -> hero.fightStats.armor.toString,
+      "maxArmor" -> hero.effectiveMaxArmor(nowMs).toString)
     val byId       = content.screen("dungeon.enter").choices.map(c => c.id -> c).toMap
     def mv(id: String, open: Boolean): pangea.engine.Choice =
       byId(id).copy(color = if (open) ChoiceColor.Positive else ChoiceColor.Negative, row = Some(1))
@@ -107,16 +113,17 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 
   private def changeDungeonLevel(user: User, renderer: Renderer, delta: Int): Task[StateType] =
     for {
+      now     <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero    <- getHero(user)
       allowed  = if (delta > 0) hero.canGoDarker else hero.canGoLighter
       _ <- if (!allowed) {
              val msg = if (delta > 0) "dungeon.darknessNotDefeated" else "dungeon.alreadyAtTop"
              renderer.show(user, Screen(content.text(msg), Nil)) *>
-               renderer.show(user, enterScreen(hero))
+               renderer.show(user, enterScreen(hero, now))
            } else {
              val newLevel = math.max(1, math.min(150, hero.dungeonLevel + delta))
              heroDao.updateDungeonLevel(user.userId, newLevel) *>
-               renderer.show(user, enterScreen(hero.copy(dungeonLevel = newLevel)))
+               renderer.show(user, enterScreen(hero.copy(dungeonLevel = newLevel), now))
            }
     } yield StateType.Dungeon
 

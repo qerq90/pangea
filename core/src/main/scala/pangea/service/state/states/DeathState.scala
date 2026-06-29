@@ -74,7 +74,9 @@ case class DeathState(
       // На 1 уровне == 1 минута; k — коэффициент роста.
       deathRestMinutes = 90.0 - 89.0 * math.exp(-DeathState.RestGrowthK * (hero.lvl - 1L))
       deathRestMs      = (deathRestMinutes * 60000.0).toLong
-      _            <- heroDao.writeSceneData(user.userId, Json.obj("restDurationMs" -> deathRestMs.asJson))
+      _            <- heroDao.writeSceneData(user.userId, Json.obj(
+                        "restDurationMs" -> deathRestMs.asJson,
+                        "postDeath"      -> true.asJson))
     } yield ()
 
   // Unused in the normal flow (Death routes onward via autoAdvance). Kept as a

@@ -25,14 +25,18 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
     for {
       now          <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
       existingData <- heroDao.readSceneData(user.userId)
-      // post-death recovery: DeathState writes restDurationMs before transitioning here
+      // post-death recovery: DeathState writes restDurationMs and postDeath=true
+      // before transitioning here.
       duration      = existingData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption)
                         .getOrElse(DefaultRestMs)
+      postDeath     = existingData.flatMap(_.hcursor.get[Boolean]("postDeath").toOption)
+                        .getOrElse(false)
       _            <- heroDao.writeSceneData(user.userId, Json.obj(
                         "restStartedAt"  -> now.asJson,
-                        "restDurationMs" -> duration.asJson))
-      // push-пробуждение: поллер по таймеру сам выполнит wakeUp (кнопка отдыха
-      // остаётся ручным fallback'ом). Перепланирование снимает прежний Revive.
+                        "restDurationMs" -> duration.asJson,
+                        "postDeath"      -> postDeath.asJson))
+      // push-пробуждение: поллер по таймеру сам выполнит wakeUp. Перепланирование
+      // снимает прежний Revive.
       _            <- scheduler.schedule(user.userId, now + duration, TaskKind.Revive, StateType.Rest, ReviveAction)
       _            <- renderer.show(user, Screen(
                         content.format("rest.enter.text", "duration" -> formatDuration(duration / 1000L)),
@@ -45,12 +49,13 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
       sceneData <- heroDao.readSceneData(user.userId)
       startedAt  = sceneData.flatMap(_.hcursor.get[Long]("restStartedAt").toOption).getOrElse(now)
       duration   = sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).getOrElse(DefaultRestMs)
+      postDeath  = sceneData.flatMap(_.hcursor.get[Boolean]("postDeath").toOption).getOrElse(false)
       elapsed    = now - startedAt
       result    <- if (elapsed >= duration)
                      heroDao.getHeroByUserId(user.userId)
                        .flatMap(ZIO.fromOption(_))
                        .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
-                       .flatMap(hero => wakeUp(user, now, hero, renderer))
+                       .flatMap(hero => wakeUp(user, now, hero, postDeath, renderer))
                    else {
                      val remainSec = ((duration - elapsed) / 1000L).max(1L)
                      renderer.show(user, Screen(
@@ -59,16 +64,15 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
                    }
     } yield result
 
-  private def wakeUp(user: User, nowMs: Long, hero: pangea.model.hero.Hero, renderer: Renderer): Task[StateType] = {
+  private def wakeUp(user: User, nowMs: Long, hero: pangea.model.hero.Hero, postDeath: Boolean, renderer: Renderer): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val maxArmor = hero.effectiveMaxArmor(nowMs)
+    val textKey  = if (postDeath) "rest.revived" else "rest.done"
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor))
       _ <- heroDao.writeSceneData(user.userId, Json.Null)
-      // снимаем отложенное пробуждение — оно уже отработано (ручным ли поком,
-      // самим ли поллером)
       _ <- scheduler.cancel(user.userId, TaskKind.Revive)
-      _ <- renderer.show(user, Screen(content.text("rest.done"), Nil))
+      _ <- renderer.show(user, Screen(content.text(textKey), Nil))
     } yield StateType.Dungeon
   }
 
