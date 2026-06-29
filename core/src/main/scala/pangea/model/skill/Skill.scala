@@ -20,6 +20,11 @@ sealed abstract class Skill(
 ) extends EnumEntry {
   /** Базовое значение эффекта без рандома: для DamageSkill — урон, для HealSkill — лечение. */
   def baseValue(hero: Hero, nowMs: Long): Double
+
+  /** Учитывается ли defence моба при расчёте урона от этого скилла. По умолчанию
+   *  нет — большинство скиллов «пробивают» защиту. Включается точечно (например,
+   *  быстрый удар бьёт слабо и упирается в броню). */
+  def appliesDefenceReduction: Boolean = false
 }
 
 object Skill extends Enum[Skill] {
@@ -41,7 +46,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      0.5 * b.str + 0.5 * b.int + 0.5 * f.atk
+      0.4 * b.str + 0.4 * b.int + 0.4 * f.atk
     }
   }
 
@@ -56,6 +61,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.25 * b.agi + 0.4 * f.accuracy + 0.5 * b.int
     }
+    override val appliesDefenceReduction: Boolean = true
   }
 
   case object CunningStrike extends Skill(
@@ -80,7 +86,7 @@ object Skill extends Enum[Skill] {
   ) {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
-      0.75 * b.vit + 1.0 * b.int
+      0.75 * b.vit + 1.0 * b.int + 0.2 * hero.effectiveMaxHp(nowMs)
     }
   }
 
@@ -93,7 +99,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      0.5 * f.defence + 0.75 * b.vit + 0.3 * b.int
+      0.5 * f.defence + 0.75 * b.vit + 0.4 * b.int + 0.1 * hero.effectiveMaxHp(nowMs)
     }
   }
 

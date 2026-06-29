@@ -159,7 +159,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     for {
       spread <- Random.nextLongBetween(80L, 121L)
       base    = slot.skill.baseValue(hero, nowMs)
-      value   = (base * spread / 100.0).toLong.max(1L)
+      raw     = (base * spread / 100.0).toLong.max(1L)
+      // Часть скиллов (см. Skill.appliesDefenceReduction) бьются о защиту моба
+      // так же, как обычная атака — иначе урон проходит мимо защиты.
+      value   = if (slot.skill.appliesDefenceReduction) {
+                  val red = BattleState.damageReduction(
+                    protection  = battle.monsterStats.defence,
+                    defenderInt = battle.monsterStats.concentration,
+                    attackerInt = hero.baseStats.int)
+                  (raw * (1.0 - red)).toLong.max(1L)
+                } else raw
       bumpedBattle = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
       skip    = Set(slot.itemId)
       result <- slot.skill.kind match {
