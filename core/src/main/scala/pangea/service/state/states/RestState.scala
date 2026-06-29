@@ -38,9 +38,14 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
       // push-пробуждение: поллер по таймеру сам выполнит wakeUp. Перепланирование
       // снимает прежний Revive.
       _            <- scheduler.schedule(user.userId, now + duration, TaskKind.Revive, StateType.Rest, ReviveAction)
+      // post-death recovery → отдельный «обморочный» текст; обычный отдых — у костра.
+      // hideKeyboard = true: скрываем прежние кнопки (бой/подземелье), пока герой
+      // в отключке.
+      enterKey      = if (postDeath) "rest.enterRevive" else "rest.enter.text"
       _            <- renderer.show(user, Screen(
-                        content.format("rest.enter.text", "duration" -> formatDuration(duration / 1000L)),
-                        content.screen("rest.enter").choices))
+                        content.format(enterKey, "duration" -> formatDuration(duration / 1000L)),
+                        content.screen("rest.enter").choices,
+                        hideKeyboard = true))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

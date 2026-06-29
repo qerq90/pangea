@@ -73,7 +73,7 @@ case class Item(
     val parts = List(
       Option.when(attack > 0)(s"⚔+$attack"),
       Option.when(accuracy > 0)(s"🎯+$accuracy"),
-      Option.when(concentration > 0)(s"🧠+$concentration"),
+      Option.when(concentration > 0)(s"🌀+$concentration"),
       Option.when(armor > 0)(s"🧥+$armor"),
       Option.when(defence > 0)(s"🛡+$defence"),
       Option.when(evasion > 0)(s"💨+$evasion"),

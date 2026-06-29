@@ -355,7 +355,7 @@ heroStats:
 
 battle:
   enter:
-    text: "{monster}\n{monsterRace}\n❤ {monsterHp}/{monsterMax}  🧥 {monsterArmor}/{monsterMaxArmor}  ⚔ {monsterAtk}  🎯 {mobHit}  💨 {monsterDodge}  🌀 {mobSkillHit}\n\nВы:\n❤ {heroHp}/{heroMax}  🧥 {heroArmor}/{heroMaxArmor}  ⚔ {heroAtk}  🛡 {heroReduction}  🎯 {heroHit}  💨 {heroDodge}  🌀 {heroSkillHit}  🧪 {flaskCharges}"
+    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}  🧥 {monsterArmor}/{monsterMaxArmor}  ⚔ {monsterAtk}\n🎯 {mobHit}  💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}  🧥 {heroArmor}/{heroMaxArmor}  ⚔ {heroAtk}\n🎯 {heroHit}  💨 {heroDodge}  🌀 {heroSkillHit}  🧪 {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -389,6 +389,7 @@ rest:
   enter:
     text: "Вы садитесь у костра. До полного восстановления осталось {duration}."
     choices: []
+  enterRevive: "В глазах внезапно потемнело… Вы теряете сознание.\nДо прихода в себя осталось {duration}."
   waiting: "Ещё {remaining} до восстановления..."
   done: "Вы отдохнули! HP восстановлено."
   revived: "Клеймо Пангеи вспыхивает на твоей плоти багровым огнём. Земля размыкает свои объятия — отмеченным не место среди мёртвых. Ты снова на ногах."

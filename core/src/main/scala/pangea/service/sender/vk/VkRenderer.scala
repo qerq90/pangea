@@ -10,13 +10,16 @@ import zio.Task
 class VkRenderer(api: Api) extends Renderer {
   def show(user: User, screen: Screen): Task[Unit] = {
     val kbOpt =
-      if (screen.choices.isEmpty) None
+      if (screen.choices.isEmpty)
+        // Без кнопок: либо явно скрываем прошлую клавиатуру (пустая bot-клавиатура),
+        // либо вообще не отправляем `keyboard` — тогда ВК сохраняет прежнюю.
+        if (screen.hideKeyboard) Some(Keyboard.empty) else None
       else {
         // Если хотя бы у одной кнопки задан `row` — рендерим ряды: choices группируются
         // по row, ряды отсортированы по возрастанию. Кнопки без row идут каждая в свою
         // строку (старое поведение — сохранено для совместимости).
         val hasRows = screen.choices.exists(_.row.isDefined)
-        val kbInit  = Keyboard.default.withInline(screen.inline)
+        val kbInit  = Keyboard.empty.withInline(screen.inline)
         val kb =
           if (!hasRows) screen.choices.foldLeft(kbInit) { (acc, choice) =>
             acc.addRow().addButton(toButton(choice))

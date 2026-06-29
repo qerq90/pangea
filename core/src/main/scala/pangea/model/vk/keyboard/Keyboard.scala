@@ -33,7 +33,10 @@ case class Keyboard(
 }
 
 object Keyboard {
-  val default: Keyboard = Keyboard(List.empty, one_time = false, inline = false)
+  /** Клавиатура с пустым `buttons: []` — стартовая заготовка для сборки рядов и
+   *  одновременно «сигнальная» клавиатура, которой ВК скрывает предыдущие кнопки
+   *  (см. [[pangea.engine.Screen.hideKeyboard]] и [[pangea.service.sender.vk.VkRenderer]]). */
+  val empty: Keyboard = Keyboard(List.empty, one_time = false, inline = false)
 
   implicit val encoder: Encoder[Keyboard] = deriveEncoder[Keyboard]
 }

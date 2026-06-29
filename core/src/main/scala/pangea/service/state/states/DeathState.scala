@@ -61,10 +61,12 @@ case class DeathState(
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateGold(user.userId, newGold)
       _            <- heroDao.clearActiveBattle(user.userId)
+      // Первое сообщение после смерти — сразу убираем боевую клавиатуру, чтобы
+      // не висела поверх «обморока».
       _            <- renderer.show(user, Screen(
                         content.format("death.penalty",
                           "expLost"  -> expLost.toString,
-                          "goldLost" -> goldLost.toString), Nil))
+                          "goldLost" -> goldLost.toString), Nil, hideKeyboard = true))
       _            <- applyTrauma(user, existingNames, pool, traumaUntil, renderer)
 
       _            <- dropItems(user, hero.id, monsterName, renderer)

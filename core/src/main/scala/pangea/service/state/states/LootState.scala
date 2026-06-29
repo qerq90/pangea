@@ -120,11 +120,14 @@ case class LootState(
   private def itemLine(item: Item): String =
     if (item.itemType == ItemType.Trophy)
       s"🎁 ${item.name} Ур.${item.lvl} (трофей)" // у трофеев нет редкости
-    else
-      s"🎁 ${item.name} Ур.${item.lvl} ${item.statsLineEmoji}".trim
+    else {
+      val lines = item.statsLines
+      val tail  = if (lines.isEmpty) "" else "\n" + lines.mkString("\n")
+      s"🎁 ${item.name} Ур.${item.lvl}$tail"
+    }
 
-  /** Карточка дропа + строки с надетым в том же слоте — чтобы сразу сравнить. У
-   *  надетого статы выводятся компактно со смайликами. Трофеи не сравниваются. */
+  /** Карточка дропа + строки с надетым в том же слоте — чтобы сразу сравнить.
+   *  Статы выводим словами на отдельных строках (так читается). Трофеи не сравниваются. */
   private def itemLineWithEquipped(item: Item, hero: Hero): String = {
     val base = itemLine(item)
     if (item.itemType == ItemType.Trophy) base
@@ -133,8 +136,12 @@ case class LootState(
                        .filter(_.itemType != ItemType.NoItem)
       if (equipped.isEmpty) base
       else {
-        val eqLines = equipped.map(e => s"Надето: ${e.name} Ур.${e.lvl} ${e.statsLineEmoji}".trim)
-        base + "\n" + eqLines.mkString("\n")
+        val blocks = equipped.map { e =>
+          val stats = e.statsLines
+          val body  = if (stats.isEmpty) "" else "\n" + stats.mkString("\n")
+          s"Надето: ${e.name} Ур.${e.lvl}$body"
+        }
+        base + "\n" + blocks.mkString("\n")
       }
     }
   }
