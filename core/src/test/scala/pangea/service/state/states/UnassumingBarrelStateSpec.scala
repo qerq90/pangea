@@ -156,7 +156,7 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
               assertTrue(barrelRepo.goldSnapshot == 100L)
     },
 
-    test("DepositItemsMenu при 12 предметах → 10 кнопок и кнопка След.") {
+    test("DepositItemsMenu при 12 предметах → 9 кнопок и кнопка След.") {
       val twelve = (1L to 12L).toList.map(i => gearItem(i, s"X$i"))
       for {
         t <- makeState(inventory = twelve)
@@ -165,7 +165,7 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
         screens <- renderer.sentScreens
       } yield {
         val ids = screens.last.choices.map(_.id)
-        assertTrue(ids.count(_.startsWith("DepositItem_")) == 10) &&
+        assertTrue(ids.count(_.startsWith("DepositItem_")) == 9) &&
         assertTrue(ids.contains("DepositItemsNext")) &&
         assertTrue(!ids.contains("DepositItemsPrev"))
       }
@@ -181,7 +181,7 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
         screens <- renderer.sentScreens
       } yield {
         val ids = screens.last.choices.map(_.id)
-        assertTrue(ids.count(_.startsWith("DepositItem_")) == 2) &&
+        assertTrue(ids.count(_.startsWith("DepositItem_")) == 3) &&
         assertTrue(ids.contains("DepositItemsPrev")) &&
         assertTrue(!ids.contains("DepositItemsNext"))
       }

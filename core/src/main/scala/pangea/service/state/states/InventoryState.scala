@@ -2,17 +2,17 @@ package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
-import io.circe.{Decoder, Encoder}
+import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.states.InventoryState.InventoryPage
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.states.InventoryState._
+import pangea.service.state.{ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 case class InventoryState(
@@ -24,132 +24,172 @@ case class InventoryState(
   private val branch = new Branch(
     routes = Map(
       "BackFromInventory" -> Target.Goto(StateType.HeroStats),
-      "Next"              -> Target.Run { (user, _, renderer) => navigate(user, renderer, +1) },
-      "Prev"              -> Target.Run { (user, _, renderer) => navigate(user, renderer, -1) },
-      "Equip"             -> Target.Run { (user, _, renderer) => equipCurrent(user, renderer) },
-      "Drop"              -> Target.Run { (user, _, renderer) => dropCurrent(user, renderer) }
+      "InventoryList"     -> Target.Run { (u, _, r) => writeScene(u, InventoryScene(page = Some(0))) *> showList(u, r).as(StateType.Inventory) },
+      "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
+      "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
+      "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
+      "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) }
     ),
-    fallback = Target.Run { (user, _, renderer) => showCurrentPage(user, renderer) }
+    fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
   override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    for {
-      hero  <- getHero(user)
-      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      items  = inv.items.data
-      _ <- if (items.isEmpty)
-             renderer.show(user, emptyScreen(hero))
-           else
-             heroDao.writeSceneData(user.userId, InventoryPage(0).asJson) *>
-               showItemScreen(user, hero, items, 0, renderer)
-    } yield ()
+    writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  private def navigate(user: User, renderer: Renderer, delta: Int): Task[StateType] =
-    for {
-      hero    <- getHero(user)
-      inv     <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      items    = inv.items.data
-      page    <- currentPage(user)
-      newPage  = (page + delta).max(0).min((items.size - 1).max(0))
-      _       <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
-           else showItemScreen(user, hero, items, newPage, renderer)
-    } yield StateType.Inventory
+  // ── Список ──────────────────────────────────────────────────────────────────
 
-  private def equipCurrent(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      hero   <- getHero(user)
-      inv    <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      items   = inv.items.data
-      page   <- currentPage(user)
-      _ <- ZIO.when(items.nonEmpty && page < items.size) {
-        val item = items(page)
-        if (item.itemType == ItemType.Trophy)
-          renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil))
-        else if (item.lvl > hero.lvl)
-          renderer.show(user, Screen(
-            content.format("inventory.tooHighLevel",
-              "required" -> item.lvl.toString,
-              "current"  -> hero.lvl.toString), Nil))
-        else {
-          val (newEq, newFight, oldItem) = InventoryState.equip(hero, item)
-          for {
-            _ <- heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight)
-            _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
-            _ <- ZIO.when(oldItem.itemType != ItemType.NoItem) {
-                   inventoryRepo.addItem(hero.id, oldItem).ignore
-                 }
-            _ <- renderer.show(user, Screen(
-                   content.format("inventory.equipped",
-                     "name" -> item.name,
-                     "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))
-          } yield ()
-        }
-      }
-      hero2  <- getHero(user)
-      inv2   <- inventoryRepo.get(hero2.id).mapError(e => new Throwable(e.toString))
-      items2  = inv2.items.data
-      newPage = page.min((items2.size - 1).max(0))
-      _      <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items2.isEmpty) renderer.show(user, emptyScreen(hero2))
-           else showItemScreen(user, hero2, items2, newPage, renderer)
-    } yield StateType.Inventory
-
-  private def dropCurrent(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      hero   <- getHero(user)
-      inv    <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      items   = inv.items.data
-      page   <- currentPage(user)
-      _ <- ZIO.when(items.nonEmpty && page < items.size) {
-        val item = items(page)
-        inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-          renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil))
-      }
-      inv2   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      items2  = inv2.items.data
-      newPage = page.min((items2.size - 1).max(0))
-      _      <- heroDao.writeSceneData(user.userId, InventoryPage(newPage).asJson)
-      _ <- if (items2.isEmpty) renderer.show(user, emptyScreen(hero))
-           else showItemScreen(user, hero, items2, newPage, renderer)
-    } yield StateType.Inventory
-
-  private def showCurrentPage(user: User, renderer: Renderer): Task[StateType] =
+  private def showList(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       items  = inv.items.data
-      page  <- currentPage(user)
-      _     <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
-               else showItemScreen(user, hero, items, page.min((items.size - 1).max(0)), renderer)
+      scene <- readScene(user)
+      _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
+           else {
+             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.page.getOrElse(0))
+             val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 💰 ${hero.gold}"
+             val itemBtns = ItemMenu.itemButtons(pageItems, ItemActionPrefix)
+             val nav      = navRow(page, totalPages, "InventoryPrev", "InventoryNext", "BackFromInventory")
+             renderer.show(user, Screen(header, itemBtns ++ nav))
+           }
     } yield StateType.Inventory
+
+  private def navigate(user: User, renderer: Renderer, delta: Int): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      (_, totalPages, _) = ItemMenu.page(inv.items.data, 0)
+      scene <- readScene(user)
+      cur    = scene.page.getOrElse(0)
+      np     = (cur + delta).max(0).min(totalPages - 1)
+      _     <- writeScene(user, scene.copy(page = Some(np)))
+      res   <- showList(user, renderer)
+    } yield res
+
+  // ── Детальный экран выбранного предмета ────────────────────────────────────
+
+  private def showItem(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      scene <- readScene(user)
+      res <- inv.items.data.find(_.id == itemId) match {
+        case None => showList(user, renderer)
+        case Some(item) =>
+          val text    = itemDetail(item, hero.equipment, hero.gold)
+          val canEquip = item.itemType != ItemType.Trophy
+          val choices  = List(
+            Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
+            Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
+            Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
+          ).flatten
+          writeScene(user, scene.copy(selectedId = Some(itemId))) *>
+            renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
+      }
+    } yield res
+
+  // ── Действия с выбранным предметом ─────────────────────────────────────────
+
+  private def equipSelected(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      res <- scene.selectedId match {
+        case None => showList(user, renderer)
+        case Some(id) => equipById(user, id, renderer)
+      }
+    } yield res
+
+  private def equipById(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- inv.items.data.find(_.id == itemId) match {
+        case None => ZIO.unit
+        case Some(item) =>
+          if (item.itemType == ItemType.Trophy)
+            renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil))
+          else if (item.lvl > hero.lvl)
+            renderer.show(user, Screen(
+              content.format("inventory.tooHighLevel",
+                "required" -> item.lvl.toString,
+                "current"  -> hero.lvl.toString), Nil))
+          else {
+            val (newEq, newFight, oldItem) = InventoryState.equip(hero, item)
+            heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+              inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+              ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
+              renderer.show(user, Screen(
+                content.format("inventory.equipped",
+                  "name" -> item.name,
+                  "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))
+          }
+      }
+      res <- showList(user, renderer)
+    } yield res
+
+  private def dropSelected(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      res <- scene.selectedId match {
+        case None => showList(user, renderer)
+        case Some(id) => dropById(user, id, renderer)
+      }
+    } yield res
+
+  private def dropById(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- inv.items.data.find(_.id == itemId) match {
+        case None => ZIO.unit
+        case Some(item) =>
+          inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+            renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil))
+      }
+      res <- showList(user, renderer)
+    } yield res
+
+  // ── Fallback: динамические id вида ItemAction_<id> ─────────────────────────
+
+  private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    parseAction(ua.payload) match {
+      case Some(a) if a.startsWith(ItemActionPrefix) =>
+        a.drop(ItemActionPrefix.length).toLongOption.fold(showList(user, renderer))(showItem(user, _, renderer))
+      case _ => showList(user, renderer)
+    }
+
+  // ── Хелперы ─────────────────────────────────────────────────────────────────
 
   private def emptyScreen(hero: Hero): Screen = {
     val base = content.screen("inventory.empty")
     Screen(s"📦 Инвентарь пуст | 💰 ${hero.gold}", base.choices)
   }
 
-  private def showItemScreen(user: User, hero: Hero, items: List[Item], page: Int, renderer: Renderer): Task[Unit] = {
-    val item    = items(page)
-    val text    = InventoryState.itemText(item, hero.equipment, page + 1, items.size, Some(hero.gold))
-    val choices = List(
-      Option.when(page > 0)(content.choice("Prev", "common.prev")),
-      Some(content.choice("Equip", "inventory.equip")),
-      Some(content.choice("Drop",  "inventory.drop")),
-      Option.when(page < items.size - 1)(content.choice("Next", "common.next")),
-      Some(content.choice("BackFromInventory", "inventory.exit"))
+  private def navRow(page: Int, totalPages: Int, prevId: String, nextId: String, backId: String): List[Choice] = {
+    val row = ItemMenu.NavRow
+    List(
+      Some(content.choice(backId, "inventory.exit").copy(row = Some(row), color = ChoiceColor.Negative)),
+      Option.when(page > 0)(Choice(prevId, content.text("common.prev"), row = Some(row))),
+      Option.when(page < totalPages - 1)(Choice(nextId, content.text("common.next"), row = Some(row)))
     ).flatten
-    renderer.show(user, Screen(text, choices))
   }
 
-  private def currentPage(user: User): Task[Int] =
-    heroDao.readSceneData(user.userId)
-      .map(_.flatMap(_.as[InventoryPage].toOption).map(_.page).getOrElse(0))
+  private def itemDetail(item: Item, eq: Equipment, gold: Long): String =
+    s"💰 $gold\n\n${itemText(item, eq)}"
+
+  private def readScene(user: User): Task[InventoryScene] =
+    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[InventoryScene].toOption).getOrElse(InventoryScene()))
+
+  private def writeScene(user: User, scene: InventoryScene): Task[Unit] =
+    heroDao.writeSceneData(user.userId, scene.asJson)
+
+  private def parseAction(payload: Option[String]): Option[String] =
+    payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)
@@ -159,10 +199,12 @@ case class InventoryState(
 
 object InventoryState {
 
-  case class InventoryPage(page: Int)
-  object InventoryPage {
-    implicit val encoder: Encoder[InventoryPage] = deriveEncoder
-    implicit val decoder: Decoder[InventoryPage] = deriveDecoder
+  val ItemActionPrefix = "InventoryItem_"
+
+  case class InventoryScene(page: Option[Int] = None, selectedId: Option[Long] = None)
+  object InventoryScene {
+    implicit val encoder: Encoder[InventoryScene] = deriveEncoder
+    implicit val decoder: Decoder[InventoryScene] = deriveDecoder
   }
 
   def equip(hero: Hero, item: Item): (Equipment, FightStats, Item) = {
@@ -172,7 +214,9 @@ object InventoryState {
     (newEq, newFight, oldItem)
   }
 
-  def itemText(item: Item, eq: Equipment, pageNum: Int, total: Int, gold: Option[Long] = None): String = {
+  /** Подробное представление предмета (статы + надетое в том же слоте). Используется
+   *  и в детальном экране инвентаря, и снаружи (например, регистрация). */
+  def itemText(item: Item, eq: Equipment): String = {
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring =>
@@ -185,8 +229,7 @@ object InventoryState {
     }
     val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    val goldStr  = gold.fold("")(g => s" | 💰 $g")
-    s"📦 Инвентарь ($pageNum/$total)$goldStr\n\n${item.name} Ур.${item.lvl}\n$statsStr$slotInfo"
+    s"${item.name} Ур.${item.lvl}\n$statsStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании

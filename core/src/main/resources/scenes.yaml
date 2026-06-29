@@ -155,7 +155,8 @@ guild:
   trophyExchange:
     text: "Все боевые трофеи, собранные в опасных битвах, собираются в гильдии для обмена на репутацию. Выполните задания гильдии и докажите свою верность, а опытные мастера, при достижении вами достаточной репутации, раскроют перед вами свои секреты, чтобы вы могли стать ещё сильнее…"
     choices:
-      SubmitTrophies: "Сдать трофеи"
+      SubmitTrophies:    "Сдать все"
+      TrophyListMenu:    "Сдать по одному"
       LeaveTrophyExchange:
         label: "↩ Назад"
         color: "negative"
@@ -199,6 +200,8 @@ guild:
         color: "negative"
   noTrophies: "В вашем рюкзаке нет трофеев."
   trophiesSubmitted: "Гильдия принимает {count} трофеев. Репутация искателя: +{gained} (всего {total})."
+  trophyListHeader: "Выберите трофей для сдачи. Репутация искателя: {reputation}"
+  trophySubmitted: "Гильдия принимает {name}. Репутация искателя: +{gained} (всего {total})."
 
 construction:
   menu:

@@ -14,7 +14,11 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
+
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+  /** Имитация нажатия на динамическую кнопку конкретного предмета. */
+  private def selectItem(itemId: Long): UserAction =
+    UserAction("", Some(s"""{"action":"${InventoryState.ItemActionPrefix}$itemId"}"""))
 
   private val sword = Item(10L, "Старый меч", 1L, Rarity.Gray, ItemType.Weapon,
     attack = 5, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
@@ -23,7 +27,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
   private val oldSword = Item(99L, "Ржавый меч", 1L, Rarity.Gray, ItemType.Weapon,
     attack = 2, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
 
-  private val baseHero = TestFixtures.hero(userId)  // fightStats.atk = 10, пустое снаряжение
+  private val baseHero = TestFixtures.hero(userId)
 
   private def makeState(hero: Hero, items: List[Item]) =
     for {
@@ -45,34 +49,28 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(screens.head.text.contains("пуст"))
     },
 
-    test("enter с предметами → показывает первый предмет") {
+    test("enter с предметами → показывает экран-список с кнопками-предметами") {
       for {
         quad                    <- makeState(baseHero, List(sword, helm))
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
         screens                 <- renderer.sentScreens
-      } yield assertTrue(screens.last.text.contains(sword.name))
+      } yield assertTrue(
+                screens.last.choices.exists(_.id == s"${InventoryState.ItemActionPrefix}${sword.id}")) &&
+              assertTrue(
+                screens.last.choices.exists(_.id == s"${InventoryState.ItemActionPrefix}${helm.id}"))
     },
 
-    test("Next → переходит к следующему предмету") {
+    test("выбор предмета кнопкой → открывает детальный экран с Equip/Drop") {
       for {
-        quad                    <- makeState(baseHero, List(sword, helm))
+        quad                    <- makeState(baseHero, List(sword))
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
-        result                  <- state.action(testUser, tap("Next"), renderer)
+        _                       <- state.action(testUser, selectItem(sword.id), renderer)
         screens                 <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Inventory) &&
-              assertTrue(screens.last.text.contains(helm.name))
-    },
-
-    test("Prev на первом предмете → остаётся на первом") {
-      for {
-        quad                    <- makeState(baseHero, List(sword, helm))
-        (state, _, _, renderer)  = quad
-        _                       <- state.enter(testUser, renderer)
-        _                       <- state.action(testUser, tap("Prev"), renderer)
-        screens                 <- renderer.sentScreens
-      } yield assertTrue(screens.last.text.contains(sword.name))
+      } yield assertTrue(screens.last.text.contains(sword.name)) &&
+              assertTrue(screens.last.choices.exists(_.id == "Equip")) &&
+              assertTrue(screens.last.choices.exists(_.id == "Drop"))
     },
 
     test("BackFromInventory → возврат в HeroStats") {
@@ -84,11 +82,12 @@ object InventoryStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.HeroStats)
     },
 
-    test("Equip оружия в пустой слот → надет, удалён из инвентаря, atk обновлён") {
+    test("Equip выбранного оружия в пустой слот → надет, удалён из инвентаря") {
       for {
         quad                             <- makeState(baseHero, List(sword))
         (state, heroDao, invRepo, renderer) = quad
         _                                <- state.enter(testUser, renderer)
+        _                                <- state.action(testUser, selectItem(sword.id), renderer)
         _                                <- state.action(testUser, tap("Equip"), renderer)
         updatedHero                      <- heroDao.getHeroByUserId(userId)
         items                             = invRepo.snapshot
@@ -97,7 +96,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(updatedHero.exists(_.fightStats.atk == baseHero.fightStats.atk + sword.attack))
     },
 
-    test("Equip оружия с заменой старого → старое попадает обратно в инвентарь") {
+    test("Equip с заменой старого → старое попадает обратно в инвентарь") {
       val heroWithWeapon = baseHero.copy(
         equipment  = TestFixtures.emptyEquipment.copy(weapon = oldSword),
         fightStats = baseHero.fightStats.copy(atk = baseHero.fightStats.atk + oldSword.attack)
@@ -106,6 +105,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
         quad                             <- makeState(heroWithWeapon, List(sword))
         (state, heroDao, invRepo, renderer) = quad
         _                                <- state.enter(testUser, renderer)
+        _                                <- state.action(testUser, selectItem(sword.id), renderer)
         _                                <- state.action(testUser, tap("Equip"), renderer)
         updatedHero                      <- heroDao.getHeroByUserId(userId)
         items                             = invRepo.snapshot
@@ -114,11 +114,12 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(updatedHero.exists(_.fightStats.atk == baseHero.fightStats.atk + sword.attack))
     },
 
-    test("Drop → предмет удалён из инвентаря, показывается следующий") {
+    test("Drop выбранного → предмет удалён из инвентаря") {
       for {
         quad                             <- makeState(baseHero, List(sword, helm))
         (state, _, invRepo, renderer)    = quad
         _                                <- state.enter(testUser, renderer)
+        _                                <- state.action(testUser, selectItem(sword.id), renderer)
         _                                <- state.action(testUser, tap("Drop"), renderer)
         items                             = invRepo.snapshot
         screens                          <- renderer.sentScreens
@@ -132,6 +133,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
         quad                    <- makeState(baseHero, List(sword))
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
+        _                       <- state.action(testUser, selectItem(sword.id), renderer)
         _                       <- state.action(testUser, tap("Drop"), renderer)
         screens                 <- renderer.sentScreens
       } yield assertTrue(screens.last.text.contains("пуст"))
@@ -140,11 +142,12 @@ object InventoryStateSpec extends ZIOSpecDefault {
     test("Equip предмета выше уровня героя → ошибка, предмет не надет") {
       val highLvlSword = Item(30L, "Легендарный меч", 99L, Rarity.Gray, ItemType.Weapon,
         attack = 100, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
-      val lvl1Hero = baseHero  // lvl = 1
+      val lvl1Hero = baseHero
       for {
         quad                             <- makeState(lvl1Hero, List(highLvlSword))
         (state, heroDao, invRepo, renderer) = quad
         _                                <- state.enter(testUser, renderer)
+        _                                <- state.action(testUser, selectItem(highLvlSword.id), renderer)
         _                                <- state.action(testUser, tap("Equip"), renderer)
         updatedHero                      <- heroDao.getHeroByUserId(userId)
         items                             = invRepo.snapshot

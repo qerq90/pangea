@@ -14,6 +14,13 @@ object EquipmentStateSpec extends ZIOSpecDefault {
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+  private def selectSlot(idx: Int): UserAction =
+    UserAction("", Some(s"""{"action":"${EquipmentState.SlotPrefix}$idx"}"""))
+  private def selectItem(itemId: Long): UserAction =
+    UserAction("", Some(s"""{"action":"${InventoryState.ItemActionPrefix}$itemId"}"""))
+
+  // Индекс слотов в [[EquipmentState.slots]]
+  private val WeaponSlotIdx = 12
 
   private val sword = Item(10L, "Меч судьбы", 1L, Rarity.Blue, ItemType.Weapon,
                            attack = 20, accuracy = 5, concentration = 0,
@@ -36,24 +43,14 @@ object EquipmentStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("EquipmentState")(
 
-    test("enter → показывает первый слот (Шлем)") {
+    test("enter → показывает список слотов кнопками") {
       for {
         quad                          <- makeState(TestFixtures.hero(userId))
         (state, _, _, renderer)        = quad
         _                             <- state.enter(testUser, renderer)
         screens                       <- renderer.sentScreens
       } yield assertTrue(screens.nonEmpty) &&
-              assertTrue(screens.head.text.contains("Шлем"))
-    },
-
-    test("Next → переходит к следующему слоту") {
-      for {
-        quad                          <- makeState(TestFixtures.hero(userId))
-        (state, _, _, renderer)        = quad
-        _                             <- state.enter(testUser, renderer)
-        _                             <- state.action(testUser, tap("Next"), renderer)
-        screens                       <- renderer.sentScreens
-      } yield assertTrue(screens.last.text.contains("Наплечники"))
+              assertTrue(screens.head.choices.exists(_.id == s"${EquipmentState.SlotPrefix}0"))
     },
 
     test("BackFromEquip → возврат в HeroStats") {
@@ -65,6 +62,20 @@ object EquipmentStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.HeroStats)
     },
 
+    test("выбор слота → открывает детальный экран с Unequip (если предмет надет)") {
+      val heroWithSword = TestFixtures.hero(userId).copy(
+        equipment = TestFixtures.emptyEquipment.copy(weapon = sword)
+      )
+      for {
+        quad                          <- makeState(heroWithSword)
+        (state, _, _, renderer)        = quad
+        _                             <- state.enter(testUser, renderer)
+        _                             <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        screens                       <- renderer.sentScreens
+      } yield assertTrue(screens.last.text.contains(sword.name)) &&
+              assertTrue(screens.last.choices.exists(_.id == "Unequip"))
+    },
+
     test("Unequip оружия → предмет идёт в инвентарь, слот пустеет, atk снижается") {
       val heroWithSword = TestFixtures.hero(userId).copy(
         equipment  = TestFixtures.emptyEquipment.copy(weapon = sword),
@@ -74,8 +85,7 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         quad                          <- makeState(heroWithSword)
         (state, heroDao, invRepo, renderer) = quad
         _                             <- state.enter(testUser, renderer)
-        // перейти к слоту «Оружие» (индекс 12)
-        _                             <- ZIO.foreachDiscard(1 to 12)(_ => state.action(testUser, tap("Next"), renderer))
+        _                             <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
         _                             <- state.action(testUser, tap("Unequip"), renderer)
         updated                       <- heroDao.getHeroByUserId(userId)
         screens                       <- renderer.sentScreens
@@ -85,14 +95,14 @@ object EquipmentStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("снят")))
     },
 
-    test("Unequip пустого слота → сообщение об ошибке") {
+    test("Unequip пустого слота → у детального экрана нет кнопки Unequip") {
       for {
         quad                          <- makeState(TestFixtures.hero(userId))
         (state, _, _, renderer)        = quad
         _                             <- state.enter(testUser, renderer)
-        _                             <- state.action(testUser, tap("Unequip"), renderer)
+        _                             <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
         screens                       <- renderer.sentScreens
-      } yield assertTrue(screens.exists(_.text.contains("пуст")))
+      } yield assertTrue(screens.last.choices.forall(_.id != "Unequip"))
     },
 
     test("Unequip при полном инвентаре → сообщение, предмет остаётся") {
@@ -103,11 +113,10 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         heroDao  <- TestHeroDao.withHero(userId, heroWithSword)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
-        // canAdd = false: addItem всегда возвращает ошибку
         invRepo   = TestInventoryRepository.full
         state     = EquipmentState(heroDao, invRepo, content)
         _        <- state.enter(testUser, renderer)
-        _        <- ZIO.foreachDiscard(1 to 12)(_ => state.action(testUser, tap("Next"), renderer))
+        _        <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
         _        <- state.action(testUser, tap("Unequip"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
@@ -115,7 +124,7 @@ object EquipmentStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Сумка странника переполнена")))
     },
 
-    test("надеть два кольца из инвентаря → оба в разных слотах") {
+    test("надеть два кольца из инвентаря через детальные экраны → оба в разных слотах") {
       val heroBase = TestFixtures.hero(userId)
       for {
         heroDao  <- TestHeroDao.withHero(userId, heroBase)
@@ -123,9 +132,11 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
         invState  = InventoryState(heroDao, invRepo, content)
-        _        <- invState.enter(testUser, renderer)          // видим ring1
-        _        <- invState.action(testUser, tap("Equip"), renderer)  // надеваем ring1 → firstRing
-        _        <- invState.action(testUser, tap("Equip"), renderer)  // надеваем ring2 → secondRing
+        _        <- invState.enter(testUser, renderer)
+        _        <- invState.action(testUser, selectItem(ring1.id), renderer)
+        _        <- invState.action(testUser, tap("Equip"), renderer)
+        _        <- invState.action(testUser, selectItem(ring2.id), renderer)
+        _        <- invState.action(testUser, tap("Equip"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(updated.exists(_.equipment.firstRing.id  == ring1.id)) &&
               assertTrue(updated.exists(_.equipment.secondRing.id == ring2.id))

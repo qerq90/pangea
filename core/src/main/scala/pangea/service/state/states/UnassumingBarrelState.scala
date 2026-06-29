@@ -12,6 +12,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
+import pangea.service.state.ItemMenu
 import pangea.service.state.states.UnassumingBarrelState._
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
@@ -33,7 +34,9 @@ case class UnassumingBarrelState(
       "DepositItemsMenu"  -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(depositPage = Some(0))) *> showDepositItems(u, r).as(StateType.UnassumingBarrel) },
       "DepositItemsPrev"  -> Target.Run { (u, _, r) => navigateDeposit(u, r, -1).as(StateType.UnassumingBarrel) },
       "DepositItemsNext"  -> Target.Run { (u, _, r) => navigateDeposit(u, r, +1).as(StateType.UnassumingBarrel) },
-      "WithdrawItemsMenu" -> Target.Run { (u, _, r) => resetScene(u) *> showWithdrawItems(u, r).as(StateType.UnassumingBarrel) },
+      "WithdrawItemsMenu" -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(withdrawPage = Some(0))) *> showWithdrawItems(u, r).as(StateType.UnassumingBarrel) },
+      "WithdrawItemsPrev" -> Target.Run { (u, _, r) => navigateWithdraw(u, r, -1).as(StateType.UnassumingBarrel) },
+      "WithdrawItemsNext" -> Target.Run { (u, _, r) => navigateWithdraw(u, r, +1).as(StateType.UnassumingBarrel) },
       "DepositGoldMenu"   -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(barrelMode = Some(ModeDepositGold))) *> showDepositGold(u, r).as(StateType.UnassumingBarrel) },
       "WithdrawGoldMenu"  -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(barrelMode = Some(ModeWithdrawGold))) *> showWithdrawGold(u, r).as(StateType.UnassumingBarrel) },
       "LeaveBarrel"       -> Target.Goto(StateType.HarborQuarter)
@@ -81,22 +84,17 @@ case class UnassumingBarrelState(
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("barrel.emptyInventory"), backRow))
            else {
-             val totalPages = ((items.size + PageSize - 1) / PageSize).max(1)
-             val page       = scene.depositPage.getOrElse(0).max(0).min(totalPages - 1)
-             val pageItems  = items.slice(page * PageSize, page * PageSize + PageSize)
+             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.depositPage.getOrElse(0))
              val header     = content.format("barrel.depositItemsHeader",
                                 "free"  -> barrel.freeSlots.toString,
                                 "page"  -> (page + 1).toString,
                                 "total" -> totalPages.toString)
-             val itemBtns   = pageItems.zipWithIndex.map { case (it, idx) =>
-                                Choice(s"$DepositItemPrefix${it.id}", itemButtonLabel(it), row = Some(idx / 2))
-                              }
-             val nav        = List(
-                                Option.when(page > 0)(Choice("DepositItemsPrev", content.text("common.prev"), row = Some(NavRow))),
-                                Option.when(page < totalPages - 1)(Choice("DepositItemsNext", content.text("common.next"), row = Some(NavRow)))
-                              ).flatten
-             val back       = Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(BackRow))
-             renderer.show(user, Screen(header, itemBtns ++ nav :+ back))
+             val itemBtns   = ItemMenu.itemButtons(pageItems, DepositItemPrefix)
+             val nav        = navRow(
+                                back  = Some(Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(ItemMenu.NavRow))),
+                                prev  = Option.when(page > 0)(Choice("DepositItemsPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
+                                next  = Option.when(page < totalPages - 1)(Choice("DepositItemsNext", content.text("common.next"), row = Some(ItemMenu.NavRow))))
+             renderer.show(user, Screen(header, itemBtns ++ nav))
            }
     } yield ()
 
@@ -105,7 +103,7 @@ case class UnassumingBarrelState(
       scene  <- readScene(user)
       hero   <- getHero(user)
       inv    <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      totalPages = ((inv.items.data.size + PageSize - 1) / PageSize).max(1)
+      (_, totalPages, _) = ItemMenu.page(inv.items.data, 0)
       curPage    = scene.depositPage.getOrElse(0)
       newPage    = (curPage + delta).max(0).min(totalPages - 1)
       _      <- writeScene(user, scene.copy(depositPage = Some(newPage)))
@@ -117,24 +115,42 @@ case class UnassumingBarrelState(
       hero   <- getHero(user)
       inv    <- inventoryRepo.get(hero.id).mapError(asThrowable)
       barrel <- getBarrel(user)
+      scene  <- readScene(user)
       items   = barrel.items.data
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("barrel.emptyBarrel"), backRow))
            else {
-             val header  = content.format("barrel.withdrawItemsHeader", "free" -> inv.freeSlots.toString)
-             val buttons = items.zipWithIndex.map { case (it, idx) =>
-               Choice(s"$WithdrawItemPrefix${it.id}", itemButtonLabel(it), row = Some(idx / 2))
-             }
-             val rowsUsed = (buttons.size + 1) / 2
-             val back     = Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(rowsUsed))
-             renderer.show(user, Screen(header, buttons :+ back))
+             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.withdrawPage.getOrElse(0))
+             val header  = content.format("barrel.withdrawItemsHeader", "free" -> inv.freeSlots.toString) +
+                           (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
+             val buttons = ItemMenu.itemButtons(pageItems, WithdrawItemPrefix)
+             val nav     = navRow(
+                             back = Some(Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(ItemMenu.NavRow))),
+                             prev = Option.when(page > 0)(Choice("WithdrawItemsPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
+                             next = Option.when(page < totalPages - 1)(Choice("WithdrawItemsNext", content.text("common.next"), row = Some(ItemMenu.NavRow))))
+             renderer.show(user, Screen(header, buttons ++ nav))
            }
+    } yield ()
+
+  private def navigateWithdraw(user: User, renderer: Renderer, delta: Int): Task[Unit] =
+    for {
+      scene  <- readScene(user)
+      hero   <- getHero(user)
+      barrel <- barrelRepo.get(hero.id).mapError(asThrowable)
+      (_, totalPages, _) = ItemMenu.page(barrel.items.data, 0)
+      curPage = scene.withdrawPage.getOrElse(0)
+      newPage = (curPage + delta).max(0).min(totalPages - 1)
+      _      <- writeScene(user, scene.copy(withdrawPage = Some(newPage)))
+      _      <- showWithdrawItems(user, renderer)
     } yield ()
 
   private def backRow: List[Choice] =
     List(Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(0)))
 
-  private def itemButtonLabel(item: Item): String = s"${item.name} Ур.${item.lvl}"
+  /** Сборка единого ряда `[Назад][Предыдущий][Следующий]` (ВК-стиль — последний
+   *  ряд экрана, до трёх кнопок). Назад всегда красная. */
+  private def navRow(back: Option[Choice], prev: Option[Choice], next: Option[Choice]): List[Choice] =
+    List(back, prev, next).flatten
 
   // --- Ввод золота ---
 
@@ -297,15 +313,16 @@ case class UnassumingBarrelState(
 }
 
 object UnassumingBarrelState {
-  val PageSize           = 10
-  val NavRow             = 5
-  val BackRow            = 6
   val DepositItemPrefix  = "DepositItem_"
   val WithdrawItemPrefix = "WithdrawItem_"
   val ModeDepositGold    = "depositGold"
   val ModeWithdrawGold   = "withdrawGold"
 
-  case class BarrelScene(barrelMode: Option[String] = None, depositPage: Option[Int] = None)
+  case class BarrelScene(
+    barrelMode:   Option[String] = None,
+    depositPage:  Option[Int]    = None,
+    withdrawPage: Option[Int]    = None
+  )
   object BarrelScene {
     implicit val encoder: Encoder[BarrelScene] = deriveEncoder
     implicit val decoder: Decoder[BarrelScene] = deriveDecoder

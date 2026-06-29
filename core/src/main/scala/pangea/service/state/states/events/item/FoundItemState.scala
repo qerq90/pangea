@@ -63,7 +63,7 @@ case class FoundItemState(
       raw  <- heroDao.readSceneData(user.userId)
       item  = raw.flatMap(_.as[FoundItemData].toOption).map(_.item)
       text  = item.fold(content.text("foundItem.header")) { i =>
-        content.text("foundItem.header") + "\n\n" + InventoryState.itemText(i, hero.equipment, 1, 1)
+        content.text("foundItem.header") + "\n\n" + InventoryState.itemText(i, hero.equipment)
       }
       _    <- renderer.show(user, Screen(text, content.screen("foundItem.enter").choices))
     } yield ()

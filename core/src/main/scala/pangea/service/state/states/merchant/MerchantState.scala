@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, Rarity}
@@ -14,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{CharacterMenu, InventoryFeedback, State, UserAction}
+import pangea.service.state.{CharacterMenu, InventoryFeedback, ItemMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -34,19 +34,20 @@ case class MerchantState(
 
   private val branch = new Branch(
     routes = Map(
-      "Buy"          -> Target.Run { (u, ua, r) => confirmBuy(u, ua, r) },
-      "ConfirmBuy"   -> Target.Run { (u, ua, r) => doBuy(u, ua, r) },
-      "CancelBuy"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
-      "Refresh"      -> Target.Run { (u, _,  r) => refresh(u, r) },
-      "Sell"         -> Target.Run { (u, _,  r) => showSell(u, r, 0) },
-      "SellPrev"     -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
-      "SellNext"     -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
-      "SellItem"     -> Target.Run { (u, _,  r) => doSell(u, r) },
-      "BackFromSell" -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
-      "OpenCharacter"-> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
-      "Back"         -> Target.Goto(StateType.MarketSquare)
+      "Buy"             -> Target.Run { (u, ua, r) => confirmBuy(u, ua, r) },
+      "ConfirmBuy"      -> Target.Run { (u, ua, r) => doBuy(u, ua, r) },
+      "CancelBuy"       -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
+      "Refresh"         -> Target.Run { (u, _,  r) => refresh(u, r) },
+      "Sell"            -> Target.Run { (u, _,  r) => showSellList(u, r, 0) },
+      "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
+      "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
+      "ConfirmSellItem" -> Target.Run { (u, _,  r) => doSell(u, r) },
+      "CancelSellItem"  -> Target.Run { (u, _,  r) => currentSellPage(u).flatMap(p => showSellList(u, r, p)) },
+      "BackFromSell"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
+      "OpenCharacter"   -> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
+      "Back"            -> Target.Goto(StateType.MarketSquare)
     ),
-    fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.Merchant) }
+    fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
   override def targetStates: Set[StateType] = Set(StateType.MarketSquare, StateType.Merchant, StateType.HeroStats)
@@ -125,7 +126,7 @@ case class MerchantState(
 
   // ── Продажа ─────────────────────────────────────────────────────────────────
 
-  private def showSell(user: User, renderer: Renderer, page: Int): Task[StateType] =
+  private def showSellList(user: User, renderer: Renderer, page: Int): Task[StateType] =
     for {
       hero  <- getHero(user)
       items <- inventoryItems(hero)
@@ -133,30 +134,78 @@ case class MerchantState(
              renderer.show(user, Screen(content.text("merchant.sellEmpty"),
                List(content.choice("BackFromSell", "merchant.sellBackLabel"))))
            else {
-             val p = page.max(0).min(items.size - 1)
-             heroDao.writeSceneData(user.userId, SellPage(p).asJson) *>
-               renderer.show(user, sellScreen(hero, items, p))
+             val (pageItems, totalPages, p) = ItemMenu.page(items, page)
+             heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *> {
+               val header  = content.format("merchant.sellHeader",
+                 "page"  -> (p + 1).toString,
+                 "total" -> totalPages.toString,
+                 "gold"  -> hero.gold.toString)
+               val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
+               val nav     = sellNavRow(p, totalPages)
+               renderer.show(user, Screen(header, btns ++ nav))
+             }
            }
     } yield StateType.Merchant
 
-  private def navigateSell(user: User, renderer: Renderer, delta: Int): Task[StateType] =
-    currentSellPage(user).flatMap(p => showSell(user, renderer, p + delta))
-
-  private def doSell(user: User, renderer: Renderer): Task[StateType] =
+  private def showSellConfirm(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
     for {
       hero  <- getHero(user)
       items <- inventoryItems(hero)
-      page  <- currentSellPage(user)
-      _ <- if (items.nonEmpty && page < items.size) {
-             val item  = items(page)
-             val price = sellPrice(item)
-             inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-               heroDao.updateGold(user.userId, hero.gold + price) *>
-               renderer.show(user, Screen(
-                 content.format("merchant.sold", "name" -> item.name, "price" -> price.toString), Nil)) *>
-               showSell(user, renderer, page).unit
-           } else showSell(user, renderer, page).unit
+      _ <- items.find(_.id == itemId) match {
+        case None => showSellList(user, renderer, 0).unit
+        case Some(item) =>
+          val price = sellPrice(item)
+          val text  = s"${itemDesc(item)}\n💰 Цена продажи: $price"
+          val choices = List(
+            content.choice("ConfirmSellItem", "merchant.sellItemLabel").copy(data = Map("id" -> itemId.toString), row = Some(0)),
+            content.choice("CancelSellItem",  "merchant.sellBackLabel").copy(row = Some(1))
+          )
+          currentSellPage(user).flatMap(p => heroDao.writeSceneData(user.userId,
+            SellScene(page = p, selectedId = Some(itemId)).asJson)) *>
+            renderer.show(user, Screen(text, choices, inline = true))
+      }
     } yield StateType.Merchant
+
+  private def navigateSell(user: User, renderer: Renderer, delta: Int): Task[StateType] =
+    currentSellPage(user).flatMap(p => showSellList(user, renderer, p + delta))
+
+  private def doSell(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero   <- getHero(user)
+      items  <- inventoryItems(hero)
+      scene  <- currentSellScene(user)
+      itemId  = scene.selectedId.getOrElse(-1L)
+      _ <- items.find(_.id == itemId) match {
+        case Some(item) =>
+          val price = sellPrice(item)
+          inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+            heroDao.updateGold(user.userId, hero.gold + price) *>
+            renderer.show(user, Screen(
+              content.format("merchant.sold", "name" -> item.name, "price" -> price.toString), Nil))
+        case None => ZIO.unit
+      }
+      _ <- showSellList(user, renderer, scene.page).unit
+    } yield StateType.Merchant
+
+  private def sellNavRow(page: Int, totalPages: Int): List[Choice] = {
+    val row = ItemMenu.NavRow
+    List(
+      Some(content.choice("BackFromSell", "merchant.sellBackLabel").copy(row = Some(row))),
+      Option.when(page > 0)(content.choice("SellListPrev", "common.prev").copy(row = Some(row))),
+      Option.when(page < totalPages - 1)(content.choice("SellListNext", "common.next").copy(row = Some(row)))
+    ).flatten
+  }
+
+  private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    parseFallbackAction(ua.payload) match {
+      case Some(a) if a.startsWith(SellItemPrefix) =>
+        a.drop(SellItemPrefix.length).toLongOption.fold[Task[StateType]](showMenu(user, renderer).as(StateType.Merchant))(
+          showSellConfirm(user, _, renderer))
+      case _ => showMenu(user, renderer).as(StateType.Merchant)
+    }
+
+  private def parseFallbackAction(payload: Option[String]): Option[String] =
+    payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
   // ── Экраны и хелперы ────────────────────────────────────────────────────────
 
@@ -185,22 +234,6 @@ case class MerchantState(
       content.choice("OpenCharacter", "common.character"),
       content.choice("Back",          "merchant.backLabel")
     )
-    Screen(text, choices)
-  }
-
-  private def sellScreen(hero: Hero, items: List[Item], page: Int): Screen = {
-    val item  = items(page)
-    val price = sellPrice(item)
-    val text  = content.format("merchant.sellHeader",
-      "page"  -> (page + 1).toString,
-      "total" -> items.size.toString,
-      "gold"  -> hero.gold.toString) + s"\n\n${itemDesc(item)}\n💰 Цена продажи: $price"
-    val choices = List(
-      Option.when(page > 0)(content.choice("SellPrev", "common.prev")),
-      Some(content.choice("SellItem", "merchant.sellItemLabel")),
-      Option.when(page < items.size - 1)(content.choice("SellNext", "common.next")),
-      Some(content.choice("BackFromSell", "merchant.sellBackLabel"))
-    ).flatten
     Screen(text, choices)
   }
 
@@ -258,8 +291,10 @@ case class MerchantState(
   private def inventoryItems(hero: Hero): Task[List[Item]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data)
 
-  private def currentSellPage(user: User): Task[Int] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[SellPage].toOption).map(_.page).getOrElse(0))
+  private def currentSellPage(user: User): Task[Int] = currentSellScene(user).map(_.page)
+
+  private def currentSellScene(user: User): Task[SellScene] =
+    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[SellScene].toOption).getOrElse(SellScene()))
 
   private def payloadIdx(ua: UserAction): Option[Int] =
     ua.payload
@@ -289,9 +324,11 @@ object MerchantState {
     implicit val decoder: Decoder[MerchantData] = deriveDecoder
   }
 
-  final case class SellPage(page: Int)
-  object SellPage {
-    implicit val encoder: Encoder[SellPage] = deriveEncoder
-    implicit val decoder: Decoder[SellPage] = deriveDecoder
+  final case class SellScene(page: Int = 0, selectedId: Option[Long] = None)
+  object SellScene {
+    implicit val encoder: Encoder[SellScene] = deriveEncoder
+    implicit val decoder: Decoder[SellScene] = deriveDecoder
   }
+
+  val SellItemPrefix = "SellItem_"
 }
