@@ -301,7 +301,7 @@ merchant:
 
 dungeon:
   enter:
-    text: "Великий лабиринт. Уровень: {level}\n❤️ {hp}/{maxHp}    🛡 {armor}/{maxArmor}"
+    text: "Великий лабиринт. Уровень: {level}\n❤ {hp}/{maxHp}    🧥 {armor}/{maxArmor}"
     choices:
       FindEvent: "Исследовать уровень"
       GoDarker: "Двигаться к тьме"
@@ -352,7 +352,7 @@ heroStats:
 
 battle:
   enter:
-    text: "⚔ {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax} | 🧥 {monsterArmor}/{monsterMaxArmor} | ⚔ {monsterAtk}\n👹 Шанс попадания: {mobHit} | 💨 Шанс уворота: {monsterDodge}\n🌀 Шанс применения умения: {mobSkillHit}\n\n🧙 Вы: ❤ {heroHp}/{heroMax} 🧥 {heroArmor}/{heroMaxArmor} 🛡 {heroReduction}\n🎯 Шанс попадания: {heroHit} | 💨 Шанс уворота: {heroDodge}\n🌀 Шанс применения умения: {heroSkillHit}\n🧪 Фляга: {flaskCharges}"
+    text: "{monster}\n{monsterRace}\n❤ {monsterHp}/{monsterMax}  🧥 {monsterArmor}/{monsterMaxArmor}  ⚔ {monsterAtk}  🎯 {mobHit}  💨 {monsterDodge}  🌀 {mobSkillHit}\n\nВы:\n❤ {heroHp}/{heroMax}  🧥 {heroArmor}/{heroMaxArmor}  ⚔ {heroAtk}  🛡 {heroReduction}  🎯 {heroHit}  💨 {heroDodge}  🌀 {heroSkillHit}  🧪 {flaskCharges}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"

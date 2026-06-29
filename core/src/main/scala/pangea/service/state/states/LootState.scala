@@ -61,7 +61,7 @@ case class LootState(
                renderer.show(user, Screen(text, content.screen("loot.enter").choices))
            } else {
              // золото уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
-             val preview = goldLines ++ loot.items.map(itemLine)
+             val preview = goldLines ++ loot.items.map(it => itemLineWithEquipped(it, hero))
              val text    = content.text("loot.header") + "\n\n" + preview.mkString("\n")
              val choices = List(
                content.choice("Take", "loot.takeLabel"),
@@ -120,11 +120,24 @@ case class LootState(
   private def itemLine(item: Item): String =
     if (item.itemType == ItemType.Trophy)
       s"🎁 ${item.name} Ур.${item.lvl} (трофей)" // у трофеев нет редкости
+    else
+      s"🎁 ${item.name} Ур.${item.lvl} ${item.statsLineEmoji}".trim
+
+  /** Карточка дропа + строки с надетым в том же слоте — чтобы сразу сравнить. У
+   *  надетого статы выводятся компактно со смайликами. Трофеи не сравниваются. */
+  private def itemLineWithEquipped(item: Item, hero: Hero): String = {
+    val base = itemLine(item)
+    if (item.itemType == ItemType.Trophy) base
     else {
-      val lines = item.statsLines
-      val tail  = if (lines.nonEmpty) "\n" + lines.mkString("\n") else ""
-      s"🎁 ${item.name} Ур.${item.lvl}$tail"
+      val equipped = hero.equipment.equippedFor(item.itemType)
+                       .filter(_.itemType != ItemType.NoItem)
+      if (equipped.isEmpty) base
+      else {
+        val eqLines = equipped.map(e => s"Надето: ${e.name} Ур.${e.lvl} ${e.statsLineEmoji}".trim)
+        base + "\n" + eqLines.mkString("\n")
+      }
     }
+  }
 }
 
 object LootState {

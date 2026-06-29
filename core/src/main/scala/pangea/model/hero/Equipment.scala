@@ -4,7 +4,7 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import pangea.model.item.Item
+import pangea.model.item.{Item, ItemType}
 
 case class Equipment(
   helmet: Item,
@@ -34,6 +34,28 @@ case class Equipment(
     gloves.hp + pants.hp + boots.hp + amulet.hp +
     firstRing.hp + secondRing.hp + belt.hp + flask.hp +
     weapon.hp + additionalWeapon.hp
+
+  /** Какие предметы из снаряжения занимают слот данного типа. Для Ring возвращает
+   *  оба кольца (есть два слота); для прочих типов — один. Пустые слоты включены —
+   *  фильтрацию по [[Item.itemType]] делает вызывающий. */
+  def equippedFor(itemType: ItemType): List[Item] = itemType match {
+    case ItemType.Helmet           => List(helmet)
+    case ItemType.ShoulderPads     => List(shoulderPads)
+    case ItemType.ChestPlate       => List(chestPlate)
+    case ItemType.Bracelets        => List(bracelets)
+    case ItemType.Gloves           => List(gloves)
+    case ItemType.Pants            => List(pants)
+    case ItemType.Leggings         => List(pants)
+    case ItemType.Boots            => List(boots)
+    case ItemType.Amulet           => List(amulet)
+    case ItemType.Ring             => List(firstRing, secondRing)
+    case ItemType.Belt             => List(belt)
+    case ItemType.Flask            => List(flask)
+    case ItemType.Weapon           => List(weapon)
+    case ItemType.AdditionalWeapon => List(additionalWeapon)
+    case ItemType.Trophy           => Nil
+    case ItemType.NoItem           => Nil
+  }
 }
 
 object Equipment {

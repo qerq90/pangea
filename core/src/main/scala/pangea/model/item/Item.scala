@@ -66,6 +66,21 @@ case class Item(
     ).flatten
     numeric ++ activeSkill.map(s => s"""Активный навык: «${s.label}»""").toList
   }
+
+  /** Компактная строка статов со смайликами вместо названий — для контекстов,
+   *  где сравниваются несколько предметов (дроп vs надетое). */
+  def statsLineEmoji: String = {
+    val parts = List(
+      Option.when(attack > 0)(s"⚔+$attack"),
+      Option.when(accuracy > 0)(s"🎯+$accuracy"),
+      Option.when(concentration > 0)(s"🧠+$concentration"),
+      Option.when(armor > 0)(s"🧥+$armor"),
+      Option.when(defence > 0)(s"🛡+$defence"),
+      Option.when(evasion > 0)(s"💨+$evasion"),
+      Option.when(hp > 0)(s"❤+$hp")
+    ).flatten ++ activeSkill.map(s => s"✨«${s.label}»").toList
+    parts.mkString(" ")
+  }
 }
 
 object Item {
