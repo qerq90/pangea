@@ -217,15 +217,16 @@ object InventoryState {
   /** Подробное представление предмета (статы + надетое в том же слоте). Используется
    *  и в детальном экране инвентаря, и снаружи (например, регистрация). */
   def itemText(item: Item, eq: Equipment): String = {
+    def equipped(prefix: String, cur: Item): String =
+      if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
+      else s"$prefix: ${cur.name} Ур.${cur.lvl} ${cur.statsLineEmoji}".trim
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
-      case ItemType.Ring =>
-        val r1 = if (eq.firstRing.itemType  != ItemType.NoItem) s"Слот 1: ${eq.firstRing.name}"  else "Слот 1: свободен"
-        val r2 = if (eq.secondRing.itemType != ItemType.NoItem) s"Слот 2: ${eq.secondRing.name}" else "Слот 2: свободен"
-        s"\n$r1\n$r2"
+      case ItemType.Ring   => s"\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
       case _ =>
         val cur = equippedIn(eq, item.itemType)
-        if (cur.itemType != ItemType.NoItem) s"\nСейчас надет: ${cur.name}" else ""
+        if (cur.itemType == ItemType.NoItem) ""
+        else s"\n${equipped("Сейчас надет", cur)}"
     }
     val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")

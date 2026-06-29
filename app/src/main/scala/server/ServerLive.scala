@@ -37,19 +37,17 @@ final class ServerLive(
 
         event <- req.as[VkEvent].option
         json  <- req.as[Json]
-        _     <- ZIO.logInfo(json.toString())
         _ <- (event match {
           case Some(value) =>
-            stateHandler
-              .makeActionVK(
-                VkId(value.`object`.message.peerId.toString),
-                value.`object`.message.id,
-                UserAction(
-                  value.`object`.message.text,
-                  value.`object`.message.payload
+            val msg = value.`object`.message
+            ZIO.logInfo(s"peer=${msg.peerId} text=${msg.text} payload=${msg.payload.getOrElse("")}") *>
+              stateHandler
+                .makeActionVK(
+                  VkId(msg.peerId.toString),
+                  msg.id,
+                  UserAction(msg.text, msg.payload)
                 )
-              )
-              .catchAll(err => ZIO.logError(err.getMessage))
+                .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }).catchAll { err =>
           ZIO.logError(s"error occurred: $err")
