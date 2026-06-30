@@ -141,11 +141,8 @@ case class MerchantState(
                "gold"  -> hero.gold.toString)
              val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
              val nav     = sellNavRow(p, totalPages)
-             val screen  = Screen(header, btns ++ nav)
-             val kbDump  = pangea.service.sender.vk.VkRenderer.debugKeyboardJson(screen)
-             ZIO.logInfo(s"sell user=${user.userId.value} req=$page → norm=$p total=$totalPages items=${items.size} pageItemIds=${pageItems.map(_.id)} labels=${pageItems.map(_.name)} kbSize=${kbDump.length} kb=$kbDump") *>
-               heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *>
-               renderer.show(user, screen)
+             heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *>
+               renderer.show(user, Screen(header, btns ++ nav))
            }
     } yield StateType.Merchant
 
@@ -169,10 +166,7 @@ case class MerchantState(
     } yield StateType.Merchant
 
   private def navigateSell(user: User, renderer: Renderer, delta: Int): Task[StateType] =
-    currentSellPage(user).flatMap { p =>
-      ZIO.logInfo(s"sell-nav user=${user.userId.value} cur=$p delta=$delta → ${p + delta}") *>
-        showSellList(user, renderer, p + delta)
-    }
+    currentSellPage(user).flatMap(p => showSellList(user, renderer, p + delta))
 
   private def doSell(user: User, renderer: Renderer): Task[StateType] =
     for {
