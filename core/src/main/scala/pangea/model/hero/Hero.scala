@@ -1,5 +1,6 @@
 package pangea.model.hero
 
+import pangea.model.battle.SkillSlotState
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.{BaseStats, FightStats}
@@ -23,7 +24,8 @@ case class Hero(
   traumaUntil: Option[Long],
   traumaNames: List[String],
   guildReputation: Long,
-  masterHornBoosts: MasterHornBoosts
+  masterHornBoosts: MasterHornBoosts,
+  doubloons: Long
 ) {
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда
@@ -89,6 +91,13 @@ case class Hero(
       int = (b.applyInt(baseStats.int) * (1.0 - p.intPct)).toLong.max(1L)
     )
   }
+
+  /** Слоты активных навыков героя для боя: снимаются с надетых оружия и
+   *  нагрудника (у каждого может быть `activeSkill`). Ключ слота — id предмета,
+   *  поэтому два предмета с «одним» навыком катаются независимо. */
+  def activeSkillSlots: List[SkillSlotState] =
+    List(equipment.weapon, equipment.chestPlate)
+      .flatMap(it => it.activeSkill.map(s => SkillSlotState(it.id, s)))
 
   def effectiveMaxHp(nowMs: Long): Long = {
     val p           = combinedPenalties(nowMs)

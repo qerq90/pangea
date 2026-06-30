@@ -77,6 +77,9 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def updateGold(userId: UserId, gold: Long): Task[Unit] =
     Queries.updateGold(userId, gold).update.run.transact(xa).unit
 
+  override def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit] =
+    Queries.updateDoubloons(userId, doubloons).update.run.transact(xa).unit
+
   override def updateGuildReputation(userId: UserId, value: Long): Task[Unit] =
     Queries.updateGuildReputation(userId, value).update.run.transact(xa).unit
 

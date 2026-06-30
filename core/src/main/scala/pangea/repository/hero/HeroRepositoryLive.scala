@@ -74,7 +74,8 @@ object HeroRepositoryLive {
       traumaUntil = None,
       traumaNames = Nil,
       guildReputation = 0L,
-      masterHornBoosts = MasterHornBoosts.empty
+      masterHornBoosts = MasterHornBoosts.empty,
+      doubloons = 0L
     )
 
 }

@@ -1,6 +1,8 @@
 package pangea.model.state
 
 import enumeratum._
+import io.circe.{Decoder, Encoder, HCursor}
+import io.circe.syntax.EncoderOps
 
 sealed trait StateType extends EnumEntry
 
@@ -8,9 +10,14 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
 
   val values = findValues
 
-  // Battle 45% · FoundItem 22% · Spring 23% · GoldVein 10% (вес = число повторов в пуле).
+  implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
+  implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
+
+  // Battle 40% · FoundItem 20% · Spring 20% · GoldVein 10% · TreasureMobs 5% ·
+  // TreasureDig 5% (вес = число повторов в пуле, сумма = 100).
   val events: List[StateType] =
-    List.fill(45)(Battle) ++ List.fill(22)(FoundItem) ++ List.fill(23)(Spring) ++ List.fill(10)(GoldVein)
+    List.fill(40)(Battle) ++ List.fill(20)(FoundItem) ++ List.fill(20)(Spring) ++
+      List.fill(10)(GoldVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig)
 
   case object GlobalMap     extends StateType
   case object HarborQuarter    extends StateType
@@ -39,4 +46,10 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TrainingHall   extends StateType
   case object MasterHorn     extends StateType
   case object MentorKazimir  extends StateType
+
+  // События-«сокровища» подземелья.
+  case object TreasureMobs     extends StateType // встреча мобов, выкопавших сокровище (интро с выбором)
+  case object TreasureMobsFight extends StateType // эффект-нода: спавн очередного боя цепочки
+  case object TreasureSchron   extends StateType // эффект-нода: выдача схрона после цепочки боёв
+  case object TreasureDig      extends StateType // прикопанный схрон (раскопки по таймеру)
 }

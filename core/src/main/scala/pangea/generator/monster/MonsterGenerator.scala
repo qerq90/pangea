@@ -25,8 +25,15 @@ object MonsterGenerator {
       List.fill(3)(Legendary)
 
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
-    val (race, rng1)     = rng.pick(Race.values.toList)
-    val (rarity, rng2)   = rng1.pick(rarityPool)
+    val (race, rng1) = rng.pick(Race.values.toList)
+    generateOfRace(dungeonLevel, race, rng1)
+  }
+
+  /** Генерация моба фиксированной расы (раса задаётся снаружи — например, в
+   *  цепочке боёв события «мобы с сокровищем» все бои одной расы). Редкость и
+   *  «отмеченность» по-прежнему роллятся как обычно. */
+  def generateOfRace(dungeonLevel: Int, race: Race, rng: Rng): (Monster, Rng) = {
+    val (rarity, rng2)   = rng.pick(rarityPool)
     val stats            = buildStats(dungeonLevel, rarity, race)
     val (markRoll, rng3) = rng2.between(0L, 100L)
     val marked     = MarkedRarities.contains(rarity) && markRoll < MarkedChance

@@ -105,10 +105,11 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     for {
       seed         <- Random.nextLong
       (monster, _)  = MonsterGenerator.generate(hero.dungeonLevel, Rng(seed))
-      slots         = List(hero.equipment.weapon, hero.equipment.chestPlate)
-                        .flatMap(it => it.activeSkill.map(s => pangea.model.battle.SkillSlotState(it.id, s)))
-      battle        = ActiveBattle.fromMonster(monster).copy(skillSlots = slots)
+      battle        = ActiveBattle.from(monster, hero)
       _            <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      // Обычный бой: после добычи возврат в лабиринт — чистим routing в scene_data,
+      // чтобы victory не подхватил чужой «куда вернуться» от прошлого события.
+      _            <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
     } yield StateType.Battle
 
   private def changeDungeonLevel(user: User, renderer: Renderer, delta: Int): Task[StateType] =

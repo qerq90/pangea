@@ -2,6 +2,7 @@ package pangea.model.battle
 
 import io.circe.{Decoder, Encoder, HCursor}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import pangea.model.hero.Hero
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.skill.Skill
 import pangea.model.stats.FightStats
@@ -58,14 +59,18 @@ case class ActiveBattle(
 }
 
 object ActiveBattle {
-  def fromMonster(monster: Monster): ActiveBattle = ActiveBattle(
+  /** Сборка боя из моба и героя: статы/hp/броня берутся с моба, слоты активных
+   *  навыков отдаёт сам герой (`hero.activeSkillSlots`). Единая точка входа в
+   *  бой для всех событий. */
+  def from(monster: Monster, hero: Hero): ActiveBattle = ActiveBattle(
     monsterLvl          = monster.lvl,
     monsterRace         = monster.race.entryName,
     monsterRarity       = monster.rarity.entryName,
     monsterStats        = monster.fightStats,
     monsterCurrentHp    = monster.fightStats.hp,
     monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L),
-    monsterMarked       = monster.marked
+    monsterMarked       = monster.marked,
+    skillSlots          = hero.activeSkillSlots
   )
 
   implicit val encoder: Encoder[ActiveBattle] = deriveEncoder

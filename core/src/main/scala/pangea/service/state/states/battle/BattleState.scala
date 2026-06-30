@@ -297,12 +297,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       seed             <- Random.nextLong
       monster           = battle.toMonster
       (drops, _)        = LootGenerator.roll(battle.rarity, monster.race, hero.dungeonLevel.toLong, Rng(seed))
+      // routing события (returnState/eventData) кладётся в scene_data ДО боя
+      // (напр. цепочка «мобы с сокровищем»); переносим его в добычу, чтобы экран
+      // добычи знал, куда вернуться. Для обычного боя scene_data пуст → None.
+      prev             <- heroDao.readSceneData(user.userId)
+                            .map(_.flatMap(_.as[LootState.LootData].toOption))
       lootData          = LootState.LootData(
                             items = drops.collect {
                               case LootGenerator.LootDrop.Gear(i)   => i
                               case LootGenerator.LootDrop.Trophy(i) => i
                             },
-                            golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a }
+                            golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a },
+                            returnState = prev.flatMap(_.returnState),
+                            eventData   = prev.flatMap(_.eventData)
                           )
       _                <- heroDao.clearActiveBattle(user.userId)
       _                <- heroDao.updateExpAndLevel(user.userId, leveled.exp, leveled.lvl, leveled.upgradePoints)

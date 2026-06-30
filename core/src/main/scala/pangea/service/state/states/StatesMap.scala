@@ -3,7 +3,7 @@ package pangea.service.state.states
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
-import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HarborQuarter, HeroStats, Innkeeper, Inventory, Loot, MarketSquare, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TrophyExchange, UnassumingBarrel}
+import pangea.model.state.StateType.{Battle, Construction, Death, Dungeon, Equipment, FoundItem, GlobalMap, GoldVein, Guild, HarborQuarter, HeroStats, Innkeeper, Inventory, Loot, MarketSquare, MasterHorn, MentorKazimir, Merchant, QuestBoard, Registration, Rest, Tavern, TrainingHall, TreasureDig, TreasureMobs, TreasureMobsFight, TreasureSchron, TrophyExchange, UnassumingBarrel}
 import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
@@ -12,6 +12,7 @@ import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.GoldVeinState
+import pangea.service.state.states.events.treasure.{TreasureDigState, TreasureMobsFightState, TreasureMobsState, TreasureSchronState}
 import pangea.service.state.states.guild.{GuildState, MasterHornState, MentorKazimirState, TrainingHallState, TrophyExchangeState}
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.merchant.MerchantState
@@ -58,6 +59,10 @@ object StatesMap {
           QuestBoard   -> QuestBoardState(heroDao, content),
           Innkeeper    -> InnkeeperState(heroDao, inventoryRepo, content),
           GoldVein     -> GoldVeinState(heroDao, scheduler, content),
+          TreasureMobs      -> TreasureMobsState(heroDao, content),
+          TreasureMobsFight -> TreasureMobsFightState(heroDao, content),
+          TreasureSchron    -> TreasureSchronState(heroDao, content),
+          TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
           Construction   -> ConstructionState(heroDao, scheduler, content),
           Guild          -> GuildState(heroDao, content),
           TrophyExchange -> TrophyExchangeState(heroDao, inventoryRepo, content),
