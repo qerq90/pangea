@@ -49,6 +49,40 @@ class VkRenderer(api: Api) extends Renderer {
 object VkRenderer {
   def apply(api: Api): VkRenderer = new VkRenderer(api)
 
+  /** Сборка клавиатуры тем же путём, что и `show`, но без отправки — для логов
+   *  при диагностике (видеть, что именно уйдёт в ВК). Возвращает `""` если
+   *  клавиатура не отправляется (нет кнопок и hideKeyboard=false). */
+  def debugKeyboardJson(screen: pangea.engine.Screen): String = {
+    import pangea.model.vk.keyboard.Keyboard
+    if (screen.choices.isEmpty)
+      if (screen.hideKeyboard) Keyboard.empty.getJson else ""
+    else {
+      val hasRows = screen.choices.exists(_.row.isDefined)
+      val kbInit  = Keyboard.empty.withInline(screen.inline)
+      val kb =
+        if (!hasRows) screen.choices.foldLeft(kbInit) { (acc, choice) =>
+          acc.addRow().addButton(debugToButton(choice))
+        }
+        else {
+          val grouped = screen.choices.zipWithIndex
+            .groupBy { case (c, _) => c.row.getOrElse(Int.MaxValue) }
+            .toList.sortBy(_._1)
+            .map { case (_, items) => items.sortBy(_._2).map(_._1) }
+          grouped.foldLeft(kbInit) { (acc, rowChoices) =>
+            rowChoices.foldLeft(acc.addRow()) { (k, choice) => k.addButton(debugToButton(choice)) }
+          }
+        }
+      kb.getJson
+    }
+  }
+
+  private def debugToButton(choice: pangea.engine.Choice): pangea.model.vk.keyboard.Button = {
+    import io.circe.syntax.EncoderOps
+    import pangea.model.vk.keyboard.{Action => VkAction, Button}
+    val payload = (Map("action" -> choice.id) ++ choice.data).asJson
+    Button.withAction(VkAction.Text(choice.label, Some(payload))).withColor(toButtonColor(choice.color))
+  }
+
   def toButtonColor(color: ChoiceColor): ButtonColor = color match {
     case ChoiceColor.Negative  => ButtonColor.Negative
     case ChoiceColor.Positive  => ButtonColor.Positive

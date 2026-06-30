@@ -135,16 +135,17 @@ case class MerchantState(
                List(content.choice("BackFromSell", "merchant.sellBackLabel"))))
            else {
              val (pageItems, totalPages, p) = ItemMenu.page(items, page)
-             ZIO.logInfo(s"sell user=${user.userId.value} req=$page → norm=$p total=$totalPages items=${items.size} pageItemIds=${pageItems.map(_.id)}") *>
-               heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *> {
-                 val header  = content.format("merchant.sellHeader",
-                   "page"  -> (p + 1).toString,
-                   "total" -> totalPages.toString,
-                   "gold"  -> hero.gold.toString)
-                 val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
-                 val nav     = sellNavRow(p, totalPages)
-                 renderer.show(user, Screen(header, btns ++ nav))
-               }
+             val header  = content.format("merchant.sellHeader",
+               "page"  -> (p + 1).toString,
+               "total" -> totalPages.toString,
+               "gold"  -> hero.gold.toString)
+             val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
+             val nav     = sellNavRow(p, totalPages)
+             val screen  = Screen(header, btns ++ nav)
+             val kbDump  = pangea.service.sender.vk.VkRenderer.debugKeyboardJson(screen)
+             ZIO.logInfo(s"sell user=${user.userId.value} req=$page → norm=$p total=$totalPages items=${items.size} pageItemIds=${pageItems.map(_.id)} labels=${pageItems.map(_.name)} kbSize=${kbDump.length} kb=$kbDump") *>
+               heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *>
+               renderer.show(user, screen)
            }
     } yield StateType.Merchant
 
