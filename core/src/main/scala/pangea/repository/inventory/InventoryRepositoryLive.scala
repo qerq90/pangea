@@ -29,6 +29,19 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     } yield ())
       .tapError(err => ZIO.logError(s"Error occurred: $err"))
 
+  def removeItems(itemIds: Set[Long], heroId: HeroId): IO[InventoryRepoError, Unit] =
+    if (itemIds.isEmpty) ZIO.unit
+    else
+      for {
+        inventory <- inventoryDao
+          .get(heroId)
+          .orElseFail(InventoryRepoError.CantFindInventory)
+        remaining = inventory.items.data.filterNot(i => itemIds.contains(i.id))
+        _ <- inventoryDao
+          .update(inventory.withItems(remaining))
+          .orElseFail(InventoryRepoError.CantUpdateInventory)
+      } yield ()
+
   def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit] =
     for {
       inventory <- inventoryDao.get(heroId).orElseFail(InventoryRepoError.CantFindInventory)

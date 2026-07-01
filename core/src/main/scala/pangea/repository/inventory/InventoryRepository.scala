@@ -10,6 +10,7 @@ trait InventoryRepository {
   def get(heroId: HeroId): IO[InventoryRepoError, Inventory]
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit]
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit]
+  def removeItems(itemIds: Set[Long], heroId: HeroId): IO[InventoryRepoError, Unit]
   def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit]
   def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit]
 }

@@ -285,6 +285,9 @@ merchant:
   boughtLine: "{n}) ✅ {name} — куплено"
   refreshLabel: "🔄 Обновить товар"
   sellLabel: "Продать снаряжение"
+  sellJunkLabel: "🧹 Продать хлам (Серое/Белое)"
+  sellJunkEmpty: "У вас нет снаряжения Серой или Белой редкости на продажу."
+  sellJunkDone: "Ришелье забрал {count} шт. хлама. Вы получили {gold} золота."
   backLabel:
     label: "↩ Назад"
     color: "negative"

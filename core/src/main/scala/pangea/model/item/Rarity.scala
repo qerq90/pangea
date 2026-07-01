@@ -26,49 +26,49 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   case object Gray extends Rarity {
     override val factorR: Double          = 2
     override val factorR1: Double         = 0.1
-    override val factorR3: Double         = 4
+    override val factorR3: Double         = 2
     override val paramsChance: List[Long] = List(10)
   }
 
   case object White extends Rarity {
     override val factorR: Double          = 3
     override val factorR1: Double         = 0.15
-    override val factorR3: Double         = 6
+    override val factorR3: Double         = 2
     override val paramsChance: List[Long] = List(30)
   }
 
   case object Green extends Rarity {
     override val factorR: Double          = 4
     override val factorR1: Double         = 0.2
-    override val factorR3: Double         = 7
+    override val factorR3: Double         = 4
     override val paramsChance: List[Long] = List(70, 50)
   }
 
   case object Blue extends Rarity {
     override val factorR: Double          = 6
     override val factorR1: Double         = 0.3
-    override val factorR3: Double         = 9
+    override val factorR3: Double         = 6
     override val paramsChance: List[Long] = List(100, 100)
   }
 
   case object Purple extends Rarity {
     override val factorR: Double          = 8
     override val factorR1: Double         = 0.5
-    override val factorR3: Double         = 12
+    override val factorR3: Double         = 8
     override val paramsChance: List[Long] = List(100, 100, 70, 50)
   }
 
   case object Violet extends Rarity {
     override val factorR: Double          = 8
     override val factorR1: Double         = 0.5
-    override val factorR3: Double         = 12
+    override val factorR3: Double         = 8
     override val paramsChance: List[Long] = List(100, 100, 100, 50)
   }
 
   case object Orange extends Rarity {
     override val factorR: Double          = 10
     override val factorR1: Double         = 0.7
-    override val factorR3: Double         = 15
+    override val factorR3: Double         = 10
     override val paramsChance: List[Long] = List(100, 100, 100, 100, 50)
   }
 

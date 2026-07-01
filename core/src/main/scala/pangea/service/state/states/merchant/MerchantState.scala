@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, Rarity}
+import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -39,6 +39,7 @@ case class MerchantState(
       "CancelBuy"       -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "Refresh"         -> Target.Run { (u, _,  r) => refresh(u, r) },
       "Sell"            -> Target.Run { (u, _,  r) => showSellList(u, r, 0) },
+      "SellJunk"        -> Target.Run { (u, _,  r) => sellJunk(u, r) },
       "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
       "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
       "ConfirmSellItem" -> Target.Run { (u, _,  r) => doSell(u, r) },
@@ -186,6 +187,30 @@ case class MerchantState(
       _ <- showSellList(user, renderer, scene.page).unit
     } yield StateType.Merchant
 
+  /** Быстрая продажа всего «хлама» — снаряжения Серой и Белой редкости.
+    * Трофеи (ItemType.Trophy) не трогаем, даже если их редкость Серая/Белая. */
+  private def sellJunk(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      items <- inventoryItems(hero)
+      junk   = items.filter(isJunk)
+      total  = junk.map(sellPrice).sum
+      _ <- if (junk.isEmpty)
+             renderer.show(user, Screen(content.text("merchant.sellJunkEmpty"), Nil)) *> showMenu(user, renderer)
+           else
+             inventoryRepo.removeItems(junk.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
+               heroDao.updateGold(user.userId, hero.gold + total) *>
+               renderer.show(user, Screen(content.format("merchant.sellJunkDone",
+                 "count" -> junk.size.toString, "gold" -> total.toString), Nil)) *>
+               showMenu(user, renderer)
+    } yield StateType.Merchant
+
+  /** «Хлам» — снаряжение Серой и Белой редкости. Трофеи (ItemType.Trophy)
+    * никогда не считаются хламом, даже при Серой/Белой редкости. */
+  private def isJunk(item: Item): Boolean =
+    item.itemType != ItemType.Trophy &&
+      (item.rarity == Rarity.Gray || item.rarity == Rarity.White)
+
   private def sellNavRow(page: Int, totalPages: Int): List[Choice] = {
     val row = ItemMenu.NavRow
     List(
@@ -230,6 +255,7 @@ case class MerchantState(
     val choices = buyButtons ++ List(
       content.choice("Refresh",       "merchant.refreshLabel"),
       content.choice("Sell",          "merchant.sellLabel"),
+      content.choice("SellJunk",      "merchant.sellJunkLabel"),
       content.choice("OpenCharacter", "common.character"),
       content.choice("Back",          "merchant.backLabel")
     )

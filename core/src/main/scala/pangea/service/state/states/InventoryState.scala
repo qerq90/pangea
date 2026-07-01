@@ -52,7 +52,7 @@ case class InventoryState(
       _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
            else {
              val (pageItems, totalPages, page) = ItemMenu.page(items, scene.page.getOrElse(0))
-             val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 💰 ${hero.gold}"
+             val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 💰 ${hero.gold} | 🪙 ${hero.doubloons}"
              val itemBtns = ItemMenu.itemButtons(pageItems, ItemActionPrefix)
              val nav      = navRow(page, totalPages, "InventoryPrev", "InventoryNext", "BackFromInventory")
              renderer.show(user, Screen(header, itemBtns ++ nav))
@@ -167,7 +167,7 @@ case class InventoryState(
 
   private def emptyScreen(hero: Hero): Screen = {
     val base = content.screen("inventory.empty")
-    Screen(s"📦 Инвентарь пуст | 💰 ${hero.gold}", base.choices)
+    Screen(s"📦 Инвентарь пуст | 💰 ${hero.gold} | 🪙 ${hero.doubloons}", base.choices)
   }
 
   private def navRow(page: Int, totalPages: Int, prevId: String, nextId: String, backId: String): List[Choice] = {

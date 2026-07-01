@@ -16,13 +16,13 @@ object MonsterGenerator {
   private val MarkedMultiplier            = 1.2
   private val MarkedRarities: Set[Rarity] = Set(Rare, Mythical, Legendary)
 
-  // Weighted pool: 50% Common, 25% Uncommon, 15% Rare, 7% Mythical, 3% Legendary
+  // Weighted pool: 50% Common, 28% Uncommon, 17% Rare, 4% Mythical, 1% Legendary
   private val rarityPool: List[Rarity] =
     List.fill(50)(Common) ++
-      List.fill(25)(Uncommon) ++
-      List.fill(15)(Rare) ++
-      List.fill(7)(Mythical) ++
-      List.fill(3)(Legendary)
+      List.fill(28)(Uncommon) ++
+      List.fill(17)(Rare) ++
+      List.fill(4)(Mythical) ++
+      List.fill(1)(Legendary)
 
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
     val (race, rng1) = rng.pick(Race.values.toList)
@@ -30,9 +30,14 @@ object MonsterGenerator {
   }
 
   /** Генерация моба фиксированной расы (раса задаётся снаружи — например, в
-   *  цепочке боёв события «мобы с сокровищем» все бои одной расы). Редкость и
-   *  «отмеченность» по-прежнему роллятся как обычно. */
-  def generateOfRace(dungeonLevel: Int, race: Race, rng: Rng): (Monster, Rng) = {
+    * цепочке боёв события «мобы с сокровищем» все бои одной расы). Редкость и
+    * «отмеченность» по-прежнему роллятся как обычно.
+    */
+  def generateOfRace(
+      dungeonLevel: Int,
+      race: Race,
+      rng: Rng
+  ): (Monster, Rng) = {
     val (rarity, rng2)   = rng.pick(rarityPool)
     val stats            = buildStats(dungeonLevel, rarity, race)
     val (markRoll, rng3) = rng2.between(0L, 100L)
