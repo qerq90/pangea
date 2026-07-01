@@ -373,6 +373,47 @@ object BattleStateSpec extends ZIOSpecDefault {
       val low  = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 50L, attackerAccuracy = 50L)
       val high = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 0L,  attackerAccuracy = 0L)
       assertTrue(low < high)
+    },
+
+    test("расовый множитель силы попадает в обычную атаку: орк (×1.2) бьёт сильнее человека (×1.0)") {
+      // Урон обычной атаки = (effectiveBaseStats.str*3 + atk) * spread/100 * weaponMod.
+      // Оба героя идентичны, различие только в расе → при atk=0 урон линеен по str_eff, а с
+      // одинаковым фидом рандома spread совпадает. str_eff: человек ceil(100×1.0)=100,
+      // орк ceil(100×1.2)=120 → урон орка ровно в 120/100 раза больше (проверяем соотношением,
+      // не завязываясь на конкретный spread). feedInts(49) → hitRoll=50 (попадание).
+      val bigMonster = ActiveBattle(
+        monsterLvl          = 1L,
+        monsterRace         = Race.Human.entryName,
+        monsterRarity       = Rarity.Common.entryName,
+        monsterStats        = FightStats(atk = 1, hp = 100000, armor = 0, defence = 0,
+                                         evasion = 0, accuracy = 1, concentration = 0),
+        monsterCurrentHp    = 100000L,
+        monsterCurrentArmor = 0L
+      )
+      def heroOf(race: Race) = TestFixtures.hero(userId).copy(
+        race       = race,
+        baseStats  = TestFixtures.hero(userId).baseStats.copy(str = 100, agi = 0),
+        fightStats = FightStats(atk = 0, hp = 10000, armor = 0, defence = 0,
+                                evasion = 9999, accuracy = 9999, concentration = 0)
+      )
+      def monsterHpAfterAttack(race: Race) =
+        for {
+          triple              <- makeState(heroOf(race), bigMonster)
+          (state, heroDao, r)  = triple
+          _                   <- TestRandom.feedInts(49)
+          _                   <- TestRandom.feedLongs(20L)
+          _                   <- state.action(testUser, tap("Attack"), r)
+          hp                  <- heroDao.readActiveBattle(userId)
+                                   .map(_.flatMap(_.as[ActiveBattle].toOption).map(_.monsterCurrentHp).getOrElse(-1L))
+        } yield hp
+      for {
+        humanHp <- monsterHpAfterAttack(Race.Human)
+        orcHp   <- monsterHpAfterAttack(Race.Orc)
+        humanDmg = 100000L - humanHp
+        orcDmg   = 100000L - orcHp
+      } yield assertTrue(humanDmg > 0L) &&                    // урон реально прошёл
+              assertTrue(orcDmg > humanDmg) &&                // орк бьёт сильнее
+              assertTrue(orcDmg * 100L == humanDmg * 120L)    // ровно ×1.2 — расовый множитель силы
     }
   )
 }

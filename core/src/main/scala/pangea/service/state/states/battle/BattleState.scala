@@ -102,7 +102,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
             damage =
-              (((hero.baseStats.str * 3L + buffedEff.atk) * spread / 100L) * weaponMod).toLong
+              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod).toLong
                 .max(1L)
             attackLine = content.format(
               "battle.hit",
@@ -197,7 +197,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       buffed = battle.heroBattleState.applyTo(effHero)
       hitChance = BattleState.heroSkillHitChance(
         heroConc = buffed.concentration,
-        heroInt = hero.baseStats.int,
+        heroInt = hero.effectiveBaseStats(nowMs).int,
         monsterConc = battle.monsterStats.concentration,
         rarityFactor = battle.rarity.factor
       )
@@ -231,7 +231,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           val red = BattleState.damageReduction(
             protection = battle.monsterStats.defence,
             defenderInt = battle.monsterStats.concentration,
-            attackerInt = hero.baseStats.int
+            attackerInt = hero.effectiveBaseStats(nowMs).int
           )
           (raw * (1.0 - red)).toLong.max(1L)
         } else raw
@@ -332,7 +332,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       monster   = ticked.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
       dodge = playerDodgeChance(
-        hero.baseStats.agi,
+        hero.effectiveBaseStats(nowMs).agi,
         buffedEff.evasion,
         buffedEff.defence,
         ticked
@@ -349,7 +349,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
             reduction = BattleState.damageReduction(
               protection = buffedEff.defence,
-              defenderInt = hero.baseStats.int,
+              defenderInt = hero.effectiveBaseStats(nowMs).int,
               attackerInt = monster.fightStats.concentration
             )
             reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
@@ -398,7 +398,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               monsterConc = monster.fightStats.concentration,
               rarityFactor = ticked.rarity.factor,
               heroConc = buffedEff.concentration,
-              heroInt = hero.baseStats.int
+              heroInt = hero.effectiveBaseStats(nowMs).int
             )
             applicable = MonsterSkill.values
               .filter(_.applicable(ticked))
@@ -531,7 +531,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       result <-
         if (
           hitRoll > playerDodgeChance(
-            hero.baseStats.agi,
+            hero.effectiveBaseStats(now).agi,
             buffedEff.evasion,
             buffedEff.defence,
             battle
@@ -542,7 +542,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
             reduction = BattleState.damageReduction(
               protection = buffedEff.defence,
-              defenderInt = hero.baseStats.int,
+              defenderInt = hero.effectiveBaseStats(now).int,
               attackerInt = monster.fightStats.concentration
             )
             reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
@@ -683,7 +683,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val eff       = hero.effectiveFightStats(nowMs)
     val buffedEff = battle.heroBattleState.applyTo(eff)
     val playerDodgePct = playerDodgeChance(
-      hero.baseStats.agi,
+      hero.effectiveBaseStats(nowMs).agi,
       buffedEff.evasion,
       buffedEff.defence,
       battle
@@ -693,13 +693,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val heroHitPct      = 100 - monsterDodgePct
     val reductionPct = (BattleState.damageReduction(
       protection = buffedEff.defence,
-      defenderInt = hero.baseStats.int,
+      defenderInt = hero.effectiveBaseStats(nowMs).int,
       attackerInt = battle.monsterStats.concentration
     ) * 100.0).toInt
     val heroSkillHitPct = BattleState
       .heroSkillHitChance(
         heroConc = buffedEff.concentration,
-        heroInt = hero.baseStats.int,
+        heroInt = hero.effectiveBaseStats(nowMs).int,
         monsterConc = battle.monsterStats.concentration,
         rarityFactor = battle.rarity.factor
       )
@@ -709,7 +709,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         monsterConc = battle.monsterStats.concentration,
         rarityFactor = battle.rarity.factor,
         heroConc = buffedEff.concentration,
-        heroInt = hero.baseStats.int
+        heroInt = hero.effectiveBaseStats(nowMs).int
       )
       .toInt
     val text = content.format(

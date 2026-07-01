@@ -48,7 +48,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val raw      = math.max(1L, (battle.monsterStats.atk * 0.5).toLong)
       val reduct   = BattleState.damageReduction(
                        protection  = buffed.defence,
-                       defenderInt = hero.baseStats.int,
+                       defenderInt = hero.effectiveBaseStats(nowMs).int,
                        attackerInt = battle.monsterStats.concentration)
       val damage   = ((raw * (1.0 - reduct)).toLong).max(1L)
       val (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, damage)

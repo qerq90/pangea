@@ -89,6 +89,9 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit] =
     Queries.updateTrauma(userId, traumaUntil, traumaNames).update.run.transact(xa).unit
 
+  override def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Task[Unit] =
+    Queries.updateStatBoosts(userId, boosts).update.run.transact(xa).unit
+
   override def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     Queries.updateBaseStats(userId, stats).update.run.transact(xa).unit
 
@@ -133,6 +136,12 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
 
   override def readQuestData(userId: UserId): Task[Option[Json]] =
     Queries.readQuestData(userId).query[Option[Json]].unique.transact(xa)
+
+  override def writeGustavoData(userId: UserId, data: Json): Task[Unit] =
+    Queries.writeGustavoData(userId, data).update.run.transact(xa).unit
+
+  override def readGustavoData(userId: UserId): Task[Option[Json]] =
+    Queries.readGustavoData(userId).query[Option[Json]].unique.transact(xa)
 
   override def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit] =
     Queries.writeReturnState(userId, state).update.run.transact(xa).unit

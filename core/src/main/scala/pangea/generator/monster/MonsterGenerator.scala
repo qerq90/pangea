@@ -9,10 +9,10 @@ object MonsterGenerator {
 
   private val N = 1.1
 
-  // Модификатор «Отмеченный тьмой»: 5% шанс, +20% ко всем показателям.
+  // Модификатор «Отмеченный тьмой»: 7% шанс, +20% ко всем показателям.
   // Доступен только мобам редкости Rare и выше — обычные/необычные «отмеченными»
   // не бывают.
-  private val MarkedChance                = 5L
+  private val MarkedChance                = 7L
   private val MarkedMultiplier            = 1.2
   private val MarkedRarities: Set[Rarity] = Set(Rare, Mythical, Legendary)
 

@@ -29,8 +29,8 @@ object ItemGenerator {
     ((param + param / 100.0 * pct).toLong, next)
   }
 
-  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(5+R1) ±20%;
-  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R1) ±10%. R1 = rarity.factorR1.
+  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(4+R3) ±20%;
+  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%. R3 = rarity.factorR3.
   private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
     val r3 = item.rarity.factorR3
     item.itemType match {

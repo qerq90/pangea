@@ -32,6 +32,7 @@ object TestFixtures {
     traumaNames  = Nil,
     guildReputation = 0L,
     masterHornBoosts = MasterHornBoosts.empty,
-    doubloons    = 0L
+    doubloons    = 0L,
+    statBoosts   = pangea.model.stats.StatBoosts.none
   )
 }

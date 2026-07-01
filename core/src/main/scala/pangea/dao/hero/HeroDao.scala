@@ -24,6 +24,7 @@ trait HeroDao {
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
   def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]
+  def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Task[Unit]
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit]
   def updateEquipment(userId: UserId, eq: Equipment): Task[Unit]
   def updateEquipmentAndFightStats(userId: UserId, eq: Equipment, stats: FightStats): Task[Unit]
@@ -43,6 +44,10 @@ trait HeroDao {
   // Durable quest board state (per-player; refreshes on its own timer)
   def writeQuestData(userId: UserId, data: Json): Task[Unit]
   def readQuestData(userId: UserId): Task[Option[Json]]
+
+  // Durable Gustavo state (per-player; хранит кулдаун зелья исцеления травм)
+  def writeGustavoData(userId: UserId, data: Json): Task[Unit]
+  def readGustavoData(userId: UserId): Task[Option[Json]]
 
   // Куда вернуться после «модального» экрана «Персонаж» (открывается из любой локации)
   def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit]

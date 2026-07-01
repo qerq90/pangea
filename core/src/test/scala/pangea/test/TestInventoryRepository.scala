@@ -24,6 +24,9 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =
     ZIO.succeed { items = items.filterNot(_.id == itemId) }
 
+  def removeItems(itemIds: Set[Long], heroId: HeroId): IO[InventoryRepoError, Unit] =
+    ZIO.succeed { items = items.filterNot(i => itemIds.contains(i.id)) }
+
   def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit] =
     ZIO.succeed {
       items = items.map(item =>

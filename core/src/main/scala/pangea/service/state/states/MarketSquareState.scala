@@ -14,6 +14,7 @@ case class MarketSquareState(content: SceneContent) extends State {
                                 renderer.show(user, content.screen("marketSquare.streetMerchants"))
                                   .as(StateType.MarketSquare) },
       "MerchantRichelieu"  -> Target.Goto(StateType.Merchant),
+      "Gustavo"            -> Target.Goto(StateType.Gustavo),
       "Construction"       -> Target.Goto(StateType.Construction),
       "BackToMarketSquare" -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.MarketSquare) },
       "BackToCity"         -> Target.Goto(StateType.GlobalMap)

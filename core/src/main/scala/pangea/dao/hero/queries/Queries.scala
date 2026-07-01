@@ -15,9 +15,9 @@ import pangea.model.user.UserId
 
 object Queries {
   private val fields: Fragment =
-    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons"
+    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts"
   private val fieldInsert: Fragment =
-    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons"
+    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, gold, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts"
   private val tableName: Fragment = sql"heroes"
 
   private val selectAll = fr"select $fields from $tableName"
@@ -26,7 +26,7 @@ object Queries {
     selectAll ++ sql"where user_id = $userId"
 
   def insert(hero: Hero): Fragment =
-    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation}, ${hero.masterHornBoosts}, ${hero.doubloons})"
+    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.gold}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation}, ${hero.masterHornBoosts}, ${hero.doubloons}, ${hero.statBoosts.asJson})"
 
   def updateGuildReputation(userId: UserId, value: Long): Fragment =
     sql"update $tableName set guild_reputation = $value where user_id = $userId"
@@ -42,6 +42,9 @@ object Queries {
 
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Fragment =
     sql"update $tableName set base_stats = ${stats.asJson} where user_id = $userId"
+
+  def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Fragment =
+    sql"update $tableName set stat_boosts = ${boosts.asJson} where user_id = $userId"
 
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Fragment =
     sql"update $tableName set trauma_until = $traumaUntil, trauma_names = $traumaNames where user_id = $userId"
@@ -96,6 +99,12 @@ object Queries {
 
   def readQuestData(userId: UserId): Fragment =
     sql"select quest_data from $tableName where user_id = $userId"
+
+  def writeGustavoData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set gustavo_data = $data where user_id = $userId"
+
+  def readGustavoData(userId: UserId): Fragment =
+    sql"select gustavo_data from $tableName where user_id = $userId"
 
   def writeReturnState(userId: UserId, state: Option[StateType]): Fragment =
     sql"update $tableName set return_state = $state where user_id = $userId"

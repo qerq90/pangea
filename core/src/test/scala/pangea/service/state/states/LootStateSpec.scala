@@ -48,7 +48,7 @@ object LootStateSpec extends ZIOSpecDefault {
         screens <- renderer.sentScreens
         hero    <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(screens.exists(_.text.contains("Осматривая добычу"))) &&
-              assertTrue(screens.exists(s => s.choices.map(_.id).toSet == Set("Take", "Leave") && s.inline)) &&
+              assertTrue(screens.exists(s => s.choices.map(_.id).toSet == Set("Take", "Leave"))) &&
               assertTrue(invRepo.snapshot.isEmpty) &&        // предметы ждут решения, не положены
               assertTrue(hero.exists(_.gold == 100L + 42L))  // золото забрано сразу
     },

@@ -3,7 +3,7 @@ package pangea.model.hero
 import pangea.model.battle.SkillSlotState
 import pangea.model.monster.Race
 import pangea.model.state.StateType
-import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.stats.{BaseStats, FightStats, StatBoosts}
 import pangea.model.trauma.{Trauma, TraumaPenalties}
 import pangea.model.user.UserId
 
@@ -25,7 +25,8 @@ case class Hero(
   traumaNames: List[String],
   guildReputation: Long,
   masterHornBoosts: MasterHornBoosts,
-  doubloons: Long
+  doubloons: Long,
+  statBoosts: StatBoosts
 ) {
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда
@@ -85,10 +86,10 @@ case class Hero(
     val p = combinedPenalties(nowMs)
     val b = HeroRaceBuff.of(race)
     BaseStats(
-      agi = b.applyAgi(baseStats.agi),
-      vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct)).toLong.max(1L),
-      str = (b.applyStr(baseStats.str) * (1.0 - p.strPct)).toLong.max(1L),
-      int = (b.applyInt(baseStats.int) * (1.0 - p.intPct)).toLong.max(1L)
+      agi = (b.applyAgi(baseStats.agi) * statBoosts.agiFactor(nowMs)).toLong.max(1L),
+      vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L),
+      str = (b.applyStr(baseStats.str) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
+      int = (b.applyInt(baseStats.int) * (1.0 - p.intPct) * statBoosts.intFactor(nowMs)).toLong.max(1L)
     )
   }
 
@@ -103,7 +104,7 @@ case class Hero(
     val p           = combinedPenalties(nowMs)
     val effectiveVit = HeroRaceBuff.of(race).applyVit(baseStats.vit)
     val base        = effectiveVit * 24L
-    (base * (1.0 - p.vitPct) * (1.0 - p.hpPct)).toLong.max(1L) + equipment.allHp
+    (base * (1.0 - p.vitPct) * (1.0 - p.hpPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L) + equipment.allHp
   }
 
   def traumaRemainingText(nowMs: Long): Option[String] =

@@ -16,6 +16,7 @@ class TestHeroDao(
   battleRef:    Ref[Map[UserId, Json]],
   merchantRef:  Ref[Map[UserId, Json]],
   questRef:     Ref[Map[UserId, Json]],
+  gustavoRef:   Ref[Map[UserId, Json]],
   returnRef:    Ref[Map[UserId, StateType]]
 ) extends HeroDao {
 
@@ -57,6 +58,9 @@ class TestHeroDao(
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(traumaUntil = traumaUntil, traumaNames = traumaNames))))
 
+  def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(statBoosts = boosts))))
+
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(baseStats = stats))))
 
@@ -93,6 +97,12 @@ class TestHeroDao(
   def readQuestData(userId: UserId): Task[Option[Json]] =
     questRef.get.map(_.get(userId))
 
+  def writeGustavoData(userId: UserId, data: Json): Task[Unit] =
+    gustavoRef.update(_.updated(userId, data))
+
+  def readGustavoData(userId: UserId): Task[Option[Json]] =
+    gustavoRef.get.map(_.get(userId))
+
   def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit] =
     returnRef.update(m => state.fold(m - userId)(s => m.updated(userId, s)))
 
@@ -111,8 +121,9 @@ object TestHeroDao {
       battleRef    <- Ref.make(Map.empty[UserId, Json])
       merchantRef  <- Ref.make(Map.empty[UserId, Json])
       questRef     <- Ref.make(Map.empty[UserId, Json])
+      gustavoRef   <- Ref.make(Map.empty[UserId, Json])
       returnRef    <- Ref.make(Map.empty[UserId, StateType])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, returnRef)
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, returnRef)
 
   def withHero(userId: UserId, hero: Hero): Task[TestHeroDao] =
     for {
@@ -122,6 +133,7 @@ object TestHeroDao {
       battleRef    <- Ref.make(Map.empty[UserId, Json])
       merchantRef  <- Ref.make(Map.empty[UserId, Json])
       questRef     <- Ref.make(Map.empty[UserId, Json])
+      gustavoRef   <- Ref.make(Map.empty[UserId, Json])
       returnRef    <- Ref.make(Map.empty[UserId, StateType])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, returnRef)
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, returnRef)
 }

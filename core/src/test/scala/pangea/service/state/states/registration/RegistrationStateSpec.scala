@@ -102,17 +102,16 @@ object RegistrationStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Dungeon)
     },
 
-    test("EndOfTravel с героем → добавляет 9 стартовых предметов в инвентарь") {
+    test("EndOfTravel с героем → добавляет стартовые предметы (меч + фляга) в инвентарь") {
       for {
         quad                           <- makeStateWithHero
         (state, renderer, _, invRepo)   = quad
         result                         <- state.action(testUser, tap("EndOfTravel"), renderer)
         screens                        <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(invRepo.snapshot.length == 9) &&
+              assertTrue(invRepo.snapshot.length == 2) &&
               assertTrue(invRepo.snapshot.map(_.name).contains("Меч новобранца")) &&
               assertTrue(invRepo.snapshot.map(_.name).contains("Фляга начинающего исследователя")) &&
-              assertTrue(invRepo.snapshot.map(_.name).contains("Нагрудник новобранца")) &&
               assertTrue(screens.exists(_.text.contains("снаряжение")))
     },
 

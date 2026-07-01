@@ -36,6 +36,11 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Equipment  extends StateType
   case object Loot       extends StateType
   case object Merchant   extends StateType
+  case object Gustavo         extends StateType
+  case object GustavoHeal     extends StateType
+  case object GustavoBoost    extends StateType
+  case object GustavoSupplies extends StateType
+  case object GustavoFlask    extends StateType
   case object Tavern     extends StateType
   case object QuestBoard extends StateType
   case object Innkeeper  extends StateType

@@ -33,8 +33,8 @@ case class HeroRepositoryLive(heroDao: HeroDao, inventoryDao: InventoryDao)
 }
 
 object HeroRepositoryLive {
-  private def newHero(id: UserId): Hero =
-    Hero(
+  private def newHero(id: UserId): Hero = {
+    val hero = Hero(
       id = HeroId(-1),
       userId = id,
       state = Registration,
@@ -45,7 +45,7 @@ object HeroRepositoryLive {
       baseStats = BaseStats(4, 4, 4, 4),
       fightStats = FightStats(
         atk = 22,
-        hp = 136,
+        hp = 0, // выставляется ниже из effectiveMaxHp (единый источник — формула от тела)
         armor = 0,
         defence = 8,
         evasion = 22,
@@ -75,7 +75,11 @@ object HeroRepositoryLive {
       traumaNames = Nil,
       guildReputation = 0L,
       masterHornBoosts = MasterHornBoosts.empty,
-      doubloons = 0L
+      doubloons = 0L,
+      statBoosts = pangea.model.stats.StatBoosts.none
     )
+    // Новичок без травм/бустов/экипировки → effectiveMaxHp = applyVit(vit) * 24.
+    hero.copy(fightStats = hero.fightStats.copy(hp = hero.effectiveMaxHp(0L)))
+  }
 
 }
