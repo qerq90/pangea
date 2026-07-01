@@ -90,7 +90,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
-      heroHitPct = (100.0 - mobDodge).toInt
+      // Попадание считается как hitRoll(1..100) > dodge, т.е. фактический шанс =
+      // 100 - floor(dodge). Округляем ТАК ЖЕ, как экран боя (см. buildBattleScreen),
+      // иначе при дробном dodge сообщение расходится с экраном на 1.
+      heroHitPct = 100 - mobDodge.toInt
       result <-
         if (hitRoll > mobDodge) {
           for {
@@ -334,7 +337,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         buffedEff.defence,
         ticked
       )
-      mobHitPct = (100.0 - dodge).toInt
+      // Тот же порядок округления, что на экране боя: 100 - floor(dodge)
+      // (совпадает с механикой hitRoll(1..100) > dodge). Раньше был (100.0 - dodge).toInt.
+      mobHitPct = 100 - dodge.toInt
 
       // 1) Обычная атака моба — обновляем hp/armor героя.
       atkResult <-

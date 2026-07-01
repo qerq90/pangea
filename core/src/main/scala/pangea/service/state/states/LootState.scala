@@ -78,7 +78,7 @@ case class LootState(
                content.choice("Take", "loot.takeLabel"),
                content.choice("Leave", "loot.leaveLabel")
              )
-             renderer.show(user, Screen(text, choices, inline = true))
+             renderer.show(user, Screen(text, choices))
            }
     } yield ()
 
@@ -149,11 +149,7 @@ case class LootState(
                        .filter(_.itemType != ItemType.NoItem)
       if (equipped.isEmpty) base
       else {
-        val blocks = equipped.map { e =>
-          val stats = e.statsLines
-          val body  = if (stats.isEmpty) "" else "\n" + stats.mkString("\n")
-          s"Надето: ${e.name} Ур.${e.lvl}$body"
-        }
+        val blocks = equipped.map(_.equippedComparison("Надето"))
         base + "\n" + blocks.mkString("\n")
       }
     }

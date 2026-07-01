@@ -1,7 +1,8 @@
 package pangea.model.monster
 
-/** Расовые множители для генерации боевых характеристик монстров.
- *  Применяются только к монстрам (см. MonsterGenerator). */
+/** Расовые множители для генерации боевых характеристик монстров. Применяются
+  * только к монстрам (см. MonsterGenerator).
+  */
 case class MonsterRaceFactor(
   hpFactor: Double,
   defenceFactor: Double,
@@ -13,14 +14,70 @@ case class MonsterRaceFactor(
 
 object MonsterRaceFactor {
   private val byRace: Map[Race, MonsterRaceFactor] = Map(
-    Race.Human   -> MonsterRaceFactor(1.0, 1.5, 1.0, 2.0, 1.0, 0.7),
-    Race.Elf     -> MonsterRaceFactor(1.0, 1.0, 0.6, 1.4, 1.6, 1.6),
-    Race.Murloc  -> MonsterRaceFactor(1.2, 0.8, 1.5, 1.3, 1.5, 0.5),
-    Race.Orc     -> MonsterRaceFactor(1.2, 1.5, 2.0, 0.8, 0.6, 0.4),
-    Race.Goblin  -> MonsterRaceFactor(0.6, 0.5, 1.0, 1.1, 1.5, 2.0),
-    Race.Demon   -> MonsterRaceFactor(0.8, 0.8, 1.5, 1.0, 1.2, 0.7),
-    Race.Gnome   -> MonsterRaceFactor(1.2, 2.0, 1.5, 1.3, 1.2, 0.5),
-    Race.Khajiit -> MonsterRaceFactor(1.2, 0.6, 1.6, 1.5, 1.3, 2.0)
+    Race.Human -> MonsterRaceFactor(
+      hpFactor = 1.0,
+      defenceFactor = 1.5,
+      attackFactor = 1.0,
+      concentrationFactor = 1.8,
+      accuracyFactor = 0.8,
+      evasionFactor = 0.7
+    ),
+    Race.Elf -> MonsterRaceFactor(
+      hpFactor = 1.0,
+      defenceFactor = 1.0,
+      attackFactor = 0.7,
+      concentrationFactor = 1.2,
+      accuracyFactor = 1.4,
+      evasionFactor = 1.6
+    ),
+    Race.Murloc -> MonsterRaceFactor(
+      hpFactor = 1.2,
+      defenceFactor = 0.8,
+      attackFactor = 1.5,
+      concentrationFactor = 1.1,
+      accuracyFactor = 1.3,
+      evasionFactor = 0.5
+    ),
+    Race.Orc -> MonsterRaceFactor(
+      hpFactor = 1.2,
+      defenceFactor = 1.5,
+      attackFactor = 1.8,
+      concentrationFactor = 0.8,
+      accuracyFactor = 0.5,
+      evasionFactor = 0.4
+    ),
+    Race.Goblin -> MonsterRaceFactor(
+      hpFactor = 0.6,
+      defenceFactor = 0.5,
+      attackFactor = 1.0,
+      concentrationFactor = 0.9,
+      accuracyFactor = 1.3,
+      evasionFactor = 2.0
+    ),
+    Race.Demon -> MonsterRaceFactor(
+      hpFactor = 0.8,
+      defenceFactor = 0.8,
+      attackFactor = 1.5,
+      concentrationFactor = 0.8,
+      accuracyFactor = 1.0,
+      evasionFactor = 0.7
+    ),
+    Race.Gnome -> MonsterRaceFactor(
+      hpFactor = 1.2,
+      defenceFactor = 2.0,
+      attackFactor = 1.5,
+      concentrationFactor = 1.1,
+      accuracyFactor = 1.0,
+      evasionFactor = 0.5
+    ),
+    Race.Khajiit -> MonsterRaceFactor(
+      hpFactor = 1.2,
+      defenceFactor = 0.6,
+      attackFactor = 1.6,
+      concentrationFactor = 1.3,
+      accuracyFactor = 1.1,
+      evasionFactor = 2.0
+    )
   )
 
   def of(race: Race): MonsterRaceFactor = byRace(race)

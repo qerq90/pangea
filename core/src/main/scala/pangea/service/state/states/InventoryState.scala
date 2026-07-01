@@ -219,7 +219,7 @@ object InventoryState {
   def itemText(item: Item, eq: Equipment): String = {
     def equipped(prefix: String, cur: Item): String =
       if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
-      else s"$prefix: ${cur.name} Ур.${cur.lvl} ${cur.statsLineEmoji}".trim
+      else cur.equippedComparison(prefix)
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring   => s"\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
