@@ -108,6 +108,7 @@ case class InnkeeperState(
                     leveled.lvl,
                     leveled.upgradePoints
                   ) *>
+                  heroDao.updateDoubloons(user.userId, hero.doubloons + 1) *>
                   heroDao.writeQuestData(
                     user.userId,
                     data.get.copy(active = None).asJson

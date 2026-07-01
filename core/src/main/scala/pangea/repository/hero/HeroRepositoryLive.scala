@@ -44,12 +44,12 @@ object HeroRepositoryLive {
       upgradePoints = 0,
       baseStats = BaseStats(4, 4, 4, 4),
       fightStats = FightStats(
-        atk = 4,
-        hp = 96,
-        armor = 1,
-        defence = 1,
-        evasion = 1,
-        accuracy = 1,
+        atk = 22,
+        hp = 136,
+        armor = 0,
+        defence = 8,
+        evasion = 22,
+        accuracy = 20,
         concentration = 1
       ),
       equipment = Equipment(

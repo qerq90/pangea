@@ -14,31 +14,48 @@ import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
 
-/**
- * Городская стройка. На входе — меню из трёх работ разной длительности; после
- * выбора игрок «занят» (как [[events.GoldVeinState]]): scene_data хранит вид
- * работы и старт, поллер по таймеру (`Construction`) выдаёт золото и
- * возвращает в GlobalMap. Кнопка «Уйти» — досрочное прерывание с
- * подтверждением.
- *
- * Формула золота: `lvl(героя) × часы`, домноженное на `100 ± d` процентов,
- * где `d ∈ [10, 20]` (знак и величина роллятся отдельно).
- */
-case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
+/** Городская стройка. На входе — меню из трёх работ разной длительности; после
+  * выбора игрок «занят» (как [[events.GoldVeinState]]): scene_data хранит вид
+  * работы и старт, поллер по таймеру (`Construction`) выдаёт золото и
+  * возвращает в GlobalMap. Кнопка «Уйти» — досрочное прерывание с
+  * подтверждением.
+  *
+  * Формула золота: `lvl(героя) × часы`, домноженное на `100 ± d` процентов, где
+  * `d ∈ [10, 20]` (знак и величина роллятся отдельно).
+  */
+case class ConstructionState(
+  heroDao: HeroDao,
+  scheduler: Scheduler,
+  content: SceneContent
+) extends State {
   import ConstructionState._
 
   private val branch = new Branch(
     routes = Map(
-      "CarryStone"       -> Target.Run { (user, _, renderer) => startJob(user, renderer, Job.CarryStone) },
-      "BreakWall"        -> Target.Run { (user, _, renderer) => startJob(user, renderer, Job.BreakWall) },
-      "BuildWall"        -> Target.Run { (user, _, renderer) => startJob(user, renderer, Job.BuildWall) },
-      "LeaveWork"        -> Target.Run { (user, _, renderer) => leaveWork(user, renderer) },
-      "ConfirmLeaveWork" -> Target.Run { (user, _, renderer) => confirmLeave(user, renderer) },
-      "CancelLeaveWork"  -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Construction) },
-      "Finish"           -> Target.Run { (user, _, renderer) => finish(user, renderer) },
+      "CarryStone" -> Target.Run { (user, _, renderer) =>
+        startJob(user, renderer, Job.CarryStone)
+      },
+      "BreakWall" -> Target.Run { (user, _, renderer) =>
+        startJob(user, renderer, Job.BreakWall)
+      },
+      "BuildWall" -> Target.Run { (user, _, renderer) =>
+        startJob(user, renderer, Job.BuildWall)
+      },
+      "LeaveWork" -> Target.Run { (user, _, renderer) =>
+        leaveWork(user, renderer)
+      },
+      "ConfirmLeaveWork" -> Target.Run { (user, _, renderer) =>
+        confirmLeave(user, renderer)
+      },
+      "CancelLeaveWork" -> Target.Run { (user, _, renderer) =>
+        enter(user, renderer).as(StateType.Construction)
+      },
+      "Finish" -> Target.Run((user, _, renderer) => finish(user, renderer)),
       "LeaveConstruction" -> Target.Goto(StateType.MarketSquare)
     ),
-    fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Construction) }
+    fallback = Target.Run { (user, _, renderer) =>
+      enter(user, renderer).as(StateType.Construction)
+    }
   )
 
   override def targetStates: Set[StateType] = branch.gotoTargets
@@ -50,46 +67,83 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       case None    => showMenu(user, renderer)
     }
 
-  override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
-    branch.act(user, ua, renderer)
+  override def action(
+      user: User,
+      ua: UserAction,
+      renderer: Renderer
+  ): Task[StateType] = branch.act(user, ua, renderer)
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(
-      content.text("construction.menu.text"),
-      List(
-        content.choice("CarryStone",        "construction.carryStoneLabel", "duration" -> formatHours(Job.CarryStone.hours)),
-        content.choice("BreakWall",         "construction.breakWallLabel",  "duration" -> formatHours(Job.BreakWall.hours)),
-        content.choice("BuildWall",         "construction.buildWallLabel",  "duration" -> formatHours(Job.BuildWall.hours)),
-        content.choice("LeaveConstruction", "construction.back")
-      )))
+    renderer.show(
+      user,
+      Screen(
+        content.text("construction.menu.text"),
+        List(
+          content.choice(
+            "CarryStone",
+            "construction.carryStoneLabel",
+            "duration" -> formatHours(Job.CarryStone.hours)
+          ),
+          content.choice(
+            "BreakWall",
+            "construction.breakWallLabel",
+            "duration" -> formatHours(Job.BreakWall.hours)
+          ),
+          content.choice(
+            "BuildWall",
+            "construction.buildWallLabel",
+            "duration" -> formatHours(Job.BuildWall.hours)
+          ),
+          content.choice("LeaveConstruction", "construction.back")
+        )
+      )
+    )
 
   // Локальная склонения для подписи кнопки: «1 час», «4 часа», «8 часов».
   private def formatHours(h: Int): String = {
     val word = h % 10 match {
-      case 1 if h % 100 != 11                    => "час"
+      case 1 if h % 100 != 11 => "час"
       case 2 | 3 | 4 if !(h % 100 >= 12 && h % 100 <= 14) => "часа"
-      case _                                     => "часов"
+      case _                                              => "часов"
     }
     s"$h $word"
   }
 
   private def showWork(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(
-      content.text("construction.work.text"),
-      content.screen("construction.work").choices))
+    renderer.show(
+      user,
+      Screen(
+        content.text("construction.work.text"),
+        content.screen("construction.work").choices
+      )
+    )
 
-  private def startJob(user: User, renderer: Renderer, job: Job): Task[StateType] =
+  private def startJob(
+      user: User,
+      renderer: Renderer,
+      job: Job
+  ): Task[StateType] =
     activeJob(user).flatMap {
       // Защита от перезапуска: если работа уже идёт, просто возвращаем её экран.
       case Some(_) => showWork(user, renderer).as(StateType.Construction)
       case None =>
         for {
           now <- nowMs
-          _   <- heroDao.writeSceneData(user.userId, Json.obj(
-                   KindKey      -> job.entryName.asJson,
-                   StartedAtKey -> now.asJson))
-          _   <- scheduler.schedule(user.userId, now + job.durationMs, TaskKind.Construction, StateType.Construction, FinishAction)
-          _   <- showWork(user, renderer)
+          _ <- heroDao.writeSceneData(
+            user.userId,
+            Json.obj(
+              KindKey      -> job.entryName.asJson,
+              StartedAtKey -> now.asJson
+            )
+          )
+          _ <- scheduler.schedule(
+            user.userId,
+            now + job.durationMs,
+            TaskKind.Construction,
+            StateType.Construction,
+            FinishAction
+          )
+          _ <- showWork(user, renderer)
         } yield StateType.Construction
     }
 
@@ -100,12 +154,22 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       job <- activeJob(user)
       result <- job match {
         case None => enter(user, renderer).as(StateType.Construction)
-        case Some((j, start)) if now - start >= j.durationMs => finish(user, renderer)
+        case Some((j, start)) if now - start >= j.durationMs =>
+          finish(user, renderer)
         case Some((j, start)) =>
           val remaining = formatRemaining(j.durationMs - (now - start))
-          renderer.show(user, Screen(
-            content.format("construction.confirmLeave.text", "remaining" -> remaining),
-            content.screen("construction.confirmLeave").choices)).as(StateType.Construction)
+          renderer
+            .show(
+              user,
+              Screen(
+                content.format(
+                  "construction.confirmLeave.text",
+                  "remaining" -> remaining
+                ),
+                content.screen("construction.confirmLeave").choices
+              )
+            )
+            .as(StateType.Construction)
       }
     } yield result
 
@@ -113,7 +177,9 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
   private def confirmLeave(user: User, renderer: Renderer): Task[StateType] =
     scheduler.cancel(user.userId, TaskKind.Construction) *>
       heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.text("construction.left"), Nil)).as(StateType.MarketSquare)
+      renderer
+        .show(user, Screen(content.text("construction.left"), Nil))
+        .as(StateType.MarketSquare)
 
   // Завершение работы — выдача золота и финальный текст. Возврат в GlobalMap.
   private def finish(user: User, renderer: Renderer): Task[StateType] =
@@ -121,16 +187,56 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       case None => ZIO.succeed(StateType.MarketSquare)
       case Some((job, _)) =>
         for {
-          hero    <- getHero(user)
-          base     = hero.lvl.toLong * job.hours.toLong
-          delta   <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
-          sign    <- Random.nextBoolean.map(if (_) 1 else -1)
-          reward   = (base * (100L + sign * delta.toLong)) / 100L
-          _       <- heroDao.updateGold(user.userId, hero.gold + reward)
-          _       <- scheduler.cancel(user.userId, TaskKind.Construction)
-          _       <- heroDao.writeSceneData(user.userId, Json.Null)
-          _       <- renderer.show(user, Screen(
-                       content.format("construction.done", "gold" -> reward.toString), Nil))
+          hero <- getHero(user)
+          base = hero.lvl.toLong * job.hours.toLong
+          delta <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
+          sign  <- Random.nextBoolean.map(if (_) 1 else -1)
+          reward = (base * (100L + sign * delta.toLong)) / 100L
+          // Опыт: уровень героя × множитель работы (0.5 / 1 / 2 за 1 / 4 / 8 ч), вверх.
+          expGained = math.ceil(hero.lvl.toDouble * job.expMult).toLong
+          leveled   = hero.gainExp(expGained)
+          _ <- heroDao.updateGold(user.userId, hero.gold + reward)
+          _ <- heroDao.updateExpAndLevel(
+            user.userId,
+            leveled.exp,
+            leveled.lvl,
+            leveled.upgradePoints
+          )
+          _ <- ZIO.when(job.doubloons > 0)(
+            heroDao.updateDoubloons(
+              user.userId,
+              hero.doubloons + job.doubloons.toLong
+            )
+          )
+          _ <- scheduler.cancel(user.userId, TaskKind.Construction)
+          _ <- heroDao.writeSceneData(user.userId, Json.Null)
+          doubloonSuffix =
+            if (job.doubloons > 0)
+              " " + content.text("construction.doneDoubloons")
+            else ""
+          _ <- renderer.show(
+            user,
+            Screen(
+              content.format(
+                "construction.done",
+                "gold" -> reward.toString,
+                "exp"  -> expGained.toString
+              ) + doubloonSuffix,
+              Nil
+            )
+          )
+          _ <- ZIO.when(leveled.lvl > hero.lvl)(
+            renderer.show(
+              user,
+              Screen(
+                content.format(
+                  "construction.levelUp",
+                  "level" -> leveled.lvl.toString
+                ),
+                Nil
+              )
+            )
+          )
         } yield StateType.MarketSquare
     }
 
@@ -144,10 +250,12 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       } yield (job, start)
     }
 
-  private def nowMs: Task[Long] = ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+  private def nowMs: Task[Long] =
+    ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
 
   private def getHero(user: User): Task[Hero] =
-    heroDao.getHeroByUserId(user.userId)
+    heroDao
+      .getHeroByUserId(user.userId)
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
 
@@ -164,21 +272,22 @@ case class ConstructionState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
 object ConstructionState {
   import enumeratum._
 
-  sealed abstract class Job(val hours: Int) extends EnumEntry {
+  sealed abstract class Job(val hours: Int, val doubloons: Int, val expMult: Double)
+      extends EnumEntry {
     val durationMs: Long = hours.toLong * 3600L * 1000L
   }
   object Job extends Enum[Job] {
     val values = findValues
-    case object CarryStone extends Job(1)
-    case object BreakWall  extends Job(4)
-    case object BuildWall  extends Job(8)
+    case object CarryStone extends Job(1, doubloons = 0, expMult = 0.5)
+    case object BreakWall  extends Job(4, doubloons = 0, expMult = 1.0)
+    case object BuildWall  extends Job(8, doubloons = 1, expMult = 2.0)
     def fromName(name: String): Option[Job] = withNameOption(name)
   }
 
   val MinSpreadPct: Int = 10
   val MaxSpreadPct: Int = 20
 
-  private val KindKey       = "constructionKind"
-  private val StartedAtKey  = "constructionStartedAt"
-  private val FinishAction  = """{"action":"Finish"}"""
+  private val KindKey      = "constructionKind"
+  private val StartedAtKey = "constructionStartedAt"
+  private val FinishAction = """{"action":"Finish"}"""
 }
