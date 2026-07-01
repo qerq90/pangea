@@ -749,8 +749,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Фляга; row 3 —
     // Сбежать. Места под заглушки (доп. слот, стиль атаки, сменить цель) пока скрыты.
     val mainButtons = List(
-      pangea.engine.Choice("Attack", "Атака", row = Some(1)),
-      pangea.engine.Choice("UseFlask", "Использовать флягу", row = Some(2)),
+      pangea.engine.Choice("Attack", "Атака", row = Some(1)), {
+        val flaskCharges = hero.equipment.flask.charges.getOrElse(0)
+        pangea.engine.Choice(
+          "UseFlask",
+          s"🧪 Фляга ($flaskCharges)",
+          color =
+            if (flaskCharges <= 0) pangea.engine.ChoiceColor.Negative
+            else pangea.engine.ChoiceColor.Primary,
+          row = Some(2)
+        )
+      },
       pangea.engine.Choice(
         "Flee",
         "Сбежать",

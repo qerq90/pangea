@@ -220,13 +220,15 @@ object InventoryState {
     def equipped(prefix: String, cur: Item): String =
       if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
       else cur.equippedComparison(prefix)
+    // Разделитель между сравниваемым предметом и тем, что уже надето.
+    val sep = "➖➖➖➖➖"
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
-      case ItemType.Ring   => s"\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
+      case ItemType.Ring   => s"\n$sep\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
       case _ =>
         val cur = equippedIn(eq, item.itemType)
         if (cur.itemType == ItemType.NoItem) ""
-        else s"\n${equipped("Сейчас надет", cur)}"
+        else s"\n$sep\n${equipped("Сейчас надет", cur)}"
     }
     val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
