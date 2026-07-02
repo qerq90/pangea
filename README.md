@@ -74,7 +74,7 @@ docker compose down -v     # остановить и удалить БД
 Для запуска тестов PostgreSQL не нужен — тесты используют in-memory заглушки.
 
 ```bash
-sbt test
+sbt core/test
 ```
 
 Для локального запуска бота нужно поднять PostgreSQL (например, через `docker compose up postgres -d`) и задать переменные окружения:

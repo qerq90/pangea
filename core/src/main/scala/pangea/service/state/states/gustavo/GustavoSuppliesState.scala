@@ -45,6 +45,6 @@ case class GustavoSuppliesState(
         content.choice("Belt",  "gustavo.supplies.beltLabel",  "cost" -> supplyCost(hero).toString),
         content.choice("Back",  "gustavo.supplies.back")
       )
-      _ <- renderer.show(user, Screen(content.text("gustavo.supplies.intro"), choices))
+      _ <- renderer.show(user, Screen(content.format("gustavo.supplies.intro", "cost" -> supplyCost(hero).toString), choices))
     } yield ()
 }
