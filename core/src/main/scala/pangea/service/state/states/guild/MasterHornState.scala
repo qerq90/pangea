@@ -160,7 +160,7 @@ object MasterHornState {
    */
   def cost(hero: Hero, stat: Stat): Long = {
     val n     = boostsFor(hero, stat) + 1
-    val raw   = 35.0 * math.pow(1.2, n - 1) - 30.0
+    val raw   = 35.0 * math.pow(1.2, (n - 1).toDouble) - 30.0
     math.ceil(raw).toLong.max(1L)
   }
 

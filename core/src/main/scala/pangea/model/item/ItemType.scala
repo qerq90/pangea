@@ -27,6 +27,14 @@ object ItemType extends Enum[ItemType] {
   val defenceItems: List[ItemType] =
     List(Helmet, ShoulderPads, ChestPlate, Pants, Boots, Belt, Leggings)
 
+  // Типы, которые не надеваются: трофеи и карты клада. Пусто (NoItem) сюда тоже
+  // относится, но оно и так исключено из itemTypes.
+  private val nonEquippable: Set[ItemType] = Set(Trophy, TreasureMap, TreasureMapHalf)
+
+  /** Надеваемые типы — всё, кроме трофеев, карт клада и NoItem. Экраны, где
+   *  предмет предлагается к надеванию, опираются на этот список. */
+  val equippable: List[ItemType] = itemTypes.filterNot(nonEquippable.contains)
+
   case object Helmet           extends ItemType
   case object ShoulderPads     extends ItemType
   case object ChestPlate       extends ItemType
@@ -45,6 +53,10 @@ object ItemType extends Enum[ItemType] {
   // Трофей с убитого моба: лежит в инвентаре как обычный предмет (раса + уровень),
   // но не экипируется — не входит в attackItems/defenceItems.
   case object Trophy extends ItemType
+
+  // Карта клада и её половинка: лежат в инвентаре, занимают слот, не надеваются.
+  case object TreasureMap     extends ItemType
+  case object TreasureMapHalf extends ItemType
 
   case object NoItem extends ItemType
 

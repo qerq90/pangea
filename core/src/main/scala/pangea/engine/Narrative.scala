@@ -3,7 +3,6 @@ package pangea.engine
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.UserAction
-import zio.Task
 
 class Narrative(steps: List[(String, Beat)]) {
   private val beatMap: Map[String, Beat] = steps.toMap

@@ -11,7 +11,7 @@ import pangea.model.item.Item
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.model.GameEvent
-import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
+import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState
 import pangea.service.state.states.events.item.FoundItemState.FoundItemData

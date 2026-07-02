@@ -4,7 +4,7 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.Item
 import pangea.model.state.StateType

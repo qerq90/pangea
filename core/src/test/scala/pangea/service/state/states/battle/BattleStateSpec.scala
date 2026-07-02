@@ -3,7 +3,6 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{ActiveBattle, Buff, HeroBattleState}
-import pangea.model.hero.Equipment
 import pangea.model.item.{Item, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType

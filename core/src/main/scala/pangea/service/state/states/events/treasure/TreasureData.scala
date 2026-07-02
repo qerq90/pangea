@@ -25,3 +25,14 @@ object TreasureDigProgress {
   implicit val encoder: Encoder[TreasureDigProgress] = deriveEncoder[TreasureDigProgress]
   implicit val decoder: Decoder[TreasureDigProgress] = deriveDecoder[TreasureDigProgress]
 }
+
+/** Прогресс похода за сокровищем по карте клада (таймер ~10 минут).
+ *  @param startedAt момент отправки (epoch ms)
+ *  @param mapLevel  уровень израсходованной карты — по нему масштабируется добыча
+ */
+final case class TreasureHuntProgress(startedAt: Long, mapLevel: Long)
+
+object TreasureHuntProgress {
+  implicit val encoder: Encoder[TreasureHuntProgress] = deriveEncoder[TreasureHuntProgress]
+  implicit val decoder: Decoder[TreasureHuntProgress] = deriveDecoder[TreasureHuntProgress]
+}

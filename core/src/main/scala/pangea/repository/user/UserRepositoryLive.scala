@@ -1,7 +1,6 @@
 package pangea.repository.user
 
 import pangea.dao.user.UserDao
-import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.user.UserRepositoryLive.{
   newTelegramUser,

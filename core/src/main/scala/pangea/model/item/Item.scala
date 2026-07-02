@@ -24,7 +24,8 @@ case class Item(
   maxCharges:  Option[Int]         = None,
   race:        Option[String]      = None, // раса моба для трофеев (entryName); None у обычных предметов
   trophyKind:  Option[TrophyKind]  = None, // вид трофея; None у обычных предметов
-  activeSkill: Option[Skill]       = None  // активный навык: только на Weapon (один из weaponSkills) и ChestPlate (один из armorSkills)
+  activeSkill: Option[Skill]       = None, // активный навык: только на Weapon (один из weaponSkills) и ChestPlate (один из armorSkills)
+  mapZone:     Option[MapZone]     = None  // зона карты клада; None у всех предметов, кроме карт/половинок
 ) {
   def withId(id: Long): Item = copy(id = id)
 
@@ -50,6 +51,15 @@ case class Item(
   def withEvasion(evasion: Long): Item = copy(evasion = evasion)
 
   def withHp(hp: Long): Item = copy(hp = hp)
+
+  /** Карта клада или её половинка. */
+  def isTreasureMap: Boolean =
+    itemType == ItemType.TreasureMap || itemType == ItemType.TreasureMapHalf
+
+  /** Текст-описание карты (для целой — описание зоны, для половинки — заглушка).
+   *  None у любого предмета, не являющегося картой. */
+  def mapDescription: Option[String] =
+    mapZone.map(_.descriptionFor(itemType))
 
   /** Строки характеристик для отображения (инвентарь/снаряжение/дроп). Активный
    *  навык — последней строкой ниже всех статов; пустая строка возвращается, если
@@ -78,7 +88,7 @@ case class Item(
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

@@ -29,11 +29,6 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
 
     test("в среднем легендарные монстры значительно сильнее обычных") {
       val n = 200
-      def avgHp(seeds: Seq[Long]) =
-        seeds.map(s => MonsterGenerator.generate(10, Rng(s))._1)
-          .filter(_.rarity == Rarity.Legendary)
-          .map(_.fightStats.hp)
-
       // генерируем достаточно монстров чтобы получить оба типа
       val monsters = (1 to n).map(i => MonsterGenerator.generate(10, Rng(i.toLong))._1)
       val legendaryHp = monsters.filter(_.rarity == Rarity.Legendary).map(_.fightStats.hp)

@@ -1,11 +1,9 @@
 package pangea.dao.hero
 
-import doobie.implicits.toSqlInterpolator
 import doobie.util.transactor.Transactor
 import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
 import io.circe.Json
-import io.circe.syntax.EncoderOps
 import pangea.dao.hero.TraumaInstances._
 import pangea.model.hero.{Equipment, MasterHornBoosts}
 import pangea.model.stats.FightStats

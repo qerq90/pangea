@@ -1,6 +1,5 @@
 package pangea.dao.sendfailure
 
-import doobie.implicits.toSqlInterpolator
 import doobie.implicits._
 import doobie.util.transactor.Transactor
 import pangea.model.user.UserId

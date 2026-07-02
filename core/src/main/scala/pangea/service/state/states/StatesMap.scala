@@ -27,12 +27,14 @@ import pangea.model.state.StateType.{
   MasterHorn,
   MentorKazimir,
   Merchant,
+  Outskirts,
   QuestBoard,
   Registration,
   Rest,
   Tavern,
   TrainingHall,
   TreasureDig,
+  TreasureHunt,
   TreasureMobs,
   TreasureMobsFight,
   TreasureSchron,
@@ -49,6 +51,7 @@ import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.GoldVeinState
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
+  TreasureHuntState,
   TreasureMobsFightState,
   TreasureMobsState,
   TreasureSchronState
@@ -150,6 +153,8 @@ object StatesMap {
           TreasureMobsFight -> TreasureMobsFightState(heroDao, content),
           TreasureSchron    -> TreasureSchronState(heroDao, content),
           TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
+          Outskirts         -> OutskirtsState(heroDao, inventoryRepo, scheduler, content),
+          TreasureHunt      -> TreasureHuntState(heroDao, scheduler, content),
           Construction      -> ConstructionState(heroDao, scheduler, content),
           Guild             -> GuildState(heroDao, content),
           TrophyExchange -> TrophyExchangeState(

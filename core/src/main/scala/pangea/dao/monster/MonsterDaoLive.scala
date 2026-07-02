@@ -1,6 +1,5 @@
 package pangea.dao.monster
 
-import doobie.implicits.toSqlInterpolator
 import doobie.util.transactor.Transactor
 import doobie.implicits._
 import doobie.postgres.circe.json.implicits._

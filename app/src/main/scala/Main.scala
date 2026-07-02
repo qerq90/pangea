@@ -10,7 +10,7 @@ import pangea.dao.journal.JournalLive
 import pangea.dao.schedule.ScheduledTaskDao
 import pangea.dao.sendfailure.SendFailureDao
 import pangea.dao.user.UserDao
-import pangea.engine.{Journal, Players, SceneContent}
+import pangea.engine.{Players, SceneContent}
 import pangea.repository.barrel.BarrelRepository
 import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository

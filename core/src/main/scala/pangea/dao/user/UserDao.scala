@@ -1,7 +1,6 @@
 package pangea.dao.user
 
 import doobie.util.transactor
-import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import zio.{Task, ZLayer}
 

@@ -1,6 +1,5 @@
 package pangea.dao.schedule
 
-import doobie.implicits.toSqlInterpolator
 import doobie.implicits._
 import doobie.util.transactor.Transactor
 import pangea.model.schedule.{ScheduledTask, TaskKind, TaskStatus}

@@ -7,7 +7,6 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.barrel.Barrel
 import pangea.model.hero.Hero
-import pangea.model.item.Item
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}

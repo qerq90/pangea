@@ -323,7 +323,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       nowMs: Long,
       renderer: Renderer,
       playerLine: String,
-      skipSlots: Set[Long] = Set.empty
+      skipSlots: Set[Long]
   ): Task[StateType] =
     for {
       ticked <- ZIO.succeed(battle.tickBuffs(skipSlots))

@@ -91,7 +91,6 @@ globalMap:
       OpenCharacter: "Персонаж"
       ReturnToDungeon: "В лабиринт"
       LeaveCity: "За город"
-  leaveCity: "Дороги за город пока закрыты."
 
 harborQuarter:
   enter:
@@ -506,6 +505,38 @@ treasureDig:
       GraveLeave:
         label: "Уйти"
         color: "negative"
+
+outskirts:
+  enter:
+    text: "За городом простирается материк. Где-то там, судя по карте, зарыто сокровище."
+    choices:
+      DepartTreasure:
+        label: "Отправиться за сокровищем"
+        color: "positive"
+      BackToCity:
+        label: "Назад"
+        color: "negative"
+  chooseMap: "Какое сокровище ищем? Выберите карту клада."
+  noMaps: "У вас нет ни одной карты клада. Сначала добудьте карту."
+  back:
+    label: "Назад"
+    color: "negative"
+  confirm:
+    text: "В обычном режиме это бы заняло 7 часов, но пока бета-тест вы вернётесь обратно через 10 минут. Не забудьте очистить свой инвентарь перед походом."
+    choices:
+      ConfirmDepart:
+        label: "Подтвердить"
+        color: "positive"
+      CancelDepart:
+        label: "Уйти"
+        color: "negative"
+
+treasureHunt:
+  enter:
+    text: "Вы отправились в путь за сокровищем. Вы вернётесь примерно через {duration}."
+  wait:
+    text: "Вы ещё в пути. До возвращения примерно {remaining}."
+  success: "Вы добрались до отмеченной на карте точки и выкопали спрятанное сокровище!"
 
 foundItem:
   header: "Вы находите предмет!"

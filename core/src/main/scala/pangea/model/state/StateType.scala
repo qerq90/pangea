@@ -57,4 +57,8 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TreasureMobsFight extends StateType // эффект-нода: спавн очередного боя цепочки
   case object TreasureSchron   extends StateType // эффект-нода: выдача схрона после цепочки боёв
   case object TreasureDig      extends StateType // прикопанный схрон (раскопки по таймеру)
+
+  // Поход за сокровищем по карте клада.
+  case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход
+  case object TreasureHunt extends StateType // сам поход по таймеру (~10 минут) → добыча
 }

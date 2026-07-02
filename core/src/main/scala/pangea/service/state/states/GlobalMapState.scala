@@ -19,9 +19,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
       "MarketSquare"    -> Target.Goto(StateType.MarketSquare),
       "ReturnToDungeon" -> Target.Goto(StateType.Dungeon),
       "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.GlobalMap) },
-      "LeaveCity"       -> Target.Run { (user, _, renderer) =>
-                             renderer.show(user, Screen(content.text("globalMap.leaveCity"), Nil)) *>
-                               enter(user, renderer).as(StateType.GlobalMap) }
+      "LeaveCity"       -> Target.Goto(StateType.Outskirts)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.GlobalMap) }
   )

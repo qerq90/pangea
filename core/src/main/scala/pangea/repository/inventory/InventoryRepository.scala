@@ -4,7 +4,7 @@ import pangea.dao.inventory.InventoryDao
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory
 import pangea.model.item.Item
-import zio.{IO, Task, ZLayer}
+import zio.{IO, ZLayer}
 
 trait InventoryRepository {
   def get(heroId: HeroId): IO[InventoryRepoError, Inventory]

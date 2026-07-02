@@ -30,15 +30,15 @@ lazy val core = (project in file("core"))
     name := "core"
   )
 
-scalacOptions ++= Seq(
-  "-deprecation",
-  "-feature",
-  "-unchecked",
-  "-Ywarn-unused"
-)
-
 lazy val standartSettings = Seq(
-  scalaVersion := "2.13.16"
+  scalaVersion := "2.13.16",
+  scalacOptions ++= Seq(
+    "-deprecation",
+    "-feature",
+    "-unchecked",
+    "-Ywarn-unused",
+    "-Xfatal-warnings"
+  )
 )
 
 resolvers ++= Seq(

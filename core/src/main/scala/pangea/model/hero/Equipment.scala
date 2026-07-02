@@ -54,6 +54,8 @@ case class Equipment(
     case ItemType.Weapon           => List(weapon)
     case ItemType.AdditionalWeapon => List(additionalWeapon)
     case ItemType.Trophy           => Nil
+    case ItemType.TreasureMap      => Nil
+    case ItemType.TreasureMapHalf  => Nil
     case ItemType.NoItem           => Nil
   }
 }

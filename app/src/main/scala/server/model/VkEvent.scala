@@ -1,6 +1,6 @@
 package server.model
 
-import io.circe.{Decoder, Json}
+import io.circe.Decoder
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveConfiguredDecoder
 import io.circe.generic.semiauto.deriveDecoder

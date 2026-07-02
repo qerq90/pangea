@@ -1,6 +1,7 @@
 package server
 
 import cats.syntax.semigroupk._
+import fs2.io.net.Network
 import io.circe.Json
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.dsl.Http4sDsl
@@ -58,7 +59,9 @@ final class ServerLive(
 
   private val httpApp: HttpApp[Task] = (routes <+> LogsRoutes.routes).orNotFound
 
-  override def run(): UIO[Unit] =
+  override def run(): UIO[Unit] = {
+    // Явный Network[Task] вместо устаревшего неявного implicitForAsync (http4s 3.7.0).
+    implicit val network: Network[Task] = Network.forAsync[Task]
     EmberServerBuilder
       .default[Task]
       .withHost(config.host)
@@ -67,5 +70,5 @@ final class ServerLive(
       .build
       .useForever
       .orDie
-
+  }
 }

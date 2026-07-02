@@ -82,7 +82,7 @@ case class InventoryState(
         case None => showList(user, renderer)
         case Some(item) =>
           val text    = itemDetail(item, hero.equipment, hero.gold)
-          val canEquip = item.itemType != ItemType.Trophy
+          val canEquip = ItemType.equippable.contains(item.itemType)
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
@@ -111,7 +111,7 @@ case class InventoryState(
       _ <- inv.items.data.find(_.id == itemId) match {
         case None => ZIO.unit
         case Some(item) =>
-          if (item.itemType == ItemType.Trophy)
+          if (!ItemType.equippable.contains(item.itemType))
             renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil))
           else if (item.lvl > hero.lvl)
             renderer.show(user, Screen(
@@ -216,7 +216,14 @@ object InventoryState {
 
   /** Подробное представление предмета (статы + надетое в том же слоте). Используется
    *  и в детальном экране инвентаря, и снаружи (например, регистрация). */
-  def itemText(item: Item, eq: Equipment): String = {
+  def itemText(item: Item, eq: Equipment): String = item.mapDescription match {
+    // Карта клада: только имя и текст-описание, без статов и сравнения слотов —
+    // карта не надевается (см. также [[ItemType.equippable]]).
+    case Some(desc) => s"${item.name} Ур.${item.lvl}\n\n$desc"
+    case None       => gearText(item, eq)
+  }
+
+  private def gearText(item: Item, eq: Equipment): String = {
     def equipped(prefix: String, cur: Item): String =
       if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
       else cur.equippedComparison(prefix)
@@ -255,6 +262,8 @@ object InventoryState {
     case ItemType.Weapon           => eq.weapon
     case ItemType.AdditionalWeapon => eq.additionalWeapon
     case ItemType.Trophy           => Item.NoItem // трофей не экипируется
+    case ItemType.TreasureMap      => Item.NoItem // карта не экипируется
+    case ItemType.TreasureMapHalf  => Item.NoItem // половинка карты не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -277,6 +286,8 @@ object InventoryState {
     case ItemType.Weapon           => eq.copy(weapon = item)
     case ItemType.AdditionalWeapon => eq.copy(additionalWeapon = item)
     case ItemType.Trophy           => eq // трофей не экипируется
+    case ItemType.TreasureMap      => eq // карта не экипируется
+    case ItemType.TreasureMapHalf  => eq // половинка карты не экипируется
     case ItemType.NoItem           => eq
   }
 

@@ -1,6 +1,5 @@
 package pangea.dao.hero.queries
 
-import doobie.implicits.toSqlInterpolator
 import doobie.util.fragment.Fragment
 import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
