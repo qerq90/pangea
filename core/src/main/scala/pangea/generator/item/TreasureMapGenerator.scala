@@ -3,19 +3,27 @@ package pangea.generator.item
 import pangea.model.item.{Item, ItemType, MapZone, Rarity}
 
 /**
- * Генератор карт клада и их половинок. Зона (а значит имя и описание) выбирается
- * детерминированно по уровню героя ([[MapZone.forLevel]]) — RNG не нужен. Карты
- * легендарной (Orange) редкости: их никогда не считают «хламом» у торговца.
+ * Генератор карт клада и их половинок. У карты нет уровня: она несёт только зону
+ * ([[MapZone]]), а зона сама задаёт диапазон уровней добычи (Кинэт 1–25 и т.д.).
+ * Уровень нужен лишь в момент дропа — чтобы выбрать зону ([[MapZone.forLevel]]).
+ * Карты легендарной (Orange) редкости: их не считают «хламом» у торговца.
  * Возвращает шаблон с id = -1; id присваивает персист (см. `ItemRepository`).
  */
 object TreasureMapGenerator {
 
-  def create(heroLevel: Long, half: Boolean): Item = {
-    val zone = MapZone.forLevel(heroLevel)
+  /** Карта или половинка: зона выбирается по уровню дропа, сам уровень не хранится. */
+  def create(dropLevel: Long, half: Boolean): Item =
+    build(MapZone.forLevel(dropLevel), half)
+
+  /** Целая карта конкретной зоны — сборка из двух половинок этой же зоны. */
+  def full(zone: MapZone): Item =
+    build(zone, half = false)
+
+  private def build(zone: MapZone, half: Boolean): Item =
     Item(
       id            = -1L,
       name          = if (half) zone.halfName else zone.mapName,
-      lvl           = heroLevel.max(1L).min(150L),
+      lvl           = 0L, // у карт уровня нет — диапазон добычи задаёт зона
       rarity        = Rarity.Orange,
       itemType      = if (half) ItemType.TreasureMapHalf else ItemType.TreasureMap,
       attack        = 0,
@@ -26,5 +34,4 @@ object TreasureMapGenerator {
       evasion       = 0,
       mapZone       = Some(zone)
     )
-  }
 }

@@ -136,7 +136,7 @@ case class LootState(
     else {
       val lines = item.statsLines
       val tail  = if (lines.isEmpty) "" else "\n" + lines.mkString("\n")
-      s"🎁 ${item.name} Ур.${item.lvl}$tail"
+      s"🎁 ${item.displayTitle}$tail"
     }
 
   /** Карточка дропа + строки с надетым в том же слоте — чтобы сразу сравнить.

@@ -575,6 +575,11 @@ inventory:
         color: "negative"
   equip: "✅ Надеть"
   drop: "🗑 Выбросить"
+  combineMap:
+    label: "🧩 Объединить"
+    color: "positive"
+  combined: "Вы сложили две половинки в {name}!"
+  combineNeedSecond: "Нужна вторая половина карты клада «{name}»."
   exit:
     label: "↩ Выйти"
     color: "negative"

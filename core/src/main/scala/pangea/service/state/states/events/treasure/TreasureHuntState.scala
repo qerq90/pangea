@@ -5,6 +5,7 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.TreasureHuntGenerator
+import pangea.model.item.MapZone
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -66,10 +67,10 @@ case class TreasureHuntState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
   private def huntDone(user: User, renderer: Renderer): Task[StateType] =
     for {
       progress <- heroDao.readSceneData(user.userId).map(_.flatMap(_.as[TreasureHuntProgress].toOption))
-      mapLevel  = progress.map(_.mapLevel).getOrElse(1L)
+      zone      = progress.map(_.zone).getOrElse(MapZone.values.head)
       _        <- scheduler.cancel(user.userId, TaskKind.TreasureHunt)
       seed     <- Random.nextLong
-      (reward, _) = TreasureHuntGenerator.roll(mapLevel, Rng(seed))
+      (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed))
       loot      = LootData(
                     items       = reward.items,
                     golds       = if (reward.gold > 0L) List(reward.gold) else Nil,

@@ -5,20 +5,23 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.{ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 case class InventoryState(
-  heroDao:      HeroDao,
-  inventoryRepo: InventoryRepository,
-  content:      SceneContent
+  heroDao:        HeroDao,
+  inventoryRepo:  InventoryRepository,
+  itemRepository: ItemRepository,
+  content:        SceneContent
 ) extends State {
 
   private val branch = new Branch(
@@ -28,7 +31,8 @@ case class InventoryState(
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
-      "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) }
+      "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
+      "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -81,10 +85,12 @@ case class InventoryState(
       res <- inv.items.data.find(_.id == itemId) match {
         case None => showList(user, renderer)
         case Some(item) =>
-          val text    = itemDetail(item, hero.equipment, hero.gold)
+          val text     = itemDetail(item, hero.equipment, hero.gold)
           val canEquip = ItemType.equippable.contains(item.itemType)
+          val canCombine = item.itemType == ItemType.TreasureMapHalf
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
+            Option.when(canCombine)(content.choice("CombineMap", "inventory.combineMap").copy(color = ChoiceColor.Positive, row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
             Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
           ).flatten
@@ -154,6 +160,46 @@ case class InventoryState(
       res <- showList(user, renderer)
     } yield res
 
+  // ── Объединение половинок карты ────────────────────────────────────────────
+
+  private def combineSelected(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      res <- scene.selectedId match {
+        case None     => showList(user, renderer)
+        case Some(id) => combineById(user, id, renderer)
+      }
+    } yield res
+
+  // Две половинки одной зоны → одна целая карта этой зоны (уровень — больший из двух).
+  private def combineById(user: User, halfId: Long, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      items  = inv.items.data
+      res <- items.find(_.id == halfId) match {
+        case Some(first) if first.itemType == ItemType.TreasureMapHalf =>
+          val second = items.find(i =>
+            i.id != first.id && i.itemType == ItemType.TreasureMapHalf && i.mapZone == first.mapZone)
+          (first.mapZone, second) match {
+            case (Some(zone), Some(other)) =>
+              val full = TreasureMapGenerator.full(zone)
+              for {
+                _         <- inventoryRepo.removeItems(Set(first.id, other.id), hero.id).mapError(e => new Throwable(e.toString))
+                persisted <- itemRepository.persist(hero.id, full)
+                _         <- inventoryRepo.addItem(hero.id, persisted).mapError(e => new Throwable(e.toString))
+                _         <- renderer.show(user, Screen(content.format("inventory.combined", "name" -> full.name), Nil))
+                back      <- showList(user, renderer)
+              } yield back
+            case _ =>
+              val name = first.mapZone.map(_.treasureName).getOrElse("")
+              renderer.show(user, Screen(content.format("inventory.combineNeedSecond", "name" -> name), Nil)) *>
+                showList(user, renderer)
+          }
+        case _ => showList(user, renderer)
+      }
+    } yield res
+
   // ── Fallback: динамические id вида ItemAction_<id> ─────────────────────────
 
   private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -217,9 +263,9 @@ object InventoryState {
   /** Подробное представление предмета (статы + надетое в том же слоте). Используется
    *  и в детальном экране инвентаря, и снаружи (например, регистрация). */
   def itemText(item: Item, eq: Equipment): String = item.mapDescription match {
-    // Карта клада: только имя и текст-описание, без статов и сравнения слотов —
-    // карта не надевается (см. также [[ItemType.equippable]]).
-    case Some(desc) => s"${item.name} Ур.${item.lvl}\n\n$desc"
+    // Карта клада: только имя (без уровня) и текст-описание, без статов и сравнения
+    // слотов — карта не надевается (см. также [[ItemType.equippable]]).
+    case Some(desc) => s"${item.displayTitle}\n\n$desc"
     case None       => gearText(item, eq)
   }
 

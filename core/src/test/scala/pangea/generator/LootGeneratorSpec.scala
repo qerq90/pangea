@@ -12,6 +12,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
   private def category(d: LootDrop): String = d match {
     case LootDrop.Gear(_)       => "gear"
     case LootDrop.Trophy(_)     => "trophy"
+    case LootDrop.MapHalf(_)    => "mapHalf"
     case LootDrop.Gold(_, true) => "goldPile"
     case LootDrop.Gold(_, _)    => "goldSmall"
   }
@@ -74,6 +75,24 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gears.nonEmpty) &&
       assertTrue(gears.forall(i => i.lvl >= 1L && i.lvl <= 51L)) &&
       assertTrue(gears.forall(_.itemType != ItemType.Trophy))
+    },
+
+    test("половинка карты падает у мифических и легендарных мобов") {
+      def half(tier: Rarity) = (1L to 5000L).iterator
+        .flatMap(s => LootGenerator.roll(tier, Race.Orc, 40L, Rng(s))._1)
+        .collectFirst { case LootDrop.MapHalf(i) => i }
+      assertTrue(half(Rarity.Legendary).exists(_.itemType == ItemType.TreasureMapHalf)) &&
+        assertTrue(half(Rarity.Mythical).exists(_.itemType == ItemType.TreasureMapHalf))
+    },
+
+    test("у обычных/необычных/редких мобов половинка карты не падает") {
+      val lowerTiers = List(Rarity.Common, Rarity.Uncommon, Rarity.Rare)
+      val anyHalf = lowerTiers.exists { tier =>
+        (1L to 3000L).iterator
+          .flatMap(s => LootGenerator.roll(tier, Race.Orc, 40L, Rng(s))._1)
+          .exists { case LootDrop.MapHalf(_) => true; case _ => false }
+      }
+      assertTrue(!anyHalf)
     }
   )
 }

@@ -1,12 +1,13 @@
 package pangea.service.state.states
 
 import pangea.engine.SceneContent
+import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Item, ItemType, MapZone, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -27,15 +28,22 @@ object InventoryStateSpec extends ZIOSpecDefault {
   private val oldSword = Item(99L, "Ржавый меч", 1L, Rarity.Gray, ItemType.Weapon,
     attack = 2, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
 
+  // Две половинки карты Кинэт (dropLevel 10 и 20 → одна зона 1..25) и половинка
+  // другой зоны (Ущелье мертвецов, 51..75) для проверки требования совпадения.
+  private val kinetHalfA = TreasureMapGenerator.create(dropLevel = 10, half = true).copy(id = 30L)
+  private val kinetHalfB = TreasureMapGenerator.create(dropLevel = 20, half = true).copy(id = 31L)
+  private val gorgeHalf  = TreasureMapGenerator.create(dropLevel = 60, half = true).copy(id = 32L)
+
   private val baseHero = TestFixtures.hero(userId)
 
   private def makeState(hero: Hero, items: List[Item]) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       invRepo   = TestInventoryRepository.withItems(items)
+      itemRepo  = TestItemRepository.make
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (InventoryState(heroDao, invRepo, content), heroDao, invRepo, renderer)
+    } yield (InventoryState(heroDao, invRepo, itemRepo, content), heroDao, invRepo, renderer)
 
   override def spec = suite("InventoryState")(
 
@@ -71,6 +79,47 @@ object InventoryStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.last.text.contains(sword.name)) &&
               assertTrue(screens.last.choices.exists(_.id == "Equip")) &&
               assertTrue(screens.last.choices.exists(_.id == "Drop"))
+    },
+
+    test("осмотр половинки → кнопка Объединить (без Надеть), уровень не показан") {
+      for {
+        quad                    <- makeState(baseHero, List(kinetHalfA, kinetHalfB))
+        (state, _, _, renderer)  = quad
+        _                       <- state.enter(testUser, renderer)
+        _                       <- state.action(testUser, selectItem(kinetHalfA.id), renderer)
+        screens                 <- renderer.sentScreens
+      } yield assertTrue(screens.last.choices.exists(_.id == "CombineMap")) &&
+              assertTrue(!screens.last.choices.exists(_.id == "Equip")) &&
+              assertTrue(!screens.last.text.contains("Ур."))
+    },
+
+    test("Объединить две половинки одной зоны → одна целая карта, половинки удалены") {
+      for {
+        quad                          <- makeState(baseHero, List(kinetHalfA, kinetHalfB))
+        (state, _, invRepo, renderer)  = quad
+        _                             <- state.enter(testUser, renderer)
+        _                             <- state.action(testUser, selectItem(kinetHalfA.id), renderer)
+        _                             <- state.action(testUser, tap("CombineMap"), renderer)
+        items                          = invRepo.snapshot
+        screens                       <- renderer.sentScreens
+      } yield assertTrue(items.size == 1) &&
+              assertTrue(items.head.itemType == ItemType.TreasureMap) &&
+              assertTrue(items.head.name == MapZone.Kinet.mapName) &&
+              assertTrue(screens.exists(_.text.contains("сложили две половинки")))
+    },
+
+    test("Объединить без второй половины этой зоны → сообщение, половинки на месте") {
+      for {
+        quad                          <- makeState(baseHero, List(kinetHalfA, gorgeHalf))
+        (state, _, invRepo, renderer)  = quad
+        _                             <- state.enter(testUser, renderer)
+        _                             <- state.action(testUser, selectItem(kinetHalfA.id), renderer)
+        _                             <- state.action(testUser, tap("CombineMap"), renderer)
+        items                          = invRepo.snapshot
+        screens                       <- renderer.sentScreens
+      } yield assertTrue(items.size == 2) &&
+              assertTrue(items.forall(_.itemType == ItemType.TreasureMapHalf)) &&
+              assertTrue(screens.exists(_.text.contains("Нужна вторая половина")))
     },
 
     test("BackFromInventory → возврат в HeroStats") {

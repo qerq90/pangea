@@ -461,8 +461,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         .map(_.flatMap(_.as[LootState.LootData].toOption))
       lootData = LootState.LootData(
         items = drops.collect {
-          case LootGenerator.LootDrop.Gear(i)   => i
-          case LootGenerator.LootDrop.Trophy(i) => i
+          case LootGenerator.LootDrop.Gear(i)    => i
+          case LootGenerator.LootDrop.Trophy(i)  => i
+          case LootGenerator.LootDrop.MapHalf(i) => i
         },
         golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a },
         returnState = prev.flatMap(_.returnState),

@@ -89,16 +89,16 @@ case class OutskirtsState(
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       chosen = scene.flatMap(s => inv.items.data.find(i => i.id == s.mapId && i.itemType == ItemType.TreasureMap))
-      res <- chosen match {
-        case None => showMapList(user, renderer) // карты уже нет — назад к списку
-        case Some(map) =>
+      res <- (chosen, chosen.flatMap(_.mapZone)) match {
+        case (Some(map), Some(zone)) =>
           for {
             now <- nowMs
             _   <- inventoryRepo.removeItem(map.id, hero.id).mapError(e => new Throwable(e.toString))
-            _   <- heroDao.writeSceneData(user.userId, TreasureHuntProgress(now, map.lvl).asJson)
+            _   <- heroDao.writeSceneData(user.userId, TreasureHuntProgress(now, zone).asJson)
             _   <- scheduler.schedule(user.userId, now + TreasureHuntState.HuntDurationMs,
                      TaskKind.TreasureHunt, StateType.TreasureHunt, TreasureHuntState.HuntDoneAction)
           } yield StateType.TreasureHunt
+        case _ => showMapList(user, renderer) // карты уже нет — назад к списку
       }
     } yield res
 

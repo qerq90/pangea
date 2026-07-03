@@ -5,7 +5,7 @@ import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -131,7 +131,7 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         invRepo   = TestInventoryRepository.withItems(List(ring1, ring2))
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
-        invState  = InventoryState(heroDao, invRepo, content)
+        invState  = InventoryState(heroDao, invRepo, TestItemRepository.make, content)
         _        <- invState.enter(testUser, renderer)
         _        <- invState.action(testUser, selectItem(ring1.id), renderer)
         _        <- invState.action(testUser, tap("Equip"), renderer)

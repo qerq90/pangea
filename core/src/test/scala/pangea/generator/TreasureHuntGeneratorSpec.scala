@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.loot.TreasureHuntGenerator
-import pangea.model.item.Rarity
+import pangea.model.item.{MapZone, Rarity}
 import zio.test._
 
 object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
@@ -10,7 +10,9 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
   private val allowedRarities: Set[Rarity] =
     Set(Rarity.Green, Rarity.Blue, Rarity.Purple, Rarity.Violet, Rarity.Orange)
 
-  private val rewards = (1 to 500).map(s => TreasureHuntGenerator.roll(50L, Rng(s.toLong))._1)
+  // Ущелье мертвецов — зона 51..75; лут должен катиться в этих уровнях.
+  private val zone    = MapZone.DeadmansGorge
+  private val rewards = (1 to 500).map(s => TreasureHuntGenerator.roll(zone, Rng(s.toLong))._1)
 
   override def spec = suite("TreasureHuntGenerator")(
 
@@ -25,6 +27,12 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
 
     test("редкость снаряжения только из допустимого набора (без серой/белой)") {
       assertTrue(rewards.forall(_.items.forall(i => allowedRarities.contains(i.rarity))))
+    },
+
+    test("уровень снаряжения — в диапазоне зоны (51..75 для Ущелья мертвецов)") {
+      val lvls = rewards.flatMap(_.items).map(_.lvl)
+      assertTrue(lvls.nonEmpty) &&
+        assertTrue(lvls.forall(l => l >= zone.levels.min.toLong && l <= zone.levels.max.toLong))
     },
 
     test("золото и дублоны взаимоисключающи; часто не выпадает ничего сверх снаряжения") {
@@ -47,8 +55,8 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
     },
 
     test("детерминизм: один seed → одинаковая добыча") {
-      val (a, _) = TreasureHuntGenerator.roll(50L, Rng(777L))
-      val (b, _) = TreasureHuntGenerator.roll(50L, Rng(777L))
+      val (a, _) = TreasureHuntGenerator.roll(zone, Rng(777L))
+      val (b, _) = TreasureHuntGenerator.roll(zone, Rng(777L))
       assertTrue(a.gold == b.gold) &&
         assertTrue(a.doubloons == b.doubloons) &&
         assertTrue(a.items.map(_.name) == b.items.map(_.name))

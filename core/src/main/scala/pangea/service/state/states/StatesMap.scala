@@ -136,7 +136,7 @@ object StatesMap {
           Battle    -> BattleState(heroDao, content),
           Death     -> DeathState(heroDao, inventoryRepo, content),
           Rest      -> RestState(heroDao, scheduler, content),
-          Inventory -> InventoryState(heroDao, inventoryRepo, content),
+          Inventory -> InventoryState(heroDao, inventoryRepo, itemRepo, content),
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
           Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
           Merchant -> MerchantState(heroDao, inventoryRepo, itemRepo, content),

@@ -2,6 +2,7 @@ package pangea.service.state.states.events.treasure
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.{Decoder, Encoder}
+import pangea.model.item.MapZone
 
 /** Прогресс цепочки боёв события «мобы, выкопавшие сокровище». Живёт в `eventData`
  *  добычи и в `scene_data` событийных состояний между боями.
@@ -28,9 +29,9 @@ object TreasureDigProgress {
 
 /** Прогресс похода за сокровищем по карте клада (таймер ~10 минут).
  *  @param startedAt момент отправки (epoch ms)
- *  @param mapLevel  уровень израсходованной карты — по нему масштабируется добыча
+ *  @param zone      зона израсходованной карты — её диапазон уровней задаёт добычу
  */
-final case class TreasureHuntProgress(startedAt: Long, mapLevel: Long)
+final case class TreasureHuntProgress(startedAt: Long, zone: MapZone)
 
 object TreasureHuntProgress {
   implicit val encoder: Encoder[TreasureHuntProgress] = deriveEncoder[TreasureHuntProgress]

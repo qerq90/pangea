@@ -56,6 +56,10 @@ case class Item(
   def isTreasureMap: Boolean =
     itemType == ItemType.TreasureMap || itemType == ItemType.TreasureMapHalf
 
+  /** Заголовок для списков и экранов. У карт клада уровня нет (зона сама задаёт
+   *  диапазон) — показываем только имя; у прочих предметов — «Имя Ур.N». */
+  def displayTitle: String = if (isTreasureMap) name else s"$name Ур.$lvl"
+
   /** Текст-описание карты (для целой — описание зоны, для половинки — заглушка).
    *  None у любого предмета, не являющегося картой. */
   def mapDescription: Option[String] =

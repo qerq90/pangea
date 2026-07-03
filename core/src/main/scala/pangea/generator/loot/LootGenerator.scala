@@ -1,7 +1,7 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.ItemGenerator
+import pangea.generator.item.{ItemGenerator, TreasureMapGenerator}
 import pangea.model.item.{Item, ItemType, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.item.{Rarity => ItemRarity}
@@ -29,6 +29,7 @@ object LootGenerator {
   object LootDrop {
     final case class Gear(item: Item)                  extends LootDrop
     final case class Trophy(item: Item)                extends LootDrop
+    final case class MapHalf(item: Item)               extends LootDrop
     final case class Gold(amount: Long, pile: Boolean) extends LootDrop
   }
 
@@ -37,6 +38,7 @@ object LootGenerator {
     case object Gear     extends Category
     case object Trophy   extends Category
     case object GoldPile extends Category
+    case object MapHalf  extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -49,11 +51,17 @@ object LootGenerator {
       case MobRarity.Legendary => List(100, 100, 60)
     }
 
-  // Веса категорий (в %), одинаковы для всех тиров; сумма = 100 → «пусто» нет
-  // (для первого слота). На последующих слотах уже выпавшая категория исключается,
-  // суммарный вес активных падает, и появляется доля «пусто».
-  private val categoryWeights: List[(Category, Int)] =
-    List(Category.Gear -> 35, Category.Trophy -> 39, Category.GoldPile -> 26)
+  // Веса категорий (в %); сумма = 100 → «пусто» нет (для первого слота). На
+  // последующих слотах уже выпавшая категория исключается, суммарный вес активных
+  // падает, и появляется доля «пусто». У мифических и легендарных мобов 1% забран
+  // у золота под половинку карты сокровищ (MapHalf).
+  private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
+    tier match {
+      case MobRarity.Mythical | MobRarity.Legendary =>
+        List(Category.Gear -> 35, Category.Trophy -> 39, Category.GoldPile -> 25, Category.MapHalf -> 1)
+      case _ =>
+        List(Category.Gear -> 35, Category.Trophy -> 39, Category.GoldPile -> 26)
+    }
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
   // Числа из §20 с исправленными суммами до 100% (Green добирает остаток).
@@ -160,7 +168,7 @@ object LootGenerator {
           val (roll, r1) = r.between(0L, 100L)
           if (roll >= chance) loop(rest, used, acc, r1)
           else {
-            val (catOpt, r2) = pickCategory(categoryWeights, used, r1)
+            val (catOpt, r2) = pickCategory(categoryWeights(tier), used, r1)
             catOpt match {
               case None => loop(rest, used, acc, r2)
               case Some(cat) =>
@@ -226,6 +234,10 @@ object LootGenerator {
       case Category.GoldPile =>
         val (amount, r1) = rollGold(killLevel, rng)
         (LootDrop.Gold(amount, pile = true), r1)
+
+      case Category.MapHalf =>
+        // половинка карты сокровищ — по уровню убитого моба; RNG не тратит
+        (LootDrop.MapHalf(TreasureMapGenerator.create(killLevel, half = true)), rng)
     }
 
   // Золото: базис lvl×4 с разбросом ±20%, минимум 1.

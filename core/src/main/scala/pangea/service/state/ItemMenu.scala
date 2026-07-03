@@ -26,9 +26,10 @@ object ItemMenu {
   def truncate(s: String): String =
     if (s.length <= MaxButtonLen) s else s.take(MaxButtonLen - 1) + "…"
 
-  /** Лейбл по умолчанию: `<имя> Ур.<уровень>`, обрезанный по лимиту. */
+  /** Лейбл по умолчанию: `<имя> Ур.<уровень>` (у карт клада — только имя),
+   *  обрезанный по лимиту. */
   def itemButtonLabel(item: Item): String =
-    truncate(s"${item.name} Ур.${item.lvl}")
+    truncate(item.displayTitle)
 
   /** Кнопки «по одной на ряд» начиная с `baseRow`. ID кнопки — `<prefix><id>`. */
   def itemButtons(items: List[Item], prefix: String, baseRow: Int = 0): List[Choice] =

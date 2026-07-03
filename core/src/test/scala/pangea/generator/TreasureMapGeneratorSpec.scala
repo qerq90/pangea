@@ -30,7 +30,7 @@ object TreasureMapGeneratorSpec extends ZIOSpecDefault {
     },
 
     test("целая карта: тип, легендарная редкость, имя, описание зоны и подсказка осмотра") {
-      val map = TreasureMapGenerator.create(heroLevel = 10, half = false)
+      val map = TreasureMapGenerator.create(dropLevel = 10, half = false)
       assertTrue(map.itemType == ItemType.TreasureMap) &&
         assertTrue(map.rarity == Rarity.Orange) &&
         assertTrue(map.isTreasureMap) &&
@@ -41,7 +41,7 @@ object TreasureMapGeneratorSpec extends ZIOSpecDefault {
     },
 
     test("половинка: свой тип, имя-половинка и общее описание-заглушка") {
-      val half = TreasureMapGenerator.create(heroLevel = 10, half = true)
+      val half = TreasureMapGenerator.create(dropLevel = 10, half = true)
       assertTrue(half.itemType == ItemType.TreasureMapHalf) &&
         assertTrue(half.name == MapZone.Kinet.halfName) &&
         assertTrue(half.mapDescription.contains(MapZone.HalfDescription)) &&

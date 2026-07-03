@@ -2,12 +2,13 @@ package pangea.generator.loot
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.{Item, Rarity => ItemRarity}
+import pangea.model.item.{Item, MapZone, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
 
-/** Чистое ядро добычи похода за сокровищем по карте клада. Уровень предметов и
-  * золота масштабируется по уровню карты.
+/** Чистое ядро добычи похода за сокровищем по карте клада. Уровень у карты не
+  * хранится: диапазон задаёт зона ([[MapZone.levels]], напр. Кинэт 1–25) — каждый
+  * предмет и золото катаются на случайный уровень внутри этого диапазона.
   *
   *   - снаряжение: 2 экземпляра гарантированно, 3-й — с шансом 50%, и только
   *     если он выпал, ролится 4-й (тоже 50%) → итог 2–4 предмета; редкость
@@ -29,14 +30,14 @@ object TreasureHuntGenerator {
       ItemRarity.Orange -> 2
     )
 
-  def roll(mapLevel: Long, rng: Rng): (Reward, Rng) = {
+  def roll(zone: MapZone, rng: Rng): (Reward, Rng) = {
     val (gearCount, r1)   = rollGearCount(rng)    // 2..4
-    val (items, r2)       = rollGear(gearCount, mapLevel, Nil, rng = r1)
+    val (items, r2)       = rollGear(gearCount, zone, Nil, rng = r1)
     val (bonusRoll, r3)   = r2.between(0L, 100L)
     val (gold, doubloons, r4) =
       if (bonusRoll < 50) (0L, 0L, r3)                             // 50% — ничего
       else if (bonusRoll < 80) {                                   // 30% — золото
-        val (g, rr) = rollGold(mapLevel, r3)
+        val (g, rr) = rollGold(zone, r3)
         (g, 0L, rr)
       } else {                                                     // 20% — дублоны
         val (d, rr) = r3.between(30L, 121L)                        // 30..120
@@ -57,20 +58,26 @@ object TreasureHuntGenerator {
   }
 
   @tailrec
-  private def rollGear(n: Int, mapLevel: Long, acc: List[Item], rng: Rng): (List[Item], Rng) =
+  private def rollGear(n: Int, zone: MapZone, acc: List[Item], rng: Rng): (List[Item], Rng) =
     if (n <= 0) (acc.reverse, rng)
     else {
       val (rarity, r1) = pickWeighted(gearRarityWeights, rng)
-      val (item, r2)   = ItemGenerator.createItem(mapLevel, rarity, r1)
-      rollGear(n - 1, mapLevel, item :: acc, r2)
+      val (lvl, r2)    = levelIn(zone, r1)
+      val (item, r3)   = ItemGenerator.createItemAtLevel(lvl, rarity, r2)
+      rollGear(n - 1, zone, item :: acc, r3)
     }
 
-  // Золото: базис lvl×12 с разбросом ±20%, минимум 1.
-  private def rollGold(mapLevel: Long, rng: Rng): (Long, Rng) = {
-    val base        = mapLevel.max(1L) * 12L
-    val (pct, next) = rng.between(80L, 121L) // 80..120 %
+  // Золото: базис lvl×12 (уровень — из диапазона зоны) с разбросом ±20%, минимум 1.
+  private def rollGold(zone: MapZone, rng: Rng): (Long, Rng) = {
+    val (lvl, r1)   = levelIn(zone, rng)
+    val base        = lvl.max(1L) * 12L
+    val (pct, next) = r1.between(80L, 121L) // 80..120 %
     ((base * pct / 100L).max(1L), next)
   }
+
+  // Случайный уровень в диапазоне зоны (включительно).
+  private def levelIn(zone: MapZone, rng: Rng): (Long, Rng) =
+    rng.between(zone.levels.min.toLong, zone.levels.max.toLong + 1L)
 
   private def pickWeighted[A](weights: List[(A, Int)], rng: Rng): (A, Rng) = {
     val total        = weights.map(_._2).sum.max(1)
