@@ -1,7 +1,7 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.ItemGenerator
+import pangea.generator.item.{ItemGenerator, TreasureMapGenerator}
 import pangea.model.item.{Item, ItemType, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.item.{Rarity => ItemRarity}
@@ -13,8 +13,8 @@ import scala.annotation.tailrec
   *
   *   - 2 слота: первый срабатывает на 100%, второй — на 60% (как «гарантированно
   *     что-то + 60% ещё одно, но не той же категории»);
-  *   - категории слота: Экипировка 35% · Трофей 35% · Золото 30% (сумма = 100;
-  *     исходный 1% «половинка карты сокровищ» отложен и влит в золото);
+  *   - категории слота: Экипировка 35% · Трофей 35% · Золото 27% · Половинка
+  *     карты сокровищ 3% (сумма = 100; половинка забрала свои 3% у золота);
   *   - редкость экипировки: Green 50 · Blue 42 · Purple 5 · Violet 2 · Orange 1;
   *   - трофей: Реликвия 35 · Талисман 65 (всегда ровно один);
   *   - золото: `lvl × 8 ± 20%`, плюс дублоны в диапазоне события.
@@ -28,9 +28,10 @@ object SchronGenerator {
 
   private sealed trait Category
   private object Category {
-    case object Gear   extends Category
-    case object Trophy extends Category
-    case object Gold   extends Category
+    case object Gear    extends Category
+    case object Trophy  extends Category
+    case object Gold    extends Category
+    case object MapHalf extends Category
   }
 
   // Слоты схрона и шанс каждого (в %): первый гарантированный, второй — 60%.
@@ -38,8 +39,9 @@ object SchronGenerator {
 
   // Веса категорий (в %, сумма = 100). На втором слоте уже выпавшая категория
   // исключается — суммарный вес активных падает, появляется доля «пусто».
+  // Половинка карты сокровищ (MapHalf) — 3%, забранные у золота (Gold: 30 → 27).
   private val categoryWeights: List[(Category, Int)] =
-    List(Category.Gear -> 35, Category.Trophy -> 35, Category.Gold -> 30)
+    List(Category.Gear -> 35, Category.Trophy -> 35, Category.Gold -> 27, Category.MapHalf -> 3)
 
   // Редкость выпавшей экипировки (в %, сумма = 100). Без серой/белой.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -99,6 +101,10 @@ object SchronGenerator {
                     val (g, r3) = rollGold(killLevel, r2)
                     val (d, r4) = r3.between(doubloonMin.toLong, doubloonMax.toLong + 1L)
                     loop(tail, used + cat, items, gold + g, doubloons + d, r4)
+                  case Category.MapHalf =>
+                    // половинка карты по уровню схрона; RNG не тратит
+                    val half = TreasureMapGenerator.create(killLevel, half = true)
+                    loop(tail, used + cat, half :: items, gold, doubloons, r2)
                 }
             }
       }

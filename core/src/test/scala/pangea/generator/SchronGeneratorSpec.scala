@@ -50,10 +50,18 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
     test("экипировка: редкости только Green/Blue/Purple/Violet/Orange, не трофей") {
       val gears = rewards(Race.Demon, 50L, 2, 3)
         .flatMap(_.items)
-        .filter(_.itemType != ItemType.Trophy)
+        .filter(i => i.itemType != ItemType.Trophy && !i.isTreasureMap)
       assertTrue(gears.nonEmpty) &&
       assertTrue(gears.forall(i => gearRarities.contains(i.rarity))) &&
       assertTrue(gears.forall(i => i.lvl >= 1L && i.lvl <= 51L))
+    },
+
+    test("половинка карты сокровищ (3%) встречается в схроне") {
+      val half = rewards(Race.Demon, 50L, 2, 3)
+        .flatMap(_.items)
+        .find(_.itemType == ItemType.TreasureMapHalf)
+      assertTrue(half.nonEmpty) &&
+      assertTrue(half.forall(_.mapZone.isDefined))
     },
 
     test("трофей: только Реликвия/Талисман, хранит расу и уровень") {
