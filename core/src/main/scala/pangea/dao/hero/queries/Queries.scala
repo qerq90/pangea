@@ -105,6 +105,12 @@ object Queries {
   def readGustavoData(userId: UserId): Fragment =
     sql"select gustavo_data from $tableName where user_id = $userId"
 
+  def writeCardSellerData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set card_seller_data = $data where user_id = $userId"
+
+  def readCardSellerData(userId: UserId): Fragment =
+    sql"select card_seller_data from $tableName where user_id = $userId"
+
   def writeReturnState(userId: UserId, state: Option[StateType]): Fragment =
     sql"update $tableName set return_state = $state where user_id = $userId"
 

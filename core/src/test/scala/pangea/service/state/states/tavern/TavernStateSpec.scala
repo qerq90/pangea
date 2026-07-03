@@ -1,5 +1,6 @@
 package pangea.service.state.states.tavern
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -41,6 +42,31 @@ object TavernStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.head.choices.map(_.id).contains("RentRoom")) &&
               assertTrue(screens.head.choices.map(_.id).contains("QuestBoard")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Innkeeper"))
+    },
+
+    test("продавец карт в таверне → кнопка «Подозрительный человек» над «Персонаж»") {
+      val offer = CardSellerData(offerUntil = Some(3600000L), price = Some(120L), nextRollAt = Some(3600000L))
+      for {
+        triple                     <- makeState(richHero)
+        (state, heroDao, renderer)  = triple
+        _                          <- heroDao.writeCardSellerData(userId, offer.asJson)
+        _                          <- state.enter(testUser, renderer)
+        choices                    <- renderer.sentScreens.map(_.head.choices)
+        sRow = choices.find(_.id == "SuspiciousMan").flatMap(_.row).getOrElse(99)
+        cRow = choices.find(_.id == "OpenCharacter").flatMap(_.row).getOrElse(0)
+      } yield assertTrue(choices.map(_.id).contains("SuspiciousMan")) &&
+              assertTrue(sRow < cRow)
+    },
+
+    test("гейт закрыт (продавца нет) → кнопки «Подозрительный человек» нет") {
+      val gated = CardSellerData(offerUntil = None, price = None, nextRollAt = Some(Long.MaxValue))
+      for {
+        triple                     <- makeState(richHero)
+        (state, heroDao, renderer)  = triple
+        _                          <- heroDao.writeCardSellerData(userId, gated.asJson)
+        _                          <- state.enter(testUser, renderer)
+        screens                    <- renderer.sentScreens
+      } yield assertTrue(!screens.head.choices.map(_.id).contains("SuspiciousMan"))
     },
 
     test("QuestBoard → переходит в QuestBoard") {

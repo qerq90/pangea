@@ -49,6 +49,10 @@ trait HeroDao {
   def writeGustavoData(userId: UserId, data: Json): Task[Unit]
   def readGustavoData(userId: UserId): Task[Option[Json]]
 
+  // Durable состояние продавца карт в таверне (присутствие/цена/почасовой ролл)
+  def writeCardSellerData(userId: UserId, data: Json): Task[Unit]
+  def readCardSellerData(userId: UserId): Task[Option[Json]]
+
   // Куда вернуться после «модального» экрана «Персонаж» (открывается из любой локации)
   def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit]
   def readReturnState(userId: UserId): Task[Option[StateType]]

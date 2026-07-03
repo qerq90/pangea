@@ -39,6 +39,7 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
       "QuestBoard"      -> Target.Goto(StateType.QuestBoard),
       "Innkeeper"       -> Target.Goto(StateType.Innkeeper),
       "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Tavern) },
+      "SuspiciousMan"   -> Target.Goto(StateType.CardSeller),
       "LeaveTavern"     -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.Tavern) }
@@ -51,20 +52,30 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
     roomStartedAt(user).flatMap {
       case Some(_) => showRoom(user, renderer)
       case None =>
-        getHero(user).flatMap { hero =>
-          val text = content.format("tavern.menu.text",
+        for {
+          now  <- nowMs
+          hero <- getHero(user)
+          // «Раз в час» ролл продавца карт (лениво, с почасовым гейтом внутри).
+          seller <- CardSeller.rollAndLoad(heroDao, user.userId, now)
+          text = content.format("tavern.menu.text",
             "cost" -> roomCost(hero).toString,
             "gold" -> hero.gold.toString)
-          val byId = content.screen("tavern.menu").choices.map(c => c.id -> c).toMap
-          val choices = List(
+          byId = content.screen("tavern.menu").choices.map(c => c.id -> c).toMap
+          present = seller.present(now)
+          // «Подозрительный человек» — зелёная кнопка над «Персонаж» (только когда он тут).
+          suspicious = Option.when(present)(
+            content.choice("SuspiciousMan", "tavern.suspiciousMan").copy(row = Some(2)))
+          charRow  = if (present) 3 else 2
+          leaveRow = if (present) 4 else 3
+          choices = suspicious.toList ++ List(
             byId("RentRoom").copy(row = Some(0)),
             byId("QuestBoard").copy(color = ChoiceColor.Positive, row = Some(1)),
             byId("Innkeeper").copy(color = ChoiceColor.Positive, row = Some(1)),
-            byId("OpenCharacter").copy(row = Some(2)),
-            byId("LeaveTavern").copy(color = ChoiceColor.Negative, row = Some(3))
+            byId("OpenCharacter").copy(row = Some(charRow)),
+            byId("LeaveTavern").copy(color = ChoiceColor.Negative, row = Some(leaveRow))
           )
-          renderer.show(user, Screen(text, choices))
-        }
+          _ <- renderer.show(user, Screen(text, choices))
+        } yield ()
     }
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

@@ -5,6 +5,7 @@ import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
 import pangea.model.state.StateType.{
   Battle,
+  CardSeller,
   Construction,
   Death,
   Dungeon,
@@ -75,6 +76,7 @@ import pangea.service.state.states.gustavo.{
 import pangea.service.state.states.registration.RegistrationState
 import pangea.service.state.states.hero.HeroStatsState
 import pangea.service.state.states.tavern.{
+  CardSellerState,
   InnkeeperState,
   QuestBoardState,
   TavernState
@@ -146,6 +148,7 @@ object StatesMap {
           GustavoSupplies   -> GustavoSuppliesState(heroDao, content),
           GustavoFlask      -> GustavoFlaskState(heroDao, content),
           Tavern            -> TavernState(heroDao, scheduler, content),
+          CardSeller        -> CardSellerState(heroDao, inventoryRepo, itemRepo, content),
           QuestBoard        -> QuestBoardState(heroDao, content),
           Innkeeper         -> InnkeeperState(heroDao, inventoryRepo, content),
           GoldVein          -> GoldVeinState(heroDao, scheduler, content),
