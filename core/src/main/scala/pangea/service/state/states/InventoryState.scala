@@ -7,7 +7,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.{Equipment, Hero}
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
@@ -179,9 +179,10 @@ case class InventoryState(
       items  = inv.items.data
       res <- items.find(_.id == halfId) match {
         case Some(first) if first.itemType == ItemType.TreasureMapHalf =>
+          val firstZone = zoneOf(first)
           val second = items.find(i =>
-            i.id != first.id && i.itemType == ItemType.TreasureMapHalf && i.mapZone == first.mapZone)
-          (first.mapZone, second) match {
+            i.id != first.id && i.itemType == ItemType.TreasureMapHalf && zoneOf(i) == firstZone)
+          (firstZone, second) match {
             case (Some(zone), Some(other)) =>
               val full = TreasureMapGenerator.full(zone)
               for {
@@ -192,7 +193,7 @@ case class InventoryState(
                 back      <- showList(user, renderer)
               } yield back
             case _ =>
-              val name = first.mapZone.map(_.treasureName).getOrElse("")
+              val name = firstZone.map(_.treasureName).getOrElse("")
               renderer.show(user, Screen(content.format("inventory.combineNeedSecond", "name" -> name), Nil)) *>
                 showList(user, renderer)
           }
@@ -258,6 +259,12 @@ object InventoryState {
     val newEq    = withSlot(hero.equipment, item)
     val newFight = applyDelta(hero.fightStats, item, oldItem)
     (newEq, newFight, oldItem)
+  }
+
+  /** Зона карты клада (для целой карты и её половинки); None у прочих предметов. */
+  private def zoneOf(item: Item): Option[pangea.model.item.MapZone] = item.details match {
+    case ItemDetails.TreasureMap(zone) => Some(zone)
+    case _                             => None
   }
 
   /** Подробное представление предмета (статы + надетое в том же слоте). Используется

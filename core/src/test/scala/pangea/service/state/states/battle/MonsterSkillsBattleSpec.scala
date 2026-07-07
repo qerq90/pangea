@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.SoloPveBattle
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -36,7 +36,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
     curHp:      Long = 100,
     maxHp:      Long = 100,
     curArmor:   Long = 0
-  ): ActiveBattle = ActiveBattle(
+  ): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
@@ -46,7 +46,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
     monsterCurrentArmor = curArmor
   )
 
-  private def makeState(hero: pangea.model.hero.Hero, b: ActiveBattle) =
+  private def makeState(hero: pangea.model.hero.Hero, b: SoloPveBattle) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       _        <- heroDao.writeActiveBattle(userId, b.asJson)
@@ -99,7 +99,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
         (state, heroDao, renderer)    = triple
         _                            <- TestRandom.feedInts(50, 50, 1, 0)
         _                            <- state.action(testUser, tap("Attack"), renderer)
-        afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption).get)
+        afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield
         // hp и armor моба не выросли (нет хила/ремонта); максимум — упали от обычной атаки героя.
         assertTrue(afterBattle.monsterCurrentHp <= 100L) &&

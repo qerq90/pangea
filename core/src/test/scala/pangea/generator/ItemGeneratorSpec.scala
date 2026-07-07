@@ -2,11 +2,18 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.{ItemType, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, Rarity}
 import pangea.model.skill.Skill
 import zio.test._
 
 object ItemGeneratorSpec extends ZIOSpecDefault {
+
+  private def skillOf(i: Item): Option[Skill] = i.details match {
+    case ItemDetails.Weapon(s) => Some(s)
+    case ItemDetails.Armor(s)  => Some(s)
+    case _                     => None
+  }
+
   def spec = suite("ItemGeneratorSpec")(
     test("same seed produces identical item") {
       val rng        = Rng(42L)
@@ -76,7 +83,7 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.Weapon)
       assertTrue(weapons.nonEmpty) &&
-      assertTrue(weapons.forall(_.activeSkill.exists(Skill.weaponSkills.contains)))
+      assertTrue(weapons.forall(i => skillOf(i).exists(Skill.weaponSkills.contains)))
     },
 
     test("ChestPlate всегда имеет activeSkill из armorSkills") {
@@ -84,21 +91,21 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.ChestPlate)
       assertTrue(chests.nonEmpty) &&
-      assertTrue(chests.forall(_.activeSkill.exists(Skill.armorSkills.contains)))
+      assertTrue(chests.forall(i => skillOf(i).exists(Skill.armorSkills.contains)))
     },
 
     test("Остальные слоты не получают activeSkill") {
       val others = (1L to 500L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Blue, Rng(s))._1)
         .filter(i => i.itemType != ItemType.Weapon && i.itemType != ItemType.ChestPlate)
-      assertTrue(others.forall(_.activeSkill.isEmpty))
+      assertTrue(others.forall(i => skillOf(i).isEmpty))
     },
 
     test("Распределение оружейных навыков примерно равномерно") {
       val skills = (1L to 1500L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.Weapon)
-        .flatMap(_.activeSkill)
+        .flatMap(skillOf)
       val counts = Skill.weaponSkills.map(s => skills.count(_ == s))
       // У всех 3 навыков ненулевая выборка — каждое значение хотя бы изредка выпало.
       assertTrue(counts.forall(_ > 0))

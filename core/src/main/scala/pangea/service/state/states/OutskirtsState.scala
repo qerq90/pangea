@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.ItemType
+import pangea.model.item.{ItemDetails, ItemType}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -89,7 +89,11 @@ case class OutskirtsState(
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       chosen = scene.flatMap(s => inv.items.data.find(i => i.id == s.mapId && i.itemType == ItemType.TreasureMap))
-      res <- (chosen, chosen.flatMap(_.mapZone)) match {
+      chosenZone = chosen.flatMap(_.details match {
+        case ItemDetails.TreasureMap(zone) => Some(zone)
+        case _                             => None
+      })
+      res <- (chosen, chosenZone) match {
         case (Some(map), Some(zone)) =>
           for {
             now <- nowMs

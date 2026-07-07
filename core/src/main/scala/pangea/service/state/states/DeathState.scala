@@ -4,7 +4,7 @@ import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Renderer, SceneContent, Screen}
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.SoloPveBattle
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -34,7 +34,7 @@ case class DeathState(
                         .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
       battleJson   <- heroDao.readActiveBattle(user.userId)
       monsterName   = battleJson
-                        .flatMap(_.as[ActiveBattle].toOption)
+                        .flatMap(_.as[SoloPveBattle].toOption)
                         .map(_.toMonster.name)
                         .getOrElse("Монстр")
       expLost       = (hero.exp * 0.1).toLong.max(0L)

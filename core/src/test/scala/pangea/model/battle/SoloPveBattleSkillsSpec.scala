@@ -6,9 +6,9 @@ import pangea.model.skill.Skill
 import pangea.model.stats.FightStats
 import zio.test._
 
-object ActiveBattleSkillsSpec extends ZIOSpecDefault {
+object SoloPveBattleSkillsSpec extends ZIOSpecDefault {
 
-  private def stub(slots: List[SkillSlotState]): ActiveBattle = ActiveBattle(
+  private def stub(slots: List[SkillSlotState]): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.values.head.entryName,
     monsterRarity       = Rarity.Common.entryName,
@@ -18,7 +18,7 @@ object ActiveBattleSkillsSpec extends ZIOSpecDefault {
     skillSlots          = slots
   )
 
-  def spec = suite("ActiveBattleSkillsSpec")(
+  def spec = suite("SoloPveBattleSkillsSpec")(
     test("tickBuffs уменьшает cooldown на 1, не ниже 0") {
       val b   = stub(List(
         SkillSlotState(1L, Skill.SweepingStrike, cooldown = 2),
@@ -58,14 +58,14 @@ object ActiveBattleSkillsSpec extends ZIOSpecDefault {
         SkillSlotState(7L,  Skill.CunningStrike, cooldown = 3, uses = 2),
         SkillSlotState(11L, Skill.Ram,           cooldown = 0, uses = 0)
       ))
-      val decoded = original.asJson.as[ActiveBattle]
+      val decoded = original.asJson.as[SoloPveBattle]
       assertTrue(decoded.exists(_.skillSlots == original.skillSlots))
     },
 
     test("Декодер совместим со старыми JSON-записями без skillSlots") {
       val legacy = stub(Nil).asJson
         .mapObject(_.remove("skillSlots"))
-      val decoded = legacy.as[ActiveBattle]
+      val decoded = legacy.as[SoloPveBattle]
       assertTrue(decoded.exists(_.skillSlots.isEmpty))
     }
   )

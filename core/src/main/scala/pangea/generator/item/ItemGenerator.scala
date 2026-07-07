@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, PotionKind, Rarity}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -168,22 +168,29 @@ object ItemGenerator {
 
     val (withExtras, rng5) = updateExtraParams(numberOfExtraParams, item, rng4)
     val (withMandatory, rng5b) = applyMandatory(withExtras, rng5)
-    val (withSkill, rng5c)     = applyActiveSkill(withMandatory, rng5b)
+    val (withDetails, rng5c)   = applyTypeDetails(withMandatory, rng5b)
     val (name, rng6) =
-      ItemNameGenerator.generate(withSkill.itemType, rarity, rng5c)
-    (withSkill.withName(name), rng6)
+      ItemNameGenerator.generate(withDetails.itemType, rarity, rng5c)
+    (withDetails.withName(name), rng6)
   }
 
-  // Активный навык падает только на Weapon (один из weaponSkills) и на ChestPlate
-  // (один из armorSkills), равновероятно среди допустимых для слота.
-  private def applyActiveSkill(item: Item, rng: Rng): (Item, Rng) =
+  // Спец-данные типа при генерации:
+  //  - оружию — активный навык (один из weaponSkills) → ItemDetails.Weapon;
+  //  - нагруднику — активный навык (один из armorSkills) → ItemDetails.Armor;
+  //  - поясу — случайное зелье (равновероятно из PotionKind) с зарядами по
+  //    редкости → ItemDetails.Belt.
+  private def applyTypeDetails(item: Item, rng: Rng): (Item, Rng) =
     item.itemType match {
       case ItemType.Weapon =>
         val (skill, next) = rng.pick(Skill.weaponSkills)
-        (item.copy(activeSkill = Some(skill)), next)
+        (item.copy(details = ItemDetails.Weapon(skill)), next)
       case ItemType.ChestPlate =>
         val (skill, next) = rng.pick(Skill.armorSkills)
-        (item.copy(activeSkill = Some(skill)), next)
+        (item.copy(details = ItemDetails.Armor(skill)), next)
+      case ItemType.Belt =>
+        val (potion, next) = rng.pick(PotionKind.values.toList)
+        val cap            = ItemDetails.Belt.capacityFor(item.rarity)
+        (item.copy(details = ItemDetails.Belt(potion, cap, cap)), next)
       case _ => (item, rng)
     }
 }

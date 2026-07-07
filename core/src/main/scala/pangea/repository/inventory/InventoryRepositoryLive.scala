@@ -46,9 +46,10 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     for {
       inventory <- inventoryDao.get(heroId).orElseFail(InventoryRepoError.CantFindInventory)
       refilled   = inventory.items.data.map(item =>
-                     if (item.itemType == pangea.model.item.ItemType.Flask && item.maxCharges.isDefined)
-                       item.copy(charges = item.maxCharges)
-                     else item)
+                     item.details match {
+                       case f: pangea.model.item.ItemDetails.Flask => item.copy(details = f.refilled)
+                       case _                                      => item
+                     })
       _         <- inventoryDao.update(inventory.withItems(refilled)).orElseFail(InventoryRepoError.CantUpdateInventory)
     } yield ()
 

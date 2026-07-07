@@ -1,7 +1,7 @@
 package pangea.generator
 
 import pangea.generator.item.TreasureMapGenerator
-import pangea.model.item.{ItemType, MapZone, Rarity}
+import pangea.model.item.{ItemDetails, ItemType, MapZone, Rarity}
 import zio.test._
 
 object TreasureMapGeneratorSpec extends ZIOSpecDefault {
@@ -37,7 +37,7 @@ object TreasureMapGeneratorSpec extends ZIOSpecDefault {
         assertTrue(map.name == MapZone.Kinet.mapName) &&
         assertTrue(map.mapDescription.exists(_.contains(MapZone.Kinet.description))) &&
         assertTrue(map.mapDescription.exists(_.contains(MapZone.InspectHint))) &&
-        assertTrue(map.mapZone.contains(MapZone.Kinet))
+        assertTrue(map.details == ItemDetails.TreasureMap(MapZone.Kinet))
     },
 
     test("половинка: свой тип, имя-половинка и общее описание-заглушка") {

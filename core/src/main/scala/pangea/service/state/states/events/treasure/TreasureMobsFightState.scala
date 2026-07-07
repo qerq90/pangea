@@ -5,7 +5,7 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Renderer, SceneContent, Screen}
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.monster.Race
 import pangea.model.state.StateType
@@ -43,7 +43,7 @@ case class TreasureMobsFightState(heroDao: HeroDao, content: SceneContent) exten
                        golds       = Nil,
                        returnState = Some(returnTarget),
                        eventData   = Some(chain.copy(remaining = afterThis).asJson))
-      _ <- heroDao.writeActiveBattle(user.userId, ActiveBattle.from(monster, hero).asJson)
+      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.from(monster, hero).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text("treasureMobs.nextFight"), Nil))
     } yield ()

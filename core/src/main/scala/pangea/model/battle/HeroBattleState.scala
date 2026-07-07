@@ -17,6 +17,12 @@ case class HeroBattleState(buffs: List[Buff]) {
   // Flat armor bonus that reduces raw damage before physical armor absorbs (doesn't deplete).
   def armorBonus: Long = buffs.map(_.armor).sum
 
+  // Прибавка в п.п. к итоговому шансу уклонения игрока (зелье уворота).
+  def dodgeBonus: Long = buffs.map(_.dodgePct).sum
+
+  // Прибавка в п.п. к итоговому шансу применить активный навык (зелье концентрации).
+  def skillHitBonus: Long = buffs.map(_.skillHitPct).sum
+
   // Decrement turnsLeft for each buff, remove expired ones.
   def tick: HeroBattleState = HeroBattleState(
     buffs.flatMap {

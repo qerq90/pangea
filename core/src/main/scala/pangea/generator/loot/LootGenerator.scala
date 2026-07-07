@@ -2,7 +2,7 @@ package pangea.generator.loot
 
 import pangea.domain.Rng
 import pangea.generator.item.{ItemGenerator, TreasureMapGenerator}
-import pangea.model.item.{Item, ItemType, TrophyKind}
+import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.item.{Rarity => ItemRarity}
 
@@ -226,8 +226,7 @@ object LootGenerator {
           armor = 0,
           defence = 0,
           evasion = 0,
-          race = Some(race.entryName),
-          trophyKind = Some(kind)
+          details = ItemDetails.Trophy(race.entryName, kind)
         )
         (LootDrop.Trophy(trophy), r1)
 

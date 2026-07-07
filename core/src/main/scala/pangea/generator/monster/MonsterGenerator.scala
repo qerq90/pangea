@@ -24,6 +24,10 @@ object MonsterGenerator {
       List.fill(4)(Mythical) ++
       List.fill(1)(Legendary)
 
+  // Пул редкостей для гарантированно отмеченного моба: только Rare+ в тех же
+  // относительных весах, что и в общем пуле (17 : 4 : 1).
+  private val markedRarityPool: List[Rarity] = rarityPool.filter(MarkedRarities.contains)
+
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
     val (race, rng1) = rng.pick(Race.values.toList)
     generateOfRace(dungeonLevel, race, rng1)
@@ -44,6 +48,18 @@ object MonsterGenerator {
     val marked     = MarkedRarities.contains(rarity) && markRoll < MarkedChance
     val finalStats = if (marked) boost(stats, MarkedMultiplier) else stats
     (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked), rng3)
+  }
+
+  /** Гарантированно «Отмеченный тьмой» моб заданного уровня — для механики
+    * выслеживания прохода вглубь. Редкость роллится среди Rare+ (в тех же
+    * относительных весах, что и обычный ролл), статы усилены `MarkedMultiplier`.
+    * Уровень сюда передаётся ЦЕЛЕВОЙ (куда игрок хочет спуститься), а не текущий.
+    */
+  def generateMarked(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
+    val (race, rng1)   = rng.pick(Race.values.toList)
+    val (rarity, rng2) = rng1.pick(markedRarityPool)
+    val stats          = boost(buildStats(dungeonLevel, rarity, race), MarkedMultiplier)
+    (Monster(0L, dungeonLevel.toLong, race, rarity, stats, marked = true), rng2)
   }
 
   // +X% ко всем показателям (атака/HP зажаты снизу единицей, как в buildStats).

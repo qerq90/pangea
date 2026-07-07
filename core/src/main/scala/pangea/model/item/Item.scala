@@ -4,7 +4,6 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import pangea.model.skill.Skill
 
 case class Item(
   id: Long,
@@ -19,17 +18,9 @@ case class Item(
   defence: Long,
   evasion: Long,
   hp: Long = 0, // обязательная прибавка к максимуму HP (доспех)
-  flaskEffect: Option[FlaskEffect] = None,
-  charges:     Option[Int]         = None,
-  maxCharges:  Option[Int]         = None,
-  race:        Option[String]      = None, // раса моба для трофеев (entryName); None у обычных предметов
-  trophyKind:  Option[TrophyKind]  = None, // вид трофея; None у обычных предметов
-  activeSkill: Option[Skill]       = None, // активный навык: только на Weapon (один из weaponSkills) и ChestPlate (один из armorSkills)
-  mapZone:     Option[MapZone]     = None  // зона карты клада; None у всех предметов, кроме карт/половинок
+  details: ItemDetails = ItemDetails.Plain // спец-данные типа (навык/заряды/трофей/карта)
 ) {
   def withId(id: Long): Item = copy(id = id)
-
-  def withRace(race: String): Item = copy(race = Some(race))
 
   def withName(name: String): Item = copy(name = name)
 
@@ -62,12 +53,14 @@ case class Item(
 
   /** Текст-описание карты (для целой — описание зоны, для половинки — заглушка).
    *  None у любого предмета, не являющегося картой. */
-  def mapDescription: Option[String] =
-    mapZone.map(_.descriptionFor(itemType))
+  def mapDescription: Option[String] = details match {
+    case ItemDetails.TreasureMap(zone) => Some(zone.descriptionFor(itemType))
+    case _                             => None
+  }
 
-  /** Строки характеристик для отображения (инвентарь/снаряжение/дроп). Активный
-   *  навык — последней строкой ниже всех статов; пустая строка возвращается, если
-   *  у предмета нет ни статов, ни навыка. */
+  /** Строки характеристик для отображения (инвентарь/снаряжение/дроп). Спец-строки
+   *  (активный навык, зелье пояса) — ниже числовых статов; пустая строка
+   *  возвращается, если у предмета нет ни статов, ни спец-данных. */
   def statsLines: List[String] = {
     val numeric = List(
       Option.when(attack > 0)(s"Атака: +$attack"),
@@ -78,7 +71,13 @@ case class Item(
       Option.when(evasion > 0)(s"Уклонение: +$evasion"),
       Option.when(hp > 0)(s"HP: +$hp")
     ).flatten
-    numeric ++ activeSkill.map(s => s"""Активный навык: «${s.label}»""").toList
+    val extra = details match {
+      case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
+      case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
+      case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
+      case _                             => Nil
+    }
+    numeric ++ extra
   }
 
   /** Строка «надетого/сравниваемого» предмета — единый формат для всех экранов,
@@ -92,7 +91,7 @@ case class Item(
 
 object Item {
   def NoItem: Item =
-    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
+    Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, ItemDetails.Plain)
 
   implicit val encoder: Encoder[Item] = deriveEncoder[Item]
   implicit val decoder: Decoder[Item] = deriveDecoder[Item]

@@ -2,7 +2,7 @@ package pangea.service.state.states
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -24,7 +24,7 @@ object LootStateSpec extends ZIOSpecDefault {
   private def trophy =
     Item(-1L, "Голова (Человек)", 5L, Rarity.Gray, ItemType.Trophy,
          attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
-         race = Some("Human"))
+         details = ItemDetails.Trophy("Human", TrophyKind.Head))
 
   private def makeState(loot: LootData, canAdd: Boolean = true) =
     for {

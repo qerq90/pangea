@@ -1,6 +1,6 @@
 package pangea.model.skill
 
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.SoloPveBattle
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.test.TestFixtures
@@ -27,7 +27,7 @@ object MonsterSkillSpec extends ZIOSpecDefault {
     mobMaxHp:      Long = 1000,
     curHp:         Long = 1000,
     curArmor:      Long = 50
-  ): ActiveBattle = ActiveBattle(
+  ): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,

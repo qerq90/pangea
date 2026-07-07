@@ -2,7 +2,7 @@ package pangea.service.state.states.events.treasure
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.ActiveBattle
+import pangea.model.battle.SoloPveBattle
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -34,7 +34,7 @@ object TreasureMobsFightStateSpec extends ZIOSpecDefault {
     fightStats = FightStats(atk = 50, hp = 200, armor = 0, defence = 0,
                             evasion = 9999, accuracy = 9999, concentration = 0))
 
-  private val weakBattle = ActiveBattle(
+  private val weakBattle = SoloPveBattle(
     monsterLvl = 1L, monsterRace = Race.Human.entryName, monsterRarity = Rarity.Common.entryName,
     monsterStats = FightStats(atk = 1, hp = 1, armor = 0, defence = 0, evasion = 0, accuracy = 1, concentration = 0),
     monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
@@ -54,7 +54,7 @@ object TreasureMobsFightStateSpec extends ZIOSpecDefault {
         (state, renderer, heroDao) = t
         _       <- TestRandom.feedLongs(1L) // seed моба
         _       <- state.enter(testUser, renderer)
-        battle  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption))
+        battle  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
         routing <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
         nextChain = routing.flatMap(_.eventData).flatMap(_.as[TreasureMobsChain].toOption)
       } yield assertTrue(battle.exists(_.monsterRace == Race.Orc.entryName)) &&

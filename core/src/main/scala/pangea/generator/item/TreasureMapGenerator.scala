@@ -1,6 +1,6 @@
 package pangea.generator.item
 
-import pangea.model.item.{Item, ItemType, MapZone, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, MapZone, Rarity}
 
 /**
  * Генератор карт клада и их половинок. У карты нет уровня: она несёт только зону
@@ -32,6 +32,6 @@ object TreasureMapGenerator {
       armor         = 0,
       defence       = 0,
       evasion       = 0,
-      mapZone       = Some(zone)
+      details       = ItemDetails.TreasureMap(zone)
     )
 }

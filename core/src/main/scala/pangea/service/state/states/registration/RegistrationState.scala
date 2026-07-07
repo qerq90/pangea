@@ -6,7 +6,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Beat, Branch, Choice, Journal, Narrative, Players, Renderer, SceneContent, Screen, Target}
 import pangea.model.GameEvent
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType, Rarity}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
@@ -105,8 +105,6 @@ object RegistrationState {
       attack = 1, accuracy = 1, concentration = 0, armor = 0, defence = 0, evasion = 0),
     Item(-2L,  "Фляга начинающего исследователя", 1L, Rarity.Gray, ItemType.Flask,
       attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
-      flaskEffect = Some(pangea.model.item.FlaskEffect.HealPercent(25)),
-      charges     = Some(8),
-      maxCharges  = Some(8))
+      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
   )
 }

@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemDetails}
 import pangea.model.monster.Race
 import pangea.model.quest.QuestData
 import pangea.model.state.StateType
@@ -81,7 +81,10 @@ case class InnkeeperState(
               .get(hero.id)
               .mapError(e => new Throwable(e.toString))
             matching = inv.items.data.find(i =>
-              i.itemType == ItemType.Trophy && i.race.contains(raceName)
+              i.details match {
+                case ItemDetails.Trophy(race, _) => race == raceName
+                case _                           => false
+              }
             )
             _ <- matching match {
               case None =>
@@ -143,8 +146,13 @@ case class InnkeeperState(
     } yield StateType.Innkeeper
 
   // Опыт за трофей: 5 + Ур.трофея × коэффициент(вид), округление вверх.
-  private def questExp(trophy: Item): Long =
-    math.ceil(5.0 + trophy.lvl.toDouble * trophy.trophyKind.get.coef).toLong
+  private def questExp(trophy: Item): Long = {
+    val coef = trophy.details match {
+      case ItemDetails.Trophy(_, kind) => kind.coef
+      case _                           => 0.0
+    }
+    math.ceil(5.0 + trophy.lvl.toDouble * coef).toLong
+  }
 
   private def readQuests(user: User): Task[Option[QuestData]] =
     heroDao.readQuestData(user.userId).map(_.flatMap(_.as[QuestData].toOption))

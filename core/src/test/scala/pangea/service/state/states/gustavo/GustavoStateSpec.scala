@@ -2,7 +2,7 @@ package pangea.service.state.states.gustavo
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.{ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.trauma.Trauma
@@ -31,7 +31,12 @@ object GustavoStateSpec extends ZIOSpecDefault {
   // фляга с charges/maxCharges для тестов пополнения
   private def flask(charges: Int, maxCharges: Int): Item =
     Item.NoItem.copy(name = "Фляга", itemType = ItemType.Flask,
-      charges = Some(charges), maxCharges = Some(maxCharges))
+      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = charges, maxCharges = maxCharges))
+
+  private def flaskCharges(i: Item): Option[Int] = i.details match {
+    case f: ItemDetails.Flask => Some(f.charges)
+    case _                    => None
+  }
   private def heroWithFlask(f: Item, gold: Long = 5000L) =
     hero(gold = gold).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
 
@@ -287,7 +292,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
         } yield assertTrue(st == StateType.GustavoSupplies) &&
-                assertTrue(h.equipment.flask.charges.contains(3)) &&
+                assertTrue(flaskCharges(h.equipment.flask).contains(3)) &&
                 assertTrue(h.gold == 4750L) &&
                 assertTrue(screens.exists(_.text.contains("наполнил флягу")))
       },
@@ -300,7 +305,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
         } yield assertTrue(h.gold == 100L) &&
-                assertTrue(h.equipment.flask.charges.contains(1)) &&
+                assertTrue(flaskCharges(h.equipment.flask).contains(1)) &&
                 assertTrue(screens.exists(_.text.contains("Столько золота нет")))
       },
 

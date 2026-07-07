@@ -23,7 +23,7 @@ object SkillSlotState {
   implicit val decoder: Decoder[SkillSlotState] = deriveDecoder
 }
 
-case class ActiveBattle(
+case class SoloPveBattle(
   monsterLvl:          Long,
   monsterRace:         String,
   monsterRarity:       String,
@@ -31,9 +31,10 @@ case class ActiveBattle(
   monsterCurrentHp:    Long,
   monsterCurrentArmor: Long,
   heroBattleState:     HeroBattleState = HeroBattleState.empty,
-  flaskUsedThisRound:  Boolean = false,
+  consumableUsedThisRound: Boolean = false, // за раунд можно выпить либо флягу, либо зелье пояса
   monsterMarked:       Boolean = false,
-  skillSlots:          List[SkillSlotState] = Nil
+  skillSlots:          List[SkillSlotState] = Nil,
+  effects:             BattleEffects = BattleEffects.empty // тикающие статус-эффекты (яд/реген)
 ) {
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
@@ -43,10 +44,10 @@ case class ActiveBattle(
   /** Тик в конце хода игрока. `skipSlots` — itemId слотов, кулдауны которых не
    *  должны декрементиться (например, слот, скил из которого только что
    *  использован — его cd должен начать отсчитываться со СЛЕДУЮЩЕГО хода). */
-  def tickBuffs(skipSlots: Set[Long] = Set.empty): ActiveBattle = copy(
-    heroBattleState    = heroBattleState.tick,
-    flaskUsedThisRound = false,
-    skillSlots         = skillSlots.map(s =>
+  def tickBuffs(skipSlots: Set[Long] = Set.empty): SoloPveBattle = copy(
+    heroBattleState         = heroBattleState.tick,
+    consumableUsedThisRound = false,
+    skillSlots              = skillSlots.map(s =>
       if (skipSlots.contains(s.itemId)) s
       else s.copy(cooldown = (s.cooldown - 1).max(0))
     )
@@ -54,15 +55,15 @@ case class ActiveBattle(
 
   def slotByItem(itemId: Long): Option[SkillSlotState] = skillSlots.find(_.itemId == itemId)
 
-  def updateSlot(itemId: Long)(f: SkillSlotState => SkillSlotState): ActiveBattle =
+  def updateSlot(itemId: Long)(f: SkillSlotState => SkillSlotState): SoloPveBattle =
     copy(skillSlots = skillSlots.map(s => if (s.itemId == itemId) f(s) else s))
 }
 
-object ActiveBattle {
+object SoloPveBattle {
   /** Сборка боя из моба и героя: статы/hp/броня берутся с моба, слоты активных
    *  навыков отдаёт сам герой (`hero.activeSkillSlots`). Единая точка входа в
    *  бой для всех событий. */
-  def from(monster: Monster, hero: Hero): ActiveBattle = ActiveBattle(
+  def from(monster: Monster, hero: Hero): SoloPveBattle = SoloPveBattle(
     monsterLvl          = monster.lvl,
     monsterRace         = monster.race.entryName,
     monsterRarity       = monster.rarity.entryName,
@@ -73,9 +74,9 @@ object ActiveBattle {
     skillSlots          = hero.activeSkillSlots
   )
 
-  implicit val encoder: Encoder[ActiveBattle] = deriveEncoder
+  implicit val encoder: Encoder[SoloPveBattle] = deriveEncoder
 
-  implicit val decoder: Decoder[ActiveBattle] = (c: HCursor) =>
+  implicit val decoder: Decoder[SoloPveBattle] = (c: HCursor) =>
     for {
       monsterLvl          <- c.get[Long]("monsterLvl")
       monsterRace         <- c.get[String]("monsterRace")
@@ -84,9 +85,10 @@ object ActiveBattle {
       monsterCurrentHp    <- c.get[Long]("monsterCurrentHp")
       monsterCurrentArmor <- c.get[Long]("monsterCurrentArmor")
       heroBattleState     <- c.getOrElse[HeroBattleState]("heroBattleState")(HeroBattleState.empty)
-      flaskUsedThisRound  <- c.getOrElse[Boolean]("flaskUsedThisRound")(false)
+      consumableUsed      <- c.getOrElse[Boolean]("consumableUsedThisRound")(false)
       monsterMarked       <- c.getOrElse[Boolean]("monsterMarked")(false)
       skillSlots          <- c.getOrElse[List[SkillSlotState]]("skillSlots")(Nil)
-    } yield ActiveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
-                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, flaskUsedThisRound, monsterMarked, skillSlots)
+      effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
+    } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
+                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked, skillSlots, effects)
 }

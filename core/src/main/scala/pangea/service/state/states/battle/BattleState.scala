@@ -5,8 +5,10 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
-import pangea.model.battle.{ActiveBattle, SkillSlotState}
-import pangea.model.hero.Hero
+import pangea.model.battle.{Buff, Regen, SoloPveBattle, SkillSlotState}
+import pangea.model.hero.{Equipment, Hero}
+import pangea.model.item.{FlaskEffect, ItemDetails, PotionKind}
+import pangea.model.stats.FightStats
 import pangea.model.skill.{MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -22,6 +24,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "Attack" -> Target.Run((user, _, renderer) => attack(user, renderer)),
       "UseFlask" -> Target.Run { (user, _, renderer) =>
         useFlask(user, renderer)
+      },
+      "UseBelt" -> Target.Run { (user, _, renderer) =>
+        useBelt(user, renderer)
       },
       "Flee" -> Target.Run((user, _, renderer) => flee(user, renderer)),
       "ConfirmFlee" -> Target.Run { (user, _, renderer) =>
@@ -73,12 +78,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * используется, когда базовая атака идёт после применения скилла (тогда
     * prefix содержит описание самого скилла). `skipSlots` пробрасывается в
     * `monsterAttacks → tickBuffs`, чтобы только что использованный слот не
-    * тикался в этом же ходу (см. ActiveBattle.tickBuffs).
+    * тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
     */
   private def playerBasicAttack(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       nowMs: Long,
       renderer: Renderer,
       prefix: String,
@@ -113,14 +118,28 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             hpDmg    = damage - armorDmg
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
+            // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
+            // если удар прошёл в HP (hpDmg > 0) и моб жив: повторное попадание стакает
+            // текущий яд (+OnHit), иначе накладывает свежий.
+            poisonsNow = battle.effects.heroPoisonousAttacks && hpDmg > 0 && newHp > 0
+            effects =
+              if (!battle.effects.heroPoisonousAttacks) battle.effects
+              else battle.effects.copy(
+                heroPoisonousAttacks = false,
+                monsterPoison =
+                  if (poisonsNow) Some(battle.effects.monsterPoison.map(_.stacked).getOrElse(pangea.model.battle.Poison.onHit))
+                  else battle.effects.monsterPoison
+              )
+            attackLineFull = attackLine + (if (poisonsNow) "\n" + content.format("battle.poisonApplied", "monster" -> monster.name) else "")
             updated = battle.copy(
               monsterCurrentHp = newHp,
-              monsterCurrentArmor = newArmor
+              monsterCurrentArmor = newArmor,
+              effects = effects
             )
             r <-
               if (newHp <= 0)
                 heroDao.writeActiveBattle(user.userId, updated.asJson) *>
-                  renderer.show(user, Screen(prefix + attackLine, Nil)) *>
+                  renderer.show(user, Screen(prefix + attackLineFull, Nil)) *>
                   victory(user, hero, updated, renderer)
               else
                 monsterAttacks(
@@ -129,7 +148,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   updated,
                   nowMs,
                   renderer,
-                  prefix + attackLine,
+                  prefix + attackLineFull,
                   skipSlots
                 )
           } yield r
@@ -187,20 +206,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def castSkill(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       slot: SkillSlotState,
       nowMs: Long,
       renderer: Renderer
   ): Task[StateType] =
     for {
-      effHero <- ZIO.succeed(hero.effectiveFightStats(nowMs))
-      buffed = battle.heroBattleState.applyTo(effHero)
-      hitChance = BattleState.heroSkillHitChance(
-        heroConc = buffed.concentration,
-        heroInt = hero.effectiveBaseStats(nowMs).int,
-        monsterConc = battle.monsterStats.concentration,
-        rarityFactor = battle.rarity.factor
-      )
+      hitChance <- ZIO.succeed(heroSkillHitChance(hero, battle, nowMs))
       roll <- Random.nextIntBetween(1, 101)
       hitPct = hitChance.toInt
       result <-
@@ -215,7 +227,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def skillHit(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       slot: SkillSlotState,
       nowMs: Long,
       renderer: Renderer
@@ -288,7 +300,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def skillMiss(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       slot: SkillSlotState,
       nowMs: Long,
       renderer: Renderer,
@@ -319,7 +331,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def monsterAttacks(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       nowMs: Long,
       renderer: Renderer,
       playerLine: String,
@@ -421,22 +433,76 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           } yield out
       (finalBattle, finalHero, skillLine) = castResult
 
-      _ <- heroDao.updateFightStats(user.userId, finalHero.fightStats)
-      _ <- heroDao.writeActiveBattle(user.userId, finalBattle.asJson)
+      // 3) Конец раунда: тик статус-эффектов. Стадии героя и монстра — раздельные,
+      // каждая со своей строкой (в будущем UI сможет показать статусы у своих статов).
+      // Применяются только пока герой жив.
+      heroAlive = finalHero.fightStats.hp > 0
+      (tickedHero, battleAfterHero, heroEffectLine) =
+        if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
+        else (finalHero, finalBattle, "")
+      (tickedBattle, monsterEffectLine) =
+        if (heroAlive) tickMonsterEffects(battleAfterHero, monster.name)
+        else (battleAfterHero, "")
+
+      _ <- heroDao.updateFightStats(user.userId, tickedHero.fightStats)
+      _ <- heroDao.writeActiveBattle(user.userId, tickedBattle.asJson)
       _ <- renderer.show(
         user,
-        Screen(playerLine + "\n\n" + mobLine + skillLine, Nil)
+        Screen(playerLine + "\n\n" + mobLine + skillLine + monsterEffectLine + heroEffectLine, Nil)
       )
 
       r <-
-        if (finalHero.fightStats.hp <= 0) heroDeath(user, renderer)
+        if (tickedHero.fightStats.hp <= 0) heroDeath(user, renderer)
+        else if (tickedBattle.monsterCurrentHp <= 0)
+          victory(user, tickedHero, tickedBattle, renderer)
         else showScreen(user, renderer).as(StateType.Battle)
     } yield r
+
+  /** Тик эффектов ГЕРОЯ в конце раунда: реген лечит на `pct`% макс.HP и слабеет.
+    * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку эффекта. */
+  private def tickHeroEffects(
+      hero: Hero,
+      battle: SoloPveBattle,
+      nowMs: Long
+  ): (Hero, SoloPveBattle, String) =
+    battle.effects.heroRegen match {
+      case Some(regen) =>
+        val maxHp  = hero.effectiveMaxHp(nowMs)
+        val heal   = regen.healOn(maxHp)
+        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - hero.fightStats.hp
+        (
+          hero.copy(fightStats = hero.fightStats.copy(hp = newHp)),
+          battle.copy(effects = battle.effects.copy(heroRegen = regen.decayed)),
+          "\n" + content.format("battle.regenTick", "healed" -> healed.toString)
+        )
+      case None => (hero, battle, "")
+    }
+
+  /** Тик эффектов МОНСТРА в конце раунда: яд снимает `pct`% его макс.HP мимо брони
+    * и слабеет. Возвращает обновлённый бой плюс строку эффекта. */
+  private def tickMonsterEffects(
+      battle: SoloPveBattle,
+      monsterName: String
+  ): (SoloPveBattle, String) =
+    battle.effects.monsterPoison match {
+      case Some(poison) =>
+        val dmg   = poison.damageOn(battle.monsterStats.hp)
+        val newHp = (battle.monsterCurrentHp - dmg).max(0L)
+        (
+          battle.copy(
+            monsterCurrentHp = newHp,
+            effects = battle.effects.copy(monsterPoison = poison.decayed)
+          ),
+          "\n" + content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
+        )
+      case None => (battle, "")
+    }
 
   private def victory(
       user: User,
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       renderer: Renderer
   ): Task[StateType] =
     for {
@@ -594,25 +660,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       hero   <- getHero(user)
       battle <- getBattle(user)
       flask = hero.equipment.flask
-      result <-
-        if (flask.itemType == pangea.model.item.ItemType.NoItem)
-          renderer
-            .show(user, Screen(content.text("battle.noFlask"), Nil))
-            .as(StateType.Battle)
-        else if (flask.charges.forall(_ <= 0))
+      result <- flask.details match {
+        case f: ItemDetails.Flask if f.charges <= 0 =>
           renderer
             .show(user, Screen(content.text("battle.flaskEmpty"), Nil))
             .as(StateType.Battle)
-        else if (battle.flaskUsedThisRound)
+        case _: ItemDetails.Flask if battle.consumableUsedThisRound =>
           renderer
-            .show(user, Screen(content.text("battle.flaskAlreadyUsed"), Nil))
+            .show(user, Screen(content.text("battle.consumableAlreadyUsed"), Nil))
             .as(StateType.Battle)
-        else {
-          val spentFlask    = flask.copy(charges = flask.charges.map(_ - 1))
-          val newEquipment  = hero.equipment.copy(flask = spentFlask)
-          val updatedBattle = battle.copy(flaskUsedThisRound = true)
-          flask.flaskEffect match {
-            case Some(pangea.model.item.FlaskEffect.HealPercent(pct)) =>
+        case f: ItemDetails.Flask =>
+          val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
+          val updatedBattle = battle.copy(consumableUsedThisRound = true)
+          f.effect match {
+            case FlaskEffect.HealPercent(pct) =>
               val maxHp    = hero.effectiveMaxHp(now)
               val healAmt  = (maxHp * pct / 100L).max(1L)
               val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
@@ -642,7 +703,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 )
                 _ <- showScreen(user, renderer)
               } yield StateType.Battle
-            case Some(pangea.model.item.FlaskEffect.AddBuff(buff, rounds)) =>
+            case FlaskEffect.AddBuff(buff, rounds) =>
               val timedBuff = buff.copy(turnsLeft = Some(rounds))
               val newBattle = updatedBattle.copy(heroBattleState =
                 updatedBattle.heroBattleState.add(timedBuff)
@@ -656,13 +717,139 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 )
                 _ <- showScreen(user, renderer)
               } yield StateType.Battle
-            case None =>
-              renderer
-                .show(user, Screen(content.text("battle.flaskNoEffect"), Nil))
-                .as(StateType.Battle)
           }
-        }
+        case _ =>
+          renderer
+            .show(user, Screen(content.text("battle.noFlask"), Nil))
+            .as(StateType.Battle)
+      }
     } yield result
+
+  /** Применение зелья пояса. Зеркалит [[useFlask]]: проверки пусто/уже-пили, трата
+    * заряда, затем эффект по типу зелья ([[applyPotion]]). */
+  private def useBelt(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero   <- getHero(user)
+      battle <- getBattle(user)
+      belt = hero.equipment.belt
+      result <- belt.details match {
+        case b: ItemDetails.Belt if b.charges <= 0 =>
+          renderer
+            .show(user, Screen(content.text("battle.beltEmpty"), Nil))
+            .as(StateType.Battle)
+        case _: ItemDetails.Belt if battle.consumableUsedThisRound =>
+          renderer
+            .show(user, Screen(content.text("battle.consumableAlreadyUsed"), Nil))
+            .as(StateType.Battle)
+        case b: ItemDetails.Belt =>
+          val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
+          val battle1   = battle.copy(consumableUsedThisRound = true)
+          applyPotion(user, hero, battle1, equipment, b.potion, now, renderer)
+        case _ =>
+          renderer
+            .show(user, Screen(content.text("battle.noBelt"), Nil))
+            .as(StateType.Battle)
+      }
+    } yield result
+
+  /** Эффект конкретного зелья пояса. Мгновенные (лечение/металл) меняют статы
+    * героя; временные (атака/защита/уворот/концентрация) кладут баф на 5 ходов;
+    * яд/реген ставят соответствующий статус-эффект. `equipment` уже с потраченным
+    * зарядом, `battle` — с выставленным `consumableUsedThisRound`. */
+  private def applyPotion(
+      user: User,
+      hero: Hero,
+      battle: SoloPveBattle,
+      equipment: Equipment,
+      potion: PotionKind,
+      nowMs: Long,
+      renderer: Renderer
+  ): Task[StateType] = {
+    val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    potion match {
+      case PotionKind.Healing =>
+        val maxHp  = hero.effectiveMaxHp(nowMs)
+        val heal   = (maxHp * 25 / 100L).max(1L)
+        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - hero.fightStats.hp
+        finishBelt(user, equipment, Some(hero.fightStats.copy(hp = newHp)), battle, renderer,
+          content.format("battle.beltHeal", "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString))
+
+      case PotionKind.Metal =>
+        val maxArmor = hero.effectiveMaxArmor(nowMs)
+        val restore  = (maxArmor * 20 / 100L).max(1L)
+        val newArmor = (hero.fightStats.armor + restore).min(maxArmor)
+        val gained   = newArmor - hero.fightStats.armor
+        finishBelt(user, equipment, Some(hero.fightStats.copy(armor = newArmor)), battle, renderer,
+          content.format("battle.beltMetal", "armor" -> gained.toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString))
+
+      case PotionKind.Poison =>
+        val newBattle = battle.copy(effects = battle.effects.copy(heroPoisonousAttacks = true))
+        finishBelt(user, equipment, None, newBattle, renderer, content.text("battle.beltPoison"))
+
+      case PotionKind.Regeneration =>
+        val newBattle = battle.copy(effects = battle.effects.copy(heroRegen = Some(Regen.onDrink)))
+        finishBelt(user, equipment, None, newBattle, renderer,
+          content.format("battle.beltRegen", "pct" -> Regen.OnDrink.toString))
+
+      case PotionKind.Evasion =>
+        addBeltBuff(user, equipment, battle, renderer,
+          Buff(0L, 0L, 0L, dodgePct = 10L, skillHitPct = 0L, Some(ItemDetails.Belt.BuffRounds)),
+          content.format("battle.beltEvasion", "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+
+      case PotionKind.Concentration =>
+        addBeltBuff(user, equipment, battle, renderer,
+          Buff(0L, 0L, 0L, dodgePct = 0L, skillHitPct = 10L, Some(ItemDetails.Belt.BuffRounds)),
+          content.format("battle.beltConcentration", "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+
+      case PotionKind.Attack =>
+        val bonus = (buffed.atk * 5 / 100L).max(1L)
+        addBeltBuff(user, equipment, battle, renderer,
+          Buff(atk = bonus, 0L, 0L, 0L, 0L, Some(ItemDetails.Belt.BuffRounds)),
+          content.format("battle.beltAttack", "atk" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+
+      case PotionKind.Defence =>
+        val bonus = (buffed.defence * 10 / 100L).max(1L)
+        addBeltBuff(user, equipment, battle, renderer,
+          Buff(0L, 0L, defence = bonus, 0L, 0L, Some(ItemDetails.Belt.BuffRounds)),
+          content.format("battle.beltDefence", "defence" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+    }
+  }
+
+  /** Кладёт временный баф на героя и сохраняет бой (без изменения статов). */
+  private def addBeltBuff(
+      user: User,
+      equipment: Equipment,
+      battle: SoloPveBattle,
+      renderer: Renderer,
+      buff: Buff,
+      msg: String
+  ): Task[StateType] =
+    finishBelt(user, equipment, None,
+      battle.copy(heroBattleState = battle.heroBattleState.add(buff)), renderer, msg)
+
+  /** Общий хвост применения зелья: персист (снаряжение + опц. статы), запись боя,
+    * сообщение об эффекте и перерисовка экрана боя. */
+  private def finishBelt(
+      user: User,
+      equipment: Equipment,
+      newStats: Option[FightStats],
+      battle: SoloPveBattle,
+      renderer: Renderer,
+      msg: String
+  ): Task[StateType] = {
+    val persist = newStats match {
+      case Some(stats) => heroDao.updateEquipmentAndFightStats(user.userId, equipment, stats)
+      case None        => heroDao.updateEquipment(user.userId, equipment)
+    }
+    for {
+      _ <- persist
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- renderer.show(user, Screen(msg, Nil))
+      _ <- showScreen(user, renderer)
+    } yield StateType.Battle
+  }
 
   private def showScreen(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -677,7 +864,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   private def buildBattleScreen(
       hero: Hero,
-      battle: ActiveBattle,
+      battle: SoloPveBattle,
       maxHp: Long,
       nowMs: Long
   ): Screen = {
@@ -697,14 +884,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       defenderInt = hero.effectiveBaseStats(nowMs).int,
       attackerInt = battle.monsterStats.concentration
     ) * 100.0).toInt
-    val heroSkillHitPct = BattleState
-      .heroSkillHitChance(
-        heroConc = buffedEff.concentration,
-        heroInt = hero.effectiveBaseStats(nowMs).int,
-        monsterConc = battle.monsterStats.concentration,
-        rarityFactor = battle.rarity.factor
-      )
-      .toInt
+    val heroSkillHitPct = heroSkillHitChance(hero, battle, nowMs).toInt
     val mobSkillHitPct = BattleState
       .monsterSkillHitChance(
         monsterConc = battle.monsterStats.concentration,
@@ -713,12 +893,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         heroInt = hero.effectiveBaseStats(nowMs).int
       )
       .toInt
+    // Статус-эффекты рядом со статами своей сущности: яд у HP моба (-урон/ход),
+    // реген у HP героя (+лечение/ход).
+    val monsterPoison = battle.effects.monsterPoison
+      .map(p => s" (-${p.damageOn(battle.monsterStats.hp)})").getOrElse("")
+    val heroRegen = battle.effects.heroRegen
+      .map(r => s" (+${r.healOn(maxHp)})").getOrElse("")
     val text = content.format(
       "battle.enter.text",
       "monster"         -> battle.toMonster.name,
       "monsterRace"     -> battle.toMonster.race.toString,
       "monsterHp"       -> battle.monsterCurrentHp.toString,
       "monsterMax"      -> battle.monsterStats.hp.toString,
+      "monsterPoison"   -> monsterPoison,
+      "heroRegen"       -> heroRegen,
       "monsterArmor"    -> battle.monsterCurrentArmor.toString,
       "monsterMaxArmor" -> battle.monsterStats.armor.toString,
       "monsterAtk"      -> battle.monsterStats.atk.toString,
@@ -736,7 +924,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroReduction" -> s"$reductionPct%",
       "heroSkillHit"  -> s"$heroSkillHitPct%",
       "mobSkillHit"   -> s"$mobSkillHitPct%",
-      "flaskCharges"  -> hero.equipment.flask.charges.getOrElse(0).toString
+      "flaskCharges"  -> BattleState.flaskCharges(hero).toString
     )
     val skillButtons = battle.skillSlots.collect {
       case slot if slot.cooldown <= 0 =>
@@ -747,27 +935,39 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           row = Some(0)
         )
     }
-    // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Фляга; row 3 —
-    // Сбежать. Места под заглушки (доп. слот, стиль атаки, сменить цель) пока скрыты.
-    val mainButtons = List(
-      pangea.engine.Choice("Attack", "Атака", row = Some(1)), {
-        val flaskCharges = hero.equipment.flask.charges.getOrElse(0)
-        pangea.engine.Choice(
-          "UseFlask",
-          s"🧪 Фляга ($flaskCharges)",
-          color =
-            if (flaskCharges <= 0) pangea.engine.ChoiceColor.Negative
-            else pangea.engine.ChoiceColor.Primary,
-          row = Some(2)
-        )
-      },
-      pangea.engine.Choice(
-        "Flee",
-        "Сбежать",
-        color = pangea.engine.ChoiceColor.Negative,
-        row = Some(3)
-      )
+    // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Фляга и Пояс
+    // (Пояс — только если несёт зелье); row 3 — Сбежать. Места под заглушки (доп.
+    // слот, стиль атаки, сменить цель) пока скрыты.
+    val flaskCharges = BattleState.flaskCharges(hero)
+    val flaskButton = pangea.engine.Choice(
+      "UseFlask",
+      s"🧪 Фляга ($flaskCharges)",
+      color =
+        if (flaskCharges <= 0) pangea.engine.ChoiceColor.Negative
+        else pangea.engine.ChoiceColor.Primary,
+      row = Some(2)
     )
+    val beltButton = BattleState.beltPotion(hero).map { belt =>
+      pangea.engine.Choice(
+        "UseBelt",
+        s"👝 Пояс (${belt.charges})",
+        color =
+          if (belt.charges <= 0) pangea.engine.ChoiceColor.Negative
+          else pangea.engine.ChoiceColor.Primary,
+        row = Some(2)
+      )
+    }
+    val mainButtons =
+      List(pangea.engine.Choice("Attack", "Атака", row = Some(1)), flaskButton) ++
+        beltButton.toList ++
+        List(
+          pangea.engine.Choice(
+            "Flee",
+            "Сбежать",
+            color = pangea.engine.ChoiceColor.Negative,
+            row = Some(3)
+          )
+        )
     Screen(text, skillButtons ++ mainButtons)
   }
 
@@ -777,25 +977,41 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
 
-  private def getBattle(user: User): Task[ActiveBattle] =
+  private def getBattle(user: User): Task[SoloPveBattle] =
     heroDao
       .readActiveBattle(user.userId)
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No active battle for user ${user.userId}"))
-      .flatMap(json => ZIO.fromEither(json.as[ActiveBattle]))
+      .flatMap(json => ZIO.fromEither(json.as[SoloPveBattle]))
 
   // Уклонение игрока от удара моба: защита игрока в знаменателе, точность моба ×1.5.
+  // Поверх базового шанса добавляется бонус от боевых бафов (зелье уворота); потолок
+  // 95% абсолютный — баф его не пробивает.
   private def playerDodgeChance(
       agi: Long,
       evasion: Long,
       defence: Long,
-      battle: ActiveBattle
+      battle: SoloPveBattle
   ): Double =
-    BattleState.dodgeChance(agi, evasion, defence, battle.monsterStats.accuracy)
+    (BattleState.dodgeChance(agi, evasion, defence, battle.monsterStats.accuracy)
+      + battle.heroBattleState.dodgeBonus).min(95.0).max(5.0)
+
+  // Шанс героя применить активный навык с учётом боевых бафов (зелье концентрации):
+  // базовая формула плюс `skillHitBonus`; потолок 95% абсолютный — баф его не пробивает.
+  private def heroSkillHitChance(hero: Hero, battle: SoloPveBattle, nowMs: Long): Double = {
+    val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    val base = BattleState.heroSkillHitChance(
+      heroConc = buffed.concentration,
+      heroInt = hero.effectiveBaseStats(nowMs).int,
+      monsterConc = battle.monsterStats.concentration,
+      rarityFactor = battle.rarity.factor
+    )
+    (base + battle.heroBattleState.skillHitBonus).min(95.0).max(5.0)
+  }
 
   // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
   // в знаменателе его защита и точность игрока ×1.5.
-  private def mobDodgeChance(heroAccuracy: Long, battle: ActiveBattle): Double =
+  private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double =
     BattleState.dodgeChance(
       0L,
       battle.monsterStats.evasion,
@@ -805,6 +1021,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 }
 
 object BattleState {
+
+  /** Текущее число зарядов надетой фляги (0, если фляга не надета). */
+  def flaskCharges(hero: Hero): Int = hero.equipment.flask.details match {
+    case f: ItemDetails.Flask => f.charges
+    case _                    => 0
+  }
+
+  /** Зелье надетого пояса (если пояс несёт зелье) — для кнопки «Пояс» и её зарядов. */
+  def beltPotion(hero: Hero): Option[ItemDetails.Belt] = hero.equipment.belt.details match {
+    case b: ItemDetails.Belt => Some(b)
+    case _                   => None
+  }
 
   /** Шанс игрока попасть способностью по мобу, в процентах [5; 95]: 100 ·
     * (heroConc · 0.75·heroInt) / (0.5·monsterConc · monster.rarity.factor).

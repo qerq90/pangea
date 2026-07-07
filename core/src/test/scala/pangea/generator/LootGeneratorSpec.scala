@@ -3,11 +3,16 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.loot.LootGenerator
 import pangea.generator.loot.LootGenerator.LootDrop
-import pangea.model.item.ItemType
+import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.monster.{Race, Rarity}
 import zio.test._
 
 object LootGeneratorSpec extends ZIOSpecDefault {
+
+  private def raceOf(i: Item): Option[String] = i.details match {
+    case ItemDetails.Trophy(r, _) => Some(r)
+    case _                        => None
+  }
 
   private def category(d: LootDrop): String = d match {
     case LootDrop.Gear(_)       => "gear"
@@ -52,7 +57,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
         .collectFirst { case LootDrop.Trophy(i) => i }
       assertTrue(trophy.exists(i =>
         i.itemType == ItemType.Trophy &&
-        i.race.contains(Race.Khajiit.entryName) &&
+        raceOf(i).contains(Race.Khajiit.entryName) &&
         i.lvl == 12L &&
         i.name.contains("Каджит")))
     },

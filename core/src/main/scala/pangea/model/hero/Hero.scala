@@ -1,6 +1,7 @@
 package pangea.model.hero
 
 import pangea.model.battle.SkillSlotState
+import pangea.model.item.ItemDetails
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.{BaseStats, FightStats, StatBoosts}
@@ -97,8 +98,13 @@ case class Hero(
    *  нагрудника (у каждого может быть `activeSkill`). Ключ слота — id предмета,
    *  поэтому два предмета с «одним» навыком катаются независимо. */
   def activeSkillSlots: List[SkillSlotState] =
-    List(equipment.weapon, equipment.chestPlate)
-      .flatMap(it => it.activeSkill.map(s => SkillSlotState(it.id, s)))
+    List(equipment.weapon, equipment.chestPlate).flatMap { it =>
+      it.details match {
+        case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s))
+        case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s))
+        case _                     => None
+      }
+    }
 
   def effectiveMaxHp(nowMs: Long): Long = {
     val p           = combinedPenalties(nowMs)

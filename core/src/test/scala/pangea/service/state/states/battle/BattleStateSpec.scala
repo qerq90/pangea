@@ -2,8 +2,8 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{ActiveBattle, Buff, HeroBattleState}
-import pangea.model.item.{Item, ItemType, Rarity => ItemRarity}
+import pangea.model.battle.{SoloPveBattle, Buff, HeroBattleState}
+import pangea.model.item.{Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -15,6 +15,26 @@ import zio.test._
 import zio.test.TestRandom
 
 object BattleStateSpec extends ZIOSpecDefault {
+
+  private def flaskCharges(i: Item): Option[Int] = i.details match {
+    case f: ItemDetails.Flask => Some(f.charges)
+    case _                    => None
+  }
+
+  private def beltCharges(i: Item): Option[Int] = i.details match {
+    case b: ItemDetails.Belt => Some(b.charges)
+    case _                   => None
+  }
+
+  private def belt(potion: PotionKind, charges: Int, maxCharges: Int = 5): Item =
+    Item(9L, "Пояс", 1L, ItemRarity.Green, ItemType.Belt,
+      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Belt(potion, charges = charges, maxCharges = maxCharges))
+
+  private def healFlask(charges: Int): Item =
+    Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
+      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = charges, maxCharges = charges))
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
@@ -34,7 +54,7 @@ object BattleStateSpec extends ZIOSpecDefault {
   )
 
   // Монстр с 1 HP и нулевым уклонением — умирает от первого удара
-  private val weakBattle = ActiveBattle(
+  private val weakBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
@@ -48,7 +68,7 @@ object BattleStateSpec extends ZIOSpecDefault {
   private val markedWeakBattle = weakBattle.copy(monsterMarked = true)
 
   // Сильный монстр для теста побега
-  private val strongBattle = ActiveBattle(
+  private val strongBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
@@ -58,7 +78,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     monsterCurrentArmor = 0L
   )
 
-  private def makeState(hero: pangea.model.hero.Hero, battle: ActiveBattle) =
+  private def makeState(hero: pangea.model.hero.Hero, battle: SoloPveBattle) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       _        <- heroDao.writeActiveBattle(userId, battle.asJson)
@@ -141,9 +161,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
                    attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                   flaskEffect = Some(FlaskEffect.HealPercent(25)),
-                   charges     = Some(1),
-                   maxCharges  = Some(1))
+                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
@@ -156,7 +174,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         screens                    <- renderer.sentScreens
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp > 10L)) &&
-              assertTrue(updatedHero.exists(_.equipment.flask.charges.contains(0))) &&
+              assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(0))) &&
               assertTrue(screens.exists(_.text.contains("HP")))
     },
 
@@ -164,14 +182,12 @@ object BattleStateSpec extends ZIOSpecDefault {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
                    attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                   flaskEffect = Some(FlaskEffect.HealPercent(25)),
-                   charges     = Some(8),
-                   maxCharges  = Some(8))
+                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
       val heroWithFlask     = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
       )
-      val battleAlreadyUsed = strongBattle.copy(flaskUsedThisRound = true)
+      val battleAlreadyUsed = strongBattle.copy(consumableUsedThisRound = true)
       for {
         triple                     <- makeState(heroWithFlask, battleAlreadyUsed)
         (state, heroDao, renderer)  = triple
@@ -180,17 +196,15 @@ object BattleStateSpec extends ZIOSpecDefault {
         screens                    <- renderer.sentScreens
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
-              assertTrue(updatedHero.exists(_.equipment.flask.charges.contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("уже использована")))
+              assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
+              assertTrue(screens.exists(_.text.contains("уже использовали")))
     },
 
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
                    attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                   flaskEffect = Some(FlaskEffect.HealPercent(25)),
-                   charges     = Some(0),
-                   maxCharges  = Some(8))
+                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
       val heroEmptyFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
@@ -204,6 +218,93 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
               assertTrue(screens.exists(_.text.contains("пуста")))
+    },
+
+    test("enter → кнопка «Пояс» показана, если пояс несёт зелье") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 3)))
+      for {
+        triple              <- makeState(hero, strongBattle)
+        (state, _, renderer) = triple
+        _                   <- state.enter(testUser, renderer)
+        screens             <- renderer.sentScreens
+      } yield assertTrue(screens.head.choices.map(_.id).contains("UseBelt"))
+    },
+
+    test("enter → кнопки «Пояс» нет, если пояс без зелья") {
+      for {
+        triple              <- makeState(strongHero, strongBattle) // emptyEquipment: пояс — NoItem
+        (state, _, renderer) = triple
+        _                   <- state.enter(testUser, renderer)
+        screens             <- renderer.sentScreens
+      } yield assertTrue(!screens.head.choices.map(_.id).contains("UseBelt"))
+    },
+
+    test("UseBelt зелье лечения → HP восстановлен, заряд потрачен") {
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 2))
+      )
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        result                     <- state.action(testUser, tap("UseBelt"), renderer)
+        updated                    <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(updated.exists(_.fightStats.hp > 10L)) &&
+              assertTrue(updated.exists(h => beltCharges(h.equipment.belt).contains(1)))
+    },
+
+    test("Фляга и пояс делят лимит: после фляги пояс в этом раунде заблокирован") {
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(8), belt = belt(PotionKind.Healing, 2))
+      )
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        _                          <- state.action(testUser, tap("UseFlask"), renderer)
+        result                     <- state.action(testUser, tap("UseBelt"), renderer)
+        updated                    <- heroDao.getHeroByUserId(userId)
+        screens                    <- renderer.sentScreens
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(updated.exists(h => beltCharges(h.equipment.belt).contains(2))) && // заряд не потрачен
+              assertTrue(screens.exists(_.text.contains("уже использовали")))
+    },
+
+    test("UseBelt зелье яда → баф ядовитых атак; следующая атака травит моба") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Poison, 1)))
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        _                          <- state.action(testUser, tap("UseBelt"), renderer)
+        afterDrink                 <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        _                          <- state.action(testUser, tap("Attack"), renderer)
+        afterAttack                <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(afterDrink.effects.heroPoisonousAttacks) &&
+              assertTrue(afterDrink.effects.monsterPoison.isEmpty) &&
+              assertTrue(!afterAttack.effects.heroPoisonousAttacks) &&
+              assertTrue(afterAttack.effects.monsterPoison.isDefined)
+    },
+
+    test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Attack, 1)))
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        _                          <- state.action(testUser, tap("UseBelt"), renderer)
+        after                      <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.heroBattleState.buffs.exists(b => b.atk >= 1L && b.turnsLeft.contains(5)))
+    },
+
+    test("UseBelt с пустым поясом → сообщение, заряды не тратятся") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 0)))
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        result                     <- state.action(testUser, tap("UseBelt"), renderer)
+        screens                    <- renderer.sentScreens
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(screens.exists(_.text.contains("закончились")))
     },
 
     test("Flee → показывает экран подтверждения, остаётся в Battle") {
@@ -247,7 +348,7 @@ object BattleStateSpec extends ZIOSpecDefault {
 
     test("armor поглощает урон от моба (броня = броня × защита)") {
       // Эффективная броня = Броня × Защита: у танка много текущей брони → меньше HP-урона
-      val highAtkBattle = ActiveBattle(
+      val highAtkBattle = SoloPveBattle(
         monsterLvl          = 1L,
         monsterRace         = pangea.model.monster.Race.Human.entryName,
         monsterRarity       = pangea.model.monster.Rarity.Common.entryName,
@@ -314,7 +415,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     test("buff с turnsLeft тикается после хода (Attack)") {
-      val buff        = Buff(atk = 0L, armor = 0L, defence = 0L, turnsLeft = Some(3))
+      val buff        = Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, skillHitPct = 0L, turnsLeft = Some(3))
       val buffedBattle = strongBattle.copy(heroBattleState = HeroBattleState(List(buff)))
       for {
         triple               <- makeState(strongHero, buffedBattle)
@@ -322,7 +423,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         _                    <- state.action(testUser, tap("Attack"), renderer)
         remaining            <- heroDao.readActiveBattle(userId)
       } yield assertTrue(
-        remaining.flatMap(_.as[ActiveBattle].toOption)
+        remaining.flatMap(_.as[SoloPveBattle].toOption)
           .exists(_.heroBattleState.buffs.headOption.exists(_.turnsLeft.contains(2)))
       )
     },
@@ -334,7 +435,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         fightStats = strongHero.fightStats.copy(hp = 500L, armor = 0L, defence = 0, evasion = 0),
         baseStats  = strongHero.baseStats.copy(agi = 0)
       )
-      val bigArmorBuff  = Buff(atk = 0L, armor = 9999L, defence = 0L, turnsLeft = None)
+      val bigArmorBuff  = Buff(atk = 0L, armor = 9999L, defence = 0L, dodgePct = 0L, skillHitPct = 0L, turnsLeft = None)
       val buffedBattle  = strongBattle.copy(heroBattleState = HeroBattleState(List(bigArmorBuff)))
       for {
         triple               <- makeState(noArmorHero, buffedBattle)
@@ -380,7 +481,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       // одинаковым фидом рандома spread совпадает. str_eff: человек ceil(100×1.0)=100,
       // орк ceil(100×1.2)=120 → урон орка ровно в 120/100 раза больше (проверяем соотношением,
       // не завязываясь на конкретный spread). feedInts(49) → hitRoll=50 (попадание).
-      val bigMonster = ActiveBattle(
+      val bigMonster = SoloPveBattle(
         monsterLvl          = 1L,
         monsterRace         = Race.Human.entryName,
         monsterRarity       = Rarity.Common.entryName,
@@ -403,7 +504,7 @@ object BattleStateSpec extends ZIOSpecDefault {
           _                   <- TestRandom.feedLongs(20L)
           _                   <- state.action(testUser, tap("Attack"), r)
           hp                  <- heroDao.readActiveBattle(userId)
-                                   .map(_.flatMap(_.as[ActiveBattle].toOption).map(_.monsterCurrentHp).getOrElse(-1L))
+                                   .map(_.flatMap(_.as[SoloPveBattle].toOption).map(_.monsterCurrentHp).getOrElse(-1L))
         } yield hp
       for {
         humanHp <- monsterHpAfterAttack(Race.Human)

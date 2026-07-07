@@ -2,11 +2,26 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.loot.SchronGenerator
-import pangea.model.item.{ItemType, TrophyKind, Rarity => ItemRarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind, Rarity => ItemRarity}
 import pangea.model.monster.Race
 import zio.test._
 
 object SchronGeneratorSpec extends ZIOSpecDefault {
+
+  private def kindOf(i: Item): Option[TrophyKind] = i.details match {
+    case ItemDetails.Trophy(_, k) => Some(k)
+    case _                        => None
+  }
+
+  private def raceOf(i: Item): Option[String] = i.details match {
+    case ItemDetails.Trophy(r, _) => Some(r)
+    case _                        => None
+  }
+
+  private def hasZone(i: Item): Boolean = i.details match {
+    case _: ItemDetails.TreasureMap => true
+    case _                          => false
+  }
 
   private val gearRarities: Set[ItemRarity] =
     Set(ItemRarity.Green, ItemRarity.Blue, ItemRarity.Purple, ItemRarity.Violet, ItemRarity.Orange)
@@ -61,7 +76,7 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
         .flatMap(_.items)
         .find(_.itemType == ItemType.TreasureMapHalf)
       assertTrue(half.nonEmpty) &&
-      assertTrue(half.forall(_.mapZone.isDefined))
+      assertTrue(half.forall(hasZone))
     },
 
     test("трофей: только Реликвия/Талисман, хранит расу и уровень") {
@@ -69,8 +84,8 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
         .flatMap(_.items)
         .filter(_.itemType == ItemType.Trophy)
       assertTrue(trophies.nonEmpty) &&
-      assertTrue(trophies.forall(t => t.trophyKind.exists(k => k == TrophyKind.Relic || k == TrophyKind.Talisman))) &&
-      assertTrue(trophies.forall(_.race.contains(Race.Khajiit.entryName))) &&
+      assertTrue(trophies.forall(t => kindOf(t).exists(k => k == TrophyKind.Relic || k == TrophyKind.Talisman))) &&
+      assertTrue(trophies.forall(t => raceOf(t).contains(Race.Khajiit.entryName))) &&
       assertTrue(trophies.forall(_.name.contains("Каджит"))) &&
       assertTrue(trophies.forall(_.lvl == 12L))
     },
@@ -78,7 +93,7 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
     test("оба вида трофея реально встречаются на множестве сидов") {
       val kinds = rewards(Race.Human, 20L, 2, 3)
         .flatMap(_.items)
-        .flatMap(_.trophyKind)
+        .flatMap(kindOf)
         .toSet
       assertTrue(kinds.contains(TrophyKind.Relic)) &&
       assertTrue(kinds.contains(TrophyKind.Talisman))

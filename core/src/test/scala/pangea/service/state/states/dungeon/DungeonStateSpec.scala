@@ -1,15 +1,21 @@
 package pangea.service.state.states.dungeon
 
 import pangea.engine.SceneContent
+import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.test._
-import zio.test.TestRandom
-import zio.ZIO
+import zio.test.{TestClock, TestRandom}
+import zio.{Duration, ZIO}
 
 object DungeonStateSpec extends ZIOSpecDefault {
+
+  private def flaskCharges(i: Item): Option[Int] = i.details match {
+    case f: ItemDetails.Flask => Some(f.charges)
+    case _                    => None
+  }
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
@@ -93,9 +99,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
       import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
       val flask = Item(1L, "Фляга", 1L, Rarity.Gray, ItemType.Flask,
                    attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                   flaskEffect = Some(FlaskEffect.HealPercent(25)),
-                   charges     = Some(0),
-                   maxCharges  = Some(8))
+                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
       val heroWithEmptyFlask = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
@@ -111,7 +115,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(updated.exists(_.equipment.flask.charges.contains(8))) &&
+              assertTrue(updated.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
               assertTrue(screens.exists(_.text.contains("пополнена")))
     },
 
@@ -119,9 +123,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
       import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
       val flaskInInv = Item(2L, "Запасная фляга", 1L, Rarity.Gray, ItemType.Flask,
                         attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                        flaskEffect = Some(FlaskEffect.HealPercent(25)),
-                        charges     = Some(0),
-                        maxCharges  = Some(4))
+                        details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 4))
       for {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
         renderer <- TestRenderer.make
@@ -130,7 +132,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         state     = DungeonState(heroDao, invRepo, content)
         _        <- TestRandom.feedInts(67, 99) // без засады
         _        <- state.action(testUser, tap("FindEvent"), renderer)
-      } yield assertTrue(invRepo.snapshot.find(_.id == 2L).exists(_.charges.contains(4)))
+      } yield assertTrue(invRepo.snapshot.find(_.id == 2L).exists(i => flaskCharges(i).contains(4)))
     },
 
     test("GoDarker → увеличивает уровень лабиринта на 1") {
@@ -168,13 +170,18 @@ object DungeonStateSpec extends ZIOSpecDefault {
       } yield assertTrue(updatedHero.exists(_.dungeonLevel == 1))
     },
 
-    test("GoDarker на уровне 150 → остаётся на уровне 150") {
+    test("GoDarker на уровне 150 → дно лабиринта, выслеживание не запускается") {
       for {
         quad                              <- makeState(dungeonLevel = 150)
         (state, heroDao, renderer, _)      = quad
-        _                                 <- state.action(testUser, tap("GoDarker"), renderer)
+        result                            <- state.action(testUser, tap("GoDarker"), renderer)
+        screens                           <- renderer.sentScreens
         updatedHero                       <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(updatedHero.exists(_.dungeonLevel == 150))
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("самого дна"))) &&
+              // экран обычный (не ожидание выслеживания)
+              assertTrue(screens.last.choices.map(_.id).contains("FindEvent")) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 150))
     },
 
     test("enter на максимально доступном этаже → кнопка «к тьме» красная") {
@@ -197,7 +204,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Positive))
     },
 
-    test("GoDarker без поверженной тьмы → не двигается, сообщение про тьму") {
+    test("GoDarker без поверженной тьмы → запускает выслеживание (миазмы), не двигается") {
       for {
         quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
         (state, heroDao, renderer, _)  = quad
@@ -205,7 +212,51 @@ object DungeonStateSpec extends ZIOSpecDefault {
         screens                       <- renderer.sentScreens
         updatedHero                   <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(screens.exists(_.text.contains("Тьма этого этажа ещё не повержена"))) &&
+              assertTrue(screens.exists(_.text.contains("миазмы тьмы"))) &&
+              // на экране ожидания — «идти по следу» и «перестать искать», без обычных действий
+              assertTrue(screens.last.choices.map(_.id) == List("GoDarker", "StopTracking")) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 5))
+    },
+
+    test("выслеживание идёт, время не вышло → повторный GoDarker сообщает, что след впереди") {
+      for {
+        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, _)  = quad
+        _                             <- state.action(testUser, tap("GoDarker"), renderer) // старт таймера (2–5 мин)
+        result                        <- state.action(testUser, tap("GoDarker"), renderer) // время ещё не вышло
+        screens                       <- renderer.sentScreens
+        updatedHero                   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("всё ещё где-то впереди"))) &&
+              assertTrue(updatedHero.exists(_.dungeonLevel == 5))
+    },
+
+    test("время выслеживания вышло → GoDarker выводит на Отмеченного целевого уровня (бой)") {
+      import pangea.model.battle.SoloPveBattle
+      for {
+        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, _)  = quad
+        _                             <- state.action(testUser, tap("GoDarker"), renderer) // старт таймера
+        _                             <- TestClock.adjust(Duration.fromMillis(5L * 60L * 1000L)) // проматываем > макс. 5 мин
+        result                        <- state.action(testUser, tap("GoDarker"), renderer)
+        battleJson                    <- heroDao.readActiveBattle(userId)
+        battle                         = battleJson.flatMap(_.as[SoloPveBattle].toOption)
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(battle.exists(_.monsterMarked)) &&
+              assertTrue(battle.exists(_.monsterLvl == 6L)) // цель = текущий (5) + 1
+    },
+
+    test("перестать искать → сбрасывает выслеживание, возвращает обычный экран этажа") {
+      for {
+        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, _)  = quad
+        _                             <- state.action(testUser, tap("GoDarker"), renderer)       // старт
+        result                        <- state.action(testUser, tap("StopTracking"), renderer)   // без переспроса
+        screens                       <- renderer.sentScreens
+        updatedHero                   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("рассеиваются"))) &&
+              assertTrue(screens.last.choices.map(_.id).contains("FindEvent")) &&
               assertTrue(updatedHero.exists(_.dungeonLevel == 5))
     },
 

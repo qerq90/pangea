@@ -3,7 +3,7 @@ package pangea.service.state.states.gustavo
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
@@ -51,6 +51,11 @@ case class GustavoFlaskState(
                inline = true))
     } yield ()
 
+  private def flaskDetails(flask: Item): Option[ItemDetails.Flask] = flask.details match {
+    case f: ItemDetails.Flask => Some(f)
+    case _                    => None
+  }
+
   private def buy(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
@@ -68,12 +73,12 @@ case class GustavoFlaskState(
 
   private def refill(user: User, hero: Hero, flask: Item, price: Long, renderer: Renderer): Task[Unit] =
     heroDao.updateGold(user.userId, hero.gold - price) *>
-      heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = flask.copy(charges = flask.maxCharges))) *>
+      heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = flask.copy(details = flaskDetails(flask).map(_.refilled).getOrElse(flask.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.flaskRefilled",
-        "charges" -> flask.maxCharges.getOrElse(0).toString), back))
+        "charges" -> flaskDetails(flask).map(_.maxCharges).getOrElse(0).toString), back))
 
-  private def hasFlask(flask: Item): Boolean =
-    flask.itemType != ItemType.NoItem && flask.maxCharges.isDefined
+  private def hasFlask(flask: Item): Boolean = flaskDetails(flask).isDefined
 
-  private def isFull(flask: Item): Boolean = flask.charges == flask.maxCharges
+  private def isFull(flask: Item): Boolean =
+    flaskDetails(flask).exists(f => f.charges == f.maxCharges)
 }

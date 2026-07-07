@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType}
+import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -169,6 +169,11 @@ object TrophyExchangeState {
   }
 
   /** Репутация за один трофей: `ceil(5 + lvl × coef)`, где `coef` — у вида трофея. */
-  def reputationFor(item: Item): Long =
-    math.ceil(5.0 + item.lvl.toDouble * item.trophyKind.get.coef).toLong
+  def reputationFor(item: Item): Long = {
+    val coef = item.details match {
+      case ItemDetails.Trophy(_, kind) => kind.coef
+      case _                           => 0.0
+    }
+    math.ceil(5.0 + item.lvl.toDouble * coef).toLong
+  }
 }

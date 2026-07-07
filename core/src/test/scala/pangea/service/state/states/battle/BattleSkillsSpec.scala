@@ -2,8 +2,8 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{ActiveBattle, SkillSlotState}
-import pangea.model.item.{Item, ItemType, Rarity => ItemRarity}
+import pangea.model.battle.{SoloPveBattle, SkillSlotState}
+import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
@@ -26,10 +26,10 @@ object BattleSkillsSpec extends ZIOSpecDefault {
     val baseHero  = TestFixtures.hero(userId)
     val weapon    = Item(101L, "Меч", 1L, ItemRarity.Gray, ItemType.Weapon,
                          attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                         activeSkill = weaponSkill)
+                         details = weaponSkill.map(ItemDetails.Weapon).getOrElse(ItemDetails.Plain))
     val chest     = Item(202L, "Кираса", 1L, ItemRarity.Gray, ItemType.ChestPlate,
                          attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
-                         activeSkill = chestSkill)
+                         details = chestSkill.map(ItemDetails.Armor).getOrElse(ItemDetails.Plain))
     baseHero.copy(
       // Сильные статы → урон и лечение получаются ненулевыми
       baseStats  = baseHero.baseStats.copy(str = 50, int = 50, vit = 50, agi = 50),
@@ -40,7 +40,7 @@ object BattleSkillsSpec extends ZIOSpecDefault {
   }
 
   // Слабый монстр с низкой концентрацией — шанс применения умения у героя ≈ 95%
-  private def weakBattle(slots: List[SkillSlotState]): ActiveBattle = ActiveBattle(
+  private def weakBattle(slots: List[SkillSlotState]): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
@@ -51,7 +51,7 @@ object BattleSkillsSpec extends ZIOSpecDefault {
     skillSlots          = slots
   )
 
-  private def makeState(hero: pangea.model.hero.Hero, battle: ActiveBattle) =
+  private def makeState(hero: pangea.model.hero.Hero, battle: SoloPveBattle) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       _        <- heroDao.writeActiveBattle(userId, battle.asJson)
@@ -96,7 +96,7 @@ object BattleSkillsSpec extends ZIOSpecDefault {
         triple                       <- makeState(hero, weakBattle(slots))
         (state, heroDao, renderer)    = triple
         result                       <- state.action(testUser, tap("Skill_101"), renderer)
-        after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption).get)
+        after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield assertTrue(result == StateType.Battle || result == StateType.Loot) &&
               assertTrue(after.monsterCurrentHp <= before) &&
               // cd ставится в skill.cooldown; в этом же ходу slot пропускается в tickBuffs,
@@ -117,7 +117,7 @@ object BattleSkillsSpec extends ZIOSpecDefault {
         (state, heroDao, renderer)    = triple
         _                            <- state.action(testUser, tap("Skill_202"), renderer)
         afterHero                    <- heroDao.getHeroByUserId(userId).map(_.get)
-        afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption).get)
+        afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield assertTrue(afterHero.fightStats.hp > 50L) &&
               assertTrue(afterBattle.monsterCurrentHp <= mobHpPre) // моб мог ответить, но не от скилла
     },
@@ -142,7 +142,7 @@ object BattleSkillsSpec extends ZIOSpecDefault {
         (state, heroDao, renderer)    = triple
         result                       <- state.action(testUser, tap("Skill_101"), renderer)
         screens                      <- renderer.sentScreens
-        after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[ActiveBattle].toOption).get)
+        after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(screens.exists(_.text.contains("восстанавливается"))) &&
               // cd НЕ перезатёрся, uses не вырос
