@@ -57,10 +57,10 @@ object ItemGenerator {
         case Stat.Accuracy =>
           val (v, r) = modifyParameter(item.rarity.factorR3 * item.lvl, rng1)
           (item.withAccuracy(item.accuracy + v), r)
-        case Stat.Concentration =>
+        case Stat.Energy =>
           val (v, r) =
-            modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
-          (item.withConcentration(item.concentration + v), r)
+            modifyParameter(item.rarity.factorR3 * 0.3 * item.lvl, rng1)
+          (item.withEnergy(item.energy + v), r)
         case Stat.Armor =>
           val (v, r) =
             modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
@@ -137,7 +137,7 @@ object ItemGenerator {
             itemType,
             attack = 0,
             accuracy = 0,
-            concentration = 0,
+            energy = 0,
             armor = armor,
             defence = defence,
             evasion = 0
@@ -157,7 +157,7 @@ object ItemGenerator {
             itemType,
             attack = attack,
             accuracy = 0,
-            concentration = 0,
+            energy = 0,
             armor = 0,
             defence = 0,
             evasion = evasion

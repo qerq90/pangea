@@ -72,9 +72,10 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
   private def wakeUp(user: User, nowMs: Long, hero: pangea.model.hero.Hero, postDeath: Boolean, renderer: Renderer): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val maxArmor = hero.effectiveMaxArmor(nowMs)
+    val maxEn    = hero.maxEnergy(nowMs)
     val textKey  = if (postDeath) "rest.revived" else "rest.done"
     for {
-      _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor))
+      _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn))
       _ <- heroDao.writeSceneData(user.userId, Json.Null)
       _ <- scheduler.cancel(user.userId, TaskKind.Revive)
       _ <- renderer.show(user, Screen(content.text(textKey), Nil))

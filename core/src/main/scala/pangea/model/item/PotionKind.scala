@@ -20,7 +20,7 @@ object PotionKind extends Enum[PotionKind] {
   case object Evasion       extends PotionKind("Склянка уворота")
   case object Defence       extends PotionKind("Склянка защиты")
   case object Attack        extends PotionKind("Склянка атаки")
-  case object Concentration extends PotionKind("Склянка концентрации")
+  case object Energy        extends PotionKind("Склянка энергии")
   case object Metal         extends PotionKind("Склянка металла")
   case object Regeneration  extends PotionKind("Склянка регенерации")
 

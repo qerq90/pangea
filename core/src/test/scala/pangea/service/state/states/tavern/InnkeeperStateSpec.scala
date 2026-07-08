@@ -21,7 +21,7 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
   // Трофей нужной расы; по умолчанию вид = Голова (coef = 1.0).
   private def trophy(id: Long, race: Race, lvl: Long, kind: TrophyKind = TrophyKind.Head): Item =
     Item(id, s"${kind.displayName} (${race.toString})", lvl, Rarity.Gray, ItemType.Trophy,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Trophy(race.entryName, kind))
 
   private def makeState(items: List[Item], active: Option[Race]) =

@@ -50,7 +50,7 @@ object HeroRepositoryLive {
         defence = 8,
         evasion = 22,
         accuracy = 20,
-        concentration = 1
+        energy = 0 // выставляется ниже из maxEnergy (единый источник — формула)
       ),
       equipment = Equipment(
         NoItem,
@@ -78,8 +78,11 @@ object HeroRepositoryLive {
       doubloons = 0L,
       statBoosts = pangea.model.stats.StatBoosts.none
     )
-    // Новичок без травм/бустов/экипировки → effectiveMaxHp = applyVit(vit) * 24.
-    hero.copy(fightStats = hero.fightStats.copy(hp = hero.effectiveMaxHp(0L)))
+    // Новичок без травм/бустов/экипировки → effectiveMaxHp = applyVit(vit) * 24,
+    // maxEnergy = 5·int + 2·agi. Стартуем с полными HP и Энергией.
+    hero.copy(fightStats = hero.fightStats.copy(
+      hp     = hero.effectiveMaxHp(0L),
+      energy = hero.maxEnergy(0L)))
   }
 
 }

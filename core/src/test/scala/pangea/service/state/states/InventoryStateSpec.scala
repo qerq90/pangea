@@ -22,11 +22,11 @@ object InventoryStateSpec extends ZIOSpecDefault {
     UserAction("", Some(s"""{"action":"${InventoryState.ItemActionPrefix}$itemId"}"""))
 
   private val sword = Item(10L, "Старый меч", 1L, Rarity.Gray, ItemType.Weapon,
-    attack = 5, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+    attack = 5, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
   private val helm  = Item(20L, "Шлем стража", 2L, Rarity.White, ItemType.Helmet,
-    attack = 0, accuracy = 2, concentration = 0, armor = 3, defence = 1, evasion = 0)
+    attack = 0, accuracy = 2, energy = 0, armor = 3, defence = 1, evasion = 0)
   private val oldSword = Item(99L, "Ржавый меч", 1L, Rarity.Gray, ItemType.Weapon,
-    attack = 2, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+    attack = 2, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
 
   // Две половинки карты Кинэт (dropLevel 10 и 20 → одна зона 1..25) и половинка
   // другой зоны (Ущелье мертвецов, 51..75) для проверки требования совпадения.
@@ -190,7 +190,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
     test("Equip предмета выше уровня героя → ошибка, предмет не надет") {
       val highLvlSword = Item(30L, "Легендарный меч", 99L, Rarity.Gray, ItemType.Weapon,
-        attack = 100, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+        attack = 100, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
       val lvl1Hero = baseHero
       for {
         quad                             <- makeState(lvl1Hero, List(highLvlSword))

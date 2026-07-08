@@ -69,7 +69,7 @@ object RestStateSpec extends ZIOSpecDefault {
     test("action после 30с → восстанавливает armor до maxArmor") {
       import pangea.model.item.{Item, ItemType, Rarity}
       val helmet = Item(1L, "Шлем", 1L, Rarity.Gray, ItemType.Helmet,
-        attack=0, accuracy=0, concentration=0, armor=30, defence=0, evasion=0)
+        attack=0, accuracy=0, energy=0, armor=30, defence=0, evasion=0)
       val heroWithArmor = TestFixtures.hero(userId).copy(
         equipment  = TestFixtures.emptyEquipment.copy(helmet = helmet),
         fightStats = TestFixtures.hero(userId).fightStats.copy(armor = 0L)  // броня истрачена в бою

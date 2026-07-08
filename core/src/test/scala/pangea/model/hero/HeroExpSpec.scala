@@ -32,7 +32,7 @@ object HeroExpSpec extends ZIOSpecDefault {
           ItemType.ChestPlate,
           attack = 0,
           accuracy = 0,
-          concentration = 0,
+          energy = 0,
           armor = 0,
           defence = 0,
           evasion = 0,

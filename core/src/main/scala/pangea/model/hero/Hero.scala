@@ -70,8 +70,8 @@ case class Hero(
       defence       = ((fightStats.defence + masterHornBoosts.defence) * (1.0 - p.defPct)).toLong.max(1L),
       accuracy      = ((fightStats.accuracy + masterHornBoosts.accuracy) * (1.0 - p.accPct)).toLong.max(1L),
       evasion       = ((fightStats.evasion + masterHornBoosts.evasion) * (1.0 - p.evasionPct)).toLong.max(1L),
-      concentration = ((fightStats.concentration + masterHornBoosts.concentration) * (1.0 - p.concPct)).toLong.max(1L),
-      armor         = fightStats.armor.max(0L)
+      armor         = fightStats.armor.max(0L),
+      energy        = fightStats.energy.max(0L)
     )
 
   /** Текущие боевые статы — с учётом активных травм. */
@@ -100,11 +100,22 @@ case class Hero(
   def activeSkillSlots: List[SkillSlotState] =
     List(equipment.weapon, equipment.chestPlate).flatMap { it =>
       it.details match {
-        case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s))
-        case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s))
+        case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
+        case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
         case _                     => None
       }
     }
+
+  /** Максимум Энергии: 5·Интеллект + 2·Ловкость + Энергия с экипировки + бусты
+   *  Мастера Горна, за вычетом штрафа травм на энергию. Минимум 1. Интеллект и
+   *  ловкость берутся эффективные (раса/травмы/бусты). Текущая энергия
+   *  (`fightStats.energy`) тратится и восстанавливается до этого значения. */
+  def maxEnergy(nowMs: Long): Long = {
+    val p    = combinedPenalties(nowMs)
+    val b    = effectiveBaseStats(nowMs)
+    val base = 5L * b.int + 2L * b.agi + equipment.allEnergy + masterHornBoosts.energy
+    (base * (1.0 - p.energyPct)).toLong.max(1L)
+  }
 
   def effectiveMaxHp(nowMs: Long): Long = {
     val p           = combinedPenalties(nowMs)
@@ -127,15 +138,17 @@ case class Hero(
     val maxHp    = effectiveMaxHp(nowMs)
     val maxArm   = effectiveMaxArmor(nowMs)
     val curArm   = fightStats.armor.min(maxArm)
+    val maxEn    = maxEnergy(nowMs)
+    val curEn    = fightStats.energy.min(maxEn)
     s"""${race.toString}, Уровень $lvl
        | $getLvlExp/$getNeededExp опыта
        |
        | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
        | 🏃 ЛОВ ${effB.agi}  ИНТ ${effB.int}
        |
-       | ⚔ Атк ${eff.atk}  🎯 Точн ${eff.accuracy}
-       | 🛡 Защ ${eff.defence}  👁 Укл ${eff.evasion}
-       | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm
+       | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm  ⚡ Энергия $curEn/$maxEn
+       | ⚔ Атк ${eff.atk}  🛡 Защ ${eff.defence}
+       | 🎯 Точн ${eff.accuracy}  👁 Укл ${eff.evasion}
        |
        | Свободных очков: $upgradePoints
        |""".stripMargin

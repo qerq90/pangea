@@ -28,7 +28,7 @@ object TreasureMapGenerator {
       itemType      = if (half) ItemType.TreasureMapHalf else ItemType.TreasureMap,
       attack        = 0,
       accuracy      = 0,
-      concentration = 0,
+      energy = 0,
       armor         = 0,
       defence       = 0,
       evasion       = 0,

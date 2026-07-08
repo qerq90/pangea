@@ -32,11 +32,11 @@ object TreasureMobsFightStateSpec extends ZIOSpecDefault {
   // герой, который гарантированно бьёт и не получает урона
   private def strongHero = TestFixtures.hero(userId).copy(
     fightStats = FightStats(atk = 50, hp = 200, armor = 0, defence = 0,
-                            evasion = 9999, accuracy = 9999, concentration = 0))
+                            evasion = 9999, accuracy = 9999, energy = 0))
 
   private val weakBattle = SoloPveBattle(
     monsterLvl = 1L, monsterRace = Race.Human.entryName, monsterRarity = Rarity.Common.entryName,
-    monsterStats = FightStats(atk = 1, hp = 1, armor = 0, defence = 0, evasion = 0, accuracy = 1, concentration = 0),
+    monsterStats = FightStats(atk = 1, hp = 1, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0),
     monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
 
   override def spec = suite("TreasureMobsFightState")(

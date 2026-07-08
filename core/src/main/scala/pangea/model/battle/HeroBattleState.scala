@@ -6,22 +6,25 @@ import pangea.model.stats.FightStats
 
 case class HeroBattleState(buffs: List[Buff]) {
 
-  // Adds atk/defence bonuses from all active buffs to the given FightStats.
+  // Adds atk/defence bonuses from all active buffs to the given FightStats. Плоские
+  // прибавки к защите суммируются, затем итог умножается на (1 + Σ defencePct/100)
+  // — процентный баф «Заслона».
   def applyTo(stats: FightStats): FightStats =
     if (buffs.isEmpty) stats
-    else stats.copy(
-      atk     = (stats.atk     + buffs.map(_.atk).sum).max(1L),
-      defence = (stats.defence + buffs.map(_.defence).sum).max(0L)
-    )
+    else {
+      val flatDef  = (stats.defence + buffs.map(_.defence).sum).max(0L)
+      val pctMult  = 1.0 + buffs.map(_.defencePct).sum.toDouble / 100.0
+      stats.copy(
+        atk     = (stats.atk + buffs.map(_.atk).sum).max(1L),
+        defence = (flatDef * pctMult).toLong.max(0L)
+      )
+    }
 
   // Flat armor bonus that reduces raw damage before physical armor absorbs (doesn't deplete).
   def armorBonus: Long = buffs.map(_.armor).sum
 
   // Прибавка в п.п. к итоговому шансу уклонения игрока (зелье уворота).
   def dodgeBonus: Long = buffs.map(_.dodgePct).sum
-
-  // Прибавка в п.п. к итоговому шансу применить активный навык (зелье концентрации).
-  def skillHitBonus: Long = buffs.map(_.skillHitPct).sum
 
   // Decrement turnsLeft for each buff, remove expired ones.
   def tick: HeroBattleState = HeroBattleState(

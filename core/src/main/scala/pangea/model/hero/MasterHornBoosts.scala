@@ -12,7 +12,7 @@ case class MasterHornBoosts(
   attack:        Long = 0L,
   defence:       Long = 0L,
   accuracy:      Long = 0L,
-  concentration: Long = 0L,
+  energy:        Long = 0L,
   inventory:     Long = 0L
 )
 

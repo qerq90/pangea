@@ -71,7 +71,7 @@ object MonsterGenerator {
       defence = (s.defence * factor).toLong,
       evasion = (s.evasion * factor).toLong,
       accuracy = (s.accuracy * factor).toLong,
-      concentration = (s.concentration * factor).toLong
+      energy = 0L
     )
 
   private def buildStats(level: Int, rarity: Rarity, race: Race): FightStats = {
@@ -84,7 +84,7 @@ object MonsterGenerator {
       defence = 0L,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
-      concentration = (8.0 * base * f.concentrationFactor).toLong
+      energy = 0L
     )
   }
 }

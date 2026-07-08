@@ -7,7 +7,6 @@ case class MonsterRaceFactor(
   hpFactor: Double,
   defenceFactor: Double,
   attackFactor: Double,
-  concentrationFactor: Double,
   accuracyFactor: Double,
   evasionFactor: Double
 )
@@ -18,7 +17,6 @@ object MonsterRaceFactor {
       hpFactor = 1.0,
       defenceFactor = 1.5,
       attackFactor = 1.0,
-      concentrationFactor = 1.8,
       accuracyFactor = 0.8,
       evasionFactor = 0.7
     ),
@@ -26,7 +24,6 @@ object MonsterRaceFactor {
       hpFactor = 1.0,
       defenceFactor = 1.0,
       attackFactor = 0.7,
-      concentrationFactor = 1.2,
       accuracyFactor = 1.4,
       evasionFactor = 1.6
     ),
@@ -34,7 +31,6 @@ object MonsterRaceFactor {
       hpFactor = 1.2,
       defenceFactor = 0.8,
       attackFactor = 1.5,
-      concentrationFactor = 1.1,
       accuracyFactor = 1.3,
       evasionFactor = 0.5
     ),
@@ -42,7 +38,6 @@ object MonsterRaceFactor {
       hpFactor = 1.2,
       defenceFactor = 1.5,
       attackFactor = 1.8,
-      concentrationFactor = 0.8,
       accuracyFactor = 0.5,
       evasionFactor = 0.4
     ),
@@ -50,7 +45,6 @@ object MonsterRaceFactor {
       hpFactor = 0.6,
       defenceFactor = 0.5,
       attackFactor = 1.0,
-      concentrationFactor = 0.9,
       accuracyFactor = 1.3,
       evasionFactor = 2.0
     ),
@@ -58,7 +52,6 @@ object MonsterRaceFactor {
       hpFactor = 0.8,
       defenceFactor = 0.8,
       attackFactor = 1.5,
-      concentrationFactor = 0.8,
       accuracyFactor = 1.0,
       evasionFactor = 0.7
     ),
@@ -66,7 +59,6 @@ object MonsterRaceFactor {
       hpFactor = 1.2,
       defenceFactor = 2.0,
       attackFactor = 1.5,
-      concentrationFactor = 1.1,
       accuracyFactor = 1.0,
       evasionFactor = 0.5
     ),
@@ -74,7 +66,6 @@ object MonsterRaceFactor {
       hpFactor = 1.2,
       defenceFactor = 0.6,
       attackFactor = 1.6,
-      concentrationFactor = 1.3,
       accuracyFactor = 1.1,
       evasionFactor = 2.0
     )

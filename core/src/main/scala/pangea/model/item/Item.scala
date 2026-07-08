@@ -13,7 +13,7 @@ case class Item(
   itemType: ItemType,
   attack: Long,
   accuracy: Long,
-  concentration: Long,
+  energy: Long,
   armor: Long,
   defence: Long,
   evasion: Long,
@@ -32,8 +32,8 @@ case class Item(
 
   def withAccuracy(accuracy: Long): Item = copy(accuracy = accuracy)
 
-  def withConcentration(concentration: Long): Item =
-    copy(concentration = concentration)
+  def withEnergy(energy: Long): Item =
+    copy(energy = energy)
 
   def withArmor(armor: Long): Item = copy(armor = armor)
 
@@ -42,6 +42,13 @@ case class Item(
   def withEvasion(evasion: Long): Item = copy(evasion = evasion)
 
   def withHp(hp: Long): Item = copy(hp = hp)
+
+  /** Активный навык предмета (оружие/нагрудник), если есть. */
+  def activeSkill: Option[pangea.model.skill.Skill] = details match {
+    case ItemDetails.Weapon(s) => Some(s)
+    case ItemDetails.Armor(s)  => Some(s)
+    case _                     => None
+  }
 
   /** Карта клада или её половинка. */
   def isTreasureMap: Boolean =
@@ -65,7 +72,7 @@ case class Item(
     val numeric = List(
       Option.when(attack > 0)(s"Атака: +$attack"),
       Option.when(accuracy > 0)(s"Точность: +$accuracy"),
-      Option.when(concentration > 0)(s"Концентрация: +$concentration"),
+      Option.when(energy > 0)(s"Энергия: +$energy"),
       Option.when(armor > 0)(s"Броня: +$armor"),
       Option.when(defence > 0)(s"Защита: +$defence"),
       Option.when(evasion > 0)(s"Уклонение: +$evasion"),

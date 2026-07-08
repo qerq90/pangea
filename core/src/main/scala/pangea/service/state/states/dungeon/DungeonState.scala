@@ -55,7 +55,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       "hp"       -> hero.fightStats.hp.toString,
       "maxHp"    -> hero.effectiveMaxHp(nowMs).toString,
       "armor"    -> hero.fightStats.armor.toString,
-      "maxArmor" -> hero.effectiveMaxArmor(nowMs).toString)
+      "maxArmor" -> hero.effectiveMaxArmor(nowMs).toString,
+      "energy"   -> hero.fightStats.energy.min(hero.maxEnergy(nowMs)).toString,
+      "maxEnergy"-> hero.maxEnergy(nowMs).toString)
     val byId       = content.screen("dungeon.enter").choices.map(c => c.id -> c).toMap
     def mv(id: String, open: Boolean): pangea.engine.Choice =
       byId(id).copy(color = if (open) ChoiceColor.Positive else ChoiceColor.Negative, row = Some(1))
@@ -90,6 +92,10 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
   private def healAtSpring(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val healed   = (maxHp - hero.fightStats.hp).max(0L)
+    // Ручеёк дополнительно восстанавливает 10% максимума Энергии.
+    val maxEn        = hero.maxEnergy(nowMs)
+    val newEnergy    = (hero.fightStats.energy + (maxEn * 10 / 100L).max(1L)).min(maxEn)
+    val energyBack   = newEnergy - hero.fightStats.energy
     val flask    = hero.equipment.flask
     val flaskDetails = flask.details match {
       case f: pangea.model.item.ItemDetails.Flask => Some(f)
@@ -97,13 +103,14 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     }
     val hasFlask = flaskDetails.isDefined
     for {
-      _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp))
+      _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, energy = newEnergy))
       _ <- ZIO.foreachDiscard(flaskDetails)(f => heroDao.updateEquipment(user.userId,
              hero.equipment.copy(flask = flask.copy(details = f.refilled))))
       _ <- inventoryRepo.refillFlasks(hero.id).orElse(ZIO.unit)
       _ <- renderer.show(user, Screen(
              content.format("dungeon.spring",
                "healed"      -> healed.toString,
+               "energy"      -> energyBack.toString,
                "flaskFilled" -> (if (hasFlask) content.text("dungeon.springFlaskFilled") else "")), Nil))
       roll   <- Random.nextIntBetween(1, 101)
       result <- if (roll <= 50)

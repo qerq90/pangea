@@ -12,7 +12,7 @@ object SoloPveBattleSkillsSpec extends ZIOSpecDefault {
     monsterLvl          = 1L,
     monsterRace         = Race.values.head.entryName,
     monsterRarity       = Rarity.Common.entryName,
-    monsterStats        = FightStats(atk = 10, hp = 100, armor = 0, defence = 0, evasion = 0, accuracy = 0, concentration = 0),
+    monsterStats        = FightStats(atk = 10, hp = 100, armor = 0, defence = 0, evasion = 0, accuracy = 0, energy = 0),
     monsterCurrentHp    = 100L,
     monsterCurrentArmor = 0L,
     skillSlots          = slots

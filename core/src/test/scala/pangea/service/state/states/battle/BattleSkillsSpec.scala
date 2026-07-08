@@ -20,32 +20,31 @@ object BattleSkillsSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  // Высокая концентрация/интеллект → шанс применения умения = 95% (потолок), но без рандома
-  // тест не делает предположения о результате одного броска, а проверяет инварианты после.
+  // Много энергии → умения точно применяются (умения всегда попадают, тратят энергию).
   private def heroWith(weaponSkill: Option[Skill], chestSkill: Option[Skill]) = {
     val baseHero  = TestFixtures.hero(userId)
     val weapon    = Item(101L, "Меч", 1L, ItemRarity.Gray, ItemType.Weapon,
-                         attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                         attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                          details = weaponSkill.map(ItemDetails.Weapon).getOrElse(ItemDetails.Plain))
     val chest     = Item(202L, "Кираса", 1L, ItemRarity.Gray, ItemType.ChestPlate,
-                         attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                         attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                          details = chestSkill.map(ItemDetails.Armor).getOrElse(ItemDetails.Plain))
     baseHero.copy(
       // Сильные статы → урон и лечение получаются ненулевыми
       baseStats  = baseHero.baseStats.copy(str = 50, int = 50, vit = 50, agi = 50),
       fightStats = baseHero.fightStats.copy(atk = 50, accuracy = 50, defence = 20,
-                                            concentration = 10_000, hp = 200, evasion = 0),
+                                            energy = 10_000, hp = 200, evasion = 0),
       equipment  = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest)
     )
   }
 
-  // Слабый монстр с низкой концентрацией — шанс применения умения у героя ≈ 95%
+  // Слабый монстр — герой безопасно бьёт умениями и проверяет инварианты.
   private def weakBattle(slots: List[SkillSlotState]): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
     monsterStats        = FightStats(atk = 1, hp = 999, armor = 0, defence = 0,
-                                     evasion = 0, accuracy = 1, concentration = 1),
+                                     evasion = 0, accuracy = 1, energy = 1),
     monsterCurrentHp    = 999L,
     monsterCurrentArmor = 0L,
     skillSlots          = slots
@@ -122,6 +121,23 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(afterBattle.monsterCurrentHp <= mobHpPre) // моб мог ответить, но не от скилла
     },
 
+    test("Кровавая жатва: герой теряет ~10% HP и наносит урон мобу") {
+      val hero    = heroWith(Some(Skill.BloodHarvest), None)
+      val wounded = hero.copy(fightStats = hero.fightStats.copy(hp = 200L))
+      val slots   = List(SkillSlotState(101L, Skill.BloodHarvest))
+      val battle  = weakBattle(slots)
+      val mobHp   = battle.monsterCurrentHp
+      for {
+        triple                       <- makeState(wounded, battle)
+        (state, heroDao, renderer)    = triple
+        _                            <- state.action(testUser, tap("Skill_101"), renderer)
+        afterHero                    <- heroDao.getHeroByUserId(userId).map(_.get)
+        afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield // самоурон 10% от 200 = 20 (плюс возможный слабый удар моба) → HP заметно упал
+              assertTrue(afterHero.fightStats.hp <= 180L) &&
+              assertTrue(afterBattle.monsterCurrentHp < mobHp)
+    },
+
     test("Использование незарегистрированного слота → ход не съедается, ошибочное сообщение") {
       val hero  = heroWith(None, None)
       val slots = Nil
@@ -149,20 +165,30 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(after.slotByItem(101L).exists(s => s.cooldown == 2 && s.uses == 1))
     },
 
-    test("heroSkillHitChance клампится в [5;95]") {
-      val cappedHi = BattleState.heroSkillHitChance(
-        heroConc = 1_000_000L, heroInt = 1_000_000L, monsterConc = 1L, rarityFactor = 0.1)
-      val cappedLo = BattleState.heroSkillHitChance(
-        heroConc = 1L, heroInt = 1L, monsterConc = 1_000_000L, rarityFactor = 10.0)
-      assertTrue(cappedHi == 95.0) && assertTrue(cappedLo == 5.0)
+    test("Недостаточно энергии → умение не срабатывает, ход не тратится") {
+      val hero    = heroWith(Some(Skill.SweepingStrike), None)
+      val drained = hero.copy(fightStats = hero.fightStats.copy(energy = 0L))
+      val slots   = List(SkillSlotState(101L, Skill.SweepingStrike))
+      val battle  = weakBattle(slots)
+      val before  = battle.monsterCurrentHp
+      for {
+        triple                       <- makeState(drained, battle)
+        (state, heroDao, renderer)    = triple
+        result                       <- state.action(testUser, tap("Skill_101"), renderer)
+        screens                      <- renderer.sentScreens
+        after                        <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(screens.exists(_.text.contains("Недостаточно энергии"))) &&
+              // моб не получил урона, слот не откатился и не засчитал использование
+              assertTrue(after.monsterCurrentHp == before) &&
+              assertTrue(after.slotByItem(101L).exists(s => s.cooldown == 0 && s.uses == 0))
     },
 
-    test("monsterSkillHitChance клампится в [5;95]") {
-      val cappedHi = BattleState.monsterSkillHitChance(
-        monsterConc = 1_000_000L, rarityFactor = 10.0, heroConc = 1L, heroInt = 1L)
-      val cappedLo = BattleState.monsterSkillHitChance(
-        monsterConc = 1L, rarityFactor = 0.1, heroConc = 1_000_000L, heroInt = 1_000_000L)
-      assertTrue(cappedHi == 95.0) && assertTrue(cappedLo == 5.0)
+    test("monsterSkillHitChance зависит только от редкости и клампится в [5;95]") {
+      val cappedHi = BattleState.monsterSkillHitChance(rarityFactor = 10.0)
+      val cappedLo = BattleState.monsterSkillHitChance(rarityFactor = 0.1)
+      val mid      = BattleState.monsterSkillHitChance(rarityFactor = 1.0)
+      assertTrue(cappedHi == 95.0) && assertTrue(cappedLo == 5.0) && assertTrue(mid == 20.0)
     },
 
     test("parseSkillAction распознаёт Skill_<id>, иначе None") {

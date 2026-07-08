@@ -85,7 +85,7 @@ case class InventoryState(
       res <- inv.items.data.find(_.id == itemId) match {
         case None => showList(user, renderer)
         case Some(item) =>
-          val text     = itemDetail(item, hero.equipment, hero.gold)
+          val text     = itemDetail(item, hero, hero.gold)
           val canEquip = ItemType.equippable.contains(item.itemType)
           val canCombine = item.itemType == ItemType.TreasureMapHalf
           val choices  = List(
@@ -226,8 +226,8 @@ case class InventoryState(
     ).flatten
   }
 
-  private def itemDetail(item: Item, eq: Equipment, gold: Long): String =
-    s"💰 $gold\n\n${itemText(item, eq)}"
+  private def itemDetail(item: Item, hero: Hero, gold: Long): String =
+    s"💰 $gold\n\n${itemText(item, hero.equipment, Some(hero))}"
 
   private def readScene(user: User): Task[InventoryScene] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[InventoryScene].toOption).getOrElse(InventoryScene()))
@@ -269,14 +269,14 @@ object InventoryState {
 
   /** Подробное представление предмета (статы + надетое в том же слоте). Используется
    *  и в детальном экране инвентаря, и снаружи (например, регистрация). */
-  def itemText(item: Item, eq: Equipment): String = item.mapDescription match {
+  def itemText(item: Item, eq: Equipment, hero: Option[Hero] = None): String = item.mapDescription match {
     // Карта клада: только имя (без уровня) и текст-описание, без статов и сравнения
     // слотов — карта не надевается (см. также [[ItemType.equippable]]).
     case Some(desc) => s"${item.displayTitle}\n\n$desc"
-    case None       => gearText(item, eq)
+    case None       => gearText(item, eq, hero)
   }
 
-  private def gearText(item: Item, eq: Equipment): String = {
+  private def gearText(item: Item, eq: Equipment, hero: Option[Hero]): String = {
     def equipped(prefix: String, cur: Item): String =
       if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
       else cur.equippedComparison(prefix)
@@ -292,7 +292,12 @@ object InventoryState {
     }
     val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    s"${item.name} Ур.${item.lvl}\n$statsStr$slotInfo"
+    // Описание активного навыка (с подставленной стоимостью энергии от уровня героя).
+    val skillStr = (hero, item.activeSkill) match {
+      case (Some(h), Some(s)) => s"\n\n${s.describe(h)}"
+      case _                  => ""
+    }
+    s"${item.name} Ур.${item.lvl}\n$statsStr$skillStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании
@@ -351,6 +356,6 @@ object InventoryState {
       defence       = (base.defence + added.defence - removed.defence).max(0L),
       evasion       = (base.evasion + added.evasion - removed.evasion).max(0L),
       accuracy      = (base.accuracy + added.accuracy - removed.accuracy).max(0L),
-      concentration = (base.concentration + added.concentration - removed.concentration).max(0L)
+      energy        = (base.energy + added.energy - removed.energy).max(0L)
     )
 }

@@ -19,7 +19,7 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
 
   private def gearItem(id: Long, name: String = "Меч"): Item =
     Item(id, name, lvl = 1L, Rarity.Gray, ItemType.Weapon,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
 
   private def makeState(
     inventory: List[Item],

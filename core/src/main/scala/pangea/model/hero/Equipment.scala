@@ -29,6 +29,14 @@ case class Equipment(
     weapon.armor + additionalWeapon.armor
 
   // Суммарная прибавка к HP от экипировки (сейчас её даёт только нагрудник)
+  // Суммарная прибавка к максимуму Энергии от экипировки (слагаемое «с экипировки»
+  // в Hero.maxEnergy).
+  def allEnergy: Long =
+    helmet.energy + shoulderPads.energy + chestPlate.energy + bracelets.energy +
+    gloves.energy + pants.energy + boots.energy + amulet.energy +
+    firstRing.energy + secondRing.energy + belt.energy + flask.energy +
+    weapon.energy + additionalWeapon.energy
+
   def allHp: Long =
     helmet.hp + shoulderPads.hp + chestPlate.hp + bracelets.hp +
     gloves.hp + pants.hp + boots.hp + amulet.hp +

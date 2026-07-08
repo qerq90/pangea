@@ -21,16 +21,15 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  // У игрока высокие evasion/accuracy, но низкая концентрация → шанс каста моба ≈ 95% (clamp).
+  // Шанс каста моба зависит только от редкости; в тестах skillRoll=1 всегда проходит.
   private def baseHero = TestFixtures.hero(userId).copy(
     fightStats = FightStats(atk = 50, hp = 200, armor = 0, defence = 0,
-                            evasion = 9999, accuracy = 9999, concentration = 0)
+                            evasion = 9999, accuracy = 9999, energy = 0)
   )
 
   // Слабый монстр с большим запасом hp (не умрёт от удара героя).
   private def battle(
     mobAtk:     Long = 10,
-    mobConc:    Long = 1000,
     mobArmor:   Long = 0,
     mobDefence: Long = 0,
     curHp:      Long = 100,
@@ -41,7 +40,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
     monsterStats        = FightStats(atk = mobAtk, hp = maxHp, armor = mobArmor, defence = mobDefence,
-                                     evasion = 0, accuracy = 1, concentration = mobConc),
+                                     evasion = 0, accuracy = 1, energy = 0),
     monsterCurrentHp    = curHp,
     monsterCurrentArmor = curArmor
   )
@@ -115,7 +114,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
       )
       // У моба atk большой, accuracy = 1000 → шанс попадания почти 95%.
       val mob = battle(mobAtk = 1000, curHp = 100, maxHp = 100, mobArmor = 0, curArmor = 0).copy(
-        monsterStats = battle().monsterStats.copy(atk = 1000, accuracy = 1000, concentration = 1000))
+        monsterStats = battle().monsterStats.copy(atk = 1000, accuracy = 1000))
       for {
         triple                       <- makeState(dying, mob)
         (state, _, renderer)          = triple

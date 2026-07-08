@@ -82,7 +82,7 @@ registration:
 
 globalMap:
   enter:
-    text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor}\n💰 Золото: {gold}"
+    text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor} ⚡ {heroEnergy}/{heroMaxEnergy}\n💰 Золото: {gold}"
     choices:
       HarborQuarter: "Портовый квартал"
       MarketSquare: "Торговая площадь"
@@ -226,7 +226,7 @@ guild:
         ImproveAttack:        "Атака"
         ImproveDefence:       "Защита"
         ImproveAccuracy:      "Точность"
-        ImproveConcentration: "Концентрация"
+        ImproveEnergy:        "Энергия"
         ImproveInventory:     "Вместимость инвентаря"
         LeaveMasterHorn:
           label: "↩ Назад"
@@ -299,7 +299,7 @@ tavern:
   roomConfirmLeave: "До исцеления от травм осталось {remaining}, вы уверены?"
   roomLeaveYes: "Да"
   roomLeaveNo: "Нет"
-  roomHealed: "Ваши травмы успешно излечены."
+  roomHealed: "Ваши травмы успешно излечены, HP, броня и энергия восстановлены."
   suspiciousMan:
     label: "Подозрительный человек"
     color: "positive"
@@ -386,7 +386,7 @@ merchant:
 
 dungeon:
   enter:
-    text: "Великий лабиринт. Уровень: {level}\n❤ {hp}/{maxHp}    🧥 {armor}/{maxArmor}"
+    text: "Великий лабиринт. Уровень: {level}\n❤ {hp}/{maxHp}    🧥 {armor}/{maxArmor}\n⚡ {energy}/{maxEnergy}"
     choices:
       FindEvent: "Исследовать уровень"
       GoDarker: "Двигаться к тьме"
@@ -405,7 +405,7 @@ dungeon:
   trackingContinueBtn: "Идти по следу тьмы"
   trackingLeaveBtn: "Перестать искать"
   findEvent: "Вы пробираетесь по коридорам лабиринта, нервно оглядываясь и чувствуя чей то взгляд на затылке."
-  spring: "💧 Вы находите живительный ручеёк! HP полностью восстановлено (+{healed}).{flaskFilled}"
+  spring: "💧 Вы находите живительный ручеёк! HP полностью восстановлено (+{healed}), Энергия +{energy}.{flaskFilled}"
   springFlaskFilled: " Фляга пополнена."
   springAmbush: " Однако на шум живительного ручья пришёл и кто-то ещё…"
 
@@ -444,7 +444,7 @@ heroStats:
 
 battle:
   enter:
-    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}  🌀 {heroSkillHit}"
+    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -464,7 +464,7 @@ battle:
   darknessConquered: "🌑 Тьма этого этажа повержена! Путь вглубь лабиринта открыт."
   death: "Вы погибли..."
   fled: "Вы успешно сбежали!"
-  flaskUsed: "Восстановлено {healed} HP. Здоровье: {hp}/{max}"
+  flaskUsed: "Восстановлено {healed} HP и {energy} энергии. Здоровье: {hp}/{max}"
   noFlask: "Фляга не экипирована!"
   flaskEmpty: "Фляга пуста! Найдите живительный ручеёк, чтобы пополнить её."
   flaskBuff: "Эффект фляги активирован!"
@@ -478,13 +478,14 @@ battle:
   beltEvasion: "💨 Зелье уворота: +10% к шансу уклонения на {rounds} ходов."
   beltDefence: "🛡 Зелье защиты: +{defence} к защите на {rounds} ходов."
   beltAttack: "⚔ Зелье атаки: +{atk} к атаке на {rounds} ходов."
-  beltConcentration: "🌀 Зелье концентрации: +10% к шансу умения на {rounds} ходов."
+  beltEnergy: "⚡ Зелье энергии: восстановлено {energy} энергии. Энергия: {cur}/{max}"
   poisonApplied: "☠ {monster} отравлен!"
   poisonTick: "☠ Яд снимает {damage} HP с {monster}."
   regenTick: "💚 Регенерация восстанавливает {healed} HP."
-  skillMiss: "❌ Способность «{skill}» не сработала (шанс применения был {chance}%)."
   skillOnCooldown: "Способность ещё восстанавливается."
   skillUnavailable: "Эта способность сейчас недоступна."
+  weakSpotDouble: "🎯 Слабое место было поражено, урон удвоен!"
+  notEnoughEnergy: "⚡ Недостаточно энергии: нужно {cost}, а у вас {energy}."
 
 rest:
   enter:
@@ -492,7 +493,7 @@ rest:
     choices: []
   enterRevive: "В глазах внезапно потемнело… Вы теряете сознание.\nДо прихода в себя осталось {duration}."
   waiting: "Ещё {remaining} до восстановления..."
-  done: "Вы отдохнули! HP восстановлено."
+  done: "Вы отдохнули! HP, броня и энергия восстановлены."
   revived: "Клеймо Пангеи вспыхивает на твоей плоти багровым огнём. Земля размыкает свои объятия — отмеченным не место среди мёртвых. Ты снова на ногах."
 
 death:

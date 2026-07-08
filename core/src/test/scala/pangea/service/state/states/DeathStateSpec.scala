@@ -16,7 +16,7 @@ object DeathStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
 
   private val testItem = Item(42L, "Меч судьбы", 1L, Rarity.Blue, ItemType.Weapon,
-                              attack = 10, accuracy = 0, concentration = 0,
+                              attack = 10, accuracy = 0, energy = 0,
                               armor = 0, defence = 0, evasion = 0)
 
   private def makeState(hero: pangea.model.hero.Hero, items: List[Item] = Nil) =
@@ -114,7 +114,7 @@ object DeathStateSpec extends ZIOSpecDefault {
     test("enter с предметами в инвентаре → каждый предмет имеет 25% шанс дропа (не крашится)") {
       val manyItems = (1 to 20).map(i =>
         Item(i.toLong, s"Предмет $i", 1L, Rarity.Gray, ItemType.Weapon,
-             attack = 1, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0)
+             attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
       ).toList
       for {
         triple                        <- makeState(richHero, items = manyItems)

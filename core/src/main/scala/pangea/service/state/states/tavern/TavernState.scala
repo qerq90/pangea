@@ -118,7 +118,8 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
                val healed   = hero.copy(traumaUntil = None, traumaNames = Nil)
                val maxHp    = healed.effectiveMaxHp(now)
                val maxArmor = healed.effectiveMaxArmor(now)
-               heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor)) *>
+               val maxEn    = healed.maxEnergy(now)
+               heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn)) *>
                  heroDao.updateTrauma(user.userId, None, Nil) *>
                  heroDao.writeSceneData(user.userId, Json.Null) *>
                  scheduler.cancel(user.userId, TaskKind.TavernHeal) *>

@@ -23,7 +23,7 @@ object TestFixtures {
     upgradePoints = 0L,
     race         = Race.Human,
     baseStats    = BaseStats(agi = 10, vit = 10, str = 10, int = 10),
-    fightStats   = FightStats(atk = 10, hp = 100, armor = 0, defence = 0, evasion = 5, accuracy = 10, concentration = 5),
+    fightStats   = FightStats(atk = 10, hp = 100, armor = 0, defence = 0, evasion = 5, accuracy = 10, energy = 5),
     equipment    = emptyEquipment,
     dungeonLevel    = dungeonLevel,
     maxDungeonLevel = maxDungeonLevel,

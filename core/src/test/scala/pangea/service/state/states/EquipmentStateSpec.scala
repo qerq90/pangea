@@ -23,14 +23,14 @@ object EquipmentStateSpec extends ZIOSpecDefault {
   private val WeaponSlotIdx = 12
 
   private val sword = Item(10L, "Меч судьбы", 1L, Rarity.Blue, ItemType.Weapon,
-                           attack = 20, accuracy = 5, concentration = 0,
+                           attack = 20, accuracy = 5, energy = 0,
                            armor = 0, defence = 0, evasion = 0)
 
   private val ring1 = Item(11L, "Кольцо силы",   1L, Rarity.Gray, ItemType.Ring,
-                           attack = 3, accuracy = 0, concentration = 0,
+                           attack = 3, accuracy = 0, energy = 0,
                            armor = 0, defence = 0, evasion = 0)
   private val ring2 = Item(12L, "Кольцо ловкости", 1L, Rarity.Gray, ItemType.Ring,
-                           attack = 0, accuracy = 0, concentration = 0,
+                           attack = 0, accuracy = 0, energy = 0,
                            armor = 0, defence = 2, evasion = 0)
 
   private def makeState(hero: pangea.model.hero.Hero, invItems: List[Item] = Nil) =

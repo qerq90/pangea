@@ -13,7 +13,7 @@ import zio.{Task, ZIO}
 
 /**
  * Мастер Горн прокачивает шесть характеристик за репутацию: Броню, Уклонение,
- * Атаку, Защиту, Концентрацию, Вместимость инвентаря. На каждой клавише —
+ * Атаку, Защиту, Энергию, Вместимость инвентаря. На каждой клавише —
  * confirm-экран с ценой; формула цены — `a(n) = 35·1.2^(n−1) − 30`, округление
  * вверх, где `n` — порядковый номер следующего улучшения этой характеристики
  * для героя (см. `hero.masterHornBoosts`).
@@ -32,7 +32,7 @@ case class MasterHornState(
       "ImproveAttack"        -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Attack) },
       "ImproveDefence"       -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Defence) },
       "ImproveAccuracy"      -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Accuracy) },
-      "ImproveConcentration" -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Concentration) },
+      "ImproveEnergy"        -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Energy) },
       "ImproveInventory"     -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Inventory) },
       "ConfirmImprove"       -> Target.Run { (u, _, r) => confirmImprove(u, r) },
       "CancelImprove"        -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) },
@@ -125,7 +125,7 @@ object MasterHornState {
     case object Attack        extends Stat("Атака")
     case object Defence       extends Stat("Защита")
     case object Accuracy      extends Stat("Точность")
-    case object Concentration extends Stat("Концентрация")
+    case object Energy        extends Stat("Энергия")
     case object Inventory     extends Stat("Вместимость инвентаря")
   }
 
@@ -138,7 +138,7 @@ object MasterHornState {
     case Stat.Attack        => b.attack
     case Stat.Defence       => b.defence
     case Stat.Accuracy      => b.accuracy
-    case Stat.Concentration => b.concentration
+    case Stat.Energy        => b.energy
     case Stat.Inventory     => b.inventory
   }
 
@@ -148,7 +148,7 @@ object MasterHornState {
     case Stat.Attack        => b.copy(attack        = b.attack + 1)
     case Stat.Defence       => b.copy(defence       = b.defence + 1)
     case Stat.Accuracy      => b.copy(accuracy      = b.accuracy + 1)
-    case Stat.Concentration => b.copy(concentration = b.concentration + 1)
+    case Stat.Energy        => b.copy(energy        = b.energy + 1)
     case Stat.Inventory     => b.copy(inventory     = b.inventory + 1)
   }
 

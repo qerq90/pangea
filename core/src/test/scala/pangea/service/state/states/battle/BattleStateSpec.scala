@@ -28,12 +28,12 @@ object BattleStateSpec extends ZIOSpecDefault {
 
   private def belt(potion: PotionKind, charges: Int, maxCharges: Int = 5): Item =
     Item(9L, "Пояс", 1L, ItemRarity.Green, ItemType.Belt,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Belt(potion, charges = charges, maxCharges = maxCharges))
 
   private def healFlask(charges: Int): Item =
     Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = charges, maxCharges = charges))
 
   private val userId   = UserId(1L)
@@ -43,7 +43,7 @@ object BattleStateSpec extends ZIOSpecDefault {
   // Герой с высокой точностью — попадает практически всегда
   private def strongHero = TestFixtures.hero(userId).copy(
     fightStats = FightStats(atk = 50, hp = 200, armor = 0, defence = 0,
-                            evasion = 9999, accuracy = 9999, concentration = 0),
+                            evasion = 9999, accuracy = 9999, energy = 0),
     baseStats  = TestFixtures.hero(userId).baseStats.copy(str = 1)
   )
 
@@ -59,7 +59,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
     monsterStats        = FightStats(atk = 1, hp = 1, armor = 0, defence = 0,
-                                     evasion = 0, accuracy = 1, concentration = 0),
+                                     evasion = 0, accuracy = 1, energy = 0),
     monsterCurrentHp    = 1L,
     monsterCurrentArmor = 0L
   )
@@ -73,7 +73,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
     monsterStats        = FightStats(atk = 1, hp = 9999, armor = 0, defence = 0,
-                                     evasion = 0, accuracy = 9999, concentration = 0),
+                                     evasion = 0, accuracy = 9999, energy = 0),
     monsterCurrentHp    = 9999L,
     monsterCurrentArmor = 0L
   )
@@ -160,7 +160,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("UseFlask с экипированной флягой → HP восстановлен на 25%, заряд потрачен") {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                    details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
@@ -181,7 +181,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("UseFlask дважды за раунд → второй раз заблокирован, HP не меняется повторно") {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                    details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
       val heroWithFlask     = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
@@ -203,7 +203,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
       import pangea.model.item.FlaskEffect
       val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                    details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
       val heroEmptyFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
@@ -353,7 +353,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         monsterRace         = pangea.model.monster.Race.Human.entryName,
         monsterRarity       = pangea.model.monster.Rarity.Common.entryName,
         monsterStats        = FightStats(atk=10000, hp=9999, armor=0, defence=0,
-                                          evasion=0, accuracy=9999, concentration=0),
+                                          evasion=0, accuracy=9999, energy=0),
         monsterCurrentHp    = 9999L,
         monsterCurrentArmor = 0L
       )
@@ -381,7 +381,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       // Шлем даёт allArmor=30 → maxArmor = 30 (защита больше не множит броню,
       // см. BattleState.damageReduction). Травма CutAchilles режет ПОТОЛОК через armorPct.
       val helmet = Item(1L, "Шлем", 1L, ItemRarity.Gray, ItemType.Helmet,
-                        attack = 0, accuracy = 0, concentration = 0, armor = 30, defence = 0, evasion = 0)
+                        attack = 0, accuracy = 0, energy = 0, armor = 30, defence = 0, evasion = 0)
       val base = TestFixtures.hero(userId).copy(
         equipment  = TestFixtures.hero(userId).equipment.copy(helmet = helmet),
         fightStats = TestFixtures.hero(userId).fightStats.copy(defence = 8, armor = 30)
@@ -415,7 +415,7 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     test("buff с turnsLeft тикается после хода (Attack)") {
-      val buff        = Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, skillHitPct = 0L, turnsLeft = Some(3))
+      val buff        = Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(3))
       val buffedBattle = strongBattle.copy(heroBattleState = HeroBattleState(List(buff)))
       for {
         triple               <- makeState(strongHero, buffedBattle)
@@ -435,7 +435,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         fightStats = strongHero.fightStats.copy(hp = 500L, armor = 0L, defence = 0, evasion = 0),
         baseStats  = strongHero.baseStats.copy(agi = 0)
       )
-      val bigArmorBuff  = Buff(atk = 0L, armor = 9999L, defence = 0L, dodgePct = 0L, skillHitPct = 0L, turnsLeft = None)
+      val bigArmorBuff  = Buff(atk = 0L, armor = 9999L, defence = 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = None)
       val buffedBattle  = strongBattle.copy(heroBattleState = HeroBattleState(List(bigArmorBuff)))
       for {
         triple               <- makeState(noArmorHero, buffedBattle)
@@ -486,7 +486,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         monsterRace         = Race.Human.entryName,
         monsterRarity       = Rarity.Common.entryName,
         monsterStats        = FightStats(atk = 1, hp = 100000, armor = 0, defence = 0,
-                                         evasion = 0, accuracy = 1, concentration = 0),
+                                         evasion = 0, accuracy = 1, energy = 0),
         monsterCurrentHp    = 100000L,
         monsterCurrentArmor = 0L
       )
@@ -494,7 +494,7 @@ object BattleStateSpec extends ZIOSpecDefault {
         race       = race,
         baseStats  = TestFixtures.hero(userId).baseStats.copy(str = 100, agi = 0),
         fightStats = FightStats(atk = 0, hp = 10000, armor = 0, defence = 0,
-                                evasion = 9999, accuracy = 9999, concentration = 0)
+                                evasion = 9999, accuracy = 9999, energy = 0)
       )
       def monsterHpAfterAttack(race: Race) =
         for {

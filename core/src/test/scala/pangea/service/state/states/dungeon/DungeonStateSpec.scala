@@ -98,7 +98,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
     test("FindEvent Spring с экипированной флягой → фляга в слоте пополнена") {
       import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
       val flask = Item(1L, "Фляга", 1L, Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                    details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
       val heroWithEmptyFlask = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L),
@@ -122,7 +122,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
     test("FindEvent Spring → фляги в инвентаре пополнены") {
       import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
       val flaskInInv = Item(2L, "Запасная фляга", 1L, Rarity.Gray, ItemType.Flask,
-                        attack=0, accuracy=0, concentration=0, armor=0, defence=0, evasion=0,
+                        attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
                         details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 4))
       for {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))

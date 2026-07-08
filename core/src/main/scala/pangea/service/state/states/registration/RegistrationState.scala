@@ -102,9 +102,9 @@ case class RegistrationState(
 object RegistrationState {
   val starterItems: List[Item] = List(
     Item(-1L,  "Меч новобранца",            1L, Rarity.Gray, ItemType.Weapon,
-      attack = 1, accuracy = 1, concentration = 0, armor = 0, defence = 0, evasion = 0),
+      attack = 1, accuracy = 1, energy = 0, armor = 0, defence = 0, evasion = 0),
     Item(-2L,  "Фляга начинающего исследователя", 1L, Rarity.Gray, ItemType.Flask,
-      attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
   )
 }

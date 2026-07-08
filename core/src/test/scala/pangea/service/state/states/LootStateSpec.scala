@@ -19,11 +19,11 @@ object LootStateSpec extends ZIOSpecDefault {
 
   private def gear(name: String) =
     Item(-1L, name, 5L, Rarity.Green, ItemType.Helmet,
-         attack = 0, accuracy = 0, concentration = 0, armor = 7, defence = 1, evasion = 0)
+         attack = 0, accuracy = 0, energy = 0, armor = 7, defence = 1, evasion = 0)
 
   private def trophy =
     Item(-1L, "Голова (Человек)", 5L, Rarity.Gray, ItemType.Trophy,
-         attack = 0, accuracy = 0, concentration = 0, armor = 0, defence = 0, evasion = 0,
+         attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
          details = ItemDetails.Trophy("Human", TrophyKind.Head))
 
   private def makeState(loot: LootData, canAdd: Boolean = true) =

@@ -15,13 +15,12 @@ object MonsterSkillSpec extends ZIOSpecDefault {
     val base = TestFixtures.hero(userId)
     base.copy(
       baseStats  = base.baseStats.copy(int = int),
-      fightStats = base.fightStats.copy(hp = hp, armor = armor, defence = defence, concentration = 0)
+      fightStats = base.fightStats.copy(hp = hp, armor = armor, defence = defence, energy = 0)
     )
   }
 
   private def battle(
     mobAtk:        Long = 100,
-    mobConc:       Long = 0,
     mobArmor:      Long = 10,
     mobDefence:    Long = 5,
     mobMaxHp:      Long = 1000,
@@ -31,8 +30,9 @@ object MonsterSkillSpec extends ZIOSpecDefault {
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
+    // energy у моба не используется (0): «интеллект» в формулах берётся из atk/defence.
     monsterStats        = FightStats(atk = mobAtk, hp = mobMaxHp, armor = mobArmor, defence = mobDefence,
-                                     evasion = 0, accuracy = 0, concentration = mobConc),
+                                     evasion = 0, accuracy = 0, energy = 0),
     monsterCurrentHp    = curHp,
     monsterCurrentArmor = curArmor
   )
@@ -64,13 +64,12 @@ object MonsterSkillSpec extends ZIOSpecDefault {
 
     suite("cast")(
       test("QuickStrike: урон = 0.5*atk с учётом damageReduction, проходит по броне героя") {
-        // У моба concentration=1000 → attackerInt большой → reduction ≈ 0 (denom>>num).
-        // У героя effectiveFightStats clamp defence/int к 1.
-        val b = battle(mobAtk = 100, mobConc = 1000)
+        // attackerInt моба = его атака (100). У героя effectiveFightStats clamp defence/int к 1.
+        // reduction = (1+1)/((1+1)+100*2) = 2/202 ≈ 0.01 → почти без снижения.
+        val b = battle(mobAtk = 100)
         val h = hero(hp = 100, armor = 20, defence = 0, int = 0)
         val cast = MonsterSkill.QuickStrike.cast(b, h, 0L)
-        // raw = 100*0.5 = 50; reduction ≈ 2/2002 ≈ 0.001 → damage ≈ 49
-        // armor 20 поглощает 20 → hp ≈ 100 - 29
+        // raw = 100*0.5 = 50; damage ≈ 49; armor 20 поглощает 20 → hp ≈ 100 - 29
         assertTrue(cast.heroArmor == 0L) && assertTrue(cast.heroHp > 60L && cast.heroHp < 80L)
       },
 

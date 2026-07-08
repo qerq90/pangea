@@ -7,7 +7,7 @@ case class TraumaPenalties(
   hpPct:      Double = 0.0,
   vitPct:     Double = 0.0,
   accPct:     Double = 0.0,
-  concPct:    Double = 0.0,
+  energyPct:  Double = 0.0,
   armorPct:   Double = 0.0,
   defPct:     Double = 0.0,
   intPct:     Double = 0.0
@@ -19,7 +19,7 @@ case class TraumaPenalties(
     hpPct      = hpPct      + o.hpPct,
     vitPct     = vitPct     + o.vitPct,
     accPct     = accPct     + o.accPct,
-    concPct    = concPct    + o.concPct,
+    energyPct  = energyPct  + o.energyPct,
     armorPct   = armorPct   + o.armorPct,
     defPct     = defPct     + o.defPct,
     intPct     = intPct     + o.intPct
@@ -36,7 +36,7 @@ case class TraumaPenalties(
       fmt(hpPct,      "HP"),
       fmt(vitPct,     "телосложение"),
       fmt(accPct,     "точность"),
-      fmt(concPct,    "сосредоточение"),
+      fmt(energyPct,  "энергия"),
       fmt(armorPct,   "броня"),
       fmt(defPct,     "защита"),
       fmt(intPct,     "интеллект")
@@ -85,8 +85,8 @@ object Trauma {
   case object TornEar extends Trauma {
     val name        = "Порванное ухо"
     val severity    = Light
-    val description = "Вам чуть не отрезали ухо — кровь залила голову и шею, что мешает ориентироваться в пространстве. -5% к точности, -5% к сосредоточению."
-    val penalties   = TraumaPenalties(accPct = 0.05, concPct = 0.05)
+    val description = "Вам чуть не отрезали ухо — кровь залила голову и шею, что мешает ориентироваться в пространстве. -5% к точности, -5% к энергии."
+    val penalties   = TraumaPenalties(accPct = 0.05, energyPct = 0.05)
   }
 
   // ── Средние ─────────────────────────────────────────────────────────────
@@ -111,8 +111,8 @@ object Trauma {
   case object BrokenNose extends Trauma {
     val name        = "Сломанный нос"
     val severity    = Medium
-    val description = "Тупым предметом был сломан нос, из-за чего дышать стало затруднительно. -25% к точности, -25% к сосредоточению."
-    val penalties   = TraumaPenalties(accPct = 0.25, concPct = 0.25)
+    val description = "Тупым предметом был сломан нос, из-за чего дышать стало затруднительно. -25% к точности, -25% к энергии."
+    val penalties   = TraumaPenalties(accPct = 0.25, energyPct = 0.25)
   }
 
   // ── Тяжёлые ─────────────────────────────────────────────────────────────
@@ -137,8 +137,8 @@ object Trauma {
   case object SplitSkull extends Trauma {
     val name        = "Расколотый череп"
     val severity    = Heavy
-    val description = "Ваш череп получил множественные переломы, а мозг — сотрясение, что вызвало отёки мозга и повышенное давление внутри головы. -50% к точности, -50% к сосредоточению, -75% к интеллекту."
-    val penalties   = TraumaPenalties(accPct = 0.50, concPct = 0.50, intPct = 0.75)
+    val description = "Ваш череп получил множественные переломы, а мозг — сотрясение, что вызвало отёки мозга и повышенное давление внутри головы. -50% к точности, -50% к энергии, -75% к интеллекту."
+    val penalties   = TraumaPenalties(accPct = 0.50, energyPct = 0.50, intPct = 0.75)
   }
 
   val light:  Vector[Trauma] = Vector(BruisedLeg, SmashedFinger, AchingRib, TornEar)

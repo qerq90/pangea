@@ -124,7 +124,7 @@ object MerchantStateSpec extends ZIOSpecDefault {
     test("Sell → показывает список предметов; выбор → цена; ConfirmSellItem начисляет золото и убирает предмет") {
       // green helmet lvl 5 → sellPrice = (5+5)*1.2*4 = 48
       val helmet = Item(7L, "Шлем", 5L, Rarity.Green, ItemType.Helmet,
-        attack = 0, accuracy = 0, concentration = 0, armor = 10, defence = 1, evasion = 0)
+        attack = 0, accuracy = 0, energy = 0, armor = 10, defence = 1, evasion = 0)
       val selectHelmet = UserAction("", Some(s"""{"action":"${MerchantState.SellItemPrefix}${helmet.id}"}"""))
       for {
         t <- makeState(richHero.copy(gold = 100L), items = List(helmet))
