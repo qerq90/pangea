@@ -34,9 +34,12 @@ sealed abstract class Skill(
     */
   def energyCost(hero: Hero): Long
 
-  /** Описание навыка для инвентаря — с подставленной стоимостью энергии. */
+  /** Описание навыка для инвентаря — с подставленной стоимостью энергии и
+    * перезарядкой (КД). Оба хвоста собираются здесь, а не в тексте каждого
+    * навыка, чтобы формат был единым. */
   def describe(hero: Hero): String =
-    description.replace("{}", energyCost(hero).toString)
+    description.replace("{}", energyCost(hero).toString) +
+      s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}."
 }
 
 object Skill extends Enum[Skill] {
@@ -76,6 +79,19 @@ object Skill extends Enum[Skill] {
 
   // Процент текущего HP, который тратит Кровавая жатва (8 из них идут в урон — см. baseValue).
   val BloodHarvestHpCostPct: Long = 10L
+
+  /** Русское склонение слова «ход» после числа: 1 ход, 2–4 хода, 5+ ходов
+    * (с учётом 11–14 → «ходов»). */
+  private def turnsWord(n: Int): String = {
+    val mod100 = math.abs(n) % 100
+    val mod10  = math.abs(n) % 10
+    if (mod100 >= 11 && mod100 <= 14) "ходов"
+    else mod10 match {
+      case 1         => "ход"
+      case 2 | 3 | 4 => "хода"
+      case _         => "ходов"
+    }
+  }
 
   // ── Оружейные навыки ────────────────────────────────────────────────────────
   case object SweepingStrike

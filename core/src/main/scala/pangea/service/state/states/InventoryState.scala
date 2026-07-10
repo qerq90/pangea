@@ -281,7 +281,7 @@ object InventoryState {
       if (cur.itemType == ItemType.NoItem) s"$prefix: свободен"
       else cur.equippedComparison(prefix)
     // Разделитель между сравниваемым предметом и тем, что уже надето.
-    val sep = "➖➖➖➖➖"
+    val sep = Item.ComparisonSeparator
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring   => s"\n$sep\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"

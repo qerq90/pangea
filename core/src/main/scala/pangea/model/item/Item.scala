@@ -69,14 +69,16 @@ case class Item(
    *  (активный навык, зелье пояса) — ниже числовых статов; пустая строка
    *  возвращается, если у предмета нет ни статов, ни спец-данных. */
   def statsLines: List[String] = {
+    // Смайлики статов совпадают с конвенцией экрана боя (см. scenes.yaml battle):
+    // ⚔ атака, 🎯 точность, ⚡ энергия, 🧥 броня, 🛡 защита, 💨 уклонение, ❤ HP.
     val numeric = List(
-      Option.when(attack > 0)(s"Атака: +$attack"),
-      Option.when(accuracy > 0)(s"Точность: +$accuracy"),
-      Option.when(energy > 0)(s"Энергия: +$energy"),
-      Option.when(armor > 0)(s"Броня: +$armor"),
-      Option.when(defence > 0)(s"Защита: +$defence"),
-      Option.when(evasion > 0)(s"Уклонение: +$evasion"),
-      Option.when(hp > 0)(s"HP: +$hp")
+      Option.when(attack > 0)(s"⚔ +$attack"),
+      Option.when(accuracy > 0)(s"🎯 +$accuracy"),
+      Option.when(energy > 0)(s"⚡ +$energy"),
+      Option.when(armor > 0)(s"🧥 +$armor"),
+      Option.when(defence > 0)(s"🛡 +$defence"),
+      Option.when(evasion > 0)(s"💨 +$evasion"),
+      Option.when(hp > 0)(s"❤ +$hp")
     ).flatten
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
@@ -97,6 +99,10 @@ case class Item(
 }
 
 object Item {
+  /** Разделитель между сравниваемым предметом и тем, что уже надето в том же
+    * слоте. Единый для всех экранов сравнения (дроп, находка, инвентарь). */
+  val ComparisonSeparator: String = "➖➖➖➖➖"
+
   def NoItem: Item =
     Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, ItemDetails.Plain)
 

@@ -98,11 +98,14 @@ object SkillSpec extends ZIOSpecDefault {
           Skill.Bulwark.cooldown == 3 && Skill.Bulwark.initialCooldown == 0
         )
       },
-      test("Описание в инвентаре подставляет стоимость энергии") {
-        val d = Skill.Ram.describe(hero10)
-        assertTrue(d.contains("расходует 25 энергии")) && assertTrue(
-          !d.contains("{}")
-        )
+      test("Описание в инвентаре подставляет стоимость энергии и КД") {
+        val d = Skill.Ram.describe(hero10) // Ram: cooldown = 3
+        assertTrue(d.contains("расходует 25 энергии")) &&
+        assertTrue(!d.contains("{}")) &&
+        assertTrue(d.contains("Перезарядка: 3 хода")) &&
+        // склонение: 1 → ход, 2–4 → хода
+        assertTrue(Skill.QuickStrike.describe(hero10).contains("Перезарядка: 1 ход.")) &&
+        assertTrue(Skill.Restoration.describe(hero10).contains("Перезарядка: 4 хода"))
       }
     )
 }

@@ -140,7 +140,8 @@ case class LootState(
     }
 
   /** Карточка дропа + строки с надетым в том же слоте — чтобы сразу сравнить.
-   *  Статы выводим словами на отдельных строках (так читается). Трофеи не сравниваются. */
+   *  Между дропом и надетым — тот же разделитель, что при находке предмета
+   *  ([[Item.ComparisonSeparator]]). Трофеи не сравниваются. */
   private def itemLineWithEquipped(item: Item, hero: Hero): String = {
     val base = itemLine(item)
     if (item.itemType == ItemType.Trophy) base
@@ -150,7 +151,7 @@ case class LootState(
       if (equipped.isEmpty) base
       else {
         val blocks = equipped.map(_.equippedComparison("Надето"))
-        base + "\n" + blocks.mkString("\n")
+        base + "\n" + Item.ComparisonSeparator + "\n" + blocks.mkString("\n")
       }
     }
   }
