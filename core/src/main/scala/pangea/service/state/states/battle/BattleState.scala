@@ -6,7 +6,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.model.battle.{Buff, Regen, SoloPveBattle, SkillSlotState}
-import pangea.model.hero.{Equipment, Hero}
+import pangea.model.hero.Hero
 import pangea.model.item.{FlaskEffect, ItemDetails, PotionKind}
 import pangea.model.stats.FightStats
 import pangea.model.skill.{MonsterSkill, Skill}
@@ -17,31 +17,36 @@ import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
+/** Бой строится как «прочитать всё в начале хода → чисто посчитать ход →
+  * записать всё один раз в конце». Боевые функции ([[attackTurn]]/[[skillTurn]]/
+  * [[flaskTurn]]/[[beltTurn]]/[[fleeTurn]] и внутренние [[playerStrike]]/
+  * [[monsterPhase]]/[[dealSkillDamage]]) НЕ трогают `heroDao`/`renderer` — они
+  * только считают и накапливают лог сообщений ([[BattleState.TurnResult]]).
+  * Единственная точка I/O — [[resolve]]/[[commit]]: она персистит итог хода
+  * ровно один раз и показывает склеенный лог. Так исключён целый класс багов
+  * «одна из веток забыла сохранить стат» (см. Кровавую жатву). */
 case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
+
+  import BattleState.{Outcome, TurnResult}
+
+  /** Чистое вычисление одного хода: снимок состояния → результат хода. */
+  private type Turn = (Hero, SoloPveBattle, Long) => Task[TurnResult]
 
   private val branch = new Branch(
     routes = Map(
-      "Attack" -> Target.Run((user, _, renderer) => attack(user, renderer)),
-      "UseFlask" -> Target.Run { (user, _, renderer) =>
-        useFlask(user, renderer)
-      },
-      "UseBelt" -> Target.Run { (user, _, renderer) =>
-        useBelt(user, renderer)
-      },
-      "Flee" -> Target.Run((user, _, renderer) => flee(user, renderer)),
-      "ConfirmFlee" -> Target.Run { (user, _, renderer) =>
-        confirmFlee(user, renderer)
-      },
-      "CancelFlee" -> Target.Run { (user, _, renderer) =>
-        showScreen(user, renderer).as(StateType.Battle)
-      }
+      "Attack"      -> Target.Run((u, _, r) => resolve(u, r)(attackTurn)),
+      "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r)(flaskTurn)),
+      "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
+      "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
+      "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
+      "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle))
     ),
     fallback = Target.Run { (user, ua, renderer) =>
       // Кнопки способностей именуются Skill_<itemId> и роутятся динамически: id
       // указывает на конкретный предмет, поэтому два предмета с «одним» Skill
       // имеют независимые cd/uses.
       BattleState.parseSkillAction(ua) match {
-        case Some(itemId) => useSkill(user, renderer, itemId)
+        case Some(itemId) => resolve(user, renderer)(skillTurn(itemId))
         case None         => showScreen(user, renderer).as(StateType.Battle)
       }
     }
@@ -58,37 +63,75 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       renderer: Renderer
   ): Task[StateType] = branch.act(user, ua, renderer)
 
-  private def attack(user: User, renderer: Renderer): Task[StateType] =
+  // ── Оболочка I/O: читаем всё → считаем ход → пишем всё ──────────────────────
+
+  /** Прочитать снимок (герой + бой + время) один раз, посчитать ход чистой
+    * функцией `turn`, затем один раз закоммитить результат. */
+  private def resolve(user: User, renderer: Renderer)(turn: Turn): Task[StateType] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
-      result <- playerBasicAttack(
-        user,
-        hero,
-        battle,
-        now,
-        renderer,
-        prefix = "",
-        skipSlots = Set.empty
-      )
-    } yield result
+      result <- turn(hero, battle, now)
+      state  <- commit(user, result, now, renderer)
+    } yield state
 
-  /** Базовая атака игрока. `prefix` приклеивается перед строкой об атаке —
-    * используется, когда базовая атака идёт после применения скилла (тогда
-    * prefix содержит описание самого скилла). `skipSlots` пробрасывается в
-    * `monsterAttacks → tickBuffs`, чтобы только что использованный слот не
-    * тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
-    */
-  private def playerBasicAttack(
+  /** Единственная точка записи и показа за ход. Персист итоговых
+    * снаряжения+статов героя выполняется ВСЕГДА и вне ветвления по исходу —
+    * поэтому ни одна ветка не может «забыть» сохранить изменённый стат. */
+  private def commit(
       user: User,
+      res: TurnResult,
+      nowMs: Long,
+      renderer: Renderer
+  ): Task[StateType] = {
+    val persistHero =
+      heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+    val msg     = res.log.mkString("\n")
+    val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
+    res.outcome match {
+      case Outcome.Continue =>
+        persistHero *>
+          heroDao.writeActiveBattle(user.userId, res.battle.asJson) *>
+          showLog *>
+          renderer
+            .show(user, buildBattleScreen(res.hero, res.battle, res.hero.effectiveMaxHp(nowMs), nowMs))
+            .as(StateType.Battle)
+      case Outcome.Victory =>
+        persistHero *> showLog *> victory(user, res.hero, res.battle, renderer)
+      case Outcome.Death =>
+        persistHero *> showLog *>
+          renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
+      case Outcome.Fled =>
+        persistHero *>
+          heroDao.clearActiveBattle(user.userId) *>
+          showLog *>
+          renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
+    }
+  }
+
+  /** Continue без изменения состояния — только сообщение (неготовый скилл, пустая
+    * фляга и т.п.): ход не тратится, экран перерисовывается. */
+  private def cont(hero: Hero, battle: SoloPveBattle, msg: String): Task[TurnResult] =
+    ZIO.succeed(TurnResult(hero, battle, Vector(msg), Outcome.Continue))
+
+  // ── Ход игрока: базовая атака ───────────────────────────────────────────────
+
+  private def attackTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    playerStrike(hero, battle, nowMs, Vector.empty, Set.empty)
+
+  /** Базовая атака игрока. `log` — уже накопленные строки хода (например, строка
+    * применённого скилла, после которого идёт базовая атака). `skipSlots`
+    * пробрасывается в `monsterPhase → tickBuffs`, чтобы только что использованный
+    * слот не тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
+    */
+  private def playerStrike(
       hero: Hero,
       battle: SoloPveBattle,
       nowMs: Long,
-      renderer: Renderer,
-      prefix: String,
-      skipSlots: Set[Long]
-  ): Task[StateType] =
+      log: Vector[String],
+      skip: Set[Long]
+  ): Task[TurnResult] =
     for {
       eff <- ZIO.succeed(hero.effectiveFightStats(nowMs))
       buffedEff = battle.heroBattleState.applyTo(eff)
@@ -130,228 +173,41 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   if (poisonsNow) Some(battle.effects.monsterPoison.map(_.stacked).getOrElse(pangea.model.battle.Poison.onHit))
                   else battle.effects.monsterPoison
               )
-            attackLineFull = attackLine + (if (poisonsNow) "\n" + content.format("battle.poisonApplied", "monster" -> monster.name) else "")
             updated = battle.copy(
               monsterCurrentHp = newHp,
               monsterCurrentArmor = newArmor,
               effects = effects
             )
+            log1 = log :+ attackLine
+            log2 =
+              if (poisonsNow) log1 :+ content.format("battle.poisonApplied", "monster" -> monster.name)
+              else log1
             r <-
-              if (newHp <= 0)
-                heroDao.writeActiveBattle(user.userId, updated.asJson) *>
-                  renderer.show(user, Screen(prefix + attackLineFull, Nil)) *>
-                  victory(user, hero, updated, renderer)
-              else
-                monsterAttacks(
-                  user,
-                  hero,
-                  updated,
-                  nowMs,
-                  renderer,
-                  prefix + attackLineFull,
-                  skipSlots
-                )
+              if (newHp <= 0) ZIO.succeed(TurnResult(hero, updated, log2, Outcome.Victory))
+              else monsterPhase(hero, updated, nowMs, log2, skip)
           } yield r
         } else {
           val attackLine =
             content.format("battle.miss", "chance" -> heroHitPct.toString)
-          monsterAttacks(
-            user,
-            hero,
-            battle,
-            nowMs,
-            renderer,
-            prefix + attackLine,
-            skipSlots
-          )
+          monsterPhase(hero, battle, nowMs, log :+ attackLine, skip)
         }
     } yield result
 
-  /** Применение активного навыка. Логика:
-    *   - проверяем, что слот существует, готов (cd=0) и связан с экипированным
-    *     предметом;
-    *   - проверяем, что хватает энергии на каст ([[Skill.energyCost]]); если нет —
-    *     сообщение, ход не тратится;
-    *   - умение ВСЕГДА срабатывает: списываем энергию, применяем эффект
-    *     (Skill.Effect) с ±20% разбросом, ставим cd и инкрементируем uses.
+  // ── Ход монстра ─────────────────────────────────────────────────────────────
+
+  /** Ход моба после атаки игрока. `log` — строки, накопленные в фазе игрока;
+    * между сегментами игрока и монстра вставляется пустая строка-разделитель
+    * (в склейке `mkString("\n")` даёт двойной перенос).
     */
-  private def useSkill(
-      user: User,
-      renderer: Renderer,
-      itemId: Long
-  ): Task[StateType] =
-    for {
-      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero   <- getHero(user)
-      battle <- getBattle(user)
-      result <- battle.slotByItem(itemId) match {
-        case None =>
-          renderer.show(
-            user,
-            Screen(content.text("battle.skillUnavailable"), Nil)
-          ) *>
-            showScreen(user, renderer).as(StateType.Battle)
-        case Some(slot) if slot.cooldown > 0 =>
-          renderer.show(
-            user,
-            Screen(content.text("battle.skillOnCooldown"), Nil)
-          ) *>
-            showScreen(user, renderer).as(StateType.Battle)
-        case Some(slot) if hero.fightStats.energy < slot.skill.energyCost(hero) =>
-          renderer.show(
-            user,
-            Screen(
-              content.format(
-                "battle.notEnoughEnergy",
-                "cost"   -> slot.skill.energyCost(hero).toString,
-                "energy" -> hero.fightStats.energy.toString
-              ),
-              Nil
-            )
-          ) *>
-            showScreen(user, renderer).as(StateType.Battle)
-        case Some(slot) =>
-          // Списываем энергию сразу и персистим — дальше умение точно применится.
-          val cost      = slot.skill.energyCost(hero)
-          val heroAfter = hero.copy(fightStats =
-            hero.fightStats.copy(energy = (hero.fightStats.energy - cost).max(0L)))
-          heroDao.updateFightStats(user.userId, heroAfter.fightStats) *>
-            skillHit(user, heroAfter, battle, slot, now, renderer)
-      }
-    } yield result
-
-  // После применения скилла — всегда идёт базовая атака игрока (кроме случая, когда
-  // моб убит самим скиллом). Кулдаун использованного слота не должен тикаться в этом
-  // же ходу — передаём его в `skipSlots` цепочке вызовов (см. tickBuffs). Энергия уже
-  // списана в useSkill; здесь применяется эффект навыка (матч по Skill.Effect).
-  private def skillHit(
-      user: User,
+  private def monsterPhase(
       hero: Hero,
       battle: SoloPveBattle,
-      slot: SkillSlotState,
       nowMs: Long,
-      renderer: Renderer
-  ): Task[StateType] =
-    for {
-      spread <- Random.nextLongBetween(80L, 121L)
-      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0).toLong.max(1L)
-      bumped = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
-      skip = Set(slot.itemId)
-      tmpl = slot.skill.hitTemplate
-      // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
-      reduced = {
-        val red = BattleState.damageReduction(
-          protection  = battle.monsterStats.defence,
-          defenderInt = battle.monsterStats.defence,
-          attackerInt = hero.effectiveBaseStats(nowMs).int)
-        (raw * (1.0 - red)).toLong.max(1L)
-      }
-      result <- slot.skill.effect match {
-        case Skill.Effect.Damage(reducedByDefence) =>
-          val value = if (reducedByDefence) reduced else raw
-          dealSkillDamage(user, hero, bumped, value, tmpl.replace("{}", value.toString), nowMs, renderer, skip)
-
-        case Skill.Effect.BleedDamage(pct) =>
-          // Урон сразу + наложение (стак) яда на моба.
-          val stacked = battle.effects.monsterPoison.map(p => pangea.model.battle.Poison(p.pct + pct))
-                          .getOrElse(pangea.model.battle.Poison(pct))
-          val poisoned = bumped.copy(effects = bumped.effects.copy(monsterPoison = Some(stacked)))
-          dealSkillDamage(user, hero, poisoned, raw, tmpl.replace("{}", raw.toString), nowMs, renderer, skip)
-
-        case Skill.Effect.WeakSpotStrike =>
-          for {
-            roll <- Random.nextIntBetween(1, 101)
-            chance = (2L * hero.effectiveBaseStats(nowMs).int - battle.monsterLvl).max(0L).min(95L)
-            doubled = roll <= chance
-            value   = if (doubled) raw * 2L else raw
-            line    = tmpl.replace("{}", value.toString) +
-                      (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
-            r <- dealSkillDamage(user, hero, bumped, value, line, nowMs, renderer, skip)
-          } yield r
-
-        case Skill.Effect.BloodHarvest =>
-          // Урон (уже включает +8% тек.HP в baseValue) ценой 10% текущего HP.
-          val hpLost      = (hero.fightStats.hp * Skill.BloodHarvestHpCostPct / 100L).max(0L)
-          val woundedHero = hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - hpLost).max(1L)))
-          val line        = tmpl.replaceFirst("\\{\\}", raw.toString).replaceFirst("\\{\\}", hpLost.toString)
-          dealSkillDamage(user, woundedHero, bumped, raw, line, nowMs, renderer, skip)
-
-        case Skill.Effect.Heal =>
-          val maxHp     = hero.effectiveMaxHp(nowMs)
-          val newHp     = (hero.fightStats.hp + raw).min(maxHp)
-          val healed    = newHp - hero.fightStats.hp
-          val newStats  = hero.fightStats.copy(hp = newHp)
-          heroDao.updateFightStats(user.userId, newStats) *>
-            playerBasicAttack(user, hero.copy(fightStats = newStats), bumped, nowMs, renderer,
-              prefix = tmpl.replace("{}", healed.toString) + "\n", skipSlots = skip)
-
-        case Skill.Effect.RepairArmor =>
-          val (newStats, gained) = repairArmor(hero, raw, nowMs)
-          heroDao.updateFightStats(user.userId, newStats) *>
-            playerBasicAttack(user, hero.copy(fightStats = newStats), bumped, nowMs, renderer,
-              prefix = tmpl.replace("{}", gained.toString) + "\n", skipSlots = skip)
-
-        case Skill.Effect.GuardRepair(defencePct, turns) =>
-          // Восстановление брони + временный %-баф итоговой защиты.
-          val (newStats, gained) = repairArmor(hero, raw, nowMs)
-          val guarded = bumped.copy(heroBattleState = bumped.heroBattleState.add(
-            Buff(0L, 0L, 0L, dodgePct = 0L, defencePct = defencePct, turnsLeft = Some(turns))))
-          heroDao.updateFightStats(user.userId, newStats) *>
-            playerBasicAttack(user, hero.copy(fightStats = newStats), guarded, nowMs, renderer,
-              prefix = tmpl.replace("{}", gained.toString) + "\n", skipSlots = skip)
-      }
-    } yield result
-
-  /** Наносит `value` урона мобу (сначала броня, затем HP). Если моб убит — победа
-    * без базовой атаки; иначе — базовая атака игрока тем же ходом. В обоих случаях
-    * персистит статы героя (важно для Кровавой жатвы, где герой теряет HP). */
-  private def dealSkillDamage(
-      user: User,
-      hero: Hero,
-      battle: SoloPveBattle,
-      value: Long,
-      skillLine: String,
-      nowMs: Long,
-      renderer: Renderer,
+      log: Vector[String],
       skip: Set[Long]
-  ): Task[StateType] = {
-    val armorDmg = math.min(battle.monsterCurrentArmor, value)
-    val hpDmg    = value - armorDmg
-    val newArmor = battle.monsterCurrentArmor - armorDmg
-    val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
-    val updated  = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
-    if (newHp <= 0)
-      heroDao.updateFightStats(user.userId, hero.fightStats) *>
-        heroDao.writeActiveBattle(user.userId, updated.asJson) *>
-        renderer.show(user, Screen(skillLine, Nil)) *>
-        victory(user, hero, updated, renderer)
-    else
-      playerBasicAttack(user, hero, updated, nowMs, renderer, prefix = skillLine + "\n", skipSlots = skip)
-  }
-
-  /** Восстановление брони героя на `value` (кап — эффективный максимум). Возвращает
-    * новые статы и фактически восстановленную величину. */
-  private def repairArmor(hero: Hero, value: Long, nowMs: Long): (FightStats, Long) = {
-    val maxArmor = hero.effectiveMaxArmor(nowMs)
-    val newArmor = (hero.fightStats.armor + value).min(maxArmor)
-    (hero.fightStats.copy(armor = newArmor), newArmor - hero.fightStats.armor)
-  }
-
-  /** Ход моба после атаки игрока. `playerLine` — заранее посчитанная строка о
-    * результате удара игрока; mob-line склеивается с ней и выводится одним
-    * сообщением, чтобы избежать спама.
-    */
-  private def monsterAttacks(
-      user: User,
-      hero: Hero,
-      battle: SoloPveBattle,
-      nowMs: Long,
-      renderer: Renderer,
-      playerLine: String,
-      skipSlots: Set[Long]
-  ): Task[StateType] =
+  ): Task[TurnResult] =
     for {
-      ticked <- ZIO.succeed(battle.tickBuffs(skipSlots))
+      ticked <- ZIO.succeed(battle.tickBuffs(skip))
       eff       = hero.effectiveFightStats(nowMs)
       buffedEff = ticked.heroBattleState.applyTo(eff)
       monster   = ticked.toMonster
@@ -362,8 +218,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         buffedEff.defence,
         ticked
       )
-      // Тот же порядок округления, что на экране боя: 100 - floor(dodge)
-      // (совпадает с механикой hitRoll(1..100) > dodge). Раньше был (100.0 - dodge).toInt.
+      // Тот же порядок округления, что на экране боя: 100 - floor(dodge).
       mobHitPct = 100 - dodge.toInt
 
       // 1) Обычная атака моба — обновляем hp/armor героя.
@@ -437,15 +292,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                     fightStats = heroAfterAtk.fightStats
                       .copy(hp = cast.heroHp, armor = cast.heroArmor)
                   ),
-                  "\n" + cast.line
+                  cast.line
                 )
               else ZIO.succeed((ticked, heroAfterAtk, ""))
           } yield out
-      (finalBattle, finalHero, skillLine) = castResult
+      (finalBattle, finalHero, castLine) = castResult
 
       // 3) Конец раунда: тик статус-эффектов. Стадии героя и монстра — раздельные,
-      // каждая со своей строкой (в будущем UI сможет показать статусы у своих статов).
-      // Применяются только пока герой жив.
+      // каждая со своей строкой. Применяются только пока герой жив.
       heroAlive = finalHero.fightStats.hp > 0
       (tickedHero, battleAfterHero, heroEffectLine) =
         if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
@@ -465,22 +319,24 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(energy = newEn))
         } else tickedHero
 
-      _ <- heroDao.updateFightStats(user.userId, finalHeroWithEnergy.fightStats)
-      _ <- heroDao.writeActiveBattle(user.userId, tickedBattle.asJson)
-      _ <- renderer.show(
-        user,
-        Screen(playerLine + "\n\n" + mobLine + skillLine + monsterEffectLine + heroEffectLine, Nil)
-      )
+      // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
+      // порядке) каст моба, тик яда моба, тик регена героя — только непустые.
+      monsterLog = {
+        val base       = (log :+ "") :+ mobLine
+        val withCast   = if (castLine.nonEmpty) base :+ castLine else base
+        val withPoison = if (monsterEffectLine.nonEmpty) withCast :+ monsterEffectLine else withCast
+        if (heroEffectLine.nonEmpty) withPoison :+ heroEffectLine else withPoison
+      }
 
-      r <-
-        if (finalHeroWithEnergy.fightStats.hp <= 0) heroDeath(user, renderer)
-        else if (tickedBattle.monsterCurrentHp <= 0)
-          victory(user, finalHeroWithEnergy, tickedBattle, renderer)
-        else showScreen(user, renderer).as(StateType.Battle)
-    } yield r
+      outcome =
+        if (finalHeroWithEnergy.fightStats.hp <= 0) Outcome.Death
+        else if (tickedBattle.monsterCurrentHp <= 0) Outcome.Victory
+        else Outcome.Continue
+    } yield TurnResult(finalHeroWithEnergy, tickedBattle, monsterLog, outcome)
 
   /** Тик эффектов ГЕРОЯ в конце раунда: реген лечит на `pct`% макс.HP и слабеет.
-    * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку эффекта. */
+    * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку
+    * эффекта (пустая, если регена нет). */
   private def tickHeroEffects(
       hero: Hero,
       battle: SoloPveBattle,
@@ -495,13 +351,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         (
           hero.copy(fightStats = hero.fightStats.copy(hp = newHp)),
           battle.copy(effects = battle.effects.copy(heroRegen = regen.decayed)),
-          "\n" + content.format("battle.regenTick", "healed" -> healed.toString)
+          content.format("battle.regenTick", "healed" -> healed.toString)
         )
       case None => (hero, battle, "")
     }
 
   /** Тик эффектов МОНСТРА в конце раунда: яд снимает `pct`% его макс.HP мимо брони
-    * и слабеет. Возвращает обновлённый бой плюс строку эффекта. */
+    * и слабеет. Возвращает обновлённый бой плюс строку эффекта (пустая, если яда
+    * нет). */
   private def tickMonsterEffects(
       battle: SoloPveBattle,
       monsterName: String
@@ -515,10 +372,323 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             monsterCurrentHp = newHp,
             effects = battle.effects.copy(monsterPoison = poison.decayed)
           ),
-          "\n" + content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
+          content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
         )
       case None => (battle, "")
     }
+
+  // ── Ход игрока: активный навык ──────────────────────────────────────────────
+
+  /** Применение активного навыка. Проверки (слот существует / готов / хватает
+    * энергии) дают Continue-сообщение без траты хода. Умение ВСЕГДА срабатывает:
+    * списываем энергию (в героя, персист — в commit), применяем эффект с ±20%
+    * разбросом, ставим cd и инкрементируем uses. */
+  private def skillTurn(itemId: Long)(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    battle.slotByItem(itemId) match {
+      case None =>
+        cont(hero, battle, content.text("battle.skillUnavailable"))
+      case Some(slot) if slot.cooldown > 0 =>
+        cont(hero, battle, content.text("battle.skillOnCooldown"))
+      case Some(slot) if hero.fightStats.energy < slot.skill.energyCost(hero) =>
+        cont(
+          hero,
+          battle,
+          content.format(
+            "battle.notEnoughEnergy",
+            "cost"   -> slot.skill.energyCost(hero).toString,
+            "energy" -> hero.fightStats.energy.toString
+          )
+        )
+      case Some(slot) =>
+        val cost      = slot.skill.energyCost(hero)
+        val heroAfter = hero.copy(fightStats =
+          hero.fightStats.copy(energy = (hero.fightStats.energy - cost).max(0L)))
+        skillHit(heroAfter, battle, slot, nowMs)
+    }
+
+  /** Применяет эффект навыка (матч по Skill.Effect). После урона/лечения идёт
+    * базовая атака игрока (кроме случая, когда моб убит самим скиллом). Кулдаун
+    * использованного слота не тикается в этом же ходу (`skip`). Изменения статов
+    * героя (энергия/HP Кровавой жатвы/лечение) едут в `hero` результата и
+    * персистятся в commit — здесь никаких записей в БД. */
+  private def skillHit(
+      hero: Hero,
+      battle: SoloPveBattle,
+      slot: SkillSlotState,
+      nowMs: Long
+  ): Task[TurnResult] =
+    for {
+      spread <- Random.nextLongBetween(80L, 121L)
+      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0).toLong.max(1L)
+      bumped = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
+      skip = Set(slot.itemId)
+      tmpl = slot.skill.hitTemplate
+      // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
+      reduced = {
+        val red = BattleState.damageReduction(
+          protection  = battle.monsterStats.defence,
+          defenderInt = battle.monsterStats.defence,
+          attackerInt = hero.effectiveBaseStats(nowMs).int)
+        (raw * (1.0 - red)).toLong.max(1L)
+      }
+      result <- slot.skill.effect match {
+        case Skill.Effect.Damage(reducedByDefence) =>
+          val value = if (reducedByDefence) reduced else raw
+          dealSkillDamage(hero, bumped, value, tmpl.replace("{}", value.toString), nowMs, skip)
+
+        case Skill.Effect.BleedDamage(pct) =>
+          // Урон сразу + наложение (стак) яда на моба.
+          val stacked = battle.effects.monsterPoison.map(p => pangea.model.battle.Poison(p.pct + pct))
+                          .getOrElse(pangea.model.battle.Poison(pct))
+          val poisoned = bumped.copy(effects = bumped.effects.copy(monsterPoison = Some(stacked)))
+          dealSkillDamage(hero, poisoned, raw, tmpl.replace("{}", raw.toString), nowMs, skip)
+
+        case Skill.Effect.WeakSpotStrike =>
+          for {
+            roll <- Random.nextIntBetween(1, 101)
+            chance = (2L * hero.effectiveBaseStats(nowMs).int - battle.monsterLvl).max(0L).min(95L)
+            doubled = roll <= chance
+            value   = if (doubled) raw * 2L else raw
+            line    = tmpl.replace("{}", value.toString) +
+                      (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
+            r <- dealSkillDamage(hero, bumped, value, line, nowMs, skip)
+          } yield r
+
+        case Skill.Effect.BloodHarvest =>
+          // Урон (уже включает +8% тек.HP в baseValue) ценой 10% текущего HP.
+          // Раненый герой едет дальше в цепочке и персистится в commit ЕДИНООБРАЗНО
+          // во всех ветках победы — HP-цена не теряется при добивании базовой атакой.
+          val hpLost      = (hero.fightStats.hp * Skill.BloodHarvestHpCostPct / 100L).max(0L)
+          val woundedHero = hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - hpLost).max(1L)))
+          val line        = tmpl.replaceFirst("\\{\\}", raw.toString).replaceFirst("\\{\\}", hpLost.toString)
+          dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
+
+        case Skill.Effect.Heal =>
+          val maxHp    = hero.effectiveMaxHp(nowMs)
+          val newHp    = (hero.fightStats.hp + raw).min(maxHp)
+          val healed     = newHp - hero.fightStats.hp
+          val healedHero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp))
+          playerStrike(healedHero, bumped, nowMs, Vector(tmpl.replace("{}", healed.toString)), skip)
+
+        case Skill.Effect.RepairArmor =>
+          val (newStats, gained) = repairArmor(hero, raw, nowMs)
+          playerStrike(hero.copy(fightStats = newStats), bumped, nowMs, Vector(tmpl.replace("{}", gained.toString)), skip)
+
+        case Skill.Effect.GuardRepair(defencePct, turns) =>
+          // Восстановление брони + временный %-баф итоговой защиты.
+          val (newStats, gained) = repairArmor(hero, raw, nowMs)
+          val guarded = bumped.copy(heroBattleState = bumped.heroBattleState.add(
+            Buff(0L, 0L, 0L, dodgePct = 0L, defencePct = defencePct, turnsLeft = Some(turns))))
+          playerStrike(hero.copy(fightStats = newStats), guarded, nowMs, Vector(tmpl.replace("{}", gained.toString)), skip)
+      }
+    } yield result
+
+  /** Наносит `value` урона мобу (сначала броня, затем HP). Если моб убит — победа
+    * без базовой атаки; иначе — базовая атака игрока тем же ходом. Никаких записей
+    * в БД: итог (в т.ч. изменённые статы героя) уезжает в TurnResult и
+    * персистится в commit. */
+  private def dealSkillDamage(
+      hero: Hero,
+      battle: SoloPveBattle,
+      value: Long,
+      skillLine: String,
+      nowMs: Long,
+      skip: Set[Long]
+  ): Task[TurnResult] = {
+    val armorDmg = math.min(battle.monsterCurrentArmor, value)
+    val hpDmg    = value - armorDmg
+    val newArmor = battle.monsterCurrentArmor - armorDmg
+    val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
+    val updated  = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+    if (newHp <= 0) ZIO.succeed(TurnResult(hero, updated, Vector(skillLine), Outcome.Victory))
+    else playerStrike(hero, updated, nowMs, Vector(skillLine), skip)
+  }
+
+  /** Восстановление брони героя на `value` (кап — эффективный максимум). Возвращает
+    * новые статы и фактически восстановленную величину. */
+  private def repairArmor(hero: Hero, value: Long, nowMs: Long): (FightStats, Long) = {
+    val maxArmor = hero.effectiveMaxArmor(nowMs)
+    val newArmor = (hero.fightStats.armor + value).min(maxArmor)
+    (hero.fightStats.copy(armor = newArmor), newArmor - hero.fightStats.armor)
+  }
+
+  // ── Фляга и пояс (расходники, ход монстра не провоцируют) ────────────────────
+
+  private def flaskTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
+    val flask = hero.equipment.flask
+    flask.details match {
+      case f: ItemDetails.Flask if f.charges <= 0 =>
+        cont(hero, battle, content.text("battle.flaskEmpty"))
+      case _: ItemDetails.Flask if battle.consumableUsedThisRound =>
+        cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
+      case f: ItemDetails.Flask =>
+        val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
+        val updatedBattle = battle.copy(consumableUsedThisRound = true)
+        f.effect match {
+          case FlaskEffect.HealPercent(pct) =>
+            val maxHp    = hero.effectiveMaxHp(nowMs)
+            val healAmt  = (maxHp * pct / 100L).max(1L)
+            val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
+            val healed   = newHp - hero.fightStats.hp
+            // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
+            val maxEn      = hero.maxEnergy(nowMs)
+            val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
+            val energyBack = newEnergy - hero.fightStats.energy
+            val newStats   = hero.fightStats.copy(hp = newHp, energy = newEnergy)
+            val msg = content.format(
+              "battle.flaskUsed",
+              "healed" -> healed.toString,
+              "hp"     -> newHp.toString,
+              "max"    -> maxHp.toString,
+              "energy" -> energyBack.toString
+            )
+            ZIO.succeed(TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats), updatedBattle, Vector(msg), Outcome.Continue))
+          case FlaskEffect.AddBuff(buff, rounds) =>
+            val timedBuff = buff.copy(turnsLeft = Some(rounds))
+            val newBattle = updatedBattle.copy(heroBattleState = updatedBattle.heroBattleState.add(timedBuff))
+            ZIO.succeed(TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")), Outcome.Continue))
+        }
+      case _ =>
+        cont(hero, battle, content.text("battle.noFlask"))
+    }
+  }
+
+  /** Применение зелья пояса. Зеркалит [[flaskTurn]]: проверки пусто/уже-пили, трата
+    * заряда, затем эффект по типу зелья ([[applyPotion]]). */
+  private def beltTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
+    val belt = hero.equipment.belt
+    belt.details match {
+      case b: ItemDetails.Belt if b.charges <= 0 =>
+        cont(hero, battle, content.text("battle.beltEmpty"))
+      case _: ItemDetails.Belt if battle.consumableUsedThisRound =>
+        cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
+      case b: ItemDetails.Belt =>
+        val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
+        val battle1   = battle.copy(consumableUsedThisRound = true)
+        val (newStats, newBattle, msg) = applyPotion(hero, battle1, b.potion, nowMs)
+        ZIO.succeed(TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg), Outcome.Continue))
+      case _ =>
+        cont(hero, battle, content.text("battle.noBelt"))
+    }
+  }
+
+  /** Эффект конкретного зелья пояса. Мгновенные (лечение/металл/энергия) меняют
+    * статы героя; временные (атака/защита/уворот) кладут баф на 5 ходов;
+    * яд/реген ставят соответствующий статус-эффект. Возвращает новые статы героя,
+    * обновлённый бой и строку эффекта — запись выполняет вызывающий (commit). */
+  private def applyPotion(
+      hero: Hero,
+      battle: SoloPveBattle,
+      potion: PotionKind,
+      nowMs: Long
+  ): (FightStats, SoloPveBattle, String) = {
+    val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    potion match {
+      case PotionKind.Healing =>
+        val maxHp  = hero.effectiveMaxHp(nowMs)
+        val heal   = (maxHp * 25 / 100L).max(1L)
+        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - hero.fightStats.hp
+        (hero.fightStats.copy(hp = newHp), battle,
+          content.format("battle.beltHeal", "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString))
+
+      case PotionKind.Metal =>
+        val maxArmor = hero.effectiveMaxArmor(nowMs)
+        val restore  = (maxArmor * 20 / 100L).max(1L)
+        val newArmor = (hero.fightStats.armor + restore).min(maxArmor)
+        val gained   = newArmor - hero.fightStats.armor
+        (hero.fightStats.copy(armor = newArmor), battle,
+          content.format("battle.beltMetal", "armor" -> gained.toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString))
+
+      case PotionKind.Poison =>
+        (hero.fightStats, battle.copy(effects = battle.effects.copy(heroPoisonousAttacks = true)),
+          content.text("battle.beltPoison"))
+
+      case PotionKind.Regeneration =>
+        (hero.fightStats, battle.copy(effects = battle.effects.copy(heroRegen = Some(Regen.onDrink))),
+          content.format("battle.beltRegen", "pct" -> Regen.OnDrink.toString))
+
+      case PotionKind.Evasion =>
+        (hero.fightStats,
+          battle.copy(heroBattleState = battle.heroBattleState.add(
+            Buff(0L, 0L, 0L, dodgePct = 10L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
+          content.format("battle.beltEvasion", "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+
+      case PotionKind.Energy =>
+        val maxEn     = hero.maxEnergy(nowMs)
+        val restore   = (maxEn * 25 / 100L).max(1L)
+        val newEnergy = (hero.fightStats.energy + restore).min(maxEn)
+        val gained    = newEnergy - hero.fightStats.energy
+        (hero.fightStats.copy(energy = newEnergy), battle,
+          content.format("battle.beltEnergy", "energy" -> gained.toString, "cur" -> newEnergy.toString, "max" -> maxEn.toString))
+
+      case PotionKind.Attack =>
+        val bonus = (buffed.atk * 5 / 100L).max(1L)
+        (hero.fightStats,
+          battle.copy(heroBattleState = battle.heroBattleState.add(
+            Buff(atk = bonus, 0L, 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
+          content.format("battle.beltAttack", "atk" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+
+      case PotionKind.Defence =>
+        val bonus = (buffed.defence * 10 / 100L).max(1L)
+        (hero.fightStats,
+          battle.copy(heroBattleState = battle.heroBattleState.add(
+            Buff(0L, 0L, defence = bonus, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
+          content.format("battle.beltDefence", "defence" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+    }
+  }
+
+  // ── Бегство ─────────────────────────────────────────────────────────────────
+
+  /** Экран подтверждения бегства (чистая навигация, состояние не меняется). */
+  private def flee(user: User, renderer: Renderer): Task[StateType] =
+    renderer
+      .show(user, content.screen("battle.fleeConfirm"))
+      .as(StateType.Battle)
+
+  /** Подтверждённое бегство: моб делает один удар (без каста/тиков/регена, как и
+    * прежде). Умер герой — Death; иначе — Fled (бой очистит commit). */
+  private def fleeTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    for {
+      eff       <- ZIO.succeed(hero.effectiveFightStats(nowMs))
+      buffedEff = battle.heroBattleState.applyTo(eff)
+      monster   = battle.toMonster
+      hitRoll <- Random.nextIntBetween(1, 101)
+      result <-
+        if (
+          hitRoll > playerDodgeChance(
+            hero.effectiveBaseStats(nowMs).agi,
+            buffedEff.evasion,
+            buffedEff.defence,
+            battle
+          )
+        ) {
+          for {
+            spread <- Random.nextLongBetween(80L, 121L)
+            rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
+            reduction = BattleState.damageReduction(
+              protection = buffedEff.defence,
+              defenderInt = hero.effectiveBaseStats(nowMs).int,
+              attackerInt = monster.fightStats.atk
+            )
+            reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+            buffReduct  = math.min(battle.heroBattleState.armorBonus, reducedDamage)
+            afterBuff   = reducedDamage - buffReduct
+            curArmor    = hero.fightStats.armor.max(0L)
+            armorAbsorb = math.min(curArmor, afterBuff)
+            hpDmg       = afterBuff - armorAbsorb
+            newArmor    = curArmor - armorAbsorb
+            newHp       = (hero.fightStats.hp - hpDmg).max(0L)
+            hero2       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
+            mobLine     = content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)
+          } yield
+            if (newHp <= 0) TurnResult(hero2, battle, Vector(mobLine), Outcome.Death)
+            else TurnResult(hero2, battle, Vector(mobLine), Outcome.Fled)
+        } else
+          ZIO.succeed(TurnResult(hero, battle, Vector.empty, Outcome.Fled))
+    } yield result
+
+  // ── Победа ──────────────────────────────────────────────────────────────────
 
   private def victory(
       user: User,
@@ -596,290 +766,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       )
     } yield StateType.Loot
 
-  private def heroDeath(user: User, renderer: Renderer): Task[StateType] =
-    renderer
-      .show(user, Screen(content.text("battle.death"), Nil))
-      .as(StateType.Death)
-
-  private def flee(user: User, renderer: Renderer): Task[StateType] =
-    renderer
-      .show(user, content.screen("battle.fleeConfirm"))
-      .as(StateType.Battle)
-
-  private def confirmFlee(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero   <- getHero(user)
-      battle <- getBattle(user)
-      eff       = hero.effectiveFightStats(now)
-      buffedEff = battle.heroBattleState.applyTo(eff)
-      monster   = battle.toMonster
-      hitRoll <- Random.nextIntBetween(1, 101)
-
-      result <-
-        if (
-          hitRoll > playerDodgeChance(
-            hero.effectiveBaseStats(now).agi,
-            buffedEff.evasion,
-            buffedEff.defence,
-            battle
-          )
-        ) {
-          for {
-            spread <- Random.nextLongBetween(80L, 121L)
-            rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
-            reduction = BattleState.damageReduction(
-              protection = buffedEff.defence,
-              defenderInt = hero.effectiveBaseStats(now).int,
-              // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
-              attackerInt = monster.fightStats.atk
-            )
-            reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
-            buffReduct = math.min(
-              battle.heroBattleState.armorBonus,
-              reducedDamage
-            )
-            afterBuff   = reducedDamage - buffReduct
-            curArmor    = hero.fightStats.armor.max(0L)
-            armorAbsorb = math.min(curArmor, afterBuff)
-            hpDmg       = afterBuff - armorAbsorb
-            newArmor    = curArmor - armorAbsorb
-            newHp       = (hero.fightStats.hp - hpDmg).max(0L)
-            _ <- heroDao.updateFightStats(
-              user.userId,
-              hero.fightStats.copy(hp = newHp, armor = newArmor)
-            )
-            _ <- renderer.show(
-              user,
-              Screen(
-                content.format(
-                  "battle.mobHit",
-                  "damage"  -> reducedDamage.toString,
-                  "monster" -> monster.name
-                ),
-                Nil
-              )
-            )
-            r <-
-              if (newHp <= 0) heroDeath(user, renderer)
-              else
-                heroDao.clearActiveBattle(user.userId) *>
-                  renderer
-                    .show(user, Screen(content.text("battle.fled"), Nil))
-                    .as(StateType.Dungeon)
-          } yield r
-        } else {
-          heroDao.clearActiveBattle(user.userId) *>
-            renderer
-              .show(user, Screen(content.text("battle.fled"), Nil))
-              .as(StateType.Dungeon)
-        }
-    } yield result
-
-  private def useFlask(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero   <- getHero(user)
-      battle <- getBattle(user)
-      flask = hero.equipment.flask
-      result <- flask.details match {
-        case f: ItemDetails.Flask if f.charges <= 0 =>
-          renderer
-            .show(user, Screen(content.text("battle.flaskEmpty"), Nil))
-            .as(StateType.Battle)
-        case _: ItemDetails.Flask if battle.consumableUsedThisRound =>
-          renderer
-            .show(user, Screen(content.text("battle.consumableAlreadyUsed"), Nil))
-            .as(StateType.Battle)
-        case f: ItemDetails.Flask =>
-          val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
-          val updatedBattle = battle.copy(consumableUsedThisRound = true)
-          f.effect match {
-            case FlaskEffect.HealPercent(pct) =>
-              val maxHp    = hero.effectiveMaxHp(now)
-              val healAmt  = (maxHp * pct / 100L).max(1L)
-              val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
-              val healed   = newHp - hero.fightStats.hp
-              // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
-              val maxEn      = hero.maxEnergy(now)
-              val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
-              val energyBack = newEnergy - hero.fightStats.energy
-              val newStats = hero.fightStats.copy(hp = newHp, energy = newEnergy)
-              for {
-                _ <- heroDao.updateEquipmentAndFightStats(
-                  user.userId,
-                  newEquipment,
-                  newStats
-                )
-                _ <- heroDao.writeActiveBattle(
-                  user.userId,
-                  updatedBattle.asJson
-                )
-                _ <- renderer.show(
-                  user,
-                  Screen(
-                    content.format(
-                      "battle.flaskUsed",
-                      "healed" -> healed.toString,
-                      "hp"     -> newHp.toString,
-                      "max"    -> maxHp.toString,
-                      "energy" -> energyBack.toString
-                    ),
-                    Nil
-                  )
-                )
-                _ <- showScreen(user, renderer)
-              } yield StateType.Battle
-            case FlaskEffect.AddBuff(buff, rounds) =>
-              val timedBuff = buff.copy(turnsLeft = Some(rounds))
-              val newBattle = updatedBattle.copy(heroBattleState =
-                updatedBattle.heroBattleState.add(timedBuff)
-              )
-              for {
-                _ <- heroDao.updateEquipment(user.userId, newEquipment)
-                _ <- heroDao.writeActiveBattle(user.userId, newBattle.asJson)
-                _ <- renderer.show(
-                  user,
-                  Screen(content.text("battle.flaskBuff"), Nil)
-                )
-                _ <- showScreen(user, renderer)
-              } yield StateType.Battle
-          }
-        case _ =>
-          renderer
-            .show(user, Screen(content.text("battle.noFlask"), Nil))
-            .as(StateType.Battle)
-      }
-    } yield result
-
-  /** Применение зелья пояса. Зеркалит [[useFlask]]: проверки пусто/уже-пили, трата
-    * заряда, затем эффект по типу зелья ([[applyPotion]]). */
-  private def useBelt(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero   <- getHero(user)
-      battle <- getBattle(user)
-      belt = hero.equipment.belt
-      result <- belt.details match {
-        case b: ItemDetails.Belt if b.charges <= 0 =>
-          renderer
-            .show(user, Screen(content.text("battle.beltEmpty"), Nil))
-            .as(StateType.Battle)
-        case _: ItemDetails.Belt if battle.consumableUsedThisRound =>
-          renderer
-            .show(user, Screen(content.text("battle.consumableAlreadyUsed"), Nil))
-            .as(StateType.Battle)
-        case b: ItemDetails.Belt =>
-          val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
-          val battle1   = battle.copy(consumableUsedThisRound = true)
-          applyPotion(user, hero, battle1, equipment, b.potion, now, renderer)
-        case _ =>
-          renderer
-            .show(user, Screen(content.text("battle.noBelt"), Nil))
-            .as(StateType.Battle)
-      }
-    } yield result
-
-  /** Эффект конкретного зелья пояса. Мгновенные (лечение/металл/энергия) меняют
-    * статы героя; временные (атака/защита/уворот) кладут баф на 5 ходов;
-    * яд/реген ставят соответствующий статус-эффект. `equipment` уже с потраченным
-    * зарядом, `battle` — с выставленным `consumableUsedThisRound`. */
-  private def applyPotion(
-      user: User,
-      hero: Hero,
-      battle: SoloPveBattle,
-      equipment: Equipment,
-      potion: PotionKind,
-      nowMs: Long,
-      renderer: Renderer
-  ): Task[StateType] = {
-    val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
-    potion match {
-      case PotionKind.Healing =>
-        val maxHp  = hero.effectiveMaxHp(nowMs)
-        val heal   = (maxHp * 25 / 100L).max(1L)
-        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
-        val healed = newHp - hero.fightStats.hp
-        finishBelt(user, equipment, Some(hero.fightStats.copy(hp = newHp)), battle, renderer,
-          content.format("battle.beltHeal", "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString))
-
-      case PotionKind.Metal =>
-        val maxArmor = hero.effectiveMaxArmor(nowMs)
-        val restore  = (maxArmor * 20 / 100L).max(1L)
-        val newArmor = (hero.fightStats.armor + restore).min(maxArmor)
-        val gained   = newArmor - hero.fightStats.armor
-        finishBelt(user, equipment, Some(hero.fightStats.copy(armor = newArmor)), battle, renderer,
-          content.format("battle.beltMetal", "armor" -> gained.toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString))
-
-      case PotionKind.Poison =>
-        val newBattle = battle.copy(effects = battle.effects.copy(heroPoisonousAttacks = true))
-        finishBelt(user, equipment, None, newBattle, renderer, content.text("battle.beltPoison"))
-
-      case PotionKind.Regeneration =>
-        val newBattle = battle.copy(effects = battle.effects.copy(heroRegen = Some(Regen.onDrink)))
-        finishBelt(user, equipment, None, newBattle, renderer,
-          content.format("battle.beltRegen", "pct" -> Regen.OnDrink.toString))
-
-      case PotionKind.Evasion =>
-        addBeltBuff(user, equipment, battle, renderer,
-          Buff(0L, 0L, 0L, dodgePct = 10L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)),
-          content.format("battle.beltEvasion", "rounds" -> ItemDetails.Belt.BuffRounds.toString))
-
-      case PotionKind.Energy =>
-        val maxEn    = hero.maxEnergy(nowMs)
-        val restore  = (maxEn * 25 / 100L).max(1L)
-        val newEnergy = (hero.fightStats.energy + restore).min(maxEn)
-        val gained   = newEnergy - hero.fightStats.energy
-        finishBelt(user, equipment, Some(hero.fightStats.copy(energy = newEnergy)), battle, renderer,
-          content.format("battle.beltEnergy", "energy" -> gained.toString, "cur" -> newEnergy.toString, "max" -> maxEn.toString))
-
-      case PotionKind.Attack =>
-        val bonus = (buffed.atk * 5 / 100L).max(1L)
-        addBeltBuff(user, equipment, battle, renderer,
-          Buff(atk = bonus, 0L, 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)),
-          content.format("battle.beltAttack", "atk" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
-
-      case PotionKind.Defence =>
-        val bonus = (buffed.defence * 10 / 100L).max(1L)
-        addBeltBuff(user, equipment, battle, renderer,
-          Buff(0L, 0L, defence = bonus, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)),
-          content.format("battle.beltDefence", "defence" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
-    }
-  }
-
-  /** Кладёт временный баф на героя и сохраняет бой (без изменения статов). */
-  private def addBeltBuff(
-      user: User,
-      equipment: Equipment,
-      battle: SoloPveBattle,
-      renderer: Renderer,
-      buff: Buff,
-      msg: String
-  ): Task[StateType] =
-    finishBelt(user, equipment, None,
-      battle.copy(heroBattleState = battle.heroBattleState.add(buff)), renderer, msg)
-
-  /** Общий хвост применения зелья: персист (снаряжение + опц. статы), запись боя,
-    * сообщение об эффекте и перерисовка экрана боя. */
-  private def finishBelt(
-      user: User,
-      equipment: Equipment,
-      newStats: Option[FightStats],
-      battle: SoloPveBattle,
-      renderer: Renderer,
-      msg: String
-  ): Task[StateType] = {
-    val persist = newStats match {
-      case Some(stats) => heroDao.updateEquipmentAndFightStats(user.userId, equipment, stats)
-      case None        => heroDao.updateEquipment(user.userId, equipment)
-    }
-    for {
-      _ <- persist
-      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
-      _ <- renderer.show(user, Screen(msg, Nil))
-      _ <- showScreen(user, renderer)
-    } yield StateType.Battle
-  }
+  // ── Экран боя ───────────────────────────────────────────────────────────────
 
   private def showScreen(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -1036,6 +923,24 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 }
 
 object BattleState {
+
+  /** Исход хода — определяет переход и терминальные действия в [[BattleState.commit]]. */
+  sealed trait Outcome
+  object Outcome {
+    case object Continue extends Outcome
+    case object Victory  extends Outcome
+    case object Death    extends Outcome
+    case object Fled     extends Outcome
+  }
+
+  /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
+    * накопленный лог сообщений (склеивается и показывается один раз) и исход. */
+  final case class TurnResult(
+      hero: Hero,
+      battle: SoloPveBattle,
+      log: Vector[String],
+      outcome: Outcome
+  )
 
   /** Текущее число зарядов надетой фляги (0, если фляга не надета). */
   def flaskCharges(hero: Hero): Int = hero.equipment.flask.details match {

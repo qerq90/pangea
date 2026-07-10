@@ -138,6 +138,25 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(afterBattle.monsterCurrentHp < mobHp)
     },
 
+    test("Кровавая жатва: HP-цена списывается, даже когда добивает базовая атака (регресс)") {
+      // Моб: hp=1, armor=150. Урон скилла BloodHarvest (≤146 при данных статах)
+      // полностью гасится бронёй → моб переживает скилл; базовая атака следом
+      // (≥160) гарантированно пробивает остаток брони и добивает моба. Так кил
+      // приходится на БАЗОВУЮ атаку — раньше в этой ветке победы 10% HP-цена
+      // терялась (не персистилась). Диапазоны урона делают исход детерминированным.
+      val hero   = heroWith(Some(Skill.BloodHarvest), None)
+      val slots  = List(SkillSlotState(101L, Skill.BloodHarvest))
+      val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 150L)
+      for {
+        triple                       <- makeState(hero, battle)
+        (state, heroDao, renderer)    = triple
+        result                       <- state.action(testUser, tap("Skill_101"), renderer)
+        afterHero                    <- heroDao.getHeroByUserId(userId).map(_.get)
+      } yield // добили в тот же ход → Loot; HP = 200 − 10% = 180 (моб не успел ответить)
+              assertTrue(result == StateType.Loot) &&
+              assertTrue(afterHero.fightStats.hp == 180L)
+    },
+
     test("Использование незарегистрированного слота → ход не съедается, ошибочное сообщение") {
       val hero  = heroWith(None, None)
       val slots = Nil
