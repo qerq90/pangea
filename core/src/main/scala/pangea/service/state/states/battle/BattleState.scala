@@ -950,12 +950,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "mobSkillHit"    -> s"$mobSkillHitPct%",
       "flaskCharges"   -> BattleState.flaskCharges(hero).toString
     )
+    // Готовый навык синий, если хватает энергии на каст, и красный — если нет.
     val skillButtons = battle.skillSlots.collect {
       case slot if slot.cooldown <= 0 =>
+        val enoughEnergy = hero.fightStats.energy >= slot.skill.energyCost(hero)
         pangea.engine.Choice(
           id = s"Skill_${slot.itemId}",
           label = slot.skill.label,
-          color = pangea.engine.ChoiceColor.Negative,
+          color =
+            if (enoughEnergy) pangea.engine.ChoiceColor.Primary
+            else pangea.engine.ChoiceColor.Negative,
           row = Some(0)
         )
     }

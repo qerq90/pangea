@@ -126,7 +126,7 @@ object StatesMap {
             journal,
             content
           ),
-          Dungeon   -> DungeonState(heroDao, inventoryRepo, content),
+          Dungeon   -> DungeonState(heroDao, inventoryRepo, scheduler, content),
           HeroStats -> HeroStatsState(heroDao, content),
           FoundItem -> FoundItemState(
             heroDao,

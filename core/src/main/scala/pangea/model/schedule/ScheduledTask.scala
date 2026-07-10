@@ -41,6 +41,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object SchronDig extends TaskKind
   // Завершение похода за сокровищем по карте клада (~10 минут) — выдача добычи.
   case object TreasureHunt extends TaskKind
+  // Завершение выслеживания прохода вглубь (2–5 минут) — выход на Отмеченного тьмой.
+  case object DarknessTracking extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

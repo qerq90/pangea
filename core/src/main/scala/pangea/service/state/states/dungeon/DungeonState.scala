@@ -9,15 +9,17 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
+import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.service.schedule.Scheduler
 import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
-case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inventory.InventoryRepository, content: SceneContent) extends State {
+case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inventory.InventoryRepository, scheduler: Scheduler, content: SceneContent) extends State {
 
-  import DungeonState.{MinTrackMs, MaxTrackMs, TrackingData}
+  import DungeonState.{MinTrackMs, MaxTrackMs, TrackAction, TrackingData}
 
   private val branch = new Branch(
     routes = Map(
@@ -155,12 +157,13 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       hero     <- getHero(user)
       tracking <- readTracking(user)
       result <- (hero.canGoDarker, tracking) match {
-        case (true, _)                                        => descend(user, hero, now, renderer)
+        case (true, _)                              => descend(user, hero, now, renderer)
         // абсолютное дно лабиринта — выслеживать нечего, глубже пути нет
-        case (false, _) if hero.dungeonLevel >= 150           => atDeepest(user, hero, now, renderer)
-        case (false, None)                                    => startTracking(user, now, renderer)
-        case (false, Some(t)) if now < t.darknessTrackingUntil => stillTracking(user, renderer)
-        case (false, Some(_))                                 => encounterMarked(user, hero, renderer)
+        case (false, _) if hero.dungeonLevel >= 150 => atDeepest(user, hero, now, renderer)
+        case (false, None)                          => startTracking(user, now, renderer)
+        // выслеживание уже идёт: сюда попадаем по срабатыванию таймера (поллер
+        // шлёт синтетический GoDarker в момент дедлайна) — выходим на Отмеченного.
+        case (false, Some(_))                       => encounterMarked(user, hero, renderer)
       }
     } yield result
 
@@ -175,18 +178,19 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
         .as(StateType.Dungeon)
   }
 
+  /** Старт выслеживания: пишем дедлайн в scene_data и планируем push-задачу —
+   *  поллер сам разбудит героя синтетическим GoDarker в момент дедлайна (игрок
+   *  ничего не жмёт, длительность ему не сообщается). На экране ожидания остаётся
+   *  только «перестать искать». */
   private def startTracking(user: User, nowMs: Long, renderer: Renderer): Task[StateType] =
     for {
       extra   <- Random.nextLongBetween(MinTrackMs, MaxTrackMs)
       deadline = nowMs + extra
       _ <- heroDao.writeSceneData(user.userId, TrackingData(deadline).asJson)
+      _ <- scheduler.schedule(user.userId, deadline, TaskKind.DarknessTracking, StateType.Dungeon, TrackAction)
       _ <- renderer.show(user, Screen(content.text("dungeon.trackingStart"), Nil))
       _ <- renderer.show(user, trackingScreen)
     } yield StateType.Dungeon
-
-  private def stillTracking(user: User, renderer: Renderer): Task[StateType] =
-    (renderer.show(user, Screen(content.text("dungeon.trackingStill"), Nil)) *>
-      renderer.show(user, trackingScreen)).as(StateType.Dungeon)
 
   /** Время выслеживания вышло — генерируем гарантированного Отмеченного тьмой
    *  ЦЕЛЕВОГО уровня (`dungeonLevel + 1`) и уходим в бой. Победа над ним двигает
@@ -200,6 +204,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       _ <- renderer.show(user, Screen(content.text("dungeon.trackingFound"), Nil))
       _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
       _ <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _ <- scheduler.cancel(user.userId, TaskKind.DarknessTracking)
     } yield StateType.Battle
 
   /** Прекратить выслеживание без подтверждения: сбрасываем таймер и возвращаем
@@ -209,18 +214,19 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       _    <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _    <- scheduler.cancel(user.userId, TaskKind.DarknessTracking)
       _    <- renderer.show(user, Screen(content.text("dungeon.trackingStopped"), Nil))
       _    <- renderer.show(user, enterScreen(hero, now))
     } yield StateType.Dungeon
 
-  /** Экран ожидания во время выслеживания: только «идти по следу» (чек таймера)
-   *  и «перестать искать» (мгновенный выход, без переспроса). */
+  /** Экран ожидания во время выслеживания: единственная кнопка «перестать искать»
+   *  (мгновенный выход, без переспроса). Продвижение делает таймер, не игрок —
+   *  поэтому кнопки «идти по следу» нет. */
   private def trackingScreen: Screen =
     Screen(
       content.text("dungeon.trackingWait"),
       List(
-        Choice("GoDarker",     content.text("dungeon.trackingContinueBtn"), color = ChoiceColor.Positive, row = Some(0)),
-        Choice("StopTracking", content.text("dungeon.trackingLeaveBtn"),    color = ChoiceColor.Negative, row = Some(1))
+        Choice("StopTracking", content.text("dungeon.trackingLeaveBtn"), color = ChoiceColor.Negative, row = Some(0))
       )
     )
 
@@ -240,6 +246,10 @@ object DungeonState {
   // сообщается — время определяется по стенным часам (`nowMs + rnd`).
   private val MinTrackMs: Long = 2L * 60L * 1000L
   private val MaxTrackMs: Long = 5L * 60L * 1000L
+
+  // payload синтетического действия, которым поллер будит выслеживание в момент
+  // дедлайна (маршрутизируется в goDarker, как и обычное нажатие «к тьме»).
+  private val TrackAction: String = """{"action":"GoDarker"}"""
 
   /** Прогресс выслеживания в scene_data: момент (мс), когда Отмеченный тьмой
    *  будет «выслежен». Пока это лежит в scene_data — герой в режиме ожидания. */

@@ -4,8 +4,9 @@ import pangea.engine.SceneContent
 import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.model.schedule.TaskKind
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer, TestScheduler}
 import zio.test._
 import zio.test.{TestClock, TestRandom}
 import zio.{Duration, ZIO}
@@ -26,11 +27,12 @@ object DungeonStateSpec extends ZIOSpecDefault {
 
   private def makeState(dungeonLevel: Int = 1, maxDungeonLevel: Int = 150) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, dungeonLevel = dungeonLevel, maxDungeonLevel = maxDungeonLevel))
-      renderer <- TestRenderer.make
-      content  <- ZIO.attempt(SceneContent.load())
-      invRepo   = TestInventoryRepository.accepting
-    } yield (DungeonState(heroDao, invRepo, content), heroDao, renderer, invRepo)
+      heroDao   <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, dungeonLevel = dungeonLevel, maxDungeonLevel = maxDungeonLevel))
+      renderer  <- TestRenderer.make
+      scheduler <- TestScheduler.make
+      content   <- ZIO.attempt(SceneContent.load())
+      invRepo    = TestInventoryRepository.accepting
+    } yield (DungeonState(heroDao, invRepo, scheduler, content), heroDao, renderer, scheduler)
 
   import pangea.engine.ChoiceColor
   private def colorOf(s: pangea.engine.Screen, id: String): Option[ChoiceColor] =
@@ -69,8 +71,9 @@ object DungeonStateSpec extends ZIOSpecDefault {
         heroDao  <- TestHeroDao.withHero(userId, lowHpHero)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
         invRepo   = TestInventoryRepository.accepting
-        state     = DungeonState(heroDao, invRepo, content)
+        state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // 67 = Spring, 99 → roll 100 = нет засады
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
@@ -85,8 +88,9 @@ object DungeonStateSpec extends ZIOSpecDefault {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
         invRepo   = TestInventoryRepository.accepting
-        state     = DungeonState(heroDao, invRepo, content)
+        state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 0) // 67 = Spring, 0 → roll 1 = засада
         _        <- TestRandom.feedLongs(42L)  // seed для монстра
         result   <- state.action(testUser, tap("FindEvent"), renderer)
@@ -108,8 +112,9 @@ object DungeonStateSpec extends ZIOSpecDefault {
         heroDao  <- TestHeroDao.withHero(userId, heroWithEmptyFlask)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
         invRepo   = TestInventoryRepository.accepting
-        state     = DungeonState(heroDao, invRepo, content)
+        state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // без засады
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
@@ -128,8 +133,9 @@ object DungeonStateSpec extends ZIOSpecDefault {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
         invRepo   = TestInventoryRepository.withItems(List(flaskInInv))
-        state     = DungeonState(heroDao, invRepo, content)
+        state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // без засады
         _        <- state.action(testUser, tap("FindEvent"), renderer)
       } yield assertTrue(invRepo.snapshot.find(_.id == 2L).exists(i => flaskCharges(i).contains(4)))
@@ -204,59 +210,53 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(colorOf(screens.head, "GoDarker").contains(ChoiceColor.Positive))
     },
 
-    test("GoDarker без поверженной тьмы → запускает выслеживание (миазмы), не двигается") {
+    test("GoDarker без поверженной тьмы → запускает выслеживание (миазмы), планирует таймер, не двигается") {
       for {
-        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
-        (state, heroDao, renderer, _)  = quad
-        result                        <- state.action(testUser, tap("GoDarker"), renderer)
-        screens                       <- renderer.sentScreens
-        updatedHero                   <- heroDao.getHeroByUserId(userId)
+        quad                                  <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, scheduler)  = quad
+        result                                <- state.action(testUser, tap("GoDarker"), renderer)
+        screens                               <- renderer.sentScreens
+        scheduled                             <- scheduler.scheduled
+        updatedHero                           <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(result == StateType.Dungeon) &&
               assertTrue(screens.exists(_.text.contains("миазмы тьмы"))) &&
-              // на экране ожидания — «идти по следу» и «перестать искать», без обычных действий
-              assertTrue(screens.last.choices.map(_.id) == List("GoDarker", "StopTracking")) &&
+              // на экране ожидания — только «перестать искать», без обычных действий и без «идти по следу»
+              assertTrue(screens.last.choices.map(_.id) == List("StopTracking")) &&
+              // запланирована push-задача пробуждения выслеживания
+              assertTrue(scheduled.exists(_.kind == TaskKind.DarknessTracking)) &&
               assertTrue(updatedHero.exists(_.dungeonLevel == 5))
     },
 
-    test("выслеживание идёт, время не вышло → повторный GoDarker сообщает, что след впереди") {
-      for {
-        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
-        (state, heroDao, renderer, _)  = quad
-        _                             <- state.action(testUser, tap("GoDarker"), renderer) // старт таймера (2–5 мин)
-        result                        <- state.action(testUser, tap("GoDarker"), renderer) // время ещё не вышло
-        screens                       <- renderer.sentScreens
-        updatedHero                   <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(screens.exists(_.text.contains("всё ещё где-то впереди"))) &&
-              assertTrue(updatedHero.exists(_.dungeonLevel == 5))
-    },
-
-    test("время выслеживания вышло → GoDarker выводит на Отмеченного целевого уровня (бой)") {
+    test("таймер выслеживания сработал → синтетический GoDarker выводит на Отмеченного целевого уровня (бой)") {
       import pangea.model.battle.SoloPveBattle
       for {
         quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
         (state, heroDao, renderer, _)  = quad
         _                             <- state.action(testUser, tap("GoDarker"), renderer) // старт таймера
-        _                             <- TestClock.adjust(Duration.fromMillis(5L * 60L * 1000L)) // проматываем > макс. 5 мин
-        result                        <- state.action(testUser, tap("GoDarker"), renderer)
+        _                             <- TestClock.adjust(Duration.fromMillis(5L * 60L * 1000L)) // дедлайн наступил
+        result                        <- state.action(testUser, tap("GoDarker"), renderer) // поллер шлёт GoDarker
+        screens                       <- renderer.sentScreens
         battleJson                    <- heroDao.readActiveBattle(userId)
         battle                         = battleJson.flatMap(_.as[SoloPveBattle].toOption)
       } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(screens.exists(_.text.contains("Миазмы сгущаются"))) &&
               assertTrue(battle.exists(_.monsterMarked)) &&
               assertTrue(battle.exists(_.monsterLvl == 6L)) // цель = текущий (5) + 1
     },
 
-    test("перестать искать → сбрасывает выслеживание, возвращает обычный экран этажа") {
+    test("перестать искать → сбрасывает выслеживание, снимает таймер, возвращает обычный экран этажа") {
       for {
-        quad                          <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
-        (state, heroDao, renderer, _)  = quad
-        _                             <- state.action(testUser, tap("GoDarker"), renderer)       // старт
-        result                        <- state.action(testUser, tap("StopTracking"), renderer)   // без переспроса
-        screens                       <- renderer.sentScreens
-        updatedHero                   <- heroDao.getHeroByUserId(userId)
+        quad                                  <- makeState(dungeonLevel = 5, maxDungeonLevel = 5)
+        (state, heroDao, renderer, scheduler)  = quad
+        _                                     <- state.action(testUser, tap("GoDarker"), renderer)       // старт
+        result                                <- state.action(testUser, tap("StopTracking"), renderer)   // без переспроса
+        screens                               <- renderer.sentScreens
+        cancelled                             <- scheduler.cancelled
+        updatedHero                           <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(result == StateType.Dungeon) &&
               assertTrue(screens.exists(_.text.contains("рассеиваются"))) &&
               assertTrue(screens.last.choices.map(_.id).contains("FindEvent")) &&
+              assertTrue(cancelled.contains(userId -> TaskKind.DarknessTracking)) &&
               assertTrue(updatedHero.exists(_.dungeonLevel == 5))
     },
 
