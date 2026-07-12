@@ -61,6 +61,7 @@ case class MasterHornState(
       _    <- renderer.show(user, Screen(
                 content.format("guild.masterHorn.confirm.text",
                   "stat" -> stat.label,
+                  "step" -> stat.step.toString,
                   "cost" -> cost(hero, stat).toString),
                 content.screen("guild.masterHorn.confirm").choices))
     } yield StateType.MasterHorn
@@ -96,17 +97,21 @@ case class MasterHornState(
   // Бусты Горна не пишутся в `fightStats` напрямую — они хранятся в
   // `masterHornBoosts` и прибавляются на чтение в `Hero.fightStatsWith` /
   // `maxArmor`. Единственное исключение — Inventory: вместимость живёт в
-  // отдельном репозитории.
-  private def applyBoost(user: User, hero: Hero, stat: Stat, price: Long, renderer: Renderer): Task[Unit] =
+  // отдельном репозитории. Значение буста — накопленный прирост стата
+  // (`stat.step` за прокачку), поэтому его можно прибавлять к статам напрямую.
+  private def applyBoost(user: User, hero: Hero, stat: Stat, price: Long, renderer: Renderer): Task[Unit] = {
+    val remaining = hero.guildReputation - price
     for {
-      _ <- heroDao.updateGuildReputation(user.userId, hero.guildReputation - price)
-      _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, 1L).orElse(ZIO.unit))
+      _ <- heroDao.updateGuildReputation(user.userId, remaining)
+      _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
       newBoosts = bumped(hero.masterHornBoosts, stat)
       _ <- heroDao.updateMasterHornBoosts(user.userId, newBoosts)
       _ <- renderer.show(user, Screen(
         content.format("guild.masterHorn.applied",
-          "stat" -> stat.label, "cost" -> price.toString), Nil))
+          "stat" -> stat.label, "step" -> stat.step.toString,
+          "cost" -> price.toString, "remaining" -> remaining.toString), Nil))
     } yield ()
+  }
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)
@@ -117,19 +122,21 @@ case class MasterHornState(
 object MasterHornState {
   import enumeratum._
 
-  sealed abstract class Stat(val label: String) extends EnumEntry
+  // `step` — на сколько единиц растёт характеристика за одну прокачку. Боевые
+  // статы качаются по +3, а Энергия и Вместимость инвентаря — по +1.
+  sealed abstract class Stat(val label: String, val step: Long) extends EnumEntry
   object Stat extends Enum[Stat] {
     val values = findValues
-    case object Armor         extends Stat("Броня")
-    case object Evasion       extends Stat("Уклонение")
-    case object Attack        extends Stat("Атака")
-    case object Defence       extends Stat("Защита")
-    case object Accuracy      extends Stat("Точность")
-    case object Energy        extends Stat("Энергия")
-    case object Inventory     extends Stat("Вместимость инвентаря")
+    case object Armor         extends Stat("Броня", 3)
+    case object Evasion       extends Stat("Уклонение", 3)
+    case object Attack        extends Stat("Атака", 3)
+    case object Defence       extends Stat("Защита", 3)
+    case object Accuracy      extends Stat("Точность", 3)
+    case object Energy        extends Stat("Энергия", 1)
+    case object Inventory     extends Stat("Вместимость инвентаря", 1)
   }
 
-  /** Сколько раз герой уже улучшал этот стат у Мастера Горна. */
+  /** Накопленный прирост стата от Мастера Горна (кратен `stat.step`). */
   def boostsFor(hero: Hero, stat: Stat): Long = boostsFor(hero.masterHornBoosts, stat)
 
   private def boostsFor(b: MasterHornBoosts, stat: Stat): Long = stat match {
@@ -143,23 +150,25 @@ object MasterHornState {
   }
 
   private def bumped(b: MasterHornBoosts, stat: Stat): MasterHornBoosts = stat match {
-    case Stat.Armor         => b.copy(armor         = b.armor + 1)
-    case Stat.Evasion       => b.copy(evasion       = b.evasion + 1)
-    case Stat.Attack        => b.copy(attack        = b.attack + 1)
-    case Stat.Defence       => b.copy(defence       = b.defence + 1)
-    case Stat.Accuracy      => b.copy(accuracy      = b.accuracy + 1)
-    case Stat.Energy        => b.copy(energy        = b.energy + 1)
-    case Stat.Inventory     => b.copy(inventory     = b.inventory + 1)
+    case Stat.Armor         => b.copy(armor         = b.armor     + stat.step)
+    case Stat.Evasion       => b.copy(evasion       = b.evasion   + stat.step)
+    case Stat.Attack        => b.copy(attack        = b.attack    + stat.step)
+    case Stat.Defence       => b.copy(defence       = b.defence   + stat.step)
+    case Stat.Accuracy      => b.copy(accuracy      = b.accuracy  + stat.step)
+    case Stat.Energy        => b.copy(energy        = b.energy    + stat.step)
+    case Stat.Inventory     => b.copy(inventory     = b.inventory + stat.step)
   }
 
   /**
    * Цена следующей прокачки в очках репутации:
    *   `a(n) = ceil(35 × 1.2^(n−1) − 30)`,
-   * где `n = boostsFor(hero, stat) + 1`.
+   * где `n` — порядковый номер следующей прокачки этого стата
+   * (`boostsFor(hero, stat) / stat.step + 1`, так как буст хранит накопленный
+   * прирост, а не число прокачек).
    * Первая прокачка стоит 5, далее каждая дороже. Минимум — 1.
    */
   def cost(hero: Hero, stat: Stat): Long = {
-    val n     = boostsFor(hero, stat) + 1
+    val n     = boostsFor(hero, stat) / stat.step + 1
     val raw   = 35.0 * math.pow(1.2, (n - 1).toDouble) - 30.0
     math.ceil(raw).toLong.max(1L)
   }

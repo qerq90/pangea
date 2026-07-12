@@ -237,13 +237,13 @@ guild:
           label: "↩ Назад"
           color: "negative"
     confirm:
-      text: "Вы можете улучшить «{stat}» на +1 за {cost} очков репутации."
+      text: "Вы можете улучшить «{stat}» на +{step} за {cost} очков репутации."
       choices:
         ConfirmImprove: "Улучшить"
         CancelImprove:
           label: "↩ Назад"
           color: "negative"
-    applied: "✅ «{stat}» улучшена на +1. Списано {cost} очков репутации."
+    applied: "✅ «{stat}» улучшена на +{step}. Списано {cost} очков репутации. Осталось репутации: {remaining}."
     notEnough: "Недостаточно репутации: нужно {cost} очков."
     notReady: "Мастер Горн ждёт, пока вы выберете характеристику."
   mentorKazimir:
