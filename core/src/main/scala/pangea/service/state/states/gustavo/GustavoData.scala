@@ -15,7 +15,8 @@ object GustavoData {
   val HealCooldownMs:  Long = 30L * 60L * 1000L // лечение: раз в 30 минут
   val BoostDurationMs: Long = 60L * 60L * 1000L // баф характеристики: час
   val CostPerLevel:    Long = 100L              // цена зелья = CostPerLevel × уровень
-  val SupplyCostPerLevel: Long = 25L            // пополнение припасов = SupplyCostPerLevel × уровень
+  val FlaskRefillCostPerCharge: Long = 25L      // фляга: 25 золота за каждый недостающий глоток
+  val BeltRefillCostPerBottle:  Long = 100L     // пояс: 100 золота за каждую недостающую бутыль
 
   implicit val encoder: Encoder[GustavoData] = deriveEncoder
   implicit val decoder: Decoder[GustavoData] = deriveDecoder

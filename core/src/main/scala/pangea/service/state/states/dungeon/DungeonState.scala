@@ -19,11 +19,12 @@ import java.util.concurrent.TimeUnit
 
 case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inventory.InventoryRepository, scheduler: Scheduler, content: SceneContent) extends State {
 
-  import DungeonState.{MinTrackMs, MaxTrackMs, TrackAction, TrackingData}
+  import DungeonState.{MinTrackMs, MaxTrackMs, TrackAction, TrackingData, FindDelayMs, ResolveAction}
 
   private val branch = new Branch(
     routes = Map(
       "FindEvent"     -> Target.Run { (user, _, renderer) => findEvent(user, renderer) },
+      "ResolveEvent"  -> Target.Run { (user, _, renderer) => resolveEvent(user, renderer) },
       "GoDarker"      -> Target.Run { (user, _, renderer) => goDarker(user, renderer) },
       "StopTracking"  -> Target.Run { (user, _, renderer) => stopTracking(user, renderer) },
       "GoLighter"     -> Target.Run { (user, _, renderer) => goLighter(user, renderer) },
@@ -77,11 +78,21 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
+  /** Нажатие «Исследовать уровень»: показываем экран осмотра и планируем push —
+   *  поллер разбудит героя синтетическим ResolveEvent через 5 секунд, тогда и
+   *  выберется/покажется само событие. Игрок ничего не жмёт, просто ждёт. */
   private def findEvent(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      _   <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil))
+      _   <- scheduler.schedule(user.userId, now + FindDelayMs, TaskKind.LevelSearch, StateType.Dungeon, ResolveAction)
+    } yield StateType.Dungeon
+
+  /** Пауза осмотра вышла (push от поллера) — выбираем и разыгрываем событие. */
+  private def resolveEvent(user: User, renderer: Renderer): Task[StateType] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
-      _      <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil))
       idx    <- Random.nextIntBounded(StateType.events.size)
       event   = StateType.events(idx)
       result <- event match {
@@ -250,6 +261,11 @@ object DungeonState {
   // payload синтетического действия, которым поллер будит выслеживание в момент
   // дедлайна (маршрутизируется в goDarker, как и обычное нажатие «к тьме»).
   private val TrackAction: String = """{"action":"GoDarker"}"""
+
+  // Пауза «осмотра уровня» перед показом события и payload, которым поллер её
+  // завершает (маршрутизируется в resolveEvent).
+  private val FindDelayMs: Long   = 5L * 1000L
+  private val ResolveAction: String = """{"action":"ResolveEvent"}"""
 
   /** Прогресс выслеживания в scene_data: момент (мс), когда Отмеченный тьмой
    *  будет «выслежен». Пока это лежит в scene_data — герой в режиме ожидания. */

@@ -2,7 +2,7 @@ package pangea.service.state.states.gustavo
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType}
+import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType, PotionKind}
 import pangea.model.state.StateType
 import pangea.model.stats.{ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.trauma.Trauma
@@ -39,6 +39,18 @@ object GustavoStateSpec extends ZIOSpecDefault {
   }
   private def heroWithFlask(f: Item, gold: Long = 5000L) =
     hero(gold = gold).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
+
+  // пояс с charges/maxCharges для тестов пополнения
+  private def belt(charges: Int, maxCharges: Int): Item =
+    Item.NoItem.copy(name = "Пояс", itemType = ItemType.Belt,
+      details = ItemDetails.Belt(PotionKind.Healing, charges = charges, maxCharges = maxCharges))
+
+  private def beltCharges(i: Item): Option[Int] = i.details match {
+    case b: ItemDetails.Belt => Some(b.charges)
+    case _                   => None
+  }
+  private def heroWithBelt(b: Item, gold: Long = 5000L) =
+    hero(gold = gold).copy(equipment = TestFixtures.emptyEquipment.copy(belt = b))
 
   private def env(h: pangea.model.hero.Hero) =
     for {
@@ -254,7 +266,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
         } yield assertTrue(ids == List("Flask", "Belt", "Back"))
       },
 
-      test("Flask → GustavoFlask; Belt → заглушка, остаёмся; Back → Gustavo") {
+      test("Flask → GustavoFlask; Belt → GustavoBelt; Back → Gustavo") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
@@ -262,29 +274,27 @@ object GustavoStateSpec extends ZIOSpecDefault {
           flaskR  <- state.action(testUser, tap("Flask"), renderer)
           beltR   <- state.action(testUser, tap("Belt"), renderer)
           backR   <- state.action(testUser, tap("Back"), renderer)
-          screens <- renderer.sentScreens
         } yield assertTrue(flaskR == StateType.GustavoFlask) &&
-                assertTrue(beltR == StateType.GustavoSupplies) &&
-                assertTrue(backR == StateType.Gustavo) &&
-                assertTrue(screens.exists(_.text.contains("Пояс пока не берусь")))
+                assertTrue(beltR == StateType.GustavoBelt) &&
+                assertTrue(backR == StateType.Gustavo)
       }
     ),
 
     // ── Пополнение фляги ───────────────────────────────────────────────────────
     suite("GustavoFlaskState")(
 
-      test("enter с неполной флягой → предложение с ценой (25 × 10 = 250) и Купить/Назад") {
+      test("enter с неполной флягой → предложение с ценой (2 глотка × 25 = 50) и Купить/Назад") {
         for {
           t <- env(heroWithFlask(flask(1, 3)))
           (heroDao, renderer, content) = t
           _       <- GustavoFlaskState(heroDao, content).enter(testUser, renderer)
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id).toSet
-        } yield assertTrue(screens.last.text.contains("250")) &&
+        } yield assertTrue(screens.last.text.contains("50")) &&
                 assertTrue(ids == Set("Refill", "Back"))
       },
 
-      test("Refill → пополняет заряды до максимума, списывает 250, уходит в припасы") {
+      test("Refill → пополняет заряды до максимума, списывает 50, уходит в припасы") {
         for {
           t <- env(heroWithFlask(flask(1, 3)))
           (heroDao, renderer, content) = t
@@ -293,18 +303,18 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(st == StateType.GustavoSupplies) &&
                 assertTrue(flaskCharges(h.equipment.flask).contains(3)) &&
-                assertTrue(h.gold == 4750L) &&
+                assertTrue(h.gold == 4950L) &&
                 assertTrue(screens.exists(_.text.contains("наполнил флягу")))
       },
 
       test("Refill без золота → сообщение, заряды и золото не меняются") {
         for {
-          t <- env(heroWithFlask(flask(1, 3), gold = 100L))
+          t <- env(heroWithFlask(flask(1, 3), gold = 10L))
           (heroDao, renderer, content) = t
           _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 100L) &&
+        } yield assertTrue(h.gold == 10L) &&
                 assertTrue(flaskCharges(h.equipment.flask).contains(1)) &&
                 assertTrue(screens.exists(_.text.contains("Столько золота нет")))
       },
@@ -336,6 +346,76 @@ object GustavoStateSpec extends ZIOSpecDefault {
           t <- env(hero())
           (heroDao, renderer, content) = t
           st <- GustavoFlaskState(heroDao, content).action(testUser, tap("Back"), renderer)
+        } yield assertTrue(st == StateType.GustavoSupplies)
+      }
+    ),
+
+    // ── Пополнение пояса ───────────────────────────────────────────────────────
+    suite("GustavoBeltState")(
+
+      test("enter с неполным поясом → предложение с ценой (2 бутыли × 100 = 200) и Купить/Назад") {
+        for {
+          t <- env(heroWithBelt(belt(1, 3)))
+          (heroDao, renderer, content) = t
+          _       <- GustavoBeltState(heroDao, content).enter(testUser, renderer)
+          screens <- renderer.sentScreens
+          ids      = screens.last.choices.map(_.id).toSet
+        } yield assertTrue(screens.last.text.contains("200")) &&
+                assertTrue(ids == Set("Refill", "Back"))
+      },
+
+      test("Refill → пополняет бутыли до максимума, списывает 200, уходит в припасы") {
+        for {
+          t <- env(heroWithBelt(belt(1, 3)))
+          (heroDao, renderer, content) = t
+          st      <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
+          h       <- heroDao.getHeroByUserId(userId).map(_.get)
+          screens <- renderer.sentScreens
+        } yield assertTrue(st == StateType.GustavoSupplies) &&
+                assertTrue(beltCharges(h.equipment.belt).contains(3)) &&
+                assertTrue(h.gold == 4800L) &&
+                assertTrue(screens.exists(_.text.contains("забил бутыли")))
+      },
+
+      test("Refill без золота → сообщение, бутыли и золото не меняются") {
+        for {
+          t <- env(heroWithBelt(belt(1, 3), gold = 10L))
+          (heroDao, renderer, content) = t
+          _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
+          h       <- heroDao.getHeroByUserId(userId).map(_.get)
+          screens <- renderer.sentScreens
+        } yield assertTrue(h.gold == 10L) &&
+                assertTrue(beltCharges(h.equipment.belt).contains(1)) &&
+                assertTrue(screens.exists(_.text.contains("Столько золота нет")))
+      },
+
+      test("Refill с полным поясом → «все полны», золото не списано") {
+        for {
+          t <- env(heroWithBelt(belt(3, 3)))
+          (heroDao, renderer, content) = t
+          _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
+          h       <- heroDao.getHeroByUserId(userId).map(_.get)
+          screens <- renderer.sentScreens
+        } yield assertTrue(h.gold == 5000L) &&
+                assertTrue(screens.exists(_.text.contains("полны")))
+      },
+
+      test("Refill без пояса → «пояса нет», золото не списано") {
+        for {
+          t <- env(hero())
+          (heroDao, renderer, content) = t
+          _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
+          h       <- heroDao.getHeroByUserId(userId).map(_.get)
+          screens <- renderer.sentScreens
+        } yield assertTrue(h.gold == 5000L) &&
+                assertTrue(screens.exists(_.text.contains("пояса-то у тебя и нет")))
+      },
+
+      test("Back → GustavoSupplies") {
+        for {
+          t <- env(hero())
+          (heroDao, renderer, content) = t
+          st <- GustavoBeltState(heroDao, content).action(testUser, tap("Back"), renderer)
         } yield assertTrue(st == StateType.GustavoSupplies)
       }
     )

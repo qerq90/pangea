@@ -9,9 +9,9 @@ import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
-/** Пополнение зарядов надетой фляги у Густаво. За 25 × уровень золота восстанавливает
- *  `charges` фляги до `maxCharges`. Нет надетой фляги или она уже полная — сообщение без
- *  списаний. По завершении возвращает в раздел припасов [[GustavoSuppliesState]]. */
+/** Пополнение зарядов надетой фляги у Густаво. За 25 золота за каждый недостающий глоток
+ *  восстанавливает `charges` фляги до `maxCharges`. Нет надетой фляги или она уже полная —
+ *  сообщение без списаний. По завершении возвращает в раздел припасов [[GustavoSuppliesState]]. */
 case class GustavoFlaskState(
   heroDao: HeroDao,
   content: SceneContent
@@ -46,7 +46,7 @@ case class GustavoFlaskState(
                List(content.choice("Back", "gustavo.offerBack"))))
            else
              renderer.show(user, Screen(
-               content.format("gustavo.supplies.flaskOffer", "cost" -> supplyCost(hero).toString),
+               content.format("gustavo.supplies.flaskOffer", "cost" -> flaskRefillCost(hero).toString),
                List(content.choice("Refill", "gustavo.supplies.flaskBuy"), content.choice("Back", "gustavo.offerBack")),
                inline = true))
     } yield ()
@@ -60,7 +60,7 @@ case class GustavoFlaskState(
     for {
       hero <- getHero(user)
       flask = hero.equipment.flask
-      price = supplyCost(hero)
+      price = flaskRefillCost(hero)
       _ <- if (!hasFlask(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskNone"), back))
            else if (isFull(flask))

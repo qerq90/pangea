@@ -43,6 +43,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object TreasureHunt extends TaskKind
   // Завершение выслеживания прохода вглубь (2–5 минут) — выход на Отмеченного тьмой.
   case object DarknessTracking extends TaskKind
+  // Пауза «осмотра уровня» (5 секунд) перед показом случайного события.
+  case object LevelSearch extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

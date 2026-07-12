@@ -16,6 +16,7 @@ import pangea.model.state.StateType.{
   Guild,
   Gustavo,
   GustavoBoost,
+  GustavoBelt,
   GustavoFlask,
   GustavoHeal,
   GustavoSupplies,
@@ -68,6 +69,7 @@ import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.gustavo.{
   GustavoBoostState,
+  GustavoBeltState,
   GustavoFlaskState,
   GustavoHealState,
   GustavoState,
@@ -152,6 +154,7 @@ object StatesMap {
           GustavoBoost    -> GustavoBoostState(heroDao, content),
           GustavoSupplies -> GustavoSuppliesState(heroDao, content),
           GustavoFlask    -> GustavoFlaskState(heroDao, content),
+          GustavoBelt     -> GustavoBeltState(heroDao, content),
           Tavern          -> TavernState(heroDao, scheduler, content),
           CardSeller -> CardSellerState(
             heroDao,

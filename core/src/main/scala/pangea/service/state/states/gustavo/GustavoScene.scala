@@ -2,6 +2,7 @@ package pangea.service.state.states.gustavo
 
 import pangea.dao.hero.HeroDao
 import pangea.model.hero.Hero
+import pangea.model.item.{Item, ItemDetails}
 import pangea.model.user.User
 import zio.{Task, ZIO}
 
@@ -27,8 +28,23 @@ trait GustavoScene {
   /** Цена зелья: 100 × уровень героя. */
   protected def cost(hero: Hero): Long = hero.lvl * GustavoData.CostPerLevel
 
-  /** Цена пополнения припасов (фляга/пояс): 25 × уровень героя. */
-  protected def supplyCost(hero: Hero): Long = hero.lvl * GustavoData.SupplyCostPerLevel
+  /** Заряды предмета (фляга/пояс), если это заряжаемый предмет. */
+  protected def charged(item: Item): Option[ItemDetails.Charged] = item.details match {
+    case c: ItemDetails.Charged => Some(c)
+    case _                      => None
+  }
+
+  /** Цена пополнения фляги: 25 золота за каждый недостающий глоток. */
+  protected def flaskRefillCost(hero: Hero): Long =
+    charged(hero.equipment.flask)
+      .map(c => (c.maxCharges - c.charges).toLong * GustavoData.FlaskRefillCostPerCharge)
+      .getOrElse(0L)
+
+  /** Цена пополнения пояса: 100 золота за каждую недостающую бутыль. */
+  protected def beltRefillCost(hero: Hero): Long =
+    charged(hero.equipment.belt)
+      .map(c => (c.maxCharges - c.charges).toLong * GustavoData.BeltRefillCostPerBottle)
+      .getOrElse(0L)
 
   /** Оставшиеся миллисекунды → строка с минутами, округление вверх, минимум 1. */
   protected def minsOf(ms: Long): String = ((ms + 59999L) / 60000L).max(1L).toString
