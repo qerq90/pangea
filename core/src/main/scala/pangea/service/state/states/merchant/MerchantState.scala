@@ -57,7 +57,8 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
-      _    <- renderer.show(user, menuScreen(data))
+      hero <- getHero(user)
+      _    <- renderer.show(user, menuScreen(data, hero))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -79,7 +80,7 @@ case class MerchantState(
                renderer.show(user, Screen(
                  content.format("merchant.confirmBuy", "name" -> mi.item.name, "price" -> mi.price.toString),
                  choices, inline = true))
-             case _ => renderer.show(user, menuScreen(data))
+             case _ => showMenu(user, renderer)
            }
     } yield StateType.Merchant
 
@@ -117,12 +118,13 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
+      hero <- getHero(user)
       _ <- if (now - data.refreshedAt < RefreshCooldownMs) {
              val mins = ((RefreshCooldownMs - (now - data.refreshedAt)) / 60000L).max(1L)
              renderer.show(user, Screen(content.format("merchant.refreshCooldown", "mins" -> mins.toString), Nil)) *>
-               renderer.show(user, menuScreen(data))
+               renderer.show(user, menuScreen(data, hero))
            } else
-             regenerate(user, now).flatMap(d => renderer.show(user, menuScreen(d)))
+             regenerate(user, now).flatMap(d => renderer.show(user, menuScreen(d, hero)))
     } yield StateType.Merchant
 
   // ── Продажа ─────────────────────────────────────────────────────────────────
@@ -237,13 +239,14 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
-      _    <- renderer.show(user, menuScreen(data))
+      hero <- getHero(user)
+      _    <- renderer.show(user, menuScreen(data, hero))
     } yield ()
 
-  private def menuScreen(data: MerchantData): Screen = {
+  private def menuScreen(data: MerchantData, hero: Hero): Screen = {
     val lines = data.items.zipWithIndex.map { case (mi, i) =>
       if (mi.bought) content.format("merchant.boughtLine", "n" -> (i + 1).toString, "name" -> mi.item.name)
-      else s"${i + 1}) ${itemDesc(mi.item)}\n💰 Цена: ${mi.price}"
+      else saleLine(mi, i, hero)
     }
     val text =
       if (data.items.nonEmpty && data.items.forall(_.bought)) content.text("merchant.soldOut")
@@ -260,6 +263,16 @@ case class MerchantState(
       content.choice("Back",          "merchant.backLabel")
     )
     Screen(text, choices)
+  }
+
+  /** Строка продаваемого предмета + сравнение с надетым в том же слоте — тот же
+   *  формат и разделитель, что при находке/дропе ([[Item.ComparisonSeparator]]).
+   *  Если слот пуст — сравнивать не с чем, показываем только предмет. */
+  private def saleLine(mi: MerchantItem, i: Int, hero: Hero): String = {
+    val base     = s"${i + 1}) ${itemDesc(mi.item)}\n💰 Цена: ${mi.price}"
+    val equipped = hero.equipment.equippedFor(mi.item.itemType).filter(_.itemType != ItemType.NoItem)
+    if (equipped.isEmpty) base
+    else base + "\n" + Item.ComparisonSeparator + "\n" + equipped.map(_.equippedComparison("Надето")).mkString("\n")
   }
 
   private def itemDesc(item: Item): String = {
@@ -291,13 +304,10 @@ case class MerchantState(
       (acc :+ MerchantItem(item, price, bought = false), r3)
     }._1
 
-  // Белая 20% · Зелёная 50% · Синяя 30%
+  // Зелёная 50% · Синяя 50% (Ришелье белым не торгует — их доля ушла в синие)
   private def rollRarity(rng: Rng): (Rarity, Rng) = {
     val (roll, next) = rng.between(0L, 100L)
-    val rarity =
-      if (roll < 20) Rarity.White
-      else if (roll < 70) Rarity.Green
-      else Rarity.Blue
+    val rarity = if (roll < 50) Rarity.Green else Rarity.Blue
     (rarity, next)
   }
 
