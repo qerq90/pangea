@@ -26,7 +26,8 @@ object MonsterGenerator {
 
   // Пул редкостей для гарантированно отмеченного моба: только Rare+ в тех же
   // относительных весах, что и в общем пуле (17 : 4 : 1).
-  private val markedRarityPool: List[Rarity] = rarityPool.filter(MarkedRarities.contains)
+  private val markedRarityPool: List[Rarity] =
+    rarityPool.filter(MarkedRarities.contains)
 
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
     val (race, rng1) = rng.pick(Race.values.toList)
@@ -52,13 +53,14 @@ object MonsterGenerator {
 
   /** Гарантированно «Отмеченный тьмой» моб заданного уровня — для механики
     * выслеживания прохода вглубь. Редкость роллится среди Rare+ (в тех же
-    * относительных весах, что и обычный ролл), статы усилены `MarkedMultiplier`.
-    * Уровень сюда передаётся ЦЕЛЕВОЙ (куда игрок хочет спуститься), а не текущий.
+    * относительных весах, что и обычный ролл), статы усилены
+    * `MarkedMultiplier`. Уровень сюда передаётся ЦЕЛЕВОЙ (куда игрок хочет
+    * спуститься), а не текущий.
     */
   def generateMarked(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
     val (race, rng1)   = rng.pick(Race.values.toList)
     val (rarity, rng2) = rng1.pick(markedRarityPool)
-    val stats          = boost(buildStats(dungeonLevel, rarity, race), MarkedMultiplier)
+    val stats = boost(buildStats(dungeonLevel, rarity, race), MarkedMultiplier)
     (Monster(0L, dungeonLevel.toLong, race, rarity, stats, marked = true), rng2)
   }
 
@@ -78,9 +80,9 @@ object MonsterGenerator {
     val base = level.toDouble * rarity.factor * N
     val f    = MonsterRaceFactor.of(race)
     FightStats(
-      atk = (16.0 * base * f.attackFactor).toLong.max(1L),
-      hp = (32.0 * base * f.hpFactor).toLong.max(1L),
-      armor = (16.0 * base * f.defenceFactor).toLong,
+      atk = (14.0 * base * f.attackFactor).toLong.max(1L),
+      hp = (36.0 * base * f.hpFactor).toLong.max(1L),
+      armor = (18.0 * base * f.defenceFactor).toLong,
       defence = 0L,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
