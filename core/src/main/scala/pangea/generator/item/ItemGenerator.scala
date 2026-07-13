@@ -35,7 +35,7 @@ object ItemGenerator {
     val r3 = item.rarity.factorR3
     item.itemType match {
       case ItemType.Weapon =>
-        val (bonus, next) = modifySpread(item.lvl * (4.0 + r3), rng, 20L)
+        val (bonus, next) = modifySpread(item.lvl * (3.0 + r3), rng, 20L)
         (item.withAttack(item.attack + bonus), next)
       case ItemType.ChestPlate =>
         val (bonus, next) = modifySpread(item.lvl * (12.0 + r3), rng, 10L)
@@ -52,7 +52,7 @@ object ItemGenerator {
       val (modified, rng2) = stat match {
         case Stat.Attack =>
           val (v, r) =
-            modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+            modifyParameter(item.rarity.factorR3 * 0.4 * item.lvl, rng1)
           (item.withAttack(item.attack + v), r)
         case Stat.Accuracy =>
           val (v, r) = modifyParameter(item.rarity.factorR3 * item.lvl, rng1)
@@ -63,7 +63,7 @@ object ItemGenerator {
           (item.withEnergy(item.energy + v), r)
         case Stat.Armor =>
           val (v, r) =
-            modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
+            modifyParameter(item.rarity.factorR3 * 1.5 * item.lvl, rng1)
           (item.withArmor(item.armor + v), r)
         case Stat.Defence =>
           val (v, r) =
