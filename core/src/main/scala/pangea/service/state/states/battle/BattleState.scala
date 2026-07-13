@@ -231,7 +231,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               protection = buffedEff.defence,
               defenderInt = hero.effectiveBaseStats(nowMs).int,
               // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
-              attackerInt = monster.fightStats.atk
+              attackerInt = monster.fightStats.atk,
+              bonusPct = ticked.heroBattleState.reductionBonusPct
             )
             reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(
@@ -428,7 +429,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         val red = BattleState.damageReduction(
           protection  = battle.monsterStats.defence,
           defenderInt = battle.monsterStats.defence,
-          attackerInt = hero.effectiveBaseStats(nowMs).int)
+          attackerInt = hero.effectiveBaseStats(nowMs).int,
+          bonusPct    = 0L)
         (raw * (1.0 - red)).toLong.max(1L)
       }
       result <- slot.skill.effect match {
@@ -669,7 +671,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             reduction = BattleState.damageReduction(
               protection = buffedEff.defence,
               defenderInt = hero.effectiveBaseStats(nowMs).int,
-              attackerInt = monster.fightStats.atk
+              attackerInt = monster.fightStats.atk,
+              bonusPct = battle.heroBattleState.reductionBonusPct
             )
             reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             buffReduct  = math.min(battle.heroBattleState.armorBonus, reducedDamage)
@@ -799,7 +802,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val reductionPct = (BattleState.damageReduction(
       protection = buffedEff.defence,
       defenderInt = hero.effectiveBaseStats(nowMs).int,
-      attackerInt = battle.monsterStats.atk
+      attackerInt = battle.monsterStats.atk,
+      bonusPct = battle.heroBattleState.reductionBonusPct
     ) * 100.0).toInt
     val mobSkillHitPct = BattleState.monsterSkillHitChance(battle.rarity.factor).toInt
     val maxEnergy     = hero.maxEnergy(nowMs)
@@ -990,20 +994,24 @@ object BattleState {
     * уклонения.
     */
   /** Процентное снижение урона, наносимого защищающемуся юниту: reduction = (P
-    * + Iₚ) / (P + Iₚ + Iₑ × 2), зажато сверху 0.7. Где `P` — защита защитника,
-    * `Iₚ` — его интеллект, `Iₑ` — интеллект атакующего. Применяется к чистому
-    * урону до брони. Соотношение «×2 для интеллекта атакующего» — из ТЗ.
+    * + Iₚ) / (P + Iₚ + Iₑ × 2), затем к итогу ПРИБАВЛЯЕТСЯ bonusPct п.п. —
+    * процентный баф «Заслона» бьёт по ИТОГОВОМУ снижению, а не по защите. Всё
+    * вместе зажато сверху 0.7. Где `P` — защита защитника, `Iₚ` — его интеллект,
+    * `Iₑ` — интеллект атакующего, `bonusPct` — прибавка в п.п. к итогу. Применяется
+    * к чистому урону до брони. Соотношение «×2 для интеллекта атакующего» — из ТЗ.
     * Возврат — доля [0; 0.7].
     */
   def damageReduction(
       protection: Long,
       defenderInt: Long,
-      attackerInt: Long
+      attackerInt: Long,
+      bonusPct: Long
   ): Double = {
-    val numer = (protection + defenderInt).toDouble
-    val denom = numer + attackerInt * 2.0
-    val raw   = if (denom <= 0.0) 0.0 else numer / denom
-    raw.max(0.0).min(0.7)
+    val numer   = (protection + defenderInt).toDouble
+    val denom   = numer + attackerInt * 2.0
+    val raw     = if (denom <= 0.0) 0.0 else numer / denom
+    val boosted = raw + bonusPct / 100.0
+    boosted.max(0.0).min(0.7)
   }
 
   def dodgeChance(

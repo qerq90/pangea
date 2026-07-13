@@ -36,6 +36,22 @@ object HeroBattleStateSpec extends ZIOSpecDefault {
       assertTrue(result.defence == 20L)
     },
 
+    test("reductionBonusPct суммирует defencePct всех баффов (Заслон)") {
+      val buffs = List(
+        Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, defencePct = 5L, turnsLeft = Some(3)),
+        Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, defencePct = 7L, turnsLeft = None)
+      )
+      assertTrue(HeroBattleState(buffs).reductionBonusPct == 12L)
+    },
+
+    test("applyTo НЕ раздувает защиту от defencePct — Заслон бьёт по итогу, не по защите") {
+      val buff  = Buff(atk = 0L, armor = 0L, defence = 0L, dodgePct = 0L, defencePct = 5L, turnsLeft = Some(3))
+      val state = HeroBattleState(List(buff))
+      // defence остаётся базовым (10), процент уходит в reductionBonusPct, а не в статы.
+      assertTrue(state.applyTo(base).defence == 10L) &&
+      assertTrue(state.reductionBonusPct == 5L)
+    },
+
     test("armorBonus суммирует armor всех баффов") {
       val buffs = List(
         Buff(atk = 0L, armor = 30L, defence = 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = None),

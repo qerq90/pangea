@@ -50,7 +50,8 @@ object MonsterSkill extends Enum[MonsterSkill] {
                        protection  = buffed.defence,
                        defenderInt = hero.effectiveBaseStats(nowMs).int,
                        // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
-                       attackerInt = battle.monsterStats.atk)
+                       attackerInt = battle.monsterStats.atk,
+                       bonusPct    = battle.heroBattleState.reductionBonusPct)
       val damage   = ((raw * (1.0 - reduct)).toLong).max(1L)
       val (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, damage)
       val line     = template.replace("{name}", battle.toMonster.name).replace("{}", damage.toString)

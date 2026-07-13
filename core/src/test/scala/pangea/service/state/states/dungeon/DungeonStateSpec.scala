@@ -75,7 +75,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         invRepo   = TestInventoryRepository.accepting
         state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // 67 = Spring, 99 → roll 100 = нет засады
-        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        result   <- state.action(testUser, tap("ResolveEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
@@ -93,7 +93,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 0) // 67 = Spring, 0 → roll 1 = засада
         _        <- TestRandom.feedLongs(42L)  // seed для монстра
-        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        result   <- state.action(testUser, tap("ResolveEvent"), renderer)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(screens.exists(_.text.contains("ручья")))
@@ -116,7 +116,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         invRepo   = TestInventoryRepository.accepting
         state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // без засады
-        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        result   <- state.action(testUser, tap("ResolveEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
@@ -137,7 +137,7 @@ object DungeonStateSpec extends ZIOSpecDefault {
         invRepo   = TestInventoryRepository.withItems(List(flaskInInv))
         state     = DungeonState(heroDao, invRepo, scheduler, content)
         _        <- TestRandom.feedInts(67, 99) // без засады
-        _        <- state.action(testUser, tap("FindEvent"), renderer)
+        _        <- state.action(testUser, tap("ResolveEvent"), renderer)
       } yield assertTrue(invRepo.snapshot.find(_.id == 2L).exists(i => flaskCharges(i).contains(4)))
     },
 

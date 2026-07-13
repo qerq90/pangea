@@ -8,7 +8,7 @@ case class Buff(
   armor:      Long,         // flat damage reduction per incoming hit (doesn't deplete)
   defence:    Long,
   dodgePct:   Long,         // прибавка в п.п. к итоговому шансу уклонения игрока
-  defencePct: Long,         // прибавка в % к ИТОГОВОЙ защите (навык «Заслон»)
+  defencePct: Long,         // прибавка в % к ИТОГОВОМУ снижению урона (навык «Заслон»)
   turnsLeft:  Option[Int]   // None = lasts until battle ends, Some(n) = expires after n hero turns
 )
 
