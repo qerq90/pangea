@@ -8,7 +8,7 @@ import zio.test._
 object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
 
   private val allowedRarities: Set[Rarity] =
-    Set(Rarity.Green, Rarity.Blue, Rarity.Purple, Rarity.Violet, Rarity.Orange)
+    Set(Rarity.Blue, Rarity.Violet, Rarity.Purple, Rarity.Orange)
 
   // Ущелье мертвецов — зона 51..75; лут должен катиться в этих уровнях.
   private val zone    = MapZone.DeadmansGorge
@@ -25,7 +25,7 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
       assertTrue(counts == Set(2, 3, 4))
     },
 
-    test("редкость снаряжения только из допустимого набора (без серой/белой)") {
+    test("редкость снаряжения только из допустимого набора (от синей и выше)") {
       assertTrue(rewards.forall(_.items.forall(i => allowedRarities.contains(i.rarity))))
     },
 
@@ -35,23 +35,19 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
         assertTrue(lvls.forall(l => l >= zone.levels.min.toLong && l <= zone.levels.max.toLong))
     },
 
-    test("золото и дублоны взаимоисключающи; часто не выпадает ничего сверх снаряжения") {
-      val bothPositive = rewards.exists(r => r.gold > 0L && r.doubloons > 0L)
-      val nothingExtra = rewards.count(r => r.gold == 0L && r.doubloons == 0L)
-      assertTrue(!bothPositive) &&
-        assertTrue(nothingExtra > 0)
+    test("золото выпадает всегда (гарантированно положительное)") {
+      assertTrue(rewards.forall(_.gold > 0L))
     },
 
-    test("дублоны, если выпали, в диапазоне 30..120") {
+    test("дублоны выпадают часто, но не всегда (~80%)") {
+      val withDoubloons = rewards.count(_.doubloons > 0L)
+      assertTrue(withDoubloons > 0 && withDoubloons < rewards.size)
+    },
+
+    test("дублоны, если выпали, в диапазоне 30..70") {
       val doubs = rewards.map(_.doubloons).filter(_ > 0L)
       assertTrue(doubs.nonEmpty) &&
-        assertTrue(doubs.forall(d => d >= 30L && d <= 120L))
-    },
-
-    test("золото, если выпало, положительное") {
-      val golds = rewards.map(_.gold).filter(_ > 0L)
-      assertTrue(golds.nonEmpty) &&
-        assertTrue(golds.forall(_ > 0L))
+        assertTrue(doubs.forall(d => d >= 30L && d <= 70L))
     },
 
     test("детерминизм: один seed → одинаковая добыча") {

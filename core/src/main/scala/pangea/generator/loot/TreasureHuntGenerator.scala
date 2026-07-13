@@ -12,38 +12,32 @@ import scala.annotation.tailrec
   *
   *   - снаряжение: 2 экземпляра гарантированно, 3-й — с шансом 50%, и только
   *     если он выпал, ролится 4-й (тоже 50%) → итог 2–4 предмета; редкость
-  *     каждого: Green 40 · Blue 42 · Purple 11 · Violet 5 · Orange 2 (сумма = 100);
-  *   - один дополнительный ролл сверху: 50% ничего · 30% золото (`lvl×12 ±20%`) ·
-  *     20% дублоны (30–120).
+  *     каждого: Blue 20 · Purple 35 · Violet 31 · Orange 14 (сумма = 100);
+  *   - золото выпадает гарантированно (`lvl×12×100 ±20%`);
+  *   - дублоны — с шансом 80% (30–70), сверх золота.
   */
 object TreasureHuntGenerator {
 
   final case class Reward(items: List[Item], gold: Long, doubloons: Long)
 
-  // Редкость снаряжения (в %, сумма = 100). Серой/белой не бывает.
+  // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
     List(
-      ItemRarity.Green  -> 40,
-      ItemRarity.Blue   -> 42,
-      ItemRarity.Purple -> 11,
-      ItemRarity.Violet -> 5,
-      ItemRarity.Orange -> 2
+      ItemRarity.Blue   -> 20,
+      ItemRarity.Purple -> 35, // фиолетовая
+      ItemRarity.Violet -> 31, // пурпурная
+      ItemRarity.Orange -> 14
     )
 
   def roll(zone: MapZone, rng: Rng): (Reward, Rng) = {
     val (gearCount, r1)   = rollGearCount(rng)    // 2..4
     val (items, r2)       = rollGear(gearCount, zone, Nil, rng = r1)
-    val (bonusRoll, r3)   = r2.between(0L, 100L)
-    val (gold, doubloons, r4) =
-      if (bonusRoll < 50) (0L, 0L, r3)                             // 50% — ничего
-      else if (bonusRoll < 80) {                                   // 30% — золото
-        val (g, rr) = rollGold(zone, r3)
-        (g, 0L, rr)
-      } else {                                                     // 20% — дублоны
-        val (d, rr) = r3.between(30L, 121L)                        // 30..120
-        (0L, d, rr)
-      }
-    (Reward(items, gold, doubloons), r4)
+    val (gold, r3)        = rollGold(zone, r2)                     // гарантированно
+    val (doubloonRoll, r4) = r3.between(0L, 100L)
+    val (doubloons, r5) =
+      if (doubloonRoll < 80) r4.between(30L, 71L)                  // 80% — 30..70
+      else                   (0L, r4)                              // 20% — без дублонов
+    (Reward(items, gold, doubloons), r5)
   }
 
   // 2 гарантированно; 3-й — 50%; и лишь если он выпал, 4-й — тоже 50%.
@@ -67,10 +61,10 @@ object TreasureHuntGenerator {
       rollGear(n - 1, zone, item :: acc, r3)
     }
 
-  // Золото: базис lvl×12 (уровень — из диапазона зоны) с разбросом ±20%, минимум 1.
+  // Золото: базис lvl×12×100 (уровень — из диапазона зоны) с разбросом ±20%, минимум 1.
   private def rollGold(zone: MapZone, rng: Rng): (Long, Rng) = {
     val (lvl, r1)   = levelIn(zone, rng)
-    val base        = lvl.max(1L) * 12L
+    val base        = lvl.max(1L) * 12L * 100L
     val (pct, next) = r1.between(80L, 121L) // 80..120 %
     ((base * pct / 100L).max(1L), next)
   }
