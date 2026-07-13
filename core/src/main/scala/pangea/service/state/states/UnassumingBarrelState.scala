@@ -37,7 +37,9 @@ case class UnassumingBarrelState(
       "WithdrawItemsPrev" -> Target.Run { (u, _, r) => navigateWithdraw(u, r, -1).as(StateType.UnassumingBarrel) },
       "WithdrawItemsNext" -> Target.Run { (u, _, r) => navigateWithdraw(u, r, +1).as(StateType.UnassumingBarrel) },
       "DepositGoldMenu"   -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(barrelMode = Some(ModeDepositGold))) *> showDepositGold(u, r).as(StateType.UnassumingBarrel) },
+      "DepositGoldAll"    -> Target.Run { (u, _, r) => depositAllGold(u, r).as(StateType.UnassumingBarrel) },
       "WithdrawGoldMenu"  -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(barrelMode = Some(ModeWithdrawGold))) *> showWithdrawGold(u, r).as(StateType.UnassumingBarrel) },
+      "WithdrawGoldAll"   -> Target.Run { (u, _, r) => withdrawAllGold(u, r).as(StateType.UnassumingBarrel) },
       "LeaveBarrel"       -> Target.Goto(StateType.HarborQuarter)
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
@@ -160,15 +162,22 @@ case class UnassumingBarrelState(
       text    = content.format("barrel.depositGoldPrompt",
                   "heroGold" -> hero.gold.toString,
                   "free"     -> barrel.freeGoldSpace.toString)
-      _ <- renderer.show(user, Screen(text, cancelGoldRow))
+      _ <- renderer.show(user, Screen(text, allGoldRow("DepositGoldAll", "barrel.depositGoldAll")))
     } yield ()
 
   private def showWithdrawGold(user: User, renderer: Renderer): Task[Unit] =
     for {
       barrel <- getBarrel(user)
       text    = content.format("barrel.withdrawGoldPrompt", "barrelGold" -> barrel.gold.toString)
-      _ <- renderer.show(user, Screen(text, cancelGoldRow))
+      _ <- renderer.show(user, Screen(text, allGoldRow("WithdrawGoldAll", "barrel.withdrawGoldAll")))
     } yield ()
+
+  /** Ряд для экранов золота: кнопка «всё» и красная «Отмена». */
+  private def allGoldRow(allAction: String, allTextKey: String): List[Choice] =
+    List(
+      Choice(allAction, content.text(allTextKey), row = Some(0)),
+      Choice("BarrelMenu", content.text("barrel.cancelGold"), color = ChoiceColor.Negative, row = Some(0))
+    )
 
   private def cancelGoldRow: List[Choice] =
     List(Choice("BarrelMenu", content.text("barrel.cancelGold"), color = ChoiceColor.Negative, row = Some(0)))
@@ -249,6 +258,24 @@ case class UnassumingBarrelState(
                       showWithdrawItems(user, renderer)
                )
              )
+    } yield ()
+
+  /** «Положить всё»: кладём максимум, что позволяют кошелёк героя и место в бочке. */
+  private def depositAllGold(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero   <- getHero(user)
+      barrel <- getBarrel(user)
+      amount  = hero.gold.min(barrel.freeGoldSpace)
+      _ <- if (amount <= 0) renderer.show(user, Screen(content.text("barrel.goldNothingToDeposit"), allGoldRow("DepositGoldAll", "barrel.depositGoldAll")))
+           else doDepositGold(user, amount, renderer)
+    } yield ()
+
+  /** «Забрать всё»: забираем всё золото из бочки. */
+  private def withdrawAllGold(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      barrel <- getBarrel(user)
+      _ <- if (barrel.gold <= 0) renderer.show(user, Screen(content.text("barrel.goldNothingToWithdraw"), allGoldRow("WithdrawGoldAll", "barrel.withdrawGoldAll")))
+           else doWithdrawGold(user, barrel.gold, renderer)
     } yield ()
 
   private def doDepositGold(user: User, amount: Long, renderer: Renderer): Task[Unit] =
