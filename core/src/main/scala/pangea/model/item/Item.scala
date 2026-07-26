@@ -50,6 +50,12 @@ case class Item(
     case _                     => None
   }
 
+  /** Пассивный навык предмета (кольца/амулеты/шлем/плечи и т.п.), если есть. */
+  def passive: Option[PassiveKind] = details match {
+    case ItemDetails.Passive(k) => Some(k)
+    case _                      => None
+  }
+
   /** Карта клада или её половинка. */
   def isTreasureMap: Boolean =
     itemType == ItemType.TreasureMap || itemType == ItemType.TreasureMapHalf
@@ -83,6 +89,7 @@ case class Item(
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
+      case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
       case _                             => Nil
     }

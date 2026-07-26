@@ -58,6 +58,10 @@ object ItemDetails {
     }
   }
 
+  /** Пассивный навык предмета (один из `PassiveKind.poolFor(itemType)`). Падает на
+   *  слоты, не несущие активного навыка/зелья (см. [[PassiveKind]]). */
+  case class Passive(kind: PassiveKind) extends ItemDetails
+
   /** Трофей с убитого моба: раса (entryName) и вид трофея. */
   case class Trophy(race: String, kind: TrophyKind) extends ItemDetails
 
@@ -74,6 +78,8 @@ object ItemDetails {
   private val flaskDec:  Decoder[Flask]            = deriveDecoder
   private val beltEnc:   Encoder[Belt]             = deriveEncoder
   private val beltDec:   Decoder[Belt]             = deriveDecoder
+  private val passiveEnc: Encoder[Passive]         = deriveEncoder
+  private val passiveDec: Decoder[Passive]         = deriveDecoder
   private val trophyEnc: Encoder[Trophy]           = deriveEncoder
   private val trophyDec: Decoder[Trophy]           = deriveDecoder
   private val mapEnc:    Encoder[TreasureMap]      = deriveEncoder
@@ -88,6 +94,7 @@ object ItemDetails {
     case a: Armor       => tagged("Armor", armorEnc(a))
     case f: Flask       => tagged("Flask", flaskEnc(f))
     case b: Belt        => tagged("Belt", beltEnc(b))
+    case p: Passive     => tagged("Passive", passiveEnc(p))
     case t: Trophy      => tagged("Trophy", trophyEnc(t))
     case m: TreasureMap => tagged("TreasureMap", mapEnc(m))
   }
@@ -99,6 +106,7 @@ object ItemDetails {
       case "Armor"       => armorDec(c)
       case "Flask"       => flaskDec(c)
       case "Belt"        => beltDec(c)
+      case "Passive"     => passiveDec(c)
       case "Trophy"      => trophyDec(c)
       case "TreasureMap" => mapDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))

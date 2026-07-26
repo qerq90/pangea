@@ -104,10 +104,16 @@ case class EquipmentState(
     if (slotIdx < 0 || slotIdx >= slots.size) showList(user, renderer)
     else for {
       hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       slot  = slots(slotIdx)
       item  = slot.get(hero.equipment)
+      // Снятие «Тайника» убирает +10 слотов: если сумка (с возвращаемым предметом)
+      // не влезет в базовую вставимость — блокируем, надо сперва вынуть вещи.
+      blockedByStash = InventoryState.stashBonus(item) > 0 && !InventoryState.fitsWithoutStash(inv, returningItems = 1)
       _ <- if (item.itemType == pangea.model.item.ItemType.NoItem)
              renderer.show(user, Screen(content.text("equipment.slotEmpty"), Nil))
+           else if (blockedByStash)
+             renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
            else
              inventoryRepo.addItem(hero.id, item).foldZIO(
                _ => renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)),
@@ -115,6 +121,8 @@ case class EquipmentState(
                  val newEq    = slot.clear(hero.equipment)
                  val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
                  heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+                   ZIO.when(InventoryState.stashBonus(item) > 0)(
+                     inventoryRepo.increaseCapacity(hero.id, -InventoryState.stashBonus(item)).orElse(ZIO.unit)) *>
                    InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slotsLine =>
                      renderer.show(user, Screen(
                        content.format("equipment.unequipped", "name" -> item.name) + "\n" + slotsLine, Nil)))

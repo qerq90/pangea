@@ -425,6 +425,7 @@ equipment:
     color: "negative"
   unequipped: "{name} снят и возвращён в инвентарь."
   slotEmpty: "Слот уже пуст."
+  stashBlocked: "Тайник переполнен: сначала выньте вещи из инвентаря, чтобы освободить его 10 дополнительных слотов."
 
 heroStats:
   inventory: "Инвентарь"
@@ -451,7 +452,7 @@ heroStats:
 
 battle:
   enter:
-    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
+    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}{heroArmorRegen}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -493,6 +494,10 @@ battle:
   skillUnavailable: "Эта способность сейчас недоступна."
   weakSpotDouble: "🎯 Слабое место было поражено, урон удвоен!"
   notEnoughEnergy: "⚡ Недостаточно энергии: нужно {cost}, а у вас {energy}."
+  impenetrable: "🛡 Непробиваемый доспех вдвое снизил полученный урон!"
+  toughness: "🧥 Крепкость: доспех устоял — восстановлено {armor} брони!"
+  thorns: "🌵 Шипы вернули {damage} урона {monster}."
+  quickHands: "🤹 Быстрые руки: расходник применён без потери раунда!"
 
 rest:
   enter:
@@ -560,6 +565,8 @@ treasureDig:
       GraveLeave:
         label: "Уйти"
         color: "negative"
+  marauder:
+    text: "Свежая могила {race}… Опытный мародёр не уходит с пустыми руками — вы разграбили захоронение."
 
 outskirts:
   enter:

@@ -43,6 +43,18 @@ case class Equipment(
     firstRing.hp + secondRing.hp + belt.hp + flask.hp +
     weapon.hp + additionalWeapon.hp
 
+  /** Все надетые предметы (включая пустые слоты) — единый список для агрегаций,
+   *  которым не важен конкретный слот (пассивки, будущие суммы статов). */
+  def allItems: List[Item] = List(
+    helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
+    firstRing, secondRing, belt, flask, weapon, additionalWeapon
+  )
+
+  /** Набор пассивок с надетых предметов. Множество само схлопывает дубли —
+   *  «работает только одна» (см. [[pangea.model.item.PassiveKind]]). */
+  def passiveKinds: Set[pangea.model.item.PassiveKind] =
+    allItems.flatMap(_.passive).toSet
+
   /** Какие предметы из снаряжения занимают слот данного типа. Для Ring возвращает
    *  оба кольца (есть два слота); для прочих типов — один. Пустые слоты включены —
    *  фильтрацию по [[Item.itemType]] делает вызывающий. */

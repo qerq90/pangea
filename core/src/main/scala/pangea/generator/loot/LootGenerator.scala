@@ -180,6 +180,39 @@ object LootGenerator {
     loop(dropChances(tier), Set.empty, Nil, rng)
   }
 
+  /** Доп. дропы от пассивок героя, независимые от основного ролла [[roll]] (каждый
+    * со своим шансом): «Таксидермиста» — 10% на лишний трофей, «Ювелира» — 10% на
+    * отдельную груду золота по обычной формуле дропа. Чистое ядро: флаги, не Hero. */
+  def rollPassiveDrops(
+      taxidermist: Boolean,
+      jeweler: Boolean,
+      tier: MobRarity,
+      race: Race,
+      killLevel: Long,
+      rng: Rng
+  ): (List[LootDrop], Rng) = {
+    val (trophy, r1) =
+      if (taxidermist) rollChance(PassiveTrophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
+      else (None, rng)
+    val (gold, r2) =
+      if (jeweler) rollChance(PassiveGoldChancePct, r1) { r =>
+        val (amount, rr) = rollGold(killLevel, r)
+        (LootDrop.Gold(amount, pile = false), rr)
+      }
+      else (None, r1)
+    (List(trophy, gold).flatten, r2)
+  }
+
+  private val PassiveTrophyChancePct: Long = 10L
+  private val PassiveGoldChancePct: Long   = 10L
+
+  // С шансом `pct`% выполнить `make` (даёт дроп), иначе None. RNG тратится всегда.
+  private def rollChance(pct: Long, rng: Rng)(make: Rng => (LootDrop, Rng)): (Option[LootDrop], Rng) = {
+    val (roll, r1) = rng.between(0L, 100L)
+    if (roll < pct) { val (drop, r2) = make(r1); (Some(drop), r2) }
+    else (None, r1)
+  }
+
   // Взвешенный выбор категории среди ещё не выпавших; остаток до 100 — «пусто» (None).
   private def pickCategory(
       weights: List[(Category, Int)],

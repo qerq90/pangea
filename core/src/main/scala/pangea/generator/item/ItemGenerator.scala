@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Item, ItemDetails, ItemType, PotionKind, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, PotionKind, Rarity}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -174,11 +174,37 @@ object ItemGenerator {
     (withDetails.withName(name), rng6)
   }
 
+  // Шанс (в %) получить пассивку по редкости предмета: серый/белый — 10, зелёный —
+  // 40, синий — 80, фиол./пурпур/оранж — гарантированно.
+  private def passiveChancePct(rarity: Rarity): Long = rarity match {
+    case Rarity.Gray | Rarity.White => 10L
+    case Rarity.Green               => 40L
+    case Rarity.Blue                => 80L
+    case _                          => 100L
+  }
+
+  // Носимым слотам, не несущим активного навыка/зелья (шлем/плечи/брасы/перчи/
+  // сапоги/штаны/кольца/амулет), с шансом по редкости даём ровно одну пассивку из
+  // их пула. Слоты без пула (оружие/нагрудник/пояс/фляга и т.п.) возвращаются как есть.
+  private def applyPassive(item: Item, rng: Rng): (Item, Rng) = {
+    val pool = PassiveKind.poolFor(item.itemType)
+    if (pool.isEmpty) (item, rng)
+    else {
+      val (roll, rng1) = rng.between(0L, 100L)
+      if (roll >= passiveChancePct(item.rarity)) (item, rng1)
+      else {
+        val (kind, rng2) = rng1.pick(pool)
+        (item.copy(details = ItemDetails.Passive(kind)), rng2)
+      }
+    }
+  }
+
   // Спец-данные типа при генерации:
   //  - оружию — активный навык (один из weaponSkills) → ItemDetails.Weapon;
   //  - нагруднику — активный навык (один из armorSkills) → ItemDetails.Armor;
   //  - поясу — случайное зелье (равновероятно из PotionKind) с зарядами по
-  //    редкости → ItemDetails.Belt.
+  //    редкости → ItemDetails.Belt;
+  //  - прочим носимым слотам — пассивка по шансу редкости (см. applyPassive).
   private def applyTypeDetails(item: Item, rng: Rng): (Item, Rng) =
     item.itemType match {
       case ItemType.Weapon =>
@@ -191,6 +217,6 @@ object ItemGenerator {
         val (potion, next) = rng.pick(PotionKind.values.toList)
         val cap            = ItemDetails.Belt.capacityFor(item.rarity)
         (item.copy(details = ItemDetails.Belt(potion, cap, cap)), next)
-      case _ => (item, rng)
+      case _ => applyPassive(item, rng)
     }
 }

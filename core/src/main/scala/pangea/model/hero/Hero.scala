@@ -34,6 +34,10 @@ case class Hero(
    *  `maxDungeonLevel` уже сдвинут вперёд. Этажи ≤ `maxDungeonLevel` доступны всегда. */
   def canGoDarker: Boolean = dungeonLevel < maxDungeonLevel
 
+  /** Пассивные навыки надетых предметов (дубли схлопнуты) — типизированный фасад
+   *  для боя/лута/подземелья/инвентаря. */
+  def passives: HeroPassives = HeroPassives(equipment.passiveKinds)
+
   /** Можно ли двигаться к свету (выше): на первом этаже выше уже некуда. */
   def canGoLighter: Boolean = dungeonLevel > 1
 
@@ -74,8 +78,34 @@ case class Hero(
       energy        = fightStats.energy.max(0L)
     )
 
-  /** Текущие боевые статы — с учётом активных травм. */
-  def effectiveFightStats(nowMs: Long): FightStats = fightStatsWith(combinedPenalties(nowMs))
+  /** Плоские прибавки к статам от пассивок: «Укреплённые» (+5% защиты) и «Точности»
+   *  (+5% точности). Не мультипликативны — считаются от переданного значения и
+   *  прибавляются (как бафы зелий пояса). Живут здесь, т.к. действуют всегда, пока
+   *  предмет надет (в т.ч. на экране статов, не только в бою). */
+  private def withPassiveStatBonuses(fs: FightStats): FightStats = {
+    val p = passives
+    fs.copy(
+      defence  = fs.defence + p.defenceFlatBonus(fs.defence),
+      accuracy = fs.accuracy + p.accuracyFlatBonus(fs.accuracy)
+    )
+  }
+
+  /** Текущие боевые статы — с учётом активных травм и плоских бафов пассивок. */
+  def effectiveFightStats(nowMs: Long): FightStats =
+    withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs)))
+
+  /** Реген перед атакой игрока от пассивок «Целебный» (4% макс.HP) и
+   *  «Самовосстанавливающийся» (4% макс.брони). Прибавка каппится потолком, но
+   *  никогда не опускает текущее значение ниже (если оно уже выше потолка —
+   *  `.max(current)`). Величина показывается на экране боя приписками `(+N)`. */
+  def withCombatRegen(nowMs: Long): Hero = {
+    val p        = passives
+    val maxHp    = effectiveMaxHp(nowMs)
+    val maxArmor = effectiveMaxArmor(nowMs)
+    val newHp    = (fightStats.hp + maxHp * p.hpRegenPct / 100L).min(maxHp).max(fightStats.hp)
+    val newArmor = (fightStats.armor + maxArmor * p.armorRegenPct / 100L).min(maxArmor).max(fightStats.armor)
+    copy(fightStats = fightStats.copy(hp = newHp, armor = newArmor))
+  }
 
   /** Боевые статы без травм — «потолок», к которому стат вернётся после снятия травм. */
   def maxFightStats: FightStats = fightStatsWith(TraumaPenalties.none)

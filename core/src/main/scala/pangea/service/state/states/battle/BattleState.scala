@@ -7,7 +7,7 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.model.battle.{Buff, Regen, SoloPveBattle, SkillSlotState}
 import pangea.model.hero.Hero
-import pangea.model.item.{FlaskEffect, ItemDetails, PotionKind}
+import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.stats.FightStats
 import pangea.model.skill.{MonsterSkill, Skill}
 import pangea.model.state.StateType
@@ -126,15 +126,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * слот не тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
     */
   private def playerStrike(
-      hero: Hero,
+      hero0: Hero,
       battle: SoloPveBattle,
       nowMs: Long,
       log: Vector[String],
       skip: Set[Long]
-  ): Task[TurnResult] =
+  ): Task[TurnResult] = {
+    // Реген пассивок «Целебный»/«Самовосстанавливающийся» учитывается перед атакой.
+    val hero = hero0.withCombatRegen(nowMs)
     for {
-      eff <- ZIO.succeed(hero.effectiveFightStats(nowMs))
-      buffedEff = battle.heroBattleState.applyTo(eff)
+      buffedEff <- ZIO.succeed(battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs)))
       monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
@@ -149,8 +150,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             noWeapon =
               hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
+            // «Разбойника» (+5%) множит итоговый урон.
             damage =
-              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod).toLong
+              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult).toLong
                 .max(1L)
             attackLine = content.format(
               "battle.hit",
@@ -192,6 +194,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           monsterPhase(hero, battle, nowMs, log :+ attackLine, skip)
         }
     } yield result
+  }
 
   // ── Ход монстра ─────────────────────────────────────────────────────────────
 
@@ -212,16 +215,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       buffedEff = ticked.heroBattleState.applyTo(eff)
       monster   = ticked.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
-      dodge = playerDodgeChance(
-        hero.effectiveBaseStats(nowMs).agi,
-        buffedEff.evasion,
-        buffedEff.defence,
-        ticked
-      )
+      dodge = playerDodgeChance(hero, ticked, nowMs)
       // Тот же порядок округления, что на экране боя: 100 - floor(dodge).
       mobHitPct = 100 - dodge.toInt
 
-      // 1) Обычная атака моба — обновляем hp/armor героя.
+      // 1) Обычная атака моба — обновляем hp/armor героя и (для Шипастого/Крепкости) бой.
       atkResult <-
         if (hitRoll > dodge) {
           for {
@@ -234,21 +232,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               attackerInt = monster.fightStats.atk,
               bonusPct = ticked.heroBattleState.reductionBonusPct
             )
-            reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
-            (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(
-              ticked,
-              hero,
-              reducedDamage
+            baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+            // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
+            impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
+            reducedDamage =
+              if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
+              else baseReduced
+            (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(ticked, hero, reducedDamage)
+            // «Крепкость»: при обнулении брони 25% шанс одноразово восстановить 10% макс.брони.
+            armorEmptied = hero.fightStats.armor > 0 && newArmor <= 0
+            toughTriggered <- chanceRoll(
+              armorEmptied && !ticked.toughnessUsed && hero.passives.hasToughness,
+              PassiveKind.Toughness.TriggerPct
             )
-          } yield (
-            newHp,
-            newArmor,
-            content.format(
-              "battle.mobHit",
-              "damage"  -> reducedDamage.toString,
-              "monster" -> monster.name
+            restoredArmor =
+              if (toughTriggered) (hero.effectiveMaxArmor(nowMs) * PassiveKind.Toughness.RestorePct / 100L).max(1L) else 0L
+            // «Шипастый»: вернуть 5% полученного урона врагу (по HP моба, мимо брони).
+            thorns = if (hero.passives.hasSpiky) (reducedDamage * PassiveKind.Spiky.ThornsPct / 100L).max(1L) else 0L
+            battleAfterAtk = ticked.copy(
+              monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
+              toughnessUsed    = ticked.toughnessUsed || toughTriggered
             )
-          )
+            lines = List(
+              Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)),
+              Option.when(impenTriggered)(content.text("battle.impenetrable")),
+              Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
+              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> monster.name))
+            ).flatten.mkString("\n")
+          } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
         } else
           ZIO.succeed(
             (
@@ -258,10 +269,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 "battle.mobMiss",
                 "monster" -> monster.name,
                 "chance"  -> mobHitPct.toString
-              )
+              ),
+              ticked
             )
           )
-      (hpAfterAtk, armorAfterAtk, mobLine) = atkResult
+      (hpAfterAtk, armorAfterAtk, mobLine, battleAfterAtk) = atkResult
       heroAfterAtk = hero.copy(fightStats =
         hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk)
       )
@@ -272,21 +284,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // обычной атаки и может быть как уроном (CrushingStrike — мимо брони и
       // damageReduction), так и хилом/починкой моба.
       castResult <-
-        if (heroAfterAtk.fightStats.hp <= 0)
-          ZIO.succeed((ticked, heroAfterAtk, ""))
+        // Моб не кастует, если герой мёртв или моб добит Шипастым (battleAfterAtk).
+        if (heroAfterAtk.fightStats.hp <= 0 || battleAfterAtk.monsterCurrentHp <= 0)
+          ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
         else
           for {
             skillRoll <- Random.nextIntBetween(1, 101)
-            skillChance = BattleState.monsterSkillHitChance(ticked.rarity.factor)
+            skillChance = BattleState.monsterSkillHitChance(battleAfterAtk.rarity.factor)
             applicable = MonsterSkill.values
-              .filter(_.applicable(ticked))
+              .filter(_.applicable(battleAfterAtk))
               .toVector
             out <-
               if (skillRoll <= skillChance && applicable.nonEmpty)
                 for {
                   idx <- Random.nextIntBetween(0, applicable.size)
                   ms   = applicable(idx)
-                  cast = ms.cast(ticked, heroAfterAtk, nowMs)
+                  cast = ms.cast(battleAfterAtk, heroAfterAtk, nowMs)
                 } yield (
                   cast.battle,
                   heroAfterAtk.copy(
@@ -295,7 +308,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   ),
                   cast.line
                 )
-              else ZIO.succeed((ticked, heroAfterAtk, ""))
+              else ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
           } yield out
       (finalBattle, finalHero, castLine) = castResult
 
@@ -310,11 +323,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         else (battleAfterHero, "")
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
-      // выше максимума. Пока герой жив.
+      // выше максимума. «Сосредоточенный» множит реген на 1.1. Пока герой жив.
       finalHeroWithEnergy =
         if (heroAlive) {
           val b        = tickedHero.effectiveBaseStats(nowMs)
-          val regen    = (b.int + 0.5 * b.agi).toLong.max(1L)
+          val regen    = ((b.int + 0.5 * b.agi) * tickedHero.passives.energyRegenMult).toLong.max(1L)
           val maxEn    = tickedHero.maxEnergy(nowMs)
           val newEn    = (tickedHero.fightStats.energy + regen).min(maxEn)
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(energy = newEn))
@@ -466,8 +479,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
 
         case Skill.Effect.Heal =>
+          // «Целителя» множит активное лечение на 1.1.
+          val amount   = (raw * hero.passives.healMult).toLong.max(1L)
           val maxHp    = hero.effectiveMaxHp(nowMs)
-          val newHp    = (hero.fightStats.hp + raw).min(maxHp)
+          val newHp    = (hero.fightStats.hp + amount).min(maxHp)
           val healed     = newHp - hero.fightStats.hp
           val healedHero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp))
           playerStrike(healedHero, bumped, nowMs, Vector(tmpl.replace("{}", healed.toString)), skip)
@@ -516,6 +531,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   // ── Фляга и пояс (расходники, ход монстра не провоцируют) ────────────────────
 
+  /** Бросок «сработала ли пассивка» с шансом `pct`% — но ТОЛЬКО если она активна
+    * (`active`). Если пассивки нет, случайное число не тратится (важно для
+    * детерминированных боевых тестов): сразу `false`. */
+  private def chanceRoll(active: Boolean, pct: Long): Task[Boolean] =
+    if (!active) ZIO.succeed(false)
+    else Random.nextIntBetween(1, 101).map(_ <= pct)
+
+  /** Пассивка «Быстрые руки»: с 25% шансом расходник не тратит раунд (можно применить
+    * ещё раз). Возвращает флаг «раунд потрачен» (в `consumableUsedThisRound`) и
+    * приписку в лог, если прокнуло. */
+  private def quickHandsRoll(hero: Hero): Task[(Boolean, Vector[String])] =
+    chanceRoll(hero.passives.hasQuickHands, PassiveKind.QuickHands.RepeatChancePct).map { repeated =>
+      if (repeated) (false, Vector(content.text("battle.quickHands")))
+      else (true, Vector.empty)
+    }
+
   private def flaskTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
     val flask = hero.equipment.flask
     flask.details match {
@@ -524,31 +555,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       case _: ItemDetails.Flask if battle.consumableUsedThisRound =>
         cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
       case f: ItemDetails.Flask =>
-        val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
-        val updatedBattle = battle.copy(consumableUsedThisRound = true)
-        f.effect match {
-          case FlaskEffect.HealPercent(pct) =>
-            val maxHp    = hero.effectiveMaxHp(nowMs)
-            val healAmt  = (maxHp * pct / 100L).max(1L)
-            val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
-            val healed   = newHp - hero.fightStats.hp
-            // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
-            val maxEn      = hero.maxEnergy(nowMs)
-            val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
-            val energyBack = newEnergy - hero.fightStats.energy
-            val newStats   = hero.fightStats.copy(hp = newHp, energy = newEnergy)
-            val msg = content.format(
-              "battle.flaskUsed",
-              "healed" -> healed.toString,
-              "hp"     -> newHp.toString,
-              "max"    -> maxHp.toString,
-              "energy" -> energyBack.toString
-            )
-            ZIO.succeed(TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats), updatedBattle, Vector(msg), Outcome.Continue))
-          case FlaskEffect.AddBuff(buff, rounds) =>
-            val timedBuff = buff.copy(turnsLeft = Some(rounds))
-            val newBattle = updatedBattle.copy(heroBattleState = updatedBattle.heroBattleState.add(timedBuff))
-            ZIO.succeed(TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")), Outcome.Continue))
+        quickHandsRoll(hero).map { case (consumed, qhLog) =>
+          val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
+          val updatedBattle = battle.copy(consumableUsedThisRound = consumed)
+          f.effect match {
+            case FlaskEffect.HealPercent(pct) =>
+              val maxHp    = hero.effectiveMaxHp(nowMs)
+              // «Целителя» множит лечение фляги на 1.1.
+              val healAmt  = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
+              val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
+              val healed   = newHp - hero.fightStats.hp
+              // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
+              val maxEn      = hero.maxEnergy(nowMs)
+              val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
+              val energyBack = newEnergy - hero.fightStats.energy
+              val newStats   = hero.fightStats.copy(hp = newHp, energy = newEnergy)
+              val msg = content.format(
+                "battle.flaskUsed",
+                "healed" -> healed.toString,
+                "hp"     -> newHp.toString,
+                "max"    -> maxHp.toString,
+                "energy" -> energyBack.toString
+              )
+              TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats), updatedBattle, Vector(msg) ++ qhLog, Outcome.Continue)
+            case FlaskEffect.AddBuff(buff, rounds) =>
+              val timedBuff = buff.copy(turnsLeft = Some(rounds))
+              val newBattle = updatedBattle.copy(heroBattleState = updatedBattle.heroBattleState.add(timedBuff))
+              TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog, Outcome.Continue)
+          }
         }
       case _ =>
         cont(hero, battle, content.text("battle.noFlask"))
@@ -565,10 +599,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       case _: ItemDetails.Belt if battle.consumableUsedThisRound =>
         cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
       case b: ItemDetails.Belt =>
-        val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
-        val battle1   = battle.copy(consumableUsedThisRound = true)
-        val (newStats, newBattle, msg) = applyPotion(hero, battle1, b.potion, nowMs)
-        ZIO.succeed(TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg), Outcome.Continue))
+        quickHandsRoll(hero).map { case (consumed, qhLog) =>
+          val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
+          val battle1   = battle.copy(consumableUsedThisRound = consumed)
+          val (newStats, newBattle, msg) = applyPotion(hero, battle1, b.potion, nowMs)
+          TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg) ++ qhLog, Outcome.Continue)
+        }
       case _ =>
         cont(hero, battle, content.text("battle.noBelt"))
     }
@@ -588,7 +624,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     potion match {
       case PotionKind.Healing =>
         val maxHp  = hero.effectiveMaxHp(nowMs)
-        val heal   = (maxHp * 25 / 100L).max(1L)
+        // «Целителя» множит лечение зелья на 1.1.
+        val heal   = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
         val newHp  = (hero.fightStats.hp + heal).min(maxHp)
         val healed = newHp - hero.fightStats.hp
         (hero.fightStats.copy(hp = newHp), battle,
@@ -656,15 +693,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       buffedEff = battle.heroBattleState.applyTo(eff)
       monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
+      // «Сверкающие» дают +25% к уклонению именно при бегстве.
       result <-
-        if (
-          hitRoll > playerDodgeChance(
-            hero.effectiveBaseStats(nowMs).agi,
-            buffedEff.evasion,
-            buffedEff.defence,
-            battle
-          )
-        ) {
+        if (hitRoll > playerDodgeChance(hero, battle, nowMs, fleeing = true)) {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
             rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
@@ -674,7 +705,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               attackerInt = monster.fightStats.atk,
               bonusPct = battle.heroBattleState.reductionBonusPct
             )
-            reducedDamage = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+            baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+            // «Непробиваемый»: 20% шанс срезать урон обычной атаки вдвое.
+            impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
+            reducedDamage =
+              if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
+              else baseReduced
             buffReduct  = math.min(battle.heroBattleState.armorBonus, reducedDamage)
             afterBuff   = reducedDamage - buffReduct
             curArmor    = hero.fightStats.armor.max(0L)
@@ -707,12 +743,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
       seed <- Random.nextLong
       monster = battle.toMonster
-      (drops, _) = LootGenerator.roll(
+      (baseDrops, rngAfter) = LootGenerator.roll(
         battle.rarity,
         monster.race,
         hero.dungeonLevel.toLong,
         Rng(seed)
       )
+      // «Таксидермиста»/«Ювелира» дают отдельные доп. дропы поверх основного лута.
+      (extraDrops, _) = LootGenerator.rollPassiveDrops(
+        hero.passives.hasTaxidermist,
+        hero.passives.hasJeweler,
+        battle.rarity,
+        monster.race,
+        hero.dungeonLevel.toLong,
+        rngAfter
+      )
+      drops = baseDrops ++ extraDrops
       // routing события (returnState/eventData) кладётся в scene_data ДО боя
       // (напр. цепочка «мобы с сокровищем»); переносим его в добычу, чтобы экран
       // добычи знал, куда вернуться. Для обычного боя scene_data пуст → None.
@@ -790,12 +836,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   ): Screen = {
     val eff       = hero.effectiveFightStats(nowMs)
     val buffedEff = battle.heroBattleState.applyTo(eff)
-    val playerDodgePct = playerDodgeChance(
-      hero.effectiveBaseStats(nowMs).agi,
-      buffedEff.evasion,
-      buffedEff.defence,
-      battle
-    ).toInt
+    val playerDodgePct  = playerDodgeChance(hero, battle, nowMs).toInt
     val monsterDodgePct = mobDodgeChance(buffedEff.accuracy, battle).toInt
     val mobHitPct       = 100 - playerDodgePct
     val heroHitPct      = 100 - monsterDodgePct
@@ -808,11 +849,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val mobSkillHitPct = BattleState.monsterSkillHitChance(battle.rarity.factor).toInt
     val maxEnergy     = hero.maxEnergy(nowMs)
     // Статус-эффекты рядом со статами своей сущности: яд у HP моба (-урон/ход),
-    // реген у HP героя (+лечение/ход).
+    // реген у HP/брони героя (+восстановление/ход). Реген HP = зелье регенерации
+    // (затухающее) + пассивка «Целебный» (4% макс.HP); реген брони =
+    // «Самовосстанавливающийся» (4% макс.брони). Показываем суммарной припиской.
+    val maxArmor = hero.effectiveMaxArmor(nowMs)
     val monsterPoison = battle.effects.monsterPoison
       .map(p => s" (-${p.damageOn(battle.monsterStats.hp)})").getOrElse("")
-    val heroRegen = battle.effects.heroRegen
-      .map(r => s" (+${r.healOn(maxHp)})").getOrElse("")
+    val beltHpRegen    = battle.effects.heroRegen.map(_.healOn(maxHp)).getOrElse(0L)
+    val hpRegenTotal   = beltHpRegen + maxHp * hero.passives.hpRegenPct / 100L
+    val heroRegen      = if (hpRegenTotal > 0) s" (+$hpRegenTotal)" else ""
+    val armorRegen     = maxArmor * hero.passives.armorRegenPct / 100L
+    val heroArmorRegen = if (armorRegen > 0) s" (+$armorRegen)" else ""
     val text = content.format(
       "battle.enter.text",
       "monster"         -> battle.toMonster.name,
@@ -830,10 +877,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroDodge"       -> s"$playerDodgePct%",
       "heroHp"          -> hero.fightStats.hp.toString,
       "heroMax"         -> maxHp.toString,
-      "heroArmor" -> hero.fightStats.armor
-        .min(hero.effectiveMaxArmor(nowMs))
-        .toString,
-      "heroMaxArmor"  -> hero.effectiveMaxArmor(nowMs).toString,
+      "heroArmorRegen"  -> heroArmorRegen,
+      "heroArmor"       -> hero.fightStats.armor.min(maxArmor).toString,
+      "heroMaxArmor"    -> maxArmor.toString,
       "heroAtk"        -> buffedEff.atk.toString,
       "heroReduction"  -> s"$reductionPct%",
       "heroEnergy"     -> hero.fightStats.energy.min(maxEnergy).toString,
@@ -903,17 +949,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       .orElseFail(new Throwable(s"No active battle for user ${user.userId}"))
       .flatMap(json => ZIO.fromEither(json.as[SoloPveBattle]))
 
-  // Уклонение игрока от удара моба: защита игрока в знаменателе, точность моба ×1.5.
-  // Поверх базового шанса добавляется бонус от боевых бафов (зелье уворота); потолок
-  // 95% абсолютный — баф его не пробивает.
-  private def playerDodgeChance(
-      agi: Long,
-      evasion: Long,
-      defence: Long,
-      battle: SoloPveBattle
-  ): Double =
-    (BattleState.dodgeChance(agi, evasion, defence, battle.monsterStats.accuracy)
-      + battle.heroBattleState.dodgeBonus).min(95.0).max(5.0)
+  /** Уклонение игрока от удара моба, в процентах [5;95]: защита игрока в знаменателе,
+    * точность моба ×1.5. Поверх базового шанса добавляются бонус боевых бафов (зелье
+    * уворота) и плоские бонусы пассивок — «Быстрые ноги»/«Сливающиеся» всегда, а
+    * «Сверкающие» — только при бегстве (`fleeing`). Потолок 95% абсолютный. */
+  private def playerDodgeChance(hero: Hero, battle: SoloPveBattle, nowMs: Long, fleeing: Boolean = false): Double = {
+    val buffed       = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    val agi          = hero.effectiveBaseStats(nowMs).agi
+    val passiveBonus = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
+    (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, battle.monsterStats.accuracy)
+      + battle.heroBattleState.dodgeBonus + passiveBonus).min(95.0).max(5.0)
+  }
 
   // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
   // в знаменателе его защита и точность игрока ×1.5.

@@ -91,7 +91,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       _    <- scheduler.cancel(user.userId, TaskKind.SchronDig)
       roll <- Random.nextIntBetween(1, 101)
       result <- if (roll <= 80) digSuccess(user, hero, renderer)
-                else            digGrave(user, renderer)
+                else            digGrave(user, hero, renderer)
     } yield result
 
   private def digSuccess(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
@@ -108,15 +108,39 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       _ <- heroDao.writeSceneData(user.userId, loot.asJson)
     } yield StateType.Loot
 
-  private def digGrave(user: User, renderer: Renderer): Task[StateType] =
+  private def digGrave(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
     for {
       raceIdx <- Random.nextIntBounded(Race.values.size)
       race     = Race.values(raceIdx)
-      _       <- heroDao.writeSceneData(user.userId, Json.Null)
-      _       <- renderer.show(user, Screen(
-                   content.format("treasureDig.grave.text", "race" -> race.toString),
-                   content.screen("treasureDig.grave").choices))
-    } yield StateType.TreasureDig
+      result  <- if (hero.passives.hasMarauder) maraudGrave(user, hero, race, renderer)
+                 else emptyGrave(user, race, renderer)
+    } yield result
+
+  // Обычная могила: только флейвор-экран, добычи нет.
+  private def emptyGrave(user: User, race: Race, renderer: Renderer): Task[StateType] =
+    heroDao.writeSceneData(user.userId, Json.Null) *>
+      renderer.show(user, Screen(
+        content.format("treasureDig.grave.text", "race" -> race.toString),
+        content.screen("treasureDig.grave").choices)).as(StateType.TreasureDig)
+
+  // «Мародёра»: свежая могила даёт добычу, будто повержено Необычное существо этой
+  // расы (LootGenerator тир Uncommon, уровень — глубина лабиринта).
+  private def maraudGrave(user: User, hero: Hero, race: Race, renderer: Renderer): Task[StateType] =
+    for {
+      seed        <- Random.nextLong
+      (drops, _)   = pangea.generator.loot.LootGenerator.roll(
+                       pangea.model.monster.Rarity.Uncommon, race, hero.dungeonLevel.toLong, Rng(seed))
+      loot         = LootData(
+                       items = drops.collect {
+                         case pangea.generator.loot.LootGenerator.LootDrop.Gear(i)    => i
+                         case pangea.generator.loot.LootGenerator.LootDrop.Trophy(i)  => i
+                         case pangea.generator.loot.LootGenerator.LootDrop.MapHalf(i) => i
+                       },
+                       golds     = drops.collect { case pangea.generator.loot.LootGenerator.LootDrop.Gold(a, _) => a },
+                       doubloons = 0)
+      _ <- renderer.show(user, Screen(content.format("treasureDig.marauder.text", "race" -> race.toString), Nil))
+      _ <- heroDao.writeSceneData(user.userId, loot.asJson)
+    } yield StateType.Loot
 
   private def startedAt(user: User): Task[Option[Long]] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[TreasureDigProgress].toOption.map(_.startedAt)))

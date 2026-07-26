@@ -7,6 +7,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.{Equipment, Hero}
+import pangea.model.inventory.Inventory
 import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -126,13 +127,19 @@ case class InventoryState(
                 "current"  -> hero.lvl.toString), Nil))
           else {
             val (newEq, newFight, oldItem) = InventoryState.equip(hero, item)
-            heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-              inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-              ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
-              renderer.show(user, Screen(
-                content.format("inventory.equipped",
-                  "name" -> item.name,
-                  "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))
+            val capDelta = InventoryState.stashDelta(oldItem, item)
+            // Замена, снимающая «Тайник» (делта < 0), переполнит сумку → блокируем.
+            if (capDelta < 0 && !InventoryState.fitsWithoutStash(inv, returningItems = 0))
+              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
+            else
+              heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+                inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+                ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
+                ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
+                renderer.show(user, Screen(
+                  content.format("inventory.equipped",
+                    "name" -> item.name,
+                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))
           }
       }
       res <- showList(user, renderer)
@@ -261,6 +268,23 @@ object InventoryState {
     (newEq, newFight, oldItem)
   }
 
+  /** Бонус вместимости сумки от пассивки «Тайник» на предмете (0, если её нет).
+   *  Вместимость моделируется прибавкой к `maxItems` на время ношения (как бусты
+   *  Мастера Горна): +10 при надевании, −10 при снятии. */
+  def stashBonus(item: Item): Long =
+    if (item.passive.contains(pangea.model.item.PassiveKind.Stash)) pangea.model.item.PassiveKind.Stash.ExtraSlots
+    else 0L
+
+  /** Изменение вместимости при замене `oldItem` на `newItem` в слоте: разница
+   *  бонусов «Тайника». Положительное — надеваем Тайник, отрицательное — снимаем. */
+  def stashDelta(oldItem: Item, newItem: Item): Long = stashBonus(newItem) - stashBonus(oldItem)
+
+  /** Влезет ли сумка в базовую вместимость (без бонуса Тайника) с учётом
+   *  `returningItems` предметов, возвращаемых в неё. Ложь → снятие Тайника
+   *  переполнит сумку и его надо блокировать. */
+  def fitsWithoutStash(inv: Inventory, returningItems: Int): Boolean =
+    inv.items.data.length + returningItems <= inv.maxItems - pangea.model.item.PassiveKind.Stash.ExtraSlots
+
   /** Зона карты клада (для целой карты и её половинки); None у прочих предметов. */
   private def zoneOf(item: Item): Option[pangea.model.item.MapZone] = item.details match {
     case ItemDetails.TreasureMap(zone) => Some(zone)
@@ -297,7 +321,9 @@ object InventoryState {
       case (Some(h), Some(s)) => s"\n\n${s.describe(h)}"
       case _                  => ""
     }
-    s"${item.name} Ур.${item.lvl}\n$statsStr$skillStr$slotInfo"
+    // Описание пассивного навыка (статичный текст — без стоимости/кулдауна).
+    val passiveStr = item.passive.map(k => s"\n\n${k.describe}").getOrElse("")
+    s"${item.name} Ур.${item.lvl}\n$statsStr$skillStr$passiveStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании

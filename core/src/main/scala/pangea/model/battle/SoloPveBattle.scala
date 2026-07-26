@@ -34,7 +34,8 @@ case class SoloPveBattle(
   consumableUsedThisRound: Boolean = false, // за раунд можно выпить либо флягу, либо зелье пояса
   monsterMarked:       Boolean = false,
   skillSlots:          List[SkillSlotState] = Nil,
-  effects:             BattleEffects = BattleEffects.empty // тикающие статус-эффекты (яд/реген)
+  effects:             BattleEffects = BattleEffects.empty, // тикающие статус-эффекты (яд/реген)
+  toughnessUsed:       Boolean = false // пассивка «Крепкость» срабатывает один раз за бой
 ) {
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
@@ -89,6 +90,7 @@ object SoloPveBattle {
       monsterMarked       <- c.getOrElse[Boolean]("monsterMarked")(false)
       skillSlots          <- c.getOrElse[List[SkillSlotState]]("skillSlots")(Nil)
       effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
+      toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
-                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked, skillSlots, effects)
+                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked, skillSlots, effects, toughnessUsed)
 }

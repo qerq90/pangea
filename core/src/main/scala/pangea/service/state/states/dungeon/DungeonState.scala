@@ -93,8 +93,10 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
-      idx    <- Random.nextIntBounded(StateType.events.size)
-      event   = StateType.events(idx)
+      // «Охотника»/«Скрытный» сдвигают долю боевых событий в пуле.
+      pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
+      idx    <- Random.nextIntBounded(pool.size)
+      event   = pool(idx)
       result <- event match {
         case StateType.Battle => startBattle(user, hero)
         case StateType.Spring => healAtSpring(user, hero, now, renderer)

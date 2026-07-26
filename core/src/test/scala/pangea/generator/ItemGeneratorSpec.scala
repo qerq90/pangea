@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.{Item, ItemDetails, ItemType, Rarity}
+import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.skill.Skill
 import zio.test._
 
@@ -12,6 +12,14 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
     case ItemDetails.Weapon(s) => Some(s)
     case ItemDetails.Armor(s)  => Some(s)
     case _                     => None
+  }
+
+  // Доля предметов заданного типа с пассивкой при данной редкости (по выборке).
+  private def passiveRate(itemType: ItemType, rarity: Rarity): Double = {
+    val items = (1L to 1200L)
+      .map(s => ItemGenerator.createItemAtLevel(10L, rarity, Rng(s))._1)
+      .filter(_.itemType == itemType)
+    items.count(_.passive.isDefined).toDouble / items.size.max(1)
   }
 
   def spec = suite("ItemGeneratorSpec")(
@@ -109,6 +117,49 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       val counts = Skill.weaponSkills.map(s => skills.count(_ == s))
       // У всех 3 навыков ненулевая выборка — каждое значение хотя бы изредка выпало.
       assertTrue(counts.forall(_ > 0))
+    },
+
+    // ── Пассивки ──────────────────────────────────────────────────────────────
+    test("оружие/нагрудник/пояс/фляга пассивок не получают") {
+      val noPassive = List(ItemType.Weapon, ItemType.ChestPlate, ItemType.Belt, ItemType.Flask)
+      val items = (1L to 1500L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Orange, Rng(s))._1)
+        .filter(i => noPassive.contains(i.itemType))
+      assertTrue(items.nonEmpty) && assertTrue(items.forall(_.passive.isEmpty))
+    },
+
+    test("фиол./пурпур/оранж всегда дают пассивку носимым слотам") {
+      val rates = List(Rarity.Purple, Rarity.Violet, Rarity.Orange).map(r => passiveRate(ItemType.Amulet, r))
+      assertTrue(rates.forall(_ == 1.0))
+    },
+
+    test("шанс пассивки растёт с редкостью (серый ~10% < зелёный ~40% < синий ~80%)") {
+      val gray  = passiveRate(ItemType.Ring, Rarity.Gray)
+      val green = passiveRate(ItemType.Ring, Rarity.Green)
+      val blue  = passiveRate(ItemType.Ring, Rarity.Blue)
+      assertTrue(gray > 0.03 && gray < 0.18) &&
+        assertTrue(green > 0.30 && green < 0.50) &&
+        assertTrue(blue > 0.70 && blue < 0.90) &&
+        assertTrue(gray < green && green < blue)
+    },
+
+    test("пассивка предмета всегда из пула, допустимого для его слота") {
+      val items = (1L to 2000L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Orange, Rng(s))._1)
+        .filter(_.passive.isDefined)
+      assertTrue(items.nonEmpty) &&
+        assertTrue(items.forall(i => i.passive.exists(_.eligibleSlots.contains(i.itemType))))
+    },
+
+    test("на кольцах встречаются только кольцевые пассивки (Ювелира/Мародёра/Разбойника/Целителя)") {
+      val ringPassives = (1L to 2000L)
+        .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Orange, Rng(s))._1)
+        .filter(_.itemType == ItemType.Ring)
+        .flatMap(_.passive)
+        .toSet
+      val expected = Set[PassiveKind](
+        PassiveKind.Jeweler, PassiveKind.Marauder, PassiveKind.Robber, PassiveKind.Healer)
+      assertTrue(ringPassives.nonEmpty) && assertTrue(ringPassives.subsetOf(expected))
     }
   )
 }
