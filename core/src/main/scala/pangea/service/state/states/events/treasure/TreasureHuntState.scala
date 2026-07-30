@@ -72,7 +72,7 @@ case class TreasureHuntState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       seed     <- Random.nextLong
       (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed))
       loot      = LootData(
-                    items       = reward.items,
+                    items       = reward.items ++ reward.gems,
                     golds       = if (reward.gold > 0L) List(reward.gold) else Nil,
                     doubloons   = reward.doubloons,
                     returnState = Some(StateType.GlobalMap))

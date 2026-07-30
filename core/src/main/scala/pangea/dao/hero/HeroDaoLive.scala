@@ -153,4 +153,10 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def readReturnState(userId: UserId): Task[Option[StateType]] =
     Queries.readReturnState(userId).query[Option[StateType]].unique.transact(xa)
 
+  override def writeAzatData(userId: UserId, data: Json): Task[Unit] =
+    Queries.writeAzatData(userId, data).update.run.transact(xa).unit
+
+  override def readAzatData(userId: UserId): Task[Option[Json]] =
+    Queries.readAzatData(userId).query[Option[Json]].unique.transact(xa)
+
 }

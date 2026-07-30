@@ -27,9 +27,9 @@ object ItemType extends Enum[ItemType] {
   val defenceItems: List[ItemType] =
     List(Helmet, ShoulderPads, ChestPlate, Pants, Boots, Belt, Leggings)
 
-  // Типы, которые не надеваются: трофеи и карты клада. Пусто (NoItem) сюда тоже
-  // относится, но оно и так исключено из itemTypes.
-  private val nonEquippable: Set[ItemType] = Set(Trophy, TreasureMap, TreasureMapHalf)
+  // Типы, которые не надеваются: трофеи, карты клада и камни-усилители. Пусто
+  // (NoItem) сюда тоже относится, но оно и так исключено из itemTypes.
+  private val nonEquippable: Set[ItemType] = Set(Trophy, TreasureMap, TreasureMapHalf, Gem, Material)
 
   /** Надеваемые типы — всё, кроме трофеев, карт клада и NoItem. Экраны, где
    *  предмет предлагается к надеванию, опираются на этот список. */
@@ -57,6 +57,13 @@ object ItemType extends Enum[ItemType] {
   // Карта клада и её половинка: лежат в инвентаре, занимают слот, не надеваются.
   case object TreasureMap     extends ItemType
   case object TreasureMapHalf extends ItemType
+
+  // Камень-усилитель: лежит в инвентаре как предмет, не надевается — вставляется
+  // в гнездо снаряжения (см. Socketing).
+  case object Gem extends ItemType
+
+  // Материал-ингредиент (мифрил и т.п.): лежит в инвентаре, не надевается.
+  case object Material extends ItemType
 
   case object NoItem extends ItemType
 

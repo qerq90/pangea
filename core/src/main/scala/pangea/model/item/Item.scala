@@ -18,7 +18,11 @@ case class Item(
   defence: Long,
   evasion: Long,
   hp: Long = 0, // обязательная прибавка к максимуму HP (доспех)
-  details: ItemDetails = ItemDetails.Plain // спец-данные типа (навык/заряды/трофей/карта)
+  details: ItemDetails = ItemDetails.Plain, // спец-данные типа (навык/заряды/трофей/карта)
+  // Гнёзда под камни-усилители: длина = число гнёзд, элемент = вставленный камень
+  // (None — свободное гнездо). Пусто у предметов без гнёзд (редкость ниже синей и
+  // всё ненадеваемое). Раскатывается при генерации, см. ItemGenerator.
+  sockets: List[Option[Gem]] = Nil
 ) {
   def withId(id: Long): Item = copy(id = id)
 
@@ -56,13 +60,43 @@ case class Item(
     case _                      => None
   }
 
+  /** Камень-усилитель, если этот предмет — камень (для инвентаря/вставки). */
+  def gem: Option[Gem] = details match {
+    case ItemDetails.Gem(g) => Some(g)
+    case _                  => None
+  }
+
+  /** Материал-ингредиент, если этот предмет — материал. */
+  def material: Option[MaterialKind] = details match {
+    case ItemDetails.Material(k) => Some(k)
+    case _                       => None
+  }
+
+  /** Вставленные в гнёзда камни (без пустых гнёзд). */
+  def socketedGems: List[Gem] = sockets.flatten
+
+  /** Число свободных гнёзд. */
+  def freeSockets: Int = sockets.count(_.isEmpty)
+
+  /** Есть ли хотя бы одно свободное гнездо. */
+  def hasFreeSocket: Boolean = freeSockets > 0
+
+  /** Вставить камень в первое свободное гнездо. Если свободных нет — предмет как есть. */
+  def socketGem(g: Gem): Item =
+    sockets.indexWhere(_.isEmpty) match {
+      case -1  => this
+      case idx => copy(sockets = sockets.updated(idx, Some(g)))
+    }
+
   /** Карта клада или её половинка. */
   def isTreasureMap: Boolean =
     itemType == ItemType.TreasureMap || itemType == ItemType.TreasureMapHalf
 
-  /** Заголовок для списков и экранов. У карт клада уровня нет (зона сама задаёт
-   *  диапазон) — показываем только имя; у прочих предметов — «Имя Ур.N». */
-  def displayTitle: String = if (isTreasureMap) name else s"$name Ур.$lvl"
+  /** Заголовок для списков и экранов. У карт клада и камней-усилителей уровня нет —
+   *  показываем только имя; у прочих предметов — «Имя Ур.N». */
+  def displayTitle: String =
+    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material) name
+    else s"$name Ур.$lvl"
 
   /** Текст-описание карты (для целой — описание зоны, для половинки — заглушка).
    *  None у любого предмета, не являющегося картой. */
@@ -91,10 +125,22 @@ case class Item(
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
+      case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
+      case ItemDetails.Material(k)       => List(s"Материал: ${k.displayName}")
       case _                             => Nil
     }
-    numeric ++ extra
+    numeric ++ extra ++ socketLines
   }
+
+  /** Строки о гнёздах: сводка «занято/всего» и по одному камню на строку.
+   *  Пусто у предметов без гнёзд. */
+  def socketLines: List[String] =
+    if (sockets.isEmpty) Nil
+    else {
+      val filled = sockets.count(_.isDefined)
+      val header = s"🔲 Гнёзда: $filled/${sockets.length}"
+      header :: socketedGems.map(g => s"💎 ${g.displayName}")
+    }
 
   /** Строка «надетого/сравниваемого» предмета — единый формат для всех экранов,
    *  где рядом с предметом показываем, что уже надето (дроп, надевание):

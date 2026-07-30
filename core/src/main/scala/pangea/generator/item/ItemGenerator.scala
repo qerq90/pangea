@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, PotionKind, Rarity}
+import pangea.model.item.{Gem, Item, ItemDetails, ItemType, PassiveKind, PotionKind, Rarity}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -115,18 +115,30 @@ object ItemGenerator {
   def createItemAtLevel(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) =
     buildAtLevel(lvl.max(1L).min(150L), rarity, rng)
 
+  /** Создаёт предмет заданного СЛОТА на уровень (для пересборки в кубе Азата):
+   *  характеристики роллятся заново, профиль (атака/защита) — случайный, поэтому
+   *  результат может отличаться от исходного набора статов. */
+  def createItemOfType(itemType: ItemType, lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) =
+    buildAtLevel(lvl.max(1L).min(150L), rarity, rng, Some(itemType))
+
   private def buildAtLevel(
       itemLvl: Long,
       rarity: Rarity,
-      rng: Rng
+      rng: Rng,
+      forcedType: Option[ItemType] = None
   ): (Item, Rng) = {
     val (numberOfExtraParams, rng2) = rarity.getNumOfExtraParams(rng)
     val (isAttack, rng3)            = rng2.nextBoolean
 
+    // Тип: случайный из профиля (обычная генерация) либо принудительный (пересборка).
+    val (itemType, rng3z) = forcedType match {
+      case Some(t) => (t, rng3)
+      case None    => if (isAttack) rng3.pick(ItemType.attackItems) else rng3.pick(ItemType.defenceItems)
+    }
+
     val (item, rng4) =
       if (isAttack) {
-        val (itemType, rng3a) = rng3.pick(ItemType.attackItems)
-        val (armor, rng3b)    = modifyParameter(rarity.factorR * itemLvl, rng3a)
+        val (armor, rng3b)    = modifyParameter(rarity.factorR * itemLvl, rng3z)
         val (defence, rng3c) = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
@@ -145,8 +157,7 @@ object ItemGenerator {
           rng3c
         )
       } else {
-        val (itemType, rng3a) = rng3.pick(ItemType.defenceItems)
-        val (attack, rng3b)   = modifyParameter(rarity.factorR * itemLvl, rng3a)
+        val (attack, rng3b)   = modifyParameter(rarity.factorR * itemLvl, rng3z)
         val (evasion, rng3c) = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
@@ -169,9 +180,40 @@ object ItemGenerator {
     val (withExtras, rng5) = updateExtraParams(numberOfExtraParams, item, rng4)
     val (withMandatory, rng5b) = applyMandatory(withExtras, rng5)
     val (withDetails, rng5c)   = applyTypeDetails(withMandatory, rng5b)
+    val (withSockets, rng5d)   = applySockets(withDetails, rng5c)
     val (name, rng6) =
-      ItemNameGenerator.generate(withDetails.itemType, rarity, rng5c)
-    (withDetails.withName(name), rng6)
+      ItemNameGenerator.generate(withSockets.itemType, rarity, rng5d)
+    (withSockets.withName(name), rng6)
+  }
+
+  /** Максимум гнёзд на предмете (в т.ч. оружии) — 3. */
+  private val MaxSockets: Int = 3
+
+  // Число гнёзд по редкости (пороги в %, from Rng.between [0,100)):
+  //   Синяя:       0 — 60, 1 — 30, 2 — 10 (2 гнезда только у оружия);
+  //   Фиолетовая:  0 — 10, 1 — 60, 2 — 20, 3 — 10;
+  //   Пурпурная и легендарная: 1 — 20, 2 — 50, 3 — 30.
+  // Серый/белый/зелёный — без гнёзд.
+  private def socketCount(rarity: Rarity, isWeapon: Boolean, rng: Rng): (Int, Rng) = {
+    val (roll, next) = rng.between(0L, 100L)
+    val raw = rarity match {
+      case Rarity.Blue =>
+        if (roll < 60) 0 else if (roll < 90) 1 else 2
+      case Rarity.Purple => // фиолетовая
+        if (roll < 10) 0 else if (roll < 70) 1 else if (roll < 90) 2 else 3
+      case Rarity.Violet | Rarity.Orange => // пурпурная и легендарная
+        if (roll < 20) 1 else if (roll < 70) 2 else 3
+      case _ => 0
+    }
+    // У синей 2 гнезда — только на оружии; у прочей брони синей режем до 1.
+    val capped = if (!isWeapon && rarity == Rarity.Blue) raw.min(1) else raw
+    (capped.min(MaxSockets), next)
+  }
+
+  // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу.
+  private def applySockets(item: Item, rng: Rng): (Item, Rng) = {
+    val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon, rng)
+    (item.copy(sockets = List.fill(count)(Option.empty[Gem])), next)
   }
 
   // Шанс (в %) получить пассивку по редкости предмета: серый/белый — 10, зелёный —

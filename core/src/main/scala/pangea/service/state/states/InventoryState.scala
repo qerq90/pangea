@@ -33,12 +33,13 @@ case class InventoryState(
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
       "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
-      "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) }
+      "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
+      "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory)
+  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
@@ -89,9 +90,11 @@ case class InventoryState(
           val text     = itemDetail(item, hero, hero.gold)
           val canEquip = ItemType.equippable.contains(item.itemType)
           val canCombine = item.itemType == ItemType.TreasureMapHalf
+          val canSocket  = item.gem.isDefined
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
             Option.when(canCombine)(content.choice("CombineMap", "inventory.combineMap").copy(color = ChoiceColor.Positive, row = Some(0))),
+            Option.when(canSocket)(content.choice("SocketInsert", "inventory.socket").copy(color = ChoiceColor.Positive, row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
             Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
           ).flatten
@@ -205,6 +208,20 @@ case class InventoryState(
                 showList(user, renderer)
           }
         case _ => showList(user, renderer)
+      }
+    } yield res
+
+  // ── Вставка камня: уходим на экран Socketing с id выбранного камня ─────────
+
+  private def startSocketing(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      res <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)).flatMap(_.gem.map(_ => scene.selectedId.get)) match {
+        case None => showList(user, renderer)
+        case Some(gemId) =>
+          heroDao.writeSceneData(user.userId, SocketingState.Scene(gemId).asJson).as(StateType.Socketing)
       }
     } yield res
 
@@ -348,6 +365,8 @@ object InventoryState {
     case ItemType.Trophy           => Item.NoItem // трофей не экипируется
     case ItemType.TreasureMap      => Item.NoItem // карта не экипируется
     case ItemType.TreasureMapHalf  => Item.NoItem // половинка карты не экипируется
+    case ItemType.Gem              => Item.NoItem // камень не экипируется
+    case ItemType.Material         => Item.NoItem // материал не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -372,6 +391,8 @@ object InventoryState {
     case ItemType.Trophy           => eq // трофей не экипируется
     case ItemType.TreasureMap      => eq // карта не экипируется
     case ItemType.TreasureMapHalf  => eq // половинка карты не экипируется
+    case ItemType.Gem              => eq // камень не экипируется
+    case ItemType.Material         => eq // материал не экипируется
     case ItemType.NoItem           => eq
   }
 

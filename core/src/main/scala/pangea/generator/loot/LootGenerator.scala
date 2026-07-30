@@ -153,8 +153,15 @@ object LootGenerator {
       tier: MobRarity,
       race: Race,
       killLevel: Long,
-      rng: Rng
+      rng: Rng,
+      gearChanceBonusPct: Long = 0L,
+      rarityBumpPct: Long = 0L
   ): (List[LootDrop], Rng) = {
+    // Бонус к шансу экипировки (топаз в снаряжении) добавляется к весу категории Gear.
+    val weights = categoryWeights(tier).map {
+      case (Category.Gear, w) => Category.Gear -> (w + gearChanceBonusPct.toInt)
+      case other              => other
+    }
     @tailrec
     def loop(
         slots: List[Int],
@@ -168,11 +175,11 @@ object LootGenerator {
           val (roll, r1) = r.between(0L, 100L)
           if (roll >= chance) loop(rest, used, acc, r1)
           else {
-            val (catOpt, r2) = pickCategory(categoryWeights(tier), used, r1)
+            val (catOpt, r2) = pickCategory(weights, used, r1)
             catOpt match {
               case None => loop(rest, used, acc, r2)
               case Some(cat) =>
-                val (drop, r3) = makeDrop(cat, tier, race, killLevel, r2)
+                val (drop, r3) = makeDrop(cat, tier, race, killLevel, r2, rarityBumpPct)
                 loop(rest, used + cat, drop :: acc, r3)
             }
           }
@@ -201,6 +208,17 @@ object LootGenerator {
       }
       else (None, r1)
     (List(trophy, gold).flatten, r2)
+  }
+
+  /** Благословение Азата: с шансом `chancePct`% — дополнительная экипировка (редкость
+    * по тиру моба). RNG тратится всегда. */
+  def rollBlessingExtraGear(chancePct: Long, tier: MobRarity, killLevel: Long, rng: Rng): (Option[Item], Rng) = {
+    val (roll, r1) = rng.between(0L, 100L)
+    if (roll < chancePct) {
+      val (rarity, r2) = pickGearRarity(gearRarityWeights(tier), r1)
+      val (item, r3)   = ItemGenerator.createItem(killLevel, rarity, r2)
+      (Some(item), r3)
+    } else (None, r1)
   }
 
   private val PassiveTrophyChancePct: Long = 10L
@@ -237,12 +255,15 @@ object LootGenerator {
       tier: MobRarity,
       race: Race,
       killLevel: Long,
-      rng: Rng
+      rng: Rng,
+      rarityBumpPct: Long = 0L
   ): (LootDrop, Rng) =
     cat match {
       case Category.Gear =>
-        val (rarity, r1) = pickGearRarity(gearRarityWeights(tier), rng)
-        val (item, r2)   = ItemGenerator.createItem(killLevel, rarity, r1)
+        val (rarity0, r1) = pickGearRarity(gearRarityWeights(tier), rng)
+        // Благословение Азата: с шансом rarityBumpPct поднять редкость на тир.
+        val (rarity, r1b) = bumpRarity(rarity0, rarityBumpPct, r1)
+        val (item, r2)    = ItemGenerator.createItem(killLevel, rarity, r1b)
         (LootDrop.Gear(item), r2)
 
       case Category.Trophy =>
@@ -291,6 +312,22 @@ object LootGenerator {
       }
     (walk(weights, 0L), next)
   }
+
+  // Лестница редкостей для повышения тира благословением.
+  private val rarityLadder: List[ItemRarity] =
+    List(ItemRarity.Gray, ItemRarity.White, ItemRarity.Green, ItemRarity.Blue,
+      ItemRarity.Purple, ItemRarity.Violet, ItemRarity.Orange)
+
+  // С шансом `pct`% поднимает редкость на один тир (RNG тратится только если pct>0).
+  private def bumpRarity(r: ItemRarity, pct: Long, rng: Rng): (ItemRarity, Rng) =
+    if (pct <= 0L) (r, rng)
+    else {
+      val (roll, next) = rng.between(0L, 100L)
+      if (roll < pct) {
+        val i = rarityLadder.indexOf(r)
+        (if (i >= 0 && i < rarityLadder.size - 1) rarityLadder(i + 1) else r, next)
+      } else (r, next)
+    }
 
   private def pickGearRarity(
       weights: List[(ItemRarity, Long)],

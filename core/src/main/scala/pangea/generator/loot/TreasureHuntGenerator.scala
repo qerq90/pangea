@@ -1,7 +1,8 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.ItemGenerator
+import pangea.generator.item.{GemGenerator, ItemGenerator}
+import pangea.model.item.Gem
 import pangea.model.item.{Item, MapZone, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
@@ -18,7 +19,7 @@ import scala.annotation.tailrec
   */
 object TreasureHuntGenerator {
 
-  final case class Reward(items: List[Item], gold: Long, doubloons: Long)
+  final case class Reward(items: List[Item], gems: List[Item], gold: Long, doubloons: Long)
 
   // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -32,12 +33,15 @@ object TreasureHuntGenerator {
   def roll(zone: MapZone, rng: Rng): (Reward, Rng) = {
     val (gearCount, r1)   = rollGearCount(rng)    // 2..4
     val (items, r2)       = rollGear(gearCount, zone, Nil, rng = r1)
-    val (gold, r3)        = rollGold(zone, r2)                     // гарантированно
+    // Сверх снаряжения — 1..5 камней-усилителей грейда «расколотый» (1-й тир).
+    val (gemCount, r2a)   = r2.between(1L, 6L)                     // 1..5
+    val (gems, r2b)       = GemGenerator.randomGems(gemCount.toInt, Gem.MinGrade, r2a)
+    val (gold, r3)        = rollGold(zone, r2b)                    // гарантированно
     val (doubloonRoll, r4) = r3.between(0L, 100L)
     val (doubloons, r5) =
       if (doubloonRoll < 80) r4.between(30L, 71L)                  // 80% — 30..70
       else                   (0L, r4)                              // 20% — без дублонов
-    (Reward(items, gold, doubloons), r5)
+    (Reward(items, gems, gold, doubloons), r5)
   }
 
   // 2 гарантированно; 3-й — 50%; и лишь если он выпал, 4-й — тоже 50%.

@@ -32,6 +32,10 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object GlobalMap     extends StateType
   case object HarborQuarter    extends StateType
   case object MarketSquare     extends StateType
+  case object CityCenter       extends StateType // Центр города (Храм Азата)
+  case object TempleAzat       extends StateType // Храм Азата (Жрец / Зал / Уйти)
+  case object HallAzat         extends StateType // Зал Азата (кубы, заряды)
+  case object Cube             extends StateType // крафт в кубе Азата
   case object UnassumingBarrel extends StateType
   case object Registration extends StateType
   case object Dungeon      extends StateType
@@ -44,6 +48,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Spring    extends StateType
   case object Inventory  extends StateType
   case object Equipment  extends StateType
+  case object Socketing  extends StateType // вставка камня-усилителя в гнездо снаряжения
   case object Loot       extends StateType
   case object Merchant   extends StateType
   case object Gustavo         extends StateType

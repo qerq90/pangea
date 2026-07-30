@@ -5,8 +5,8 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
-import pangea.model.battle.{Buff, Regen, SoloPveBattle, SkillSlotState}
-import pangea.model.hero.Hero
+import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.stats.FightStats
 import pangea.model.skill.{MonsterSkill, Skill}
@@ -135,7 +135,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     // Реген пассивок «Целебный»/«Самовосстанавливающийся» учитывается перед атакой.
     val hero = hero0.withCombatRegen(nowMs)
     for {
-      buffedEff <- ZIO.succeed(battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs)))
+      buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
       monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
@@ -150,43 +150,67 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             noWeapon =
               hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
-            // «Разбойника» (+5%) множит итоговый урон.
+            // «Разбойника» (+5%) множит итоговый урон; грейды стихийных камней в
+            // оружии добавляют +2%/грейд стихийного урона (elementalDamageMult).
             damage =
-              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult).toLong
+              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult * hero.gems.elementalDamageMult).toLong
                 .max(1L)
             attackLine = content.format(
               "battle.hit",
               "damage"  -> damage.toString,
               "monster" -> monster.name
             )
-            armorDmg = math.min(battle.monsterCurrentArmor, damage)
-            hpDmg    = damage - armorDmg
+            // Стихии оружия модифицируют раздельно урон по броне и по HP
+            // (см. splitElementalDamage). Без стихий поведение прежнее.
+            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, damage, hero.gems)
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
             // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
             // если удар прошёл в HP (hpDmg > 0) и моб жив: повторное попадание стакает
             // текущий яд (+OnHit), иначе накладывает свежий.
             poisonsNow = battle.effects.heroPoisonousAttacks && hpDmg > 0 && newHp > 0
-            effects =
+            effectsAfterPotion =
               if (!battle.effects.heroPoisonousAttacks) battle.effects
               else battle.effects.copy(
                 heroPoisonousAttacks = false,
                 monsterPoison =
-                  if (poisonsNow) Some(battle.effects.monsterPoison.map(_.stacked).getOrElse(pangea.model.battle.Poison.onHit))
+                  if (poisonsNow) Some(battle.effects.monsterPoison.map(_.stacked).getOrElse(Poison.onHit))
                   else battle.effects.monsterPoison
               )
-            updated = battle.copy(
+            // Изумруд в оружии: при уроне по HP пассивно накладывает/стакает яд.
+            gemPoisonPct = hero.gems.weaponPoisonPct
+            gemPoisons   = gemPoisonPct > 0 && hpDmg > 0 && newHp > 0
+            effects =
+              if (!gemPoisons) effectsAfterPotion
+              else effectsAfterPotion.copy(
+                monsterPoison = Some(effectsAfterPotion.monsterPoison
+                  .map(p => Poison(p.pct + gemPoisonPct))
+                  .getOrElse(Poison(gemPoisonPct))))
+            // Череп в оружии: вампиризм — % нанесённого по HP урона в лечение героя.
+            maxHp      = hero.effectiveMaxHp(nowMs)
+            vamp       = if (hero.gems.vampirismPct > 0 && hpDmg > 0) (hpDmg * hero.gems.vampirismPct / 100L).max(0L) else 0L
+            healedHero = if (vamp > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp).min(maxHp))) else hero
+            vampGained = healedHero.fightStats.hp - hero.fightStats.hp
+            hitBattle = battle.copy(
               monsterCurrentHp = newHp,
               monsterCurrentArmor = newArmor,
               effects = effects
             )
-            log1 = log :+ attackLine
+            // Проки стихий оружия (30% каждый) — только если моб жив после удара.
+            elemResult <- if (newHp > 0) resolveElementProcs(hero, hitBattle)
+                          else ZIO.succeed((hitBattle, Vector.empty[String]))
+            (updated, elemLog) = elemResult
+            log1 = log :+ (attackLine + dotIndicators(updated))
             log2 =
-              if (poisonsNow) log1 :+ content.format("battle.poisonApplied", "monster" -> monster.name)
+              if (poisonsNow || gemPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> monster.name)
               else log1
+            log3 =
+              if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
+              else log2
+            log4 = log3 ++ elemLog
             r <-
-              if (newHp <= 0) ZIO.succeed(TurnResult(hero, updated, log2, Outcome.Victory))
-              else monsterPhase(hero, updated, nowMs, log2, skip)
+              if (updated.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(healedHero, updated, log4, Outcome.Victory))
+              else monsterPhase(healedHero, updated, nowMs, log4, skip)
           } yield r
         } else {
           val attackLine =
@@ -194,6 +218,120 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           monsterPhase(hero, battle, nowMs, log :+ attackLine, skip)
         }
     } yield result
+  }
+
+  // ── Стихии оружия ───────────────────────────────────────────────────────────
+
+  /** Боевые статы героя с учётом бафов боя и временного буста Воздуха (прок
+    * Воздуха: +10% уклонения/точности на `airBoostTurns` ходов). Постоянный +5%
+    * от воздуха в оружии уже учтён в `hero.effectiveFightStats`. */
+  private def effWithAir(hero: Hero, battle: SoloPveBattle, nowMs: Long): FightStats = {
+    val fs = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    if (battle.effects.airBoostTurns <= 0) fs
+    else {
+      val p = Element.Air.ProcBonusPct
+      fs.copy(
+        evasion  = fs.evasion + fs.evasion * p / 100L,
+        accuracy = fs.accuracy + fs.accuracy * p / 100L
+      )
+    }
+  }
+
+  /** Разбивает `damage` на урон по броне и по HP с учётом стихийных модификаторов
+    * оружия. Без стихий (мультипликаторы = 1, доля молнии = 0) поведение прежнее:
+    * броня поглощает `min(armor, damage)`, остальное — в HP. */
+  private def splitElementalDamage(curArmor: Long, damage: Long, g: pangea.model.hero.HeroGems): (Long, Long) = {
+    val rawArmorPart = math.min(curArmor, damage)
+    val rawHpPart    = damage - rawArmorPart
+    val armorDmg     = math.min(curArmor, (rawArmorPart * g.armorDamageMult).toLong).max(0L)
+    val hpFromHp     = (rawHpPart * g.hpDamageMult).toLong
+    // Молния: часть урона по броне дополнительно бьёт по HP.
+    val hpFromArmor  = (armorDmg * g.lightningArmorToHpFrac).toLong
+    (armorDmg, (hpFromHp + hpFromArmor).max(0L))
+  }
+
+  /** Роллит проки стихий оружия (по 30% на каждую стихию в оружии) и применяет их:
+    * сперва комбо (Огонь+Воздух, Молния+Холод), затем оставшиеся одиночные эффекты.
+    * Возвращает обновлённый бой и строки лога. Урон комбо снимается сразу (может
+    * добить моба — исход перепроверяется вызывающим по `monsterCurrentHp`). */
+  private def resolveElementProcs(hero: Hero, battle: SoloPveBattle): Task[(SoloPveBattle, Vector[String])] = {
+    val elems = hero.gems.weaponElements
+    if (elems.isEmpty) ZIO.succeed((battle, Vector.empty))
+    else
+      // Роллим в фиксированном порядке Element.values для детерминизма тестов.
+      ZIO.foreach(Element.values.filter(elems.contains).toList) { e =>
+        Random.nextIntBetween(1, 101).map(roll => e -> (roll <= Element.ProcChancePct))
+      }.map { rolls =>
+        val fired      = rolls.collect { case (e, true) => e }.toSet
+        val maxHp      = battle.monsterStats.hp
+        val maxArmor   = MonsterSkill.monsterMaxArmor(battle)
+        val fireAir    = fired(Element.Fire) && fired(Element.Air)
+        val lightCold  = fired(Element.Lightning) && fired(Element.Cold)
+
+        var b   = battle
+        var log = Vector.empty[String]
+
+        // Комбо Огонь+Воздух: мгновенный урон 30% макс.HP + текущий % горения, горение → 2%.
+        if (fireAir) {
+          val burnPct = b.effects.monsterBurn.map(_.pct).getOrElse(0)
+          val dmg     = (maxHp.toDouble * (30 + burnPct) / 100.0).toLong.max(0L)
+          b = b.copy(
+            monsterCurrentHp = (b.monsterCurrentHp - dmg).max(0L),
+            effects = b.effects.copy(monsterBurn = Some(Burn(Burn.Initial)))
+          )
+          log = log :+ content.format("battle.comboFireAir", "damage" -> dmg.toString)
+        }
+
+        // Комбо Молния+Холод: -40% макс.брони (не переходит в HP), -20% защиты (3 хода), выжиг энергии (флейвор).
+        if (lightCold) {
+          val armorCut = (maxArmor.toDouble * 0.40).toLong.max(0L)
+          b = b.copy(
+            monsterCurrentArmor = (b.monsterCurrentArmor - armorCut).max(0L),
+            effects = b.effects.copy(monsterDefenceDebuff = Some(TimedDefenceDebuff(20, 3)))
+          )
+          log = log :+ content.text("battle.comboLightningCold")
+        }
+
+        // Одиночные проки для стихий, не поглощённых комбо.
+        if (fired(Element.Cold) && !lightCold) {
+          b = b.copy(effects = b.effects.copy(
+            monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
+          log = log :+ Element.Cold.procText
+        }
+        if (fired(Element.Fire) && !fireAir) {
+          val burn = b.effects.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)
+          b = b.copy(effects = b.effects.copy(monsterBurn = Some(burn)))
+          log = log :+ Element.Fire.procText
+        }
+        if (fired(Element.Air) && !fireAir) {
+          b = b.copy(effects = b.effects.copy(airBoostTurns = Element.Air.ProcTurns))
+          log = log :+ Element.Air.procText
+        }
+        if (fired(Element.Lightning) && !lightCold) {
+          // Выжиг энергии моба — флейвор (у мобов нет рабочего пула энергии).
+          log = log :+ Element.Lightning.procText
+        }
+        (b, log)
+      }
+  }
+
+  /** Итоговая защита моба с учётом временного %-дебафа (комбо Молния+Холод). */
+  private def effectiveMonsterDefence(battle: SoloPveBattle): Long =
+    battle.effects.monsterDefenceDebuff match {
+      case Some(d) => (battle.monsterStats.defence * (100 - d.pct) / 100).max(0L)
+      case None    => battle.monsterStats.defence
+    }
+
+  /** Компактная сводка активных DoT на мобе для приписки к строкам атаки:
+    * ` (🟢 -N ❤)(🔴 -N ❤)(🔥 -N ❤)`. Пусто, если эффектов нет. */
+  private def dotIndicators(battle: SoloPveBattle): String = {
+    val maxHp = battle.monsterStats.hp
+    val parts = List(
+      battle.effects.monsterPoison.map(p => s"🟢 -${p.damageOn(maxHp)} ❤"),
+      battle.effects.monsterBleed.map(b => s"🔴 -${b.damageOn(maxHp)} ❤"),
+      battle.effects.monsterBurn.map(bn => s"🔥 -${bn.damageOn(maxHp)} ❤")
+    ).flatten
+    if (parts.isEmpty) "" else parts.mkString(" (", ")(", ")")
   }
 
   // ── Ход монстра ─────────────────────────────────────────────────────────────
@@ -327,7 +465,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       finalHeroWithEnergy =
         if (heroAlive) {
           val b        = tickedHero.effectiveBaseStats(nowMs)
-          val regen    = ((b.int + 0.5 * b.agi) * tickedHero.passives.energyRegenMult).toLong.max(1L)
+          // «Сосредоточенный» (пассивка) и черепа в оружии множат реген энергии.
+          val regen    = ((b.int + 0.5 * b.agi) * tickedHero.passives.energyRegenMult * tickedHero.gems.energyRegenMult).toLong.max(1L)
           val maxEn    = tickedHero.maxEnergy(nowMs)
           val newEn    = (tickedHero.fightStats.energy + regen).min(maxEn)
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(energy = newEn))
@@ -336,7 +475,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
       // порядке) каст моба, тик яда моба, тик регена героя — только непустые.
       monsterLog = {
-        val base       = (log :+ "") :+ mobLine
+        // К строке атаки моба приписываем сводку активных DoT (яд/кровь/огонь) —
+        // берём состояние ДО тика конца раунда (finalBattle), как на стороне игрока.
+        val base       = (log :+ "") :+ (mobLine + dotIndicators(finalBattle))
         val withCast   = if (castLine.nonEmpty) base :+ castLine else base
         val withPoison = if (monsterEffectLine.nonEmpty) withCast :+ monsterEffectLine else withCast
         if (heroEffectLine.nonEmpty) withPoison :+ heroEffectLine else withPoison
@@ -370,26 +511,39 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       case None => (hero, battle, "")
     }
 
-  /** Тик эффектов МОНСТРА в конце раунда: яд снимает `pct`% его макс.HP мимо брони
-    * и слабеет. Возвращает обновлённый бой плюс строку эффекта (пустая, если яда
-    * нет). */
+  /** Тик DoT-эффектов МОНСТРА в конце раунда (каждый снимает `pct`% макс.HP мимо
+    * брони). Порядок: яд → кровотечение → горение. Яд слабеет ([[Poison.decayed]]),
+    * кровотечение НЕ затухает, горение усиливается ([[Burn.grown]]). Возвращает
+    * обновлённый бой и склеенную строку эффектов (пустую, если DoT нет). */
   private def tickMonsterEffects(
       battle: SoloPveBattle,
       monsterName: String
-  ): (SoloPveBattle, String) =
-    battle.effects.monsterPoison match {
-      case Some(poison) =>
-        val dmg   = poison.damageOn(battle.monsterStats.hp)
-        val newHp = (battle.monsterCurrentHp - dmg).max(0L)
-        (
-          battle.copy(
-            monsterCurrentHp = newHp,
-            effects = battle.effects.copy(monsterPoison = poison.decayed)
-          ),
-          content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
-        )
-      case None => (battle, "")
+  ): (SoloPveBattle, String) = {
+    val maxHp = battle.monsterStats.hp
+    var eff   = battle.effects
+    var hp    = battle.monsterCurrentHp
+    var lines = Vector.empty[String]
+
+    eff.monsterPoison.foreach { p =>
+      val dmg = p.damageOn(maxHp)
+      hp = (hp - dmg).max(0L)
+      eff = eff.copy(monsterPoison = p.decayed)
+      lines = lines :+ content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
     }
+    eff.monsterBleed.foreach { b =>
+      val dmg = b.damageOn(maxHp)
+      hp = (hp - dmg).max(0L)
+      // Кровотечение не затухает — сила остаётся прежней.
+      lines = lines :+ content.format("battle.bleedTick", "damage" -> dmg.toString, "monster" -> monsterName)
+    }
+    eff.monsterBurn.foreach { bn =>
+      val dmg = bn.damageOn(maxHp)
+      hp = (hp - dmg).max(0L)
+      eff = eff.copy(monsterBurn = Some(bn.grown))
+      lines = lines :+ content.format("battle.burnTick", "damage" -> dmg.toString, "monster" -> monsterName)
+    }
+    (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"))
+  }
 
   // ── Ход игрока: активный навык ──────────────────────────────────────────────
 
@@ -438,12 +592,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       skip = Set(slot.itemId)
       tmpl = slot.skill.hitTemplate
       // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
+      // Дебаф Холода снижает итоговое %-снижение цели на monsterColdDefenceCut п.п.;
+      // временный дебаф защиты (комбо) режет саму защиту (effectiveMonsterDefence).
       reduced = {
-        val red = BattleState.damageReduction(
-          protection  = battle.monsterStats.defence,
-          defenderInt = battle.monsterStats.defence,
+        val def0 = effectiveMonsterDefence(battle)
+        val red0 = BattleState.damageReduction(
+          protection  = def0,
+          defenderInt = def0,
           attackerInt = hero.effectiveBaseStats(nowMs).int,
           bonusPct    = 0L)
+        val red = (red0 - battle.effects.monsterColdDefenceCut / 100.0).max(0.0)
         (raw * (1.0 - red)).toLong.max(1L)
       }
       result <- slot.skill.effect match {
@@ -452,11 +610,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           dealSkillDamage(hero, bumped, value, tmpl.replace("{}", value.toString), nowMs, skip)
 
         case Skill.Effect.BleedDamage(pct) =>
-          // Урон сразу + наложение (стак) яда на моба.
-          val stacked = battle.effects.monsterPoison.map(p => pangea.model.battle.Poison(p.pct + pct))
-                          .getOrElse(pangea.model.battle.Poison(pct))
-          val poisoned = bumped.copy(effects = bumped.effects.copy(monsterPoison = Some(stacked)))
-          dealSkillDamage(hero, poisoned, raw, tmpl.replace("{}", raw.toString), nowMs, skip)
+          // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
+          val stacked  = bumped.effects.monsterBleed.map(_.stackedWith(pct)).getOrElse(Bleed(pct))
+          val bled     = bumped.copy(effects = bumped.effects.copy(monsterBleed = Some(stacked)))
+          val bleedMsg = tmpl.replace("{}", raw.toString) + "\n" +
+            content.format("battle.bleedApplied", "monster" -> battle.toMonster.name)
+          dealSkillDamage(hero, bled, raw, bleedMsg, nowMs, skip)
 
         case Skill.Effect.WeakSpotStrike =>
           for {
@@ -512,13 +671,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       nowMs: Long,
       skip: Set[Long]
   ): Task[TurnResult] = {
-    val armorDmg = math.min(battle.monsterCurrentArmor, value)
-    val hpDmg    = value - armorDmg
+    // Урон навыка тоже несёт стихию оружия: грейд-множитель + раздельный урон по
+    // броне/HP. Проки стихий роллятся отдельным броском (как и на обычной атаке).
+    val scaled = (value * hero.gems.elementalDamageMult).toLong.max(1L)
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, scaled, hero.gems)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
-    val updated  = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
-    if (newHp <= 0) ZIO.succeed(TurnResult(hero, updated, Vector(skillLine), Outcome.Victory))
-    else playerStrike(hero, updated, nowMs, Vector(skillLine), skip)
+    val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+    if (newHp <= 0) ZIO.succeed(TurnResult(hero, hit, Vector(skillLine + dotIndicators(hit)), Outcome.Victory))
+    else
+      resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>
+        val lines = Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog
+        if (afterProcs.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(hero, afterProcs, lines, Outcome.Victory))
+        else playerStrike(hero, afterProcs, nowMs, lines, skip)
+      }
   }
 
   /** Восстановление брони героя на `value` (кап — эффективный максимум). Возвращает
@@ -736,9 +902,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       renderer: Renderer
   ): Task[StateType] =
     for {
-      expGained <- ZIO.succeed(
-        (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
-      )
+      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      azat <- loadAzat(user)
+      // Недельное благословение Азата: +10% опыта/золота, +10% редкости, +5% доп. дроп.
+      blessed = azat.blessingActive(now)
+      baseExp = (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
+      expGained = if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
       seed <- Random.nextLong
@@ -747,10 +916,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         battle.rarity,
         monster.race,
         hero.dungeonLevel.toLong,
-        Rng(seed)
+        Rng(seed),
+        gearChanceBonusPct = hero.gems.gearDropBonusPct,
+        rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
       )
       // «Таксидермиста»/«Ювелира» дают отдельные доп. дропы поверх основного лута.
-      (extraDrops, _) = LootGenerator.rollPassiveDrops(
+      (extraDrops, rngAfter2) = LootGenerator.rollPassiveDrops(
         hero.passives.hasTaxidermist,
         hero.passives.hasJeweler,
         battle.rarity,
@@ -758,6 +929,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         hero.dungeonLevel.toLong,
         rngAfter
       )
+      // Благословение: 5% шанс дополнительной экипировки после боя.
+      (blessingGear, _) =
+        if (blessed) LootGenerator.rollBlessingExtraGear(BattleState.BlessingExtraDropPct, battle.rarity, hero.dungeonLevel.toLong, rngAfter2)
+        else (Option.empty[pangea.model.item.Item], rngAfter2)
       drops = baseDrops ++ extraDrops
       // routing события (returnState/eventData) кладётся в scene_data ДО боя
       // (напр. цепочка «мобы с сокровищем»); переносим его в добычу, чтобы экран
@@ -765,16 +940,21 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       prev <- heroDao
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
+      goldScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
       lootData = LootState.LootData(
         items = drops.collect {
           case LootGenerator.LootDrop.Gear(i)    => i
           case LootGenerator.LootDrop.Trophy(i)  => i
           case LootGenerator.LootDrop.MapHalf(i) => i
-        },
-        golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a },
+        } ++ blessingGear.toList,
+        golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a * goldScalePct / 100L },
         returnState = prev.flatMap(_.returnState),
         eventData = prev.flatMap(_.eventData)
       )
+      // Первый поверженный легендарный моб роняет квестовый «Неактивный куб Азата»
+      // (если куба ещё нет и он не был куплен). Хранится флагом в azat_data.
+      cubeDropped = battle.rarity == pangea.model.monster.Rarity.Legendary && azat.cubeAbsent
+      _ <- ZIO.when(cubeDropped)(saveAzat(user, azat.copy(cube = CubeStatus.FoundInactive)))
       _ <- heroDao.clearActiveBattle(user.userId)
       _ <- heroDao.updateExpAndLevel(
         user.userId,
@@ -813,7 +993,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)
         )
       )
+      _ <- ZIO.when(cubeDropped)(
+        renderer.show(user, Screen(content.text("battle.cubeFound"), Nil))
+      )
     } yield StateType.Loot
+
+  private def loadAzat(user: User): Task[AzatState] =
+    heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+
+  private def saveAzat(user: User, azat: AzatState): Task[Unit] =
+    heroDao.writeAzatData(user.userId, azat.asJson)
 
   // ── Экран боя ───────────────────────────────────────────────────────────────
 
@@ -834,8 +1023,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       maxHp: Long,
       nowMs: Long
   ): Screen = {
-    val eff       = hero.effectiveFightStats(nowMs)
-    val buffedEff = battle.heroBattleState.applyTo(eff)
+    val buffedEff = effWithAir(hero, battle, nowMs)
     val playerDodgePct  = playerDodgeChance(hero, battle, nowMs).toInt
     val monsterDodgePct = mobDodgeChance(buffedEff.accuracy, battle).toInt
     val mobHitPct       = 100 - playerDodgePct
@@ -853,10 +1041,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     // (затухающее) + пассивка «Целебный» (4% макс.HP); реген брони =
     // «Самовосстанавливающийся» (4% макс.брони). Показываем суммарной припиской.
     val maxArmor = hero.effectiveMaxArmor(nowMs)
-    val monsterPoison = battle.effects.monsterPoison
-      .map(p => s" (-${p.damageOn(battle.monsterStats.hp)})").getOrElse("")
+    // Сводка DoT у HP моба: яд 🟢 / кровотечение 🔴 / горение 🔥 (урон/ход).
+    val monsterMaxHp = battle.monsterStats.hp
+    val monsterPoison = {
+      val parts = List(
+        battle.effects.monsterPoison.map(p => s"🟢-${p.damageOn(monsterMaxHp)}"),
+        battle.effects.monsterBleed.map(b => s"🔴-${b.damageOn(monsterMaxHp)}"),
+        battle.effects.monsterBurn.map(bn => s"🔥-${bn.damageOn(monsterMaxHp)}")
+      ).flatten
+      if (parts.isEmpty) "" else " (" + parts.mkString(" ") + ")"
+    }
     val beltHpRegen    = battle.effects.heroRegen.map(_.healOn(maxHp)).getOrElse(0L)
-    val hpRegenTotal   = beltHpRegen + maxHp * hero.passives.hpRegenPct / 100L
+    // Реген HP/ход = зелье + «Целебный» (% макс.HP) + черепа в снаряжении (промилле макс.HP).
+    val hpRegenTotal   = beltHpRegen + maxHp * hero.passives.hpRegenPct / 100L + maxHp * hero.gems.hpRegenPerMille / 1000L
     val heroRegen      = if (hpRegenTotal > 0) s" (+$hpRegenTotal)" else ""
     val armorRegen     = maxArmor * hero.passives.armorRegenPct / 100L
     val heroArmorRegen = if (armorRegen > 0) s" (+$armorRegen)" else ""
@@ -954,7 +1151,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * уворота) и плоские бонусы пассивок — «Быстрые ноги»/«Сливающиеся» всегда, а
     * «Сверкающие» — только при бегстве (`fleeing`). Потолок 95% абсолютный. */
   private def playerDodgeChance(hero: Hero, battle: SoloPveBattle, nowMs: Long, fleeing: Boolean = false): Double = {
-    val buffed       = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
+    // Буст Воздуха (+10% уклонения на airBoostTurns ходов) входит в effWithAir.
+    val buffed       = effWithAir(hero, battle, nowMs)
     val agi          = hero.effectiveBaseStats(nowMs).agi
     val passiveBonus = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
     (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, battle.monsterStats.accuracy)
@@ -962,12 +1160,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   }
 
   // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
-  // в знаменателе его защита и точность игрока ×1.5.
+  // в знаменателе его защита (с учётом %-дебафа комбо) и точность игрока ×1.5.
   private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double =
     BattleState.dodgeChance(
       0L,
       battle.monsterStats.evasion,
-      battle.monsterStats.defence,
+      effectiveMonsterDefence(battle),
       heroAccuracy
     )
 }
@@ -1003,6 +1201,11 @@ object BattleState {
     case b: ItemDetails.Belt => Some(b)
     case _                   => None
   }
+
+  /** Бонус благословения Азата (в %): к опыту, золоту и редкости добычи. */
+  val BlessingBonusPct: Long = AzatState.BlessingBonusPct
+  /** Шанс (в %) дополнительной экипировки после боя при благословении. */
+  val BlessingExtraDropPct: Long = AzatState.BlessingExtraDropPct
 
   /** ЗАГЛУШКА множителя шанса каста моба от редкости. Позже может стать формулой. */
   val MonsterSkillChancePerRarity: Double = 20.0

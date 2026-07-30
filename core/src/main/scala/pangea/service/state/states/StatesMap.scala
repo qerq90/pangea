@@ -6,7 +6,9 @@ import pangea.model.state.StateType
 import pangea.model.state.StateType.{
   Battle,
   CardSeller,
+  CityCenter,
   Construction,
+  Cube,
   Death,
   Dungeon,
   Equipment,
@@ -20,6 +22,7 @@ import pangea.model.state.StateType.{
   GustavoFlask,
   GustavoHeal,
   GustavoSupplies,
+  HallAzat,
   HarborQuarter,
   HeroStats,
   Innkeeper,
@@ -33,7 +36,9 @@ import pangea.model.state.StateType.{
   QuestBoard,
   Registration,
   Rest,
+  Socketing,
   Tavern,
+  TempleAzat,
   TrainingHall,
   TreasureDig,
   TreasureHunt,
@@ -51,6 +56,7 @@ import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.GoldVeinState
+import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
   TreasureHuntState,
@@ -147,6 +153,11 @@ object StatesMap {
             content
           ),
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
+          Socketing -> SocketingState(heroDao, inventoryRepo, content),
+          CityCenter -> CityCenterState(content),
+          TempleAzat -> TempleAzatState(heroDao, content),
+          HallAzat   -> HallAzatState(heroDao, content),
+          Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),
           Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
           Merchant -> MerchantState(heroDao, inventoryRepo, itemRepo, content),
           Gustavo  -> GustavoState(heroDao, content),

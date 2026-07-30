@@ -38,6 +38,9 @@ case class Hero(
    *  для боя/лута/подземелья/инвентаря. */
   def passives: HeroPassives = HeroPassives(equipment.passiveKinds)
 
+  /** Камни-усилители в гнёздах снаряжения — типизированный фасад для боя/лута. */
+  def gems: HeroGems = HeroGems(equipment.weaponGems, equipment.armorGems)
+
   /** Можно ли двигаться к свету (выше): на первом этаже выше уже некуда. */
   def canGoLighter: Boolean = dungeonLevel > 1
 
@@ -90,9 +93,25 @@ case class Hero(
     )
   }
 
-  /** Текущие боевые статы — с учётом активных травм и плоских бафов пассивок. */
+  /** Плоские прибавки к итоговым статам от камней (считаются от переданного, уже
+   *  «почти итогового» значения, поверх бафов пассивок): аметист в оружии — к
+   *  точности, аметист в снаряжении — к защите, изумруд в снаряжении — к уклонению. */
+  private def withGemStatBonuses(fs: FightStats): FightStats = {
+    val g = gems
+    // Аметист → точность, аметист-броня → защита, изумруд-броня → уклонение,
+    // воздух в оружии → +5% к итоговым уклонению и точности (постоянно).
+    val accPct = g.accuracyBonusPct + g.airEvasionAccuracyBonusPct
+    val evaPct = g.evasionBonusPct + g.airEvasionAccuracyBonusPct
+    fs.copy(
+      accuracy = fs.accuracy + fs.accuracy * accPct / 100L,
+      defence  = fs.defence + fs.defence * g.defenceBonusPct / 100L,
+      evasion  = fs.evasion + fs.evasion * evaPct / 100L
+    )
+  }
+
+  /** Текущие боевые статы — с учётом активных травм, плоских бафов пассивок и камней. */
   def effectiveFightStats(nowMs: Long): FightStats =
-    withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs)))
+    withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs))))
 
   /** Реген перед атакой игрока от пассивок «Целебный» (4% макс.HP) и
    *  «Самовосстанавливающийся» (4% макс.брони). Прибавка каппится потолком, но
@@ -102,7 +121,9 @@ case class Hero(
     val p        = passives
     val maxHp    = effectiveMaxHp(nowMs)
     val maxArmor = effectiveMaxArmor(nowMs)
-    val newHp    = (fightStats.hp + maxHp * p.hpRegenPct / 100L).min(maxHp).max(fightStats.hp)
+    // Реген HP = пассивка «Целебный» (% макс.HP) + черепа в снаряжении (промилле макс.HP).
+    val hpRegen  = maxHp * p.hpRegenPct / 100L + maxHp * gems.hpRegenPerMille / 1000L
+    val newHp    = (fightStats.hp + hpRegen).min(maxHp).max(fightStats.hp)
     val newArmor = (fightStats.armor + maxArmor * p.armorRegenPct / 100L).min(maxArmor).max(fightStats.armor)
     copy(fightStats = fightStats.copy(hp = newHp, armor = newArmor))
   }
@@ -144,14 +165,19 @@ case class Hero(
     val p    = combinedPenalties(nowMs)
     val b    = effectiveBaseStats(nowMs)
     val base = 5L * b.int + 2L * b.agi + equipment.allEnergy + masterHornBoosts.energy
-    (base * (1.0 - p.energyPct)).toLong.max(1L)
+    // Бриллианты в снаряжении дают +% к макс. Энергии.
+    (base * (1.0 - p.energyPct) * (100L + gems.energyBonusPct) / 100L).toLong.max(1L)
   }
 
   def effectiveMaxHp(nowMs: Long): Long = {
     val p           = combinedPenalties(nowMs)
     val effectiveVit = HeroRaceBuff.of(race).applyVit(baseStats.vit)
     val base        = effectiveVit * 24L
-    (base * (1.0 - p.vitPct) * (1.0 - p.hpPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L) + equipment.allHp
+    val subtotal    = (base * (1.0 - p.vitPct) * (1.0 - p.hpPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L) +
+      equipment.allHp
+    // Рубины в снаряжении: плоская прибавка + % к макс. HP.
+    val g = gems
+    (subtotal + g.flatHp) * (100L + g.maxHpBonusPct) / 100L
   }
 
   def traumaRemainingText(nowMs: Long): Option[String] =

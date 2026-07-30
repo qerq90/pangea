@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
-import pangea.model.hero.Hero
+import pangea.model.hero.{AzatState, Hero}
 import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -52,7 +52,7 @@ case class TrophyExchangeState(
       hero      <- getHero(user)
       inventory <- inventoryRepo.get(hero.id).orElseFail(new Throwable("Inventory unavailable"))
       trophies   = inventory.items.data.filter(i => i.id != 0L && i.itemType == ItemType.Trophy)
-      gained     = trophies.map(TrophyExchangeState.reputationFor).sum
+      gained    <- blessedReputation(user, trophies.map(TrophyExchangeState.reputationFor).sum)
       _         <- ZIO.foreachDiscard(trophies)(t => inventoryRepo.removeItem(t.id, hero.id).orElse(ZIO.unit))
       _         <- ZIO.when(gained > 0)(heroDao.updateGuildReputation(user.userId, hero.guildReputation + gained))
       msg        = if (trophies.isEmpty) content.text("guild.noTrophies")
@@ -108,7 +108,7 @@ case class TrophyExchangeState(
       res <- inventory.items.data.find(i => i.id == itemId && i.itemType == ItemType.Trophy) match {
         case None => showList(user, renderer)
         case Some(trophy) =>
-          val gained = TrophyExchangeState.reputationFor(trophy)
+          blessedReputation(user, TrophyExchangeState.reputationFor(trophy)).flatMap { gained =>
           val total  = hero.guildReputation + gained
           inventoryRepo.removeItem(trophy.id, hero.id).orElse(ZIO.unit) *>
             heroDao.updateGuildReputation(user.userId, total) *>
@@ -117,6 +117,7 @@ case class TrophyExchangeState(
               "gained" -> gained.toString,
               "total"  -> total.toString), Nil)) *>
             showList(user, renderer)
+          }
       }
     } yield res
 
@@ -157,6 +158,13 @@ case class TrophyExchangeState(
     heroDao.getHeroByUserId(user.userId)
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
+
+  /** Репутация с учётом благословения Азата (+BlessingBonusPct%, если активно). */
+  private def blessedReputation(user: User, base: Long): Task[Long] =
+    for {
+      now  <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+      azat <- heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+    } yield if (azat.blessingActive(now)) base * (100L + AzatState.BlessingBonusPct) / 100L else base
 }
 
 object TrophyExchangeState {

@@ -116,4 +116,10 @@ object Queries {
 
   def readReturnState(userId: UserId): Fragment =
     sql"select return_state from $tableName where user_id = $userId"
+
+  def writeAzatData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set azat_data = $data where user_id = $userId"
+
+  def readAzatData(userId: UserId): Fragment =
+    sql"select azat_data from $tableName where user_id = $userId"
 }

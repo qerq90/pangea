@@ -4,10 +4,13 @@ import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.generator.item.GemGenerator
+import pangea.model.item.{Gem, GemKind}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
+import pangea.service.state.states.LootState.LootData
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 
@@ -35,7 +38,7 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
     fallback = Target.Run { (user, _, renderer) => showVein(user, renderer).as(StateType.GoldVein) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Dungeon)
+  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.Loot)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -83,7 +86,10 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
       heroDao.writeSceneData(user.userId, Json.Null) *>
       renderer.show(user, Screen(content.text("goldVein.left"), Nil)).as(StateType.Dungeon)
 
-  // Завершение добычи (по таймеру от поллера или вручную после fireAt).
+  // Завершение добычи (по таймеру от поллера или вручную после fireAt). С шансом
+  // GemDropChancePct из жилы выпадает один камень-усилитель грейда «расколотый»
+  // (1-й тир) — тогда золото и камень выдаются через экран добычи (Loot); иначе
+  // золото начисляется сразу с флейвор-сообщением.
   private def harvest(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero    <- getHero(user)
@@ -91,12 +97,26 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
       delta   <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
       sign    <- Random.nextBoolean.map(if (_) 1 else -1)
       reward   = (base * (100L + sign * delta.toLong)) / 100L
-      _       <- heroDao.updateGold(user.userId, hero.gold + reward)
       _       <- scheduler.cancel(user.userId, TaskKind.Harvest)
-      _       <- heroDao.writeSceneData(user.userId, Json.Null)
-      _       <- renderer.show(user, Screen(
-                   content.format("goldVein.done", "gold" -> reward.toString), Nil))
-    } yield StateType.Dungeon
+      gemRoll <- Random.nextIntBetween(1, 101)
+      result  <- if (gemRoll <= GemDropChancePct) dropGem(user, reward)
+                 else grantGoldDirectly(user, hero.gold, reward, renderer)
+    } yield result
+
+  // Золото + камень через экран добычи (Loot начислит золото и предложит забрать камень).
+  private def dropGem(user: User, reward: Long): Task[StateType] =
+    for {
+      kindIdx <- Random.nextIntBounded(GemKind.values.size)
+      gem      = GemGenerator.item(GemKind.values(kindIdx), Gem.MinGrade)
+      loot     = LootData(items = List(gem), golds = List(reward))
+      _       <- heroDao.writeSceneData(user.userId, loot.asJson)
+    } yield StateType.Loot
+
+  private def grantGoldDirectly(user: User, curGold: Long, reward: Long, renderer: Renderer): Task[StateType] =
+    heroDao.updateGold(user.userId, curGold + reward) *>
+      heroDao.writeSceneData(user.userId, Json.Null) *>
+      renderer.show(user, Screen(content.format("goldVein.done", "gold" -> reward.toString), Nil))
+        .as(StateType.Dungeon)
 
   private def startedAt(user: User): Task[Option[Long]] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.hcursor.get[Long](StartedAtKey).toOption))
@@ -120,6 +140,7 @@ object GoldVeinState {
   val HarvestDurationMs: Long = 15L * 60L * 1000L
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
+  val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы
 
   private val StartedAtKey  = "goldVeinStartedAt"
   private val HarvestAction = """{"action":"Harvest"}"""

@@ -68,6 +68,12 @@ object ItemDetails {
   /** Карта клада или её половинка (целость кодирует `Item.itemType`). */
   case class TreasureMap(zone: MapZone) extends ItemDetails
 
+  /** Камень-усилитель как предмет инвентаря (вид + грейд). */
+  case class Gem(gem: pangea.model.item.Gem) extends ItemDetails
+
+  /** Материал-ингредиент (мифрил и т.п.). */
+  case class Material(kind: MaterialKind) extends ItemDetails
+
   // --- Покодечная сериализация с диспатчем по "type" ---
 
   private val weaponEnc: Encoder[Weapon]           = deriveEncoder
@@ -84,6 +90,10 @@ object ItemDetails {
   private val trophyDec: Decoder[Trophy]           = deriveDecoder
   private val mapEnc:    Encoder[TreasureMap]      = deriveEncoder
   private val mapDec:    Decoder[TreasureMap]      = deriveDecoder
+  private val gemEnc:    Encoder[Gem]              = deriveEncoder
+  private val gemDec:    Decoder[Gem]              = deriveDecoder
+  private val matEnc:    Encoder[Material]         = deriveEncoder
+  private val matDec:    Decoder[Material]         = deriveDecoder
 
   private def tagged(tpe: String, body: Json): Json =
     body.deepMerge(Json.obj("type" -> tpe.asJson))
@@ -97,6 +107,8 @@ object ItemDetails {
     case p: Passive     => tagged("Passive", passiveEnc(p))
     case t: Trophy      => tagged("Trophy", trophyEnc(t))
     case m: TreasureMap => tagged("TreasureMap", mapEnc(m))
+    case g: Gem         => tagged("Gem", gemEnc(g))
+    case m: Material    => tagged("Material", matEnc(m))
   }
 
   implicit val decoder: Decoder[ItemDetails] = Decoder.instance { c =>
@@ -109,6 +121,8 @@ object ItemDetails {
       case "Passive"     => passiveDec(c)
       case "Trophy"      => trophyDec(c)
       case "TreasureMap" => mapDec(c)
+      case "Gem"         => gemDec(c)
+      case "Material"    => matDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))
     }
   }

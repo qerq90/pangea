@@ -51,6 +51,12 @@ case class SoloPveBattle(
     skillSlots              = skillSlots.map(s =>
       if (skipSlots.contains(s.itemId)) s
       else s.copy(cooldown = (s.cooldown - 1).max(0))
+    ),
+    // Временные стихийные эффекты тикают вместе с бафами: буст Воздуха и %-дебаф
+    // защиты цели (комбо Молния+Холод) живут ограниченное число ходов.
+    effects = effects.copy(
+      airBoostTurns        = (effects.airBoostTurns - 1).max(0),
+      monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
 

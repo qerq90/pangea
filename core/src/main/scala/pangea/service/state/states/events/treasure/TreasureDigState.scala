@@ -5,8 +5,10 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.generator.item.GemGenerator
 import pangea.generator.loot.SchronGenerator
 import pangea.model.hero.Hero
+import pangea.model.item.{Gem, GemKind, Item}
 import pangea.model.monster.Race
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -112,8 +114,14 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
     for {
       raceIdx <- Random.nextIntBounded(Race.values.size)
       race     = Race.values(raceIdx)
-      result  <- if (hero.passives.hasMarauder) maraudGrave(user, hero, race, renderer)
-                 else emptyGrave(user, race, renderer)
+      // Раскапывая труп, с шансом SkullDropChancePct находим череп (1-й тир).
+      skullRoll <- Random.nextIntBetween(1, 101)
+      skull      = Option.when(skullRoll <= SkullDropChancePct)(GemGenerator.item(GemKind.Skull, Gem.MinGrade))
+      result  <- if (hero.passives.hasMarauder) maraudGrave(user, hero, race, skull, renderer)
+                 else skull match {
+                   case Some(gem) => graveWithSkull(user, race, gem, renderer)
+                   case None      => emptyGrave(user, race, renderer)
+                 }
     } yield result
 
   // Обычная могила: только флейвор-экран, добычи нет.
@@ -123,9 +131,17 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
         content.format("treasureDig.grave.text", "race" -> race.toString),
         content.screen("treasureDig.grave").choices)).as(StateType.TreasureDig)
 
+  // Могила с черепом: флейвор + выдача черепа через экран добычи.
+  private def graveWithSkull(user: User, race: Race, skull: Item, renderer: Renderer): Task[StateType] =
+    for {
+      _ <- renderer.show(user, Screen(content.format("treasureDig.skull.text", "race" -> race.toString), Nil))
+      _ <- heroDao.writeSceneData(user.userId, LootData(items = List(skull), golds = Nil).asJson)
+    } yield StateType.Loot
+
   // «Мародёра»: свежая могила даёт добычу, будто повержено Необычное существо этой
-  // расы (LootGenerator тир Uncommon, уровень — глубина лабиринта).
-  private def maraudGrave(user: User, hero: Hero, race: Race, renderer: Renderer): Task[StateType] =
+  // расы (LootGenerator тир Uncommon, уровень — глубина лабиринта). Череп (если выпал)
+  // добавляется к добыче.
+  private def maraudGrave(user: User, hero: Hero, race: Race, skull: Option[Item], renderer: Renderer): Task[StateType] =
     for {
       seed        <- Random.nextLong
       (drops, _)   = pangea.generator.loot.LootGenerator.roll(
@@ -135,7 +151,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
                          case pangea.generator.loot.LootGenerator.LootDrop.Gear(i)    => i
                          case pangea.generator.loot.LootGenerator.LootDrop.Trophy(i)  => i
                          case pangea.generator.loot.LootGenerator.LootDrop.MapHalf(i) => i
-                       },
+                       } ++ skull.toList,
                        golds     = drops.collect { case pangea.generator.loot.LootGenerator.LootDrop.Gold(a, _) => a },
                        doubloons = 0)
       _ <- renderer.show(user, Screen(content.format("treasureDig.marauder.text", "race" -> race.toString), Nil))
@@ -164,6 +180,7 @@ object TreasureDigState {
   val DigDurationMs: Long = 10L * 60L * 1000L
   val DoubloonMin: Int    = 1
   val DoubloonMax: Int    = 2
+  val SkullDropChancePct: Int = 40 // шанс найти череп при раскопке трупа/могилы
 
   private val DigAction = """{"action":"DigDone"}"""
 }

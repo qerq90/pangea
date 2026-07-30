@@ -17,6 +17,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
       "Guild"           -> Target.Goto(StateType.Guild),
       "HarborQuarter"   -> Target.Goto(StateType.HarborQuarter),
       "MarketSquare"    -> Target.Goto(StateType.MarketSquare),
+      "CityCenter"      -> Target.Goto(StateType.CityCenter),
       "ReturnToDungeon" -> Target.Goto(StateType.Dungeon),
       "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.GlobalMap) },
       "LeaveCity"       -> Target.Goto(StateType.Outskirts)
@@ -39,8 +40,9 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
                 "gold"      -> hero.gold.toString)
       byId  = content.screen("globalMap.enter").choices.map(c => c.id -> c).toMap
       choices = List(
-        byId("HarborQuarter").copy(row = Some(0)),
+        byId("HarborQuarter").copy(color = ChoiceColor.Primary, row = Some(0)),
         byId("MarketSquare").copy(row = Some(0)),
+        byId("CityCenter").copy(color = ChoiceColor.Primary, row = Some(0)),
         byId("Tavern").copy(color = ChoiceColor.Positive, row = Some(1)),
         byId("Guild").copy(color = ChoiceColor.Positive, row = Some(1)),
         byId("OpenCharacter").copy(row = Some(2)),

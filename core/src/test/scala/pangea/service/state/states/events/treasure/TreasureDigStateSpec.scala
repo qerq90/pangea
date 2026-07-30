@@ -82,12 +82,12 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
               assertTrue(loot.exists(l => l.doubloons == 0L || (l.doubloons >= 1L && l.doubloons <= 2L)))
     },
 
-    test("DigDone провал (roll>80) → «свежая могила» с кнопкой Уйти, scene_data очищен, остаётся в TreasureDig") {
+    test("DigDone провал (roll>80), без черепа → «свежая могила» с кнопкой Уйти, scene_data очищен, остаётся в TreasureDig") {
       for {
         t <- makeState
         (state, renderer, heroDao, scheduler) = t
         _         <- state.enter(testUser, renderer)
-        _         <- TestRandom.feedInts(90, 0) // roll=91 (провал), раса
+        _         <- TestRandom.feedInts(90, 0, 50) // roll=91 (провал), раса, череп=51 (>40, нет черепа)
         result    <- state.action(testUser, tap("DigDone"), renderer)
         screens   <- renderer.sentScreens
         cancelled <- scheduler.cancelled
@@ -96,6 +96,18 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(s => s.text.contains("могила") && s.choices.map(_.id).contains("GraveLeave"))) &&
               assertTrue(cancelled.contains(userId -> TaskKind.SchronDig)) &&
               assertTrue(scene.flatMap(_.as[TreasureDigProgress].toOption).isEmpty)
+    },
+
+    test("DigDone провал (roll>80), череп (roll≤40) → череп в scene_data, уход в Loot") {
+      for {
+        t <- makeState
+        (state, renderer, heroDao, _) = t
+        _         <- state.enter(testUser, renderer)
+        _         <- TestRandom.feedInts(90, 0, 10) // roll=91 (провал), раса, череп=11 (≤40, есть череп)
+        result    <- state.action(testUser, tap("DigDone"), renderer)
+        loot      <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(loot.exists(_.items.exists(_.gem.exists(_.kind == pangea.model.item.GemKind.Skull))))
     },
 
     test("GraveLeave → переход в Dungeon") {

@@ -55,6 +55,16 @@ case class Equipment(
   def passiveKinds: Set[pangea.model.item.PassiveKind] =
     allItems.flatMap(_.passive).toSet
 
+  /** Камни в гнёздах оружия (основного и дополнительного) — дают «оружейную» грань. */
+  def weaponGems: List[pangea.model.item.Gem] =
+    weapon.socketedGems ++ additionalWeapon.socketedGems
+
+  /** Камни в гнёздах остального снаряжения (всё, кроме оружия) — дают «броневую»
+   *  грань. Стакаются (в отличие от пассивок), поэтому список, а не множество. */
+  def armorGems: List[pangea.model.item.Gem] =
+    List(helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
+      firstRing, secondRing, belt, flask).flatMap(_.socketedGems)
+
   /** Какие предметы из снаряжения занимают слот данного типа. Для Ring возвращает
    *  оба кольца (есть два слота); для прочих типов — один. Пустые слоты включены —
    *  фильтрацию по [[Item.itemType]] делает вызывающий. */
@@ -76,6 +86,8 @@ case class Equipment(
     case ItemType.Trophy           => Nil
     case ItemType.TreasureMap      => Nil
     case ItemType.TreasureMapHalf  => Nil
+    case ItemType.Gem              => Nil
+    case ItemType.Material         => Nil
     case ItemType.NoItem           => Nil
   }
 }

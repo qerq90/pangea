@@ -82,15 +82,21 @@ object MonsterSkill extends Enum[MonsterSkill] {
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
       val maxHp  = battle.monsterStats.hp
-      val heal   = math.max(1L, (maxHp * 0.2).toLong)
+      val rawHeal = math.max(1L, (maxHp * 0.2).toLong)
+      // Горение ослабляет лечение на (50 + pct)% и снимается им до 0.
+      val weakenPct = battle.effects.monsterBurn.map(_.healWeakenPct).getOrElse(0)
+      val heal   = (rawHeal * (100 - weakenPct) / 100).max(0L)
       val newHp  = (battle.monsterCurrentHp + heal).min(maxHp)
       val healed = newHp - battle.monsterCurrentHp
       val line   = template.replace("{name}", battle.toMonster.name).replace("{}", healed.toString)
-      // Лечение отравленной цели ослабляет яд на HealCut п.п. (см. Poison.weakenedByHeal).
-      val weakened = battle.effects.copy(
-        monsterPoison = battle.effects.monsterPoison.flatMap(_.weakenedByHeal)
+      // Лечение: яд ослабляется на HealCut п.п.; кровотечение и горение снимаются
+      // ПОЛНОСТЬЮ (см. Poison.weakenedByHeal / Bleed / Burn).
+      val healedEffects = battle.effects.copy(
+        monsterPoison = battle.effects.monsterPoison.flatMap(_.weakenedByHeal),
+        monsterBleed  = None,
+        monsterBurn   = None
       )
-      Cast(battle.copy(monsterCurrentHp = newHp, effects = weakened), hero.fightStats.hp, hero.fightStats.armor, line)
+      Cast(battle.copy(monsterCurrentHp = newHp, effects = healedEffects), hero.fightStats.hp, hero.fightStats.armor, line)
     }
   }
 

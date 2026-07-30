@@ -18,7 +18,8 @@ class TestHeroDao(
   questRef:      Ref[Map[UserId, Json]],
   gustavoRef:    Ref[Map[UserId, Json]],
   cardSellerRef: Ref[Map[UserId, Json]],
-  returnRef:     Ref[Map[UserId, StateType]]
+  returnRef:     Ref[Map[UserId, StateType]],
+  azatRef:       Ref[Map[UserId, Json]]
 ) extends HeroDao {
 
   def getHeroByUserId(userId: UserId): Task[Option[Hero]] = heroRef.get.map(_.get(userId))
@@ -116,6 +117,12 @@ class TestHeroDao(
   def readReturnState(userId: UserId): Task[Option[StateType]] =
     returnRef.get.map(_.get(userId))
 
+  def writeAzatData(userId: UserId, data: Json): Task[Unit] =
+    azatRef.update(_.updated(userId, data))
+
+  def readAzatData(userId: UserId): Task[Option[Json]] =
+    azatRef.get.map(_.get(userId))
+
   def raceSnapshot: Task[Map[UserId, Race]] = raceRef.get
 }
 
@@ -131,7 +138,8 @@ object TestHeroDao {
       gustavoRef    <- Ref.make(Map.empty[UserId, Json])
       cardSellerRef <- Ref.make(Map.empty[UserId, Json])
       returnRef     <- Ref.make(Map.empty[UserId, StateType])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef)
+      azatRef       <- Ref.make(Map.empty[UserId, Json])
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef)
 
   def withHero(userId: UserId, hero: Hero): Task[TestHeroDao] =
     for {
@@ -144,5 +152,6 @@ object TestHeroDao {
       gustavoRef    <- Ref.make(Map.empty[UserId, Json])
       cardSellerRef <- Ref.make(Map.empty[UserId, Json])
       returnRef     <- Ref.make(Map.empty[UserId, StateType])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef)
+      azatRef       <- Ref.make(Map.empty[UserId, Json])
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef)
 }

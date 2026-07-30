@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.loot.TreasureHuntGenerator
-import pangea.model.item.{MapZone, Rarity}
+import pangea.model.item.{ItemType, MapZone, Rarity}
 import zio.test._
 
 object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
@@ -48,6 +48,17 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
       val doubs = rewards.map(_.doubloons).filter(_ > 0L)
       assertTrue(doubs.nonEmpty) &&
         assertTrue(doubs.forall(d => d >= 30L && d <= 70L))
+    },
+
+    test("камней всегда от 1 до 5 штук") {
+      assertTrue(rewards.forall(r => r.gems.size >= 1 && r.gems.size <= 5))
+    },
+
+    test("камни — предметы типа Gem грейда «расколотый» (1-й тир)") {
+      val gems = rewards.flatMap(_.gems)
+      assertTrue(gems.nonEmpty) &&
+        assertTrue(gems.forall(_.itemType == ItemType.Gem)) &&
+        assertTrue(gems.forall(_.gem.exists(_.grade == 1)))
     },
 
     test("детерминизм: один seed → одинаковая добыча") {

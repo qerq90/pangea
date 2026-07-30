@@ -70,8 +70,9 @@ object Skill extends Enum[Skill] {
       */
     case object BloodHarvest extends Effect
 
-    /** Урон + наложение яда силой `poisonPct`% на моба. */
-    final case class BleedDamage(poisonPct: Int) extends Effect
+    /** Урон + наложение КРОВОТЕЧЕНИЯ силой `bleedPct`% макс.HP на моба (отдельно
+      * от яда: не затухает, снимается лечением цели полностью). */
+    final case class BleedDamage(bleedPct: Int) extends Effect
 
     /** Урон с шансом (2·Инт − уровень моба)% нанести двойной урон. */
     case object WeakSpotStrike extends Effect
@@ -194,7 +195,7 @@ object Skill extends Enum[Skill] {
         label = "Кровотечение",
         cooldown = 2,
         initialCooldown = 1,
-        effect = Effect.BleedDamage(poisonPct = 4),
+        effect = Effect.BleedDamage(bleedPct = 4),
         hitTemplate =
           "Точный удар в нужную часть тела нанёс {} урона и кровь хлынула из раны потоком (-4%).",
         description =

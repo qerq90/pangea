@@ -3,7 +3,7 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{SoloPveBattle, Buff, HeroBattleState}
-import pangea.model.item.{Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
+import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -284,6 +284,23 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(afterDrink.effects.monsterPoison.isEmpty) &&
               assertTrue(!afterAttack.effects.heroPoisonousAttacks) &&
               assertTrue(afterAttack.effects.monsterPoison.isDefined)
+    },
+
+    test("Огонь в оружии: прок (30%) поджигает моба — накладывается горение") {
+      // Меч с камнем Рубин (Огонь) в гнезде.
+      val fireWeapon = Item(2L, "Пламенный меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        sockets = List(Some(Gem(GemKind.Ruby, 1))))
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = fireWeapon))
+      for {
+        triple                     <- makeState(hero, strongBattle)
+        (state, heroDao, renderer)  = triple
+        // Порядок бросков: удар героя(hit) → прок огня(≤30) → удар моба(miss) → каст моба(нет).
+        _                          <- TestRandom.feedInts(60, 10, 3, 90)
+        _                          <- TestRandom.feedLongs(20L)
+        _                          <- state.action(testUser, tap("Attack"), renderer)
+        after                      <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.effects.monsterBurn.isDefined)
     },
 
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {

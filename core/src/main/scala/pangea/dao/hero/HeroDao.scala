@@ -56,6 +56,10 @@ trait HeroDao {
   // Куда вернуться после «модального» экрана «Персонаж» (открывается из любой локации)
   def writeReturnState(userId: UserId, state: Option[StateType]): Task[Unit]
   def readReturnState(userId: UserId): Task[Option[StateType]]
+
+  // Durable состояние храма Азата (куб/заряды/содержимое, благословение, отдыхи)
+  def writeAzatData(userId: UserId, data: Json): Task[Unit]
+  def readAzatData(userId: UserId): Task[Option[Json]]
 }
 
 object HeroDao {
