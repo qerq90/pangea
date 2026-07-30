@@ -26,15 +26,23 @@ sealed abstract class PassiveKind(
   def describe: String = description
 }
 
+/** Группы слотов, на которые падают пассивки. Живут ОТДЕЛЬНЫМ объектом, а не в
+ *  компаньоне [[PassiveKind]]: аргумент конструктора case object-а не должен
+ *  ссылаться на члены собственного компаньона. Иначе первое обращение к самому
+ *  case object-у (напр. `PassiveKind.Taxidermist` из HeroPassives) запускает
+ *  инициализацию компаньона изнутри конструктора объекта, и `findValues` видит
+ *  ещё не присвоенный модуль — в `values` навсегда попадает `null`. */
+private object PassiveSlots {
+  val Helmet: Set[ItemType]  = Set(ItemType.Helmet)
+  val Arms: Set[ItemType]    = Set(ItemType.ShoulderPads, ItemType.Bracelets, ItemType.Gloves)
+  val Legs: Set[ItemType]    = Set(ItemType.Boots, ItemType.Pants, ItemType.Leggings)
+  val Rings: Set[ItemType]   = Set(ItemType.Ring)
+  val Amulets: Set[ItemType] = Set(ItemType.Amulet)
+}
+
 object PassiveKind extends Enum[PassiveKind] {
 
-  // Группы слотов, на которые падает та или иная пассивка. Объявлены ДО `findValues`:
-  // иначе при инициализации case object-ов (внутри findValues) они были бы ещё null.
-  private val Helmet: Set[ItemType]  = Set(ItemType.Helmet)
-  private val Arms: Set[ItemType]    = Set(ItemType.ShoulderPads, ItemType.Bracelets, ItemType.Gloves)
-  private val Legs: Set[ItemType]    = Set(ItemType.Boots, ItemType.Pants, ItemType.Leggings)
-  private val Rings: Set[ItemType]   = Set(ItemType.Ring)
-  private val Amulets: Set[ItemType] = Set(ItemType.Amulet)
+  import PassiveSlots._
 
   val values: IndexedSeq[PassiveKind] = findValues
 

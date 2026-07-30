@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
   * «одна из веток забыла сохранить стат» (см. Кровавую жатву). */
 case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
-  import BattleState.{Outcome, TurnResult}
+  import BattleState.{Outcome, TurnResult, VictoryOutcome}
 
   /** Чистое вычисление одного хода: снимок состояния → результат хода. */
   private type Turn = (Hero, SoloPveBattle, Long) => Task[TurnResult]
@@ -78,7 +78,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   /** Единственная точка записи и показа за ход. Персист итоговых
     * снаряжения+статов героя выполняется ВСЕГДА и вне ветвления по исходу —
-    * поэтому ни одна ветка не может «забыть» сохранить изменённый стат. */
+    * поэтому ни одна ветка не может «забыть» сохранить изменённый стат.
+    *
+    * ЖЁСТКИЙ ИНВАРИАНТ: сначала ВСЕ записи хода (неразрывным блоком), только
+    * потом показы. Отправка сообщений — сетевой вызов к ВК: он может упасть,
+    * а фибру обработки может прервать разрыв HTTP-соединения (ВК не дождался
+    * ответа). Если бы запись шла после показа, ход «отображался, но не
+    * случался»: игрок видел урон, а в БД оставалось прежнее состояние боя —
+    * так терялось добивание навыком (моб оживал с прежним HP). */
   private def commit(
       user: User,
       res: TurnResult,
@@ -91,20 +98,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     res.outcome match {
       case Outcome.Continue =>
-        persistHero *>
-          heroDao.writeActiveBattle(user.userId, res.battle.asJson) *>
+        (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
           showLog *>
           renderer
             .show(user, buildBattleScreen(res.hero, res.battle, res.hero.effectiveMaxHp(nowMs), nowMs))
             .as(StateType.Battle)
       case Outcome.Victory =>
-        persistHero *> showLog *> victory(user, res.hero, res.battle, renderer)
+        for {
+          outcome <- (persistHero *> applyVictory(user, res.hero, res.battle)).uninterruptible
+          _       <- showLog
+          _       <- showVictory(user, outcome, renderer)
+        } yield StateType.Loot
       case Outcome.Death =>
-        persistHero *> showLog *>
+        persistHero.uninterruptible *> showLog *>
           renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
       case Outcome.Fled =>
-        persistHero *>
-          heroDao.clearActiveBattle(user.userId) *>
+        (persistHero *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
           showLog *>
           renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
     }
@@ -895,12 +904,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   // ── Победа ──────────────────────────────────────────────────────────────────
 
-  private def victory(
+  /** Награды за победу: РОЛЛ + ВСЕ ЗАПИСИ в БД (опыт, лут в scene_data, очистка
+    * боя, куб Азата, путь вглубь). Ничего не показывает — сообщения собирает
+    * [[showVictory]] по возвращённому [[VictoryOutcome]]. Разделение сделано,
+    * чтобы победа была ЗАФИКСИРОВАНА до первого сетевого вызова (см. commit). */
+  private def applyVictory(
       user: User,
       hero: Hero,
-      battle: SoloPveBattle,
-      renderer: Renderer
-  ): Task[StateType] =
+      battle: SoloPveBattle
+  ): Task[VictoryOutcome] =
     for {
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       azat <- loadAzat(user)
@@ -970,33 +982,46 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       _ <- ZIO.when(unlocksDarkness)(
         heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon)
       )
+    } yield VictoryOutcome(
+      monsterName     = monster.name,
+      expGained       = expGained,
+      newLvl          = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
+      unlocksDarkness = unlocksDarkness,
+      cubeDropped     = cubeDropped
+    )
+
+  /** Показ итогов победы — вызывается ПОСЛЕ того, как [[applyVictory]] всё
+    * записал. Падение любого сообщения уже не откатывает бой. */
+  private def showVictory(
+      user: User,
+      outcome: VictoryOutcome,
+      renderer: Renderer
+  ): Task[Unit] =
+    for {
       _ <- renderer.show(
         user,
         Screen(
           content.format(
             "battle.victory",
-            "monster" -> monster.name,
-            "exp"     -> expGained.toString
+            "monster" -> outcome.monsterName,
+            "exp"     -> outcome.expGained.toString
           ),
           Nil
         )
       )
-      _ <- ZIO.when(unlocksDarkness)(
+      _ <- ZIO.when(outcome.unlocksDarkness)(
         renderer.show(
           user,
           Screen(content.text("battle.darknessConquered"), Nil)
         )
       )
-      _ <- ZIO.when(leveled.lvl > hero.lvl)(
-        renderer.show(
-          user,
-          Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)
-        )
+      _ <- ZIO.foreachDiscard(outcome.newLvl)(lvl =>
+        renderer.show(user, Screen(s"Вы получили новый уровень $lvl!", Nil))
       )
-      _ <- ZIO.when(cubeDropped)(
+      _ <- ZIO.when(outcome.cubeDropped)(
         renderer.show(user, Screen(content.text("battle.cubeFound"), Nil))
       )
-    } yield StateType.Loot
+    } yield ()
 
   private def loadAzat(user: User): Task[AzatState] =
     heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
@@ -1180,6 +1205,16 @@ object BattleState {
     case object Death    extends Outcome
     case object Fled     extends Outcome
   }
+
+  /** Уже ЗАПИСАННЫЙ итог победы — всё, что осталось показать игроку.
+    * `newLvl` непуст, если ход дал новый уровень. */
+  final case class VictoryOutcome(
+      monsterName: String,
+      expGained: Long,
+      newLvl: Option[Long],
+      unlocksDarkness: Boolean,
+      cubeDropped: Boolean
+  )
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
     * накопленный лог сообщений (склеивается и показывается один раз) и исход. */

@@ -157,6 +157,49 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(afterHero.fightStats.hp == 180L)
     },
 
+    test("После скилла показывается лог И экран боя с кнопками (регресс)") {
+      val hero  = heroWith(Some(Skill.Bleeding), None)
+      val slots = List(SkillSlotState(101L, Skill.Bleeding))
+      for {
+        triple                     <- makeState(hero, weakBattle(slots))
+        (state, _, renderer)        = triple
+        _                          <- state.action(testUser, tap("Skill_101"), renderer)
+        screens                    <- renderer.sentScreens
+        ids                         = screens.lastOption.map(_.choices.map(_.id)).getOrElse(Nil)
+      } yield assertTrue(screens.size == 2) && assertTrue(ids.contains("Attack"))
+    },
+
+    test("Отправка сообщений упала (ВК оборвал) → победа всё равно записана (регресс)") {
+      // Рендерер, падающий на ЛЮБОМ показе: имитирует обрыв соединения с ВК.
+      // Ход уже посчитан, значит его итог обязан быть в БД до первого сообщения —
+      // иначе добитый навыком моб «оживает» с прежним HP на следующем ходу.
+      val failing = new pangea.engine.Renderer {
+        def show(user: User, screen: pangea.engine.Screen): zio.Task[Unit] =
+          ZIO.fail(new Throwable("vk down"))
+      }
+      val hero   = heroWith(Some(Skill.SweepingStrike), None)
+      val slots  = List(SkillSlotState(101L, Skill.SweepingStrike))
+      val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
+      for {
+        triple                <- makeState(hero, battle)
+        (state, heroDao, _)    = triple
+        result                <- state.action(testUser, tap("Skill_101"), failing).either
+        after                 <- heroDao.readActiveBattle(userId)
+      } yield assertTrue(result.isLeft) && assertTrue(after.isEmpty)
+    },
+
+    test("Damage-скилл добивает моба сам → победа, переход в Loot, бой очищен") {
+      val hero   = heroWith(Some(Skill.SweepingStrike), None)
+      val slots  = List(SkillSlotState(101L, Skill.SweepingStrike))
+      val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
+      for {
+        triple                     <- makeState(hero, battle)
+        (state, heroDao, renderer)  = triple
+        result                     <- state.action(testUser, tap("Skill_101"), renderer)
+        after                      <- heroDao.readActiveBattle(userId)
+      } yield assertTrue(result == StateType.Loot) && assertTrue(after.isEmpty)
+    },
+
     test("Использование незарегистрированного слота → ход не съедается, ошибочное сообщение") {
       val hero  = heroWith(None, None)
       val slots = Nil

@@ -122,9 +122,15 @@ class StateHandler(
       _ <- transitionTo(user, hero.state, potentiallyNewState, renderer)
     } yield ()
 
-  /** Performs a state transition (persist + enter) and follows any
+  /** Performs a state transition (enter + persist) and follows any
     * `autoAdvance` chain so effect nodes route onward without a player action.
     * The fuel guard stops a misconfigured cycle of auto-advancing states.
+    *
+    * `enter` идёт ДО записи состояния: он готовит данные экрана (напр.
+    * `FoundItemState` генерирует находку и кладёт её в `scene_data`). Если бы
+    * состояние писалось первым, падение `enter` оставляло бы героя в новом
+    * состоянии без его данных — и следующее нажатие («Забрать») валилось бы на
+    * чтении `scene_data`, пока игрок не пропишет /home.
     */
   private def transitionTo(
       user: User,
@@ -139,8 +145,8 @@ class StateHandler(
         .orElseFail(
           new Throwable(s"Not found state '$to' for user ${user.userId}")
         )
-      _ <- heroRepo.updateState(user.userId, to)
       _ <- target.enter(user, renderer)
+      _ <- heroRepo.updateState(user.userId, to)
       _ <- target.autoAdvance match {
         case Some(next) if fuel > 0 =>
           transitionTo(user, to, next, renderer, fuel - 1)
