@@ -1,10 +1,11 @@
 package pangea.service.sender.vk
 
+import cats.data.Chain
 import io.circe.parser.parse
 import org.http4s.circe.CirceEntityCodec.circeEntityDecoder
 import org.http4s.client.Client
 import org.http4s.implicits.http4sLiteralsSyntax
-import org.http4s.{Method, Request}
+import org.http4s.{Method, Request, Status, UrlForm}
 import pangea.dao.sendfailure.SendFailureDao
 import pangea.model.user.User
 import pangea.model.vk.Attachment
@@ -32,38 +33,30 @@ class VkApi(client: Client[Task], config: VkConfig, failures: SendFailureDao) ex
   private val sendRetry: Schedule[Any, Any, Any] =
     Schedule.recurs(2) && Schedule.exponential(250.millis)
 
+  // Параметры уходят телом POST (form-urlencoded), а не в query string: длинные
+  // экраны (лавка Ришелье — 3 предмета со сравнением с надетым + клавиатура) в
+  // percent-encoding раздувались до ~7-8 КБ и упирались в лимит строки запроса
+  // на стороне ВК; ответ 414 приходил HTML-ом и молча считался успехом.
   override def sendMessage(
       user: User,
       message: String,
       attachments: List[Attachment],
       keyboard: Option[Keyboard]
   ): Task[Unit] = {
-    var queryParams = Map.empty[String, List[String]]
-    keyboard.foreach(keyboard =>
-      queryParams ++= Map[String, List[String]](
-        "keyboard" -> List(keyboard.getJson)
-      )
-    )
-
-    if (attachments.nonEmpty) {
-      queryParams ++= Map(
-        "message"    -> List(message),
-        "user_id"    -> List(user.vkId.value),
-        "random_id"  -> List(randomId.toString),
-        "attachment" -> List(attachments.mkString(","))
-      ) ++ baseQueryParams
-    } else {
-      queryParams ++= Map(
+    val formParams =
+      Map(
         "message"   -> List(message),
         "user_id"   -> List(user.vkId.value),
         "random_id" -> List(randomId.toString)
-      ) ++ baseQueryParams
-    }
+      ) ++
+        baseQueryParams ++
+        keyboard.map(k => "keyboard" -> List(k.getJson)).toMap ++
+        Option.when(attachments.nonEmpty)("attachment" -> List(attachments.mkString(","))).toMap
 
     val request = Request[Task](
-      method = Method.GET,
-      uri = uri / "messages.send" =? queryParams
-    )
+      method = Method.POST,
+      uri = uri / "messages.send"
+    ).withEntity(UrlForm(formParams.map { case (k, vs) => k -> Chain.fromSeq(vs) }))
 
     // Счётчик попыток для записи в журнал инцидентов.
     for {
@@ -74,7 +67,7 @@ class VkApi(client: Client[Task], config: VkConfig, failures: SendFailureDao) ex
           body <- res.bodyText.compile.toList.map(_.mkString(""))
           // успешный ответ ВК не логируем (шумно). При ошибке тело попадёт
           // в сообщение исключения через [[VkApiError]].
-          _    <- VkApi.failOnApiError(body).tapError(_ => ZIO.logError(s"vk response: $body"))
+          _    <- VkApi.failOnBadResponse(res.status, body).tapError(_ => ZIO.logError(s"vk response: $body"))
         } yield ()
       }
       _ <- send.retry(sendRetry).tapError(err =>
@@ -130,21 +123,32 @@ object VkApi {
   /** Ошибка API VK: тело ответа содержит объект `error`. */
   final case class VkApiError(code: Int, message: String) extends RuntimeException(s"VK API error $code: $message")
 
+  /** Сколько символов тела ответа кладём в текст ошибки (HTML-страницы прокси
+    * бывают на десятки килобайт, а ошибка едет в лог и в `send_failures`). */
+  private val BodySnippetLimit = 300
+
   /**
-   * Парсит тело ответа VK API. Если в JSON есть `error` — фейлит ZIO с
-   * `VkApiError`, иначе — успех. Невалидный JSON игнорируется (VK иногда
-   * отвечает текстом при проблемах транспорта — лог тела уже сделан выше).
+   * Разбирает ответ VK API. Успех — только 2xx с JSON-телом без поля `error`.
+   * Не-2xx (например 414 от прокси при слишком длинном запросе) и тело, которое
+   * не является JSON, — это недоставленное сообщение: фейлим, чтобы отработали
+   * повтор, журнал `send_failures` и `catchAll` в StateHandler. Раньше такой
+   * ответ считался успехом, и игрок молча оставался без экрана.
    */
-  def failOnApiError(body: String): Task[Unit] =
-    parse(body) match {
-      case Left(_) => ZIO.unit
-      case Right(json) =>
-        json.hcursor.downField("error").focus match {
-          case None => ZIO.unit
-          case Some(err) =>
-            val code = err.hcursor.get[Int]("error_code").getOrElse(-1)
-            val msg  = err.hcursor.get[String]("error_msg").getOrElse(err.noSpaces)
-            ZIO.fail(VkApiError(code, msg))
-        }
-    }
+  def failOnBadResponse(status: Status, body: String): Task[Unit] =
+    if (!status.isSuccess) ZIO.fail(VkApiError(status.code, snippet(body)))
+    else
+      parse(body) match {
+        case Left(_) => ZIO.fail(new RuntimeException(s"VK non-JSON response: ${snippet(body)}"))
+        case Right(json) =>
+          json.hcursor.downField("error").focus match {
+            case None => ZIO.unit
+            case Some(err) =>
+              val code = err.hcursor.get[Int]("error_code").getOrElse(-1)
+              val msg  = err.hcursor.get[String]("error_msg").getOrElse(err.noSpaces)
+              ZIO.fail(VkApiError(code, msg))
+          }
+      }
+
+  private def snippet(body: String): String =
+    if (body.length <= BodySnippetLimit) body else body.take(BodySnippetLimit) + "…"
 }
