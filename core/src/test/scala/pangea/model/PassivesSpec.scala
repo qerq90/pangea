@@ -53,12 +53,17 @@ object PassivesSpec extends ZIOSpecDefault {
       )
     },
 
-    test("Быстрые ноги +5 и Сливающиеся +10 складываются в бонус уклонения") {
+    test("Быстрые ноги +5 к бонусу уклонения; Сливающийся не входит в эту прибавку") {
       val p = HeroPassives(Set(PassiveKind.QuickFeet, PassiveKind.Blending))
-      assertTrue(p.dodgeBonusPct == 15L)
+      assertTrue(p.dodgeBonusPct == 5L)
     },
 
-    test("Сверкающие дают бонус уклона только для бегства") {
+    test("Сливающийся снижает точность моба-атакующего на 10% (множитель ×0.9)") {
+      assertTrue(HeroPassives(Set(PassiveKind.Blending)).enemyAccuracyMult == 0.9) &&
+      assertTrue(HeroPassives.empty.enemyAccuracyMult == 1.0)
+    },
+
+    test("Сверкающий даёт бонус уклона только для бегства") {
       val p = HeroPassives(Set(PassiveKind.Glittering))
       assertTrue(p.dodgeBonusPct == 0L, p.fleeDodgeBonusPct == 25L)
     },
@@ -68,7 +73,7 @@ object PassivesSpec extends ZIOSpecDefault {
       assertTrue(p.defenceFlatBonus(100) == 5L, p.accuracyFlatBonus(200) == 10L, p.defenceFlatBonus(1) == 1L)
     },
 
-    test("Разбойника ×1.05 урона, Целителя ×1.10 лечения, Сосредоточенный ×1.10 энергии") {
+    test("Разбойник ×1.05 урона, Целитель ×1.10 лечения, Сосредоточенность ×1.10 энергии") {
       assertTrue(
         HeroPassives(Set(PassiveKind.Robber)).finalDamageMult == 1.05,
         HeroPassives(Set(PassiveKind.Healer)).healMult == 1.10,
@@ -76,7 +81,7 @@ object PassivesSpec extends ZIOSpecDefault {
       )
     },
 
-    test("Охотника ×1.2, Скрытный ×0.8 к весу боя") {
+    test("Охотник ×1.2, Скрытность ×0.8 к весу боя") {
       assertTrue(
         HeroPassives(Set(PassiveKind.Hunter)).battleEncounterFactor == 1.2,
         math.abs(HeroPassives(Set(PassiveKind.Stealthy)).battleEncounterFactor - 0.8) < 1e-9
@@ -98,7 +103,7 @@ object PassivesSpec extends ZIOSpecDefault {
       assertTrue(hero.equipment.passiveKinds == Set[PassiveKind](PassiveKind.Robber))
     },
 
-    test("Укреплённые/Точности входят в effectiveFightStats как плоская прибавка") {
+    test("Укреплённый/Точность входят в effectiveFightStats как плоская прибавка") {
       val base = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(defence = 100, accuracy = 100))
       val eq = base.equipment.copy(
@@ -132,7 +137,7 @@ object PassivesSpec extends ZIOSpecDefault {
     },
 
     // ── Пул событий подземелья ─────────────────────────────────────────────────
-    test("Охотника повышает долю боёв, Скрытный понижает") {
+    test("Охотник повышает долю боёв, Скрытность понижает") {
       val baseBattles    = StateType.events.count(_ == StateType.Battle)
       val hunterBattles  = StateType.eventsWithBattleFactor(1.2).count(_ == StateType.Battle)
       val stealthBattles = StateType.eventsWithBattleFactor(0.8).count(_ == StateType.Battle)

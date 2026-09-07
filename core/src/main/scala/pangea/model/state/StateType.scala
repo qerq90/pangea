@@ -20,7 +20,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
       List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig)
 
   /** Пул событий с изменённым весом боя. `battleFactor` множит число «билетов»
-   *  Battle в пуле: пассивки «Охотника» (×1.2) повышают долю боёв, «Скрытный»
+   *  Battle в пуле: пассивки «Охотник» (×1.2) повышают долю боёв, «Скрытность»
    *  (×0.8) — понижает (см. [[pangea.model.hero.HeroPassives.battleEncounterFactor]]).
    *  Прочие события не трогаются — их абсолютный вес прежний, а относительная доля
    *  сдвигается за счёт изменения общего числа билетов. */

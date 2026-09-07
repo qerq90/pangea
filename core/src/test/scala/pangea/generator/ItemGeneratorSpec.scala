@@ -151,7 +151,7 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
         assertTrue(items.forall(i => i.passive.exists(_.eligibleSlots.contains(i.itemType))))
     },
 
-    test("на кольцах встречаются только кольцевые пассивки (Ювелира/Мародёра/Разбойника/Целителя)") {
+    test("на кольцах встречаются только кольцевые пассивки (Ювелир/Мародёр/Разбойник/Целитель)") {
       val ringPassives = (1L to 2000L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Orange, Rng(s))._1)
         .filter(_.itemType == ItemType.Ring)
