@@ -73,7 +73,7 @@ case class TreasureHuntState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed))
       loot      = LootData(
                     items       = reward.items ++ reward.gems,
-                    golds       = if (reward.gold > 0L) List(reward.gold) else Nil,
+                    silvers     = if (reward.silver > 0L) List(reward.silver) else Nil,
                     doubloons   = reward.doubloons,
                     returnState = Some(StateType.GlobalMap))
       _        <- renderer.show(user, Screen(content.text("treasureHunt.success"), Nil))

@@ -80,12 +80,12 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
       hero <- getHero(user)
       azat <- loadAzat(user)
       _ <- if (!azat.cubeFound) renderer.show(user, Screen(content.text("hall.cube.notFound"), Nil))
-           else if (hero.doubloons < ActivateDoubloons || hero.gold < ActivateSilver)
+           else if (hero.doubloons < ActivateDoubloons || hero.silver < ActivateSilver)
              renderer.show(user, Screen(content.format("hall.cube.notEnoughActivate",
                "doubloons" -> ActivateDoubloons.toString, "silver" -> ActivateSilver.toString), Nil))
            else
              heroDao.updateDoubloons(user.userId, hero.doubloons - ActivateDoubloons) *>
-               heroDao.updateGold(user.userId, hero.gold - ActivateSilver) *>
+               heroDao.updateSilver(user.userId, hero.silver - ActivateSilver) *>
                saveAzat(user, azat.copy(cube = CubeStatus.Active, cubeCharges = AzatState.MaxCharges)) *>
                renderer.show(user, Screen(content.text("hall.cube.activated"), Nil))
       _ <- enter(user, renderer)
@@ -107,11 +107,11 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
       _ <- if (!azat.hasCube) renderer.show(user, Screen(content.text("hall.recharge.noCube"), Nil))
            else if (azat.cubeCharges >= AzatState.MaxCharges)
              renderer.show(user, Screen(content.text("hall.recharge.full_already"), Nil))
-           else if (hero.gold < cost)
+           else if (hero.silver < cost)
              renderer.show(user, Screen(content.format("hall.recharge.notEnough", "cost" -> cost.toString), Nil))
            else {
              val newCharges = (azat.cubeCharges + charges).min(AzatState.MaxCharges)
-             heroDao.updateGold(user.userId, hero.gold - cost) *>
+             heroDao.updateSilver(user.userId, hero.silver - cost) *>
                saveAzat(user, azat.copy(cubeCharges = newCharges)) *>
                renderer.show(user, Screen(content.format("hall.recharge.done", "charges" -> newCharges.toString), Nil))
            }

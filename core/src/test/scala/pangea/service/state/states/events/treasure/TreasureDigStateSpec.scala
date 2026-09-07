@@ -78,7 +78,7 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Loot) &&
               assertTrue(screens.exists(_.text.contains("ровно так"))) &&
               assertTrue(cancelled.contains(userId -> TaskKind.SchronDig)) &&
-              assertTrue(loot.exists(l => l.items.nonEmpty || l.golds.nonEmpty)) &&
+              assertTrue(loot.exists(l => l.items.nonEmpty || l.silvers.nonEmpty)) &&
               assertTrue(loot.exists(l => l.doubloons == 0L || (l.doubloons >= 1L && l.doubloons <= 2L)))
     },
 

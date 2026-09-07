@@ -27,9 +27,9 @@ object TavernStateSpec extends ZIOSpecDefault {
     } yield (TavernState(heroDao, scheduler, content), heroDao, renderer)
 
   private val baseHero   = TestFixtures.hero(userId, state = StateType.Tavern)
-  private val richHero   = baseHero.copy(gold = 500L)
-  private val poorHero   = baseHero.copy(gold = 0L)
-  private val traumaHero = baseHero.copy(gold = 500L, traumaUntil = Some(Long.MaxValue))
+  private val richHero   = baseHero.copy(silver = 500L)
+  private val poorHero   = baseHero.copy(silver = 0L)
+  private val traumaHero = baseHero.copy(silver = 500L, traumaUntil = Some(Long.MaxValue))
 
   override def spec = suite("TavernState")(
 
@@ -93,7 +93,7 @@ object TavernStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.GlobalMap)
     },
 
-    test("RentRoom → списывает gold, показывает комнату с кнопкой «Уйти»") {
+    test("RentRoom → списывает silver, показывает комнату с кнопкой «Уйти»") {
       for {
         triple                     <- makeState(richHero)
         (state, heroDao, renderer)  = triple
@@ -101,12 +101,12 @@ object TavernStateSpec extends ZIOSpecDefault {
         updated                    <- heroDao.getHeroByUserId(userId)
         screens                    <- renderer.sentScreens
       } yield assertTrue(result == StateType.Tavern) &&
-              assertTrue(updated.exists(_.gold < 500L)) &&
+              assertTrue(updated.exists(_.silver < 500L)) &&
               assertTrue(screens.exists(_.text.contains("сняли комнату"))) &&
               assertTrue(screens.last.choices.map(_.id) == List("LeaveRoom"))
     },
 
-    test("RentRoom без золота → ошибка, gold не меняется") {
+    test("RentRoom без серебра → ошибка, silver не меняется") {
       for {
         triple                     <- makeState(poorHero)
         (state, heroDao, renderer)  = triple
@@ -114,7 +114,7 @@ object TavernStateSpec extends ZIOSpecDefault {
         updated                    <- heroDao.getHeroByUserId(userId)
         screens                    <- renderer.sentScreens
       } yield assertTrue(result == StateType.Tavern) &&
-              assertTrue(updated.exists(_.gold == 0L)) &&
+              assertTrue(updated.exists(_.silver == 0L)) &&
               assertTrue(screens.exists(_.text.contains("Недостаточно")))
     },
 

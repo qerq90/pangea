@@ -141,9 +141,9 @@ object PassiveKind extends Enum[PassiveKind] {
   // ── Кольца ────────────────────────────────────────────────────────────────────
   case object Jeweler extends PassiveKind(
     "Ювелира",
-    "Ювелира: +10% шанс получить дополнительное золото после боя.",
+    "Ювелира: +10% шанс получить дополнительное серебро после боя.",
     Rings
-  ) { val GoldChancePct: Long = 10L }
+  ) { val SilverChancePct: Long = 10L }
 
   case object Marauder extends PassiveKind(
     "Мародёра",

@@ -17,25 +17,25 @@ import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
 /**
- * Событие «Золотая жила». Игрок входит и сразу начинает добычу: state хранит
- * `goldVeinStartedAt` в `scene_data`, поллер по таймеру (`Harvest`) сам выдаёт
- * золото и возвращает в Dungeon. Ручная кнопка «Уйти» работает как fallback и
+ * Событие «Серебряная жила». Игрок входит и сразу начинает добычу: state хранит
+ * `silverVeinStartedAt` в `scene_data`, поллер по таймеру (`Harvest`) сам выдаёт
+ * серебро и возвращает в Dungeon. Ручная кнопка «Уйти» работает как fallback и
  * для досрочного прерывания (с подтверждением).
  *
- * Формула золота: `(dungeonLevel + 5) × 4`, домноженное на 100 ± d процентов,
+ * Формула серебра: `(dungeonLevel + 5) × 4`, домноженное на 100 ± d процентов,
  * где `d ∈ [10, 20]` — направление и величина разброса роллятся отдельно.
  */
-case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
-  import GoldVeinState._
+case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
+  import SilverVeinState._
 
   private val branch = new Branch(
     routes = Map(
       "LeaveVein"        -> Target.Run { (user, _, renderer) => leaveVein(user, renderer) },
       "ConfirmLeaveVein" -> Target.Run { (user, _, renderer) => confirmLeave(user, renderer) },
-      "CancelLeaveVein"  -> Target.Run { (user, _, renderer) => showVein(user, renderer).as(StateType.GoldVein) },
+      "CancelLeaveVein"  -> Target.Run { (user, _, renderer) => showVein(user, renderer).as(StateType.SilverVein) },
       "Harvest"          -> Target.Run { (user, _, renderer) => harvest(user, renderer) }
     ),
-    fallback = Target.Run { (user, _, renderer) => showVein(user, renderer).as(StateType.GoldVein) }
+    fallback = Target.Run { (user, _, renderer) => showVein(user, renderer).as(StateType.SilverVein) }
   )
 
   override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.Loot)
@@ -44,7 +44,7 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
     for {
       now <- nowMs
       _   <- heroDao.writeSceneData(user.userId, Json.obj(StartedAtKey -> now.asJson))
-      _   <- scheduler.schedule(user.userId, now + HarvestDurationMs, TaskKind.Harvest, StateType.GoldVein, HarvestAction)
+      _   <- scheduler.schedule(user.userId, now + HarvestDurationMs, TaskKind.Harvest, StateType.SilverVein, HarvestAction)
       _   <- showVein(user, renderer)
     } yield ()
 
@@ -59,12 +59,12 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
       // реальный остаток времени до конца добычи, а не полную длительность.
       remaining = started.map(s => (HarvestDurationMs - (now - s)).max(0L)).getOrElse(HarvestDurationMs)
       _       <- renderer.show(user, Screen(
-                   content.format("goldVein.enter.text", "duration" -> formatRemaining(remaining)),
-                   content.screen("goldVein.enter").choices))
+                   content.format("silverVein.enter.text", "duration" -> formatRemaining(remaining)),
+                   content.screen("silverVein.enter").choices))
     } yield ()
 
   // Ручная попытка уйти: до конца добычи показываем confirm c остатком времени;
-  // если поллер ещё не успел сработать после `fireAt` — сами выдадим золото.
+  // если поллер ещё не успел сработать после `fireAt` — сами выдадим серебро.
   private def leaveVein(user: User, renderer: Renderer): Task[StateType] =
     for {
       now     <- nowMs
@@ -75,21 +75,21 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
         case Some(start) =>
           val remaining = formatRemaining(HarvestDurationMs - (now - start))
           renderer.show(user, Screen(
-            content.format("goldVein.confirmLeave.text", "remaining" -> remaining),
-            content.screen("goldVein.confirmLeave").choices)).as(StateType.GoldVein)
+            content.format("silverVein.confirmLeave.text", "remaining" -> remaining),
+            content.screen("silverVein.confirmLeave").choices)).as(StateType.SilverVein)
       }
     } yield result
 
-  // Досрочный выход: золота нет, снимаем отложенный Harvest, чистим scene_data.
+  // Досрочный выход: серебра нет, снимаем отложенный Harvest, чистим scene_data.
   private def confirmLeave(user: User, renderer: Renderer): Task[StateType] =
     scheduler.cancel(user.userId, TaskKind.Harvest) *>
       heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.text("goldVein.left"), Nil)).as(StateType.Dungeon)
+      renderer.show(user, Screen(content.text("silverVein.left"), Nil)).as(StateType.Dungeon)
 
   // Завершение добычи (по таймеру от поллера или вручную после fireAt). С шансом
   // GemDropChancePct из жилы выпадает один камень-усилитель грейда «расколотый»
-  // (1-й тир) — тогда золото и камень выдаются через экран добычи (Loot); иначе
-  // золото начисляется сразу с флейвор-сообщением.
+  // (1-й тир) — тогда серебро и камень выдаются через экран добычи (Loot); иначе
+  // серебро начисляется сразу с флейвор-сообщением.
   private def harvest(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero    <- getHero(user)
@@ -100,22 +100,22 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
       _       <- scheduler.cancel(user.userId, TaskKind.Harvest)
       gemRoll <- Random.nextIntBetween(1, 101)
       result  <- if (gemRoll <= GemDropChancePct) dropGem(user, reward)
-                 else grantGoldDirectly(user, hero.gold, reward, renderer)
+                 else grantSilverDirectly(user, hero.silver, reward, renderer)
     } yield result
 
-  // Золото + камень через экран добычи (Loot начислит золото и предложит забрать камень).
+  // Серебро + камень через экран добычи (Loot начислит серебро и предложит забрать камень).
   private def dropGem(user: User, reward: Long): Task[StateType] =
     for {
       kindIdx <- Random.nextIntBounded(GemKind.values.size)
       gem      = GemGenerator.item(GemKind.values(kindIdx), Gem.MinGrade)
-      loot     = LootData(items = List(gem), golds = List(reward))
+      loot     = LootData(items = List(gem), silvers = List(reward))
       _       <- heroDao.writeSceneData(user.userId, loot.asJson)
     } yield StateType.Loot
 
-  private def grantGoldDirectly(user: User, curGold: Long, reward: Long, renderer: Renderer): Task[StateType] =
-    heroDao.updateGold(user.userId, curGold + reward) *>
+  private def grantSilverDirectly(user: User, curSilver: Long, reward: Long, renderer: Renderer): Task[StateType] =
+    heroDao.updateSilver(user.userId, curSilver + reward) *>
       heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.format("goldVein.done", "gold" -> reward.toString), Nil))
+      renderer.show(user, Screen(content.format("silverVein.done", "silver" -> reward.toString), Nil))
         .as(StateType.Dungeon)
 
   private def startedAt(user: User): Task[Option[Long]] =
@@ -136,12 +136,12 @@ case class GoldVeinState(heroDao: HeroDao, scheduler: Scheduler, content: SceneC
   }
 }
 
-object GoldVeinState {
+object SilverVeinState {
   val HarvestDurationMs: Long = 15L * 60L * 1000L
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
   val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы
 
-  private val StartedAtKey  = "goldVeinStartedAt"
+  private val StartedAtKey  = "silverVeinStartedAt"
   private val HarvestAction = """{"action":"Harvest"}"""
 }

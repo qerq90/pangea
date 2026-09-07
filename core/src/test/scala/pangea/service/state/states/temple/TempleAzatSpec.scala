@@ -15,8 +15,8 @@ object TempleAzatSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  private def hero(gold: Long = 0L, doubloons: Long = 0L) =
-    TestFixtures.hero(userId).copy(gold = gold, doubloons = doubloons)
+  private def hero(silver: Long = 0L, doubloons: Long = 0L) =
+    TestFixtures.hero(userId).copy(silver = silver, doubloons = doubloons)
 
   private def readAzat(dao: TestHeroDao) =
     dao.readAzatData(userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
@@ -68,31 +68,31 @@ object TempleAzatSpec extends ZIOSpecDefault {
 
     test("ActivateCube из найденного: 20 дублонов + 10000 серебра → активен, 50 зарядов") {
       for {
-        dao      <- TestHeroDao.withHero(userId, hero(gold = 10000L, doubloons = 20L))
+        dao      <- TestHeroDao.withHero(userId, hero(silver = 10000L, doubloons = 20L))
         _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.FoundInactive).asJson)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
         state     = HallAzatState(dao, content)
         _        <- state.action(testUser, tap("ActivateCube"), renderer)
         azat     <- readAzat(dao)
-        goldLeft <- dao.getHeroByUserId(userId).map(_.get.gold)
+        silverLeft <- dao.getHeroByUserId(userId).map(_.get.silver)
       } yield assertTrue(azat.cube == CubeStatus.Active) &&
               assertTrue(azat.cubeCharges == AzatState.MaxCharges) &&
-              assertTrue(goldLeft == 0L)
+              assertTrue(silverLeft == 0L)
     },
 
     test("RechargeFull: +50 зарядов до максимума, серебро списано") {
       for {
-        dao      <- TestHeroDao.withHero(userId, hero(gold = 20000L))
+        dao      <- TestHeroDao.withHero(userId, hero(silver = 20000L))
         _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 10).asJson)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
         state     = HallAzatState(dao, content)
         _        <- state.action(testUser, tap("RechargeFull"), renderer)
         azat     <- readAzat(dao)
-        goldLeft <- dao.getHeroByUserId(userId).map(_.get.gold)
+        silverLeft <- dao.getHeroByUserId(userId).map(_.get.silver)
       } yield assertTrue(azat.cubeCharges == AzatState.MaxCharges) &&
-              assertTrue(goldLeft == 10000L)
+              assertTrue(silverLeft == 10000L)
     }
   )
 }

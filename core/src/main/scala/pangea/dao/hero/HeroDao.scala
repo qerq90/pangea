@@ -19,7 +19,7 @@ trait HeroDao {
   def updateMaxDungeonLevel(userId: UserId, level: Int): Task[Unit]
   def updateFightStats(userId: UserId, stats: FightStats): Task[Unit]
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
-  def updateGold(userId: UserId, gold: Long): Task[Unit]
+  def updateSilver(userId: UserId, silver: Long): Task[Unit]
   def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit]
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
   def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]

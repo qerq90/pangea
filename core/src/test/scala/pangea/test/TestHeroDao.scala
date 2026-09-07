@@ -45,8 +45,8 @@ class TestHeroDao(
     heroRef.update(m => m.get(userId).fold(m)(h =>
       m.updated(userId, h.copy(exp = exp, lvl = lvl, upgradePoints = upgradePoints))))
 
-  def updateGold(userId: UserId, gold: Long): Task[Unit] =
-    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(gold = gold))))
+  def updateSilver(userId: UserId, silver: Long): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(silver = silver))))
 
   def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(doubloons = doubloons))))

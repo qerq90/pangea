@@ -20,7 +20,7 @@ import zio.{Task, ZIO}
  * Промежуточный экран добычи после победы. `BattleState.victory` уже прокатал лут
  * (чистый `LootGenerator`) и положил его в scene_data; здесь мы «осматриваем добычу»:
  * показываем, что выпало, и двумя кнопками спрашиваем
- * «Забрать»/«Оставить». Забрать → золото в кошелёк, предметы в инвентарь (переполнен →
+ * «Забрать»/«Оставить». Забрать → серебро в кошелёк, предметы в инвентарь (переполнен →
  * предмет теряется). Оставить → добыча выбрасывается. Оба исхода ведут в Dungeon.
  */
 case class LootState(
@@ -55,23 +55,23 @@ case class LootState(
       hero <- getHero(user)
       loot <- readLoot(user)
 
-      // золото и дублоны забираются всегда и сразу, без выбора
-      goldTotal = loot.golds.sum
-      _        <- ZIO.when(goldTotal > 0L)(heroDao.updateGold(user.userId, hero.gold + goldTotal))
+      // серебро и дублоны забираются всегда и сразу, без выбора
+      silverTotal = loot.silvers.sum
+      _        <- ZIO.when(silverTotal > 0L)(heroDao.updateSilver(user.userId, hero.silver + silverTotal))
       _        <- ZIO.when(loot.doubloons > 0L)(heroDao.updateDoubloons(user.userId, hero.doubloons + loot.doubloons))
-      goldLines = loot.golds.map { g => content.format("loot.gold", "amount" -> g.toString) }
-      currencyLines = goldLines ++
+      silverLines = loot.silvers.map { s => content.format("loot.silver", "amount" -> s.toString) }
+      currencyLines = silverLines ++
         (if (loot.doubloons > 0L) List(content.format("loot.doubloons", "amount" -> loot.doubloons.toString)) else Nil)
 
       _ <- if (loot.items.isEmpty) {
-             // выбирать нечего — только золото/дублоны (или совсем пусто)
+             // выбирать нечего — только серебро/дублоны (или совсем пусто)
              val text = if (currencyLines.isEmpty) content.text("loot.empty")
                         else content.text("loot.header") + "\n\n" + currencyLines.mkString("\n")
              journal.append(GameEvent(user.userId, "loot_claimed",
-               Json.obj("gold" -> goldTotal.asJson, "items" -> loot.items.map(_.name).asJson))) *>
+               Json.obj("silver" -> silverTotal.asJson, "items" -> loot.items.map(_.name).asJson))) *>
                renderer.show(user, Screen(text, content.screen("loot.enter").choices))
            } else {
-             // золото/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
+             // серебро/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
              val preview = currencyLines ++ loot.items.map(it => itemLineWithEquipped(it, hero))
              val text    = content.text("loot.header") + "\n\n" + preview.mkString("\n")
              val choices = List(
@@ -85,7 +85,7 @@ case class LootState(
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  // «Забрать»: предметы в инвентарь (переполнен → предмет теряется). Золото уже забрано в enter.
+  // «Забрать»: предметы в инвентарь (переполнен → предмет теряется). Серебро уже забрано в enter.
   private def claimLoot(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
@@ -100,7 +100,7 @@ case class LootState(
                  }
 
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
-             Json.obj("gold" -> loot.golds.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
+             Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
 
       takenLines = results.collect { case (item, true) => itemLine(item) }
       anyLost    = results.exists { case (_, added) => !added }
@@ -112,12 +112,12 @@ case class LootState(
       next <- finish(user, loot)
     } yield next
 
-  // «Оставить»: предметы выбрасываются (золото уже забрано в enter).
+  // «Оставить»: предметы выбрасываются (серебро уже забрано в enter).
   private def leaveLoot(user: User, renderer: Renderer): Task[StateType] =
     for {
       loot <- readLoot(user)
       _    <- journal.append(GameEvent(user.userId, "loot_left",
-                Json.obj("gold" -> loot.golds.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
+                Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
       _    <- renderer.show(user, Screen(content.text("loot.left"), Nil))
       next <- finish(user, loot)
     } yield next
@@ -159,7 +159,7 @@ case class LootState(
 
 object LootState {
   // Содержимое scene_data между victory и экраном добычи: непросохранённые предметы
-  // (id = -1) и список золотых выпадений. Плюс обобщённый «роутинг»:
+  // (id = -1) и список серебряных выпадений. Плюс обобщённый «роутинг»:
   //   - doubloons   — дублоны к выдаче (премиум-валюта схрона);
   //   - returnState — куда уйти после добычи (default Dungeon); экран сам рулит;
   //   - eventData   — непрозрачный блоб для состояния-получателя (его пишут в
@@ -167,7 +167,7 @@ object LootState {
   //                   прогресс — напр. ChainData цепочки боёв).
   final case class LootData(
     items:       List[Item],
-    golds:       List[Long],
+    silvers:     List[Long],
     doubloons:   Long              = 0L,
     returnState: Option[StateType] = None,
     eventData:   Option[Json]      = None

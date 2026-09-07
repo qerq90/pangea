@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task}
 
-/** Экран зелья лечения травм Густаво. За 100 × уровень золота снимает случайную активную
+/** Экран зелья лечения травм Густаво. За 100 × уровень серебра снимает случайную активную
  *  травму, после чего зелье уходит на кулдаун 30 минут. Нет активных травм — «Пошёл отсюда,
  *  шутник» без списаний. По завершении возвращает в меню [[GustavoState]]. */
 case class GustavoHealState(
@@ -69,15 +69,15 @@ case class GustavoHealState(
     val price  = cost(hero)
     if (active.isEmpty)
       renderer.show(user, Screen(content.text("gustavo.noTraumas"), Nil))
-    else if (hero.gold < price)
-      renderer.show(user, Screen(content.format("gustavo.notEnoughGold", "cost" -> price.toString), Nil))
+    else if (hero.silver < price)
+      renderer.show(user, Screen(content.format("gustavo.notEnoughSilver", "cost" -> price.toString), Nil))
     else
       for {
         idx      <- Random.nextIntBetween(0, active.length)
         healed    = active(idx)
         newNames  = removeFirst(hero.traumaNames, healed.name)
         newUntil  = if (newNames.isEmpty) None else hero.traumaUntil
-        _        <- heroDao.updateGold(user.userId, hero.gold - price)
+        _        <- heroDao.updateSilver(user.userId, hero.silver - price)
         _        <- heroDao.updateTrauma(user.userId, newUntil, newNames)
         _        <- heroDao.writeGustavoData(user.userId,
                       data.copy(healCooldownUntil = Some(now + GustavoData.HealCooldownMs)).asJson)

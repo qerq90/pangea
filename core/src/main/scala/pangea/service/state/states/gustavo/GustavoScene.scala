@@ -34,13 +34,13 @@ trait GustavoScene {
     case _                      => None
   }
 
-  /** Цена пополнения фляги: 25 золота за каждый недостающий глоток. */
+  /** Цена пополнения фляги: 25 серебра за каждый недостающий глоток. */
   protected def flaskRefillCost(hero: Hero): Long =
     charged(hero.equipment.flask)
       .map(c => (c.maxCharges - c.charges).toLong * GustavoData.FlaskRefillCostPerCharge)
       .getOrElse(0L)
 
-  /** Цена пополнения пояса: 100 золота за каждую недостающую бутыль. */
+  /** Цена пополнения пояса: 100 серебра за каждую недостающую бутыль. */
   protected def beltRefillCost(hero: Hero): Long =
     charged(hero.equipment.belt)
       .map(c => (c.maxCharges - c.charges).toLong * GustavoData.BeltRefillCostPerBottle)

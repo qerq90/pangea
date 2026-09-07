@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
-/** Пополнение бутылей надетого пояса у Густаво. За 100 золота за каждую недостающую бутыль
+/** Пополнение бутылей надетого пояса у Густаво. За 100 серебра за каждую недостающую бутыль
  *  восстанавливает `charges` пояса до `maxCharges`. Нет надетого пояса или он уже полный —
  *  сообщение без списаний. По завершении возвращает в раздел припасов [[GustavoSuppliesState]]. */
 case class GustavoBeltState(
@@ -65,14 +65,14 @@ case class GustavoBeltState(
              renderer.show(user, Screen(content.text("gustavo.supplies.beltNone"), back))
            else if (isFull(belt))
              renderer.show(user, Screen(content.text("gustavo.supplies.beltFull"), back))
-           else if (hero.gold < price)
-             renderer.show(user, Screen(content.format("gustavo.supplies.beltNotEnoughGold", "cost" -> price.toString), back))
+           else if (hero.silver < price)
+             renderer.show(user, Screen(content.format("gustavo.supplies.beltNotEnoughSilver", "cost" -> price.toString), back))
            else
              refill(user, hero, belt, price, renderer)
     } yield StateType.GustavoSupplies
 
   private def refill(user: User, hero: Hero, belt: Item, price: Long, renderer: Renderer): Task[Unit] =
-    heroDao.updateGold(user.userId, hero.gold - price) *>
+    heroDao.updateSilver(user.userId, hero.silver - price) *>
       heroDao.updateEquipment(user.userId, hero.equipment.copy(belt = belt.copy(details = beltDetails(belt).map(_.refilled).getOrElse(belt.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.beltRefilled",
         "charges" -> beltDetails(belt).map(_.maxCharges).getOrElse(0).toString), back))

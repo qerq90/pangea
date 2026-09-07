@@ -9,17 +9,17 @@ import scala.annotation.tailrec
 
 /** Чистое ядро добычи похода за сокровищем по карте клада. Уровень у карты не
   * хранится: диапазон задаёт зона ([[MapZone.levels]], напр. Кинэт 1–25) — каждый
-  * предмет и золото катаются на случайный уровень внутри этого диапазона.
+  * предмет и серебро катаются на случайный уровень внутри этого диапазона.
   *
   *   - снаряжение: 2 экземпляра гарантированно, 3-й — с шансом 50%, и только
   *     если он выпал, ролится 4-й (тоже 50%) → итог 2–4 предмета; редкость
   *     каждого: Blue 20 · Purple 35 · Violet 31 · Orange 14 (сумма = 100);
-  *   - золото выпадает гарантированно (`lvl×12×100 ±20%`);
-  *   - дублоны — с шансом 80% (30–70), сверх золота.
+  *   - серебро выпадает гарантированно (`lvl×12×100 ±20%`);
+  *   - дублоны — с шансом 80% (30–70), сверх серебра.
   */
 object TreasureHuntGenerator {
 
-  final case class Reward(items: List[Item], gems: List[Item], gold: Long, doubloons: Long)
+  final case class Reward(items: List[Item], gems: List[Item], silver: Long, doubloons: Long)
 
   // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -36,12 +36,12 @@ object TreasureHuntGenerator {
     // Сверх снаряжения — 1..5 камней-усилителей грейда «расколотый» (1-й тир).
     val (gemCount, r2a)   = r2.between(1L, 6L)                     // 1..5
     val (gems, r2b)       = GemGenerator.randomGems(gemCount.toInt, Gem.MinGrade, r2a)
-    val (gold, r3)        = rollGold(zone, r2b)                    // гарантированно
+    val (silver, r3)      = rollSilver(zone, r2b)                  // гарантированно
     val (doubloonRoll, r4) = r3.between(0L, 100L)
     val (doubloons, r5) =
       if (doubloonRoll < 80) r4.between(30L, 71L)                  // 80% — 30..70
       else                   (0L, r4)                              // 20% — без дублонов
-    (Reward(items, gems, gold, doubloons), r5)
+    (Reward(items, gems, silver, doubloons), r5)
   }
 
   // 2 гарантированно; 3-й — 50%; и лишь если он выпал, 4-й — тоже 50%.
@@ -65,8 +65,8 @@ object TreasureHuntGenerator {
       rollGear(n - 1, zone, item :: acc, r3)
     }
 
-  // Золото: базис lvl×12×100 (уровень — из диапазона зоны) с разбросом ±20%, минимум 1.
-  private def rollGold(zone: MapZone, rng: Rng): (Long, Rng) = {
+  // Серебро: базис lvl×12×100 (уровень — из диапазона зоны) с разбросом ±20%, минимум 1.
+  private def rollSilver(zone: MapZone, rng: Rng): (Long, Rng) = {
     val (lvl, r1)   = levelIn(zone, rng)
     val base        = lvl.max(1L) * 12L * 100L
     val (pct, next) = r1.between(80L, 121L) // 80..120 %

@@ -39,8 +39,8 @@ case class DeathState(
                         .getOrElse("Монстр")
       expLost       = (hero.exp * 0.1).toLong.max(0L)
       newExp        = (hero.exp - expLost).max(0L)
-      goldLost      = hero.gold / 2
-      newGold       = hero.gold - goldLost
+      silverLost    = hero.silver / 2
+      newSilver     = hero.silver - silverLost
 
       // traumas that are still active are kept; expired ones reset to empty list
       existingNames = if (hero.traumaActive(now)) hero.traumaNames else Nil
@@ -59,14 +59,14 @@ case class DeathState(
       traumaUntil   = now + 8L * 3600 * 1000
 
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
-      _            <- heroDao.updateGold(user.userId, newGold)
+      _            <- heroDao.updateSilver(user.userId, newSilver)
       _            <- heroDao.clearActiveBattle(user.userId)
       // Первое сообщение после смерти — сразу убираем боевую клавиатуру, чтобы
       // не висела поверх «обморока».
       _            <- renderer.show(user, Screen(
                         content.format("death.penalty",
-                          "expLost"  -> expLost.toString,
-                          "goldLost" -> goldLost.toString), Nil, hideKeyboard = true))
+                          "expLost"    -> expLost.toString,
+                          "silverLost" -> silverLost.toString), Nil, hideKeyboard = true))
       _            <- applyTrauma(user, existingNames, pool, traumaUntil, renderer)
 
       _            <- dropItems(user, hero.id, monsterName, renderer)

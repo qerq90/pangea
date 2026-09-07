@@ -13,11 +13,11 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
-  // Battle 40% · FoundItem 20% · Spring 20% · GoldVein 10% · TreasureMobs 5% ·
+  // Battle 40% · FoundItem 20% · Spring 20% · SilverVein 10% · TreasureMobs 5% ·
   // TreasureDig 5% (вес = число повторов в пуле, сумма = 100).
   val events: List[StateType] =
     List.fill(40)(Battle) ++ List.fill(20)(FoundItem) ++ List.fill(20)(Spring) ++
-      List.fill(10)(GoldVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig)
+      List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig)
 
   /** Пул событий с изменённым весом боя. `battleFactor` множит число «билетов»
    *  Battle в пуле: пассивки «Охотника» (×1.2) повышают долю боёв, «Скрытный»
@@ -61,7 +61,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object QuestBoard extends StateType
   case object Innkeeper  extends StateType
   case object CardSeller extends StateType // «Подозрительный человек» — продавец карт
-  case object GoldVein       extends StateType
+  case object SilverVein     extends StateType
   case object Construction   extends StateType
   case object Guild          extends StateType
   case object TrophyExchange extends StateType

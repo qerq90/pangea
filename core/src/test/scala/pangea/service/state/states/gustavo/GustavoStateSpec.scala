@@ -22,8 +22,8 @@ object GustavoStateSpec extends ZIOSpecDefault {
     UserAction("", Some(s"""{"action":"$key","stat":"$stat"}"""))
 
   // lvl 10 → цена зелья = 10 × 100 = 1000
-  private def hero(gold: Long = 5000L, traumaUntil: Option[Long] = None, traumaNames: List[String] = Nil) =
-    TestFixtures.hero(userId).copy(lvl = 10L, gold = gold, traumaUntil = traumaUntil, traumaNames = traumaNames)
+  private def hero(silver: Long = 5000L, traumaUntil: Option[Long] = None, traumaNames: List[String] = Nil) =
+    TestFixtures.hero(userId).copy(lvl = 10L, silver = silver, traumaUntil = traumaUntil, traumaNames = traumaNames)
 
   private val farFuture = 1_000_000_000L
   private def hurtHero  = hero(traumaUntil = Some(farFuture), traumaNames = List(Trauma.SmashedFinger.name))
@@ -37,8 +37,8 @@ object GustavoStateSpec extends ZIOSpecDefault {
     case f: ItemDetails.Flask => Some(f.charges)
     case _                    => None
   }
-  private def heroWithFlask(f: Item, gold: Long = 5000L) =
-    hero(gold = gold).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
+  private def heroWithFlask(f: Item, silver: Long = 5000L) =
+    hero(silver = silver).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
 
   // пояс с charges/maxCharges для тестов пополнения
   private def belt(charges: Int, maxCharges: Int): Item =
@@ -49,8 +49,8 @@ object GustavoStateSpec extends ZIOSpecDefault {
     case b: ItemDetails.Belt => Some(b.charges)
     case _                   => None
   }
-  private def heroWithBelt(b: Item, gold: Long = 5000L) =
-    hero(gold = gold).copy(equipment = TestFixtures.emptyEquipment.copy(belt = b))
+  private def heroWithBelt(b: Item, silver: Long = 5000L) =
+    hero(silver = silver).copy(equipment = TestFixtures.emptyEquipment.copy(belt = b))
 
   private def env(h: pangea.model.hero.Hero) =
     for {
@@ -138,7 +138,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(st == StateType.Gustavo) &&
                 assertTrue(h.exists(_.traumaNames.isEmpty)) &&
-                assertTrue(h.exists(_.gold == 4000L)) &&
+                assertTrue(h.exists(_.silver == 4000L)) &&
                 assertTrue(data.exists(_.healCooldownUntil.isDefined)) &&
                 assertTrue(screens.exists(_.text.contains("Исцелена травма")))
       },
@@ -151,12 +151,12 @@ object GustavoStateSpec extends ZIOSpecDefault {
           h       <- heroDao.getHeroByUserId(userId)
           data    <- heroDao.readGustavoData(userId)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.exists(_.gold == 5000L)) &&
+        } yield assertTrue(h.exists(_.silver == 5000L)) &&
                 assertTrue(data.isEmpty) &&
                 assertTrue(screens.exists(_.text.contains("шутник")))
       },
 
-      test("BuyPotion на кулдауне → сообщение про 30 минут, золото не списано") {
+      test("BuyPotion на кулдауне → сообщение про 30 минут, серебро не списано") {
         for {
           t <- env(hurtHero)
           (heroDao, renderer, content) = t
@@ -164,7 +164,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           _       <- GustavoHealState(heroDao, content).action(testUser, tap("BuyPotion"), renderer)
           h       <- heroDao.getHeroByUserId(userId)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.exists(_.gold == 5000L)) &&
+        } yield assertTrue(h.exists(_.silver == 5000L)) &&
                 assertTrue(h.exists(_.traumaNames.nonEmpty)) &&
                 assertTrue(screens.exists(_.text.contains("30 минут")))
       },
@@ -193,14 +193,14 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(str.exists(_.color == ChoiceColor.Positive))
       },
 
-      test("BoostBuy str (первое, бесплатно) → баф активен, золото не списано, +15% СИЛ") {
+      test("BoostBuy str (первое, бесплатно) → баф активен, серебро не списано, +15% СИЛ") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           _    <- GustavoBoostState(heroDao, content).action(testUser, tapStat("BoostBuy", "str"), renderer)
           h    <- heroDao.getHeroByUserId(userId).map(_.get)
           data <- heroDao.readGustavoData(userId).map(_.flatMap(_.as[GustavoData].toOption))
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(h.statBoosts.hasActive("gustavo:str", 0L)) &&
                 assertTrue(data.exists(_.freeBoostsUsed.contains("str"))) &&
                 assertTrue(h.effectiveBaseStats(0L).str == 11L) // 10 × 1.15 = 11
@@ -213,7 +213,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           _ <- heroDao.writeGustavoData(userId, GustavoData(None, List("str")).asJson)
           _ <- GustavoBoostState(heroDao, content).action(testUser, tapStat("BoostBuy", "str"), renderer)
           h <- heroDao.getHeroByUserId(userId).map(_.get)
-        } yield assertTrue(h.gold == 4000L) &&
+        } yield assertTrue(h.silver == 4000L) &&
                 assertTrue(h.statBoosts.hasActive("gustavo:str", 0L))
       },
 
@@ -227,21 +227,21 @@ object GustavoStateSpec extends ZIOSpecDefault {
           _       <- GustavoBoostState(heroDao, content).action(testUser, tapStat("BoostBuy", "str"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(screens.exists(_.text.contains("готовится")))
       },
 
-      test("BoostBuy платное без золота → сообщение, баф не выдан") {
+      test("BoostBuy платное без серебра → сообщение, баф не выдан") {
         for {
-          t <- env(hero(gold = 0L))
+          t <- env(hero(silver = 0L))
           (heroDao, renderer, content) = t
           _       <- heroDao.writeGustavoData(userId, GustavoData(None, List("str")).asJson)
           _       <- GustavoBoostState(heroDao, content).action(testUser, tapStat("BoostBuy", "str"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 0L) &&
+        } yield assertTrue(h.silver == 0L) &&
                 assertTrue(!h.statBoosts.hasActive("gustavo:str", 0L)) &&
-                assertTrue(screens.exists(_.text.contains("Столько золота нет")))
+                assertTrue(screens.exists(_.text.contains("Столько серебра нет")))
       },
 
       test("Back → GustavoState") {
@@ -303,41 +303,41 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(st == StateType.GustavoSupplies) &&
                 assertTrue(flaskCharges(h.equipment.flask).contains(3)) &&
-                assertTrue(h.gold == 4950L) &&
+                assertTrue(h.silver == 4950L) &&
                 assertTrue(screens.exists(_.text.contains("наполнил флягу")))
       },
 
-      test("Refill без золота → сообщение, заряды и золото не меняются") {
+      test("Refill без серебра → сообщение, заряды и серебро не меняются") {
         for {
-          t <- env(heroWithFlask(flask(1, 3), gold = 10L))
+          t <- env(heroWithFlask(flask(1, 3), silver = 10L))
           (heroDao, renderer, content) = t
           _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 10L) &&
+        } yield assertTrue(h.silver == 10L) &&
                 assertTrue(flaskCharges(h.equipment.flask).contains(1)) &&
-                assertTrue(screens.exists(_.text.contains("Столько золота нет")))
+                assertTrue(screens.exists(_.text.contains("Столько серебра нет")))
       },
 
-      test("Refill с полной флягой → «уже полная», золото не списано") {
+      test("Refill с полной флягой → «уже полная», серебро не списано") {
         for {
           t <- env(heroWithFlask(flask(3, 3)))
           (heroDao, renderer, content) = t
           _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(screens.exists(_.text.contains("полная")))
       },
 
-      test("Refill без фляги → «фляги нет», золото не списано") {
+      test("Refill без фляги → «фляги нет», серебро не списано") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(screens.exists(_.text.contains("фляги-то у тебя и нет")))
       },
 
@@ -373,41 +373,41 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(st == StateType.GustavoSupplies) &&
                 assertTrue(beltCharges(h.equipment.belt).contains(3)) &&
-                assertTrue(h.gold == 4800L) &&
+                assertTrue(h.silver == 4800L) &&
                 assertTrue(screens.exists(_.text.contains("забил бутыли")))
       },
 
-      test("Refill без золота → сообщение, бутыли и золото не меняются") {
+      test("Refill без серебра → сообщение, бутыли и серебро не меняются") {
         for {
-          t <- env(heroWithBelt(belt(1, 3), gold = 10L))
+          t <- env(heroWithBelt(belt(1, 3), silver = 10L))
           (heroDao, renderer, content) = t
           _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 10L) &&
+        } yield assertTrue(h.silver == 10L) &&
                 assertTrue(beltCharges(h.equipment.belt).contains(1)) &&
-                assertTrue(screens.exists(_.text.contains("Столько золота нет")))
+                assertTrue(screens.exists(_.text.contains("Столько серебра нет")))
       },
 
-      test("Refill с полным поясом → «все полны», золото не списано") {
+      test("Refill с полным поясом → «все полны», серебро не списано") {
         for {
           t <- env(heroWithBelt(belt(3, 3)))
           (heroDao, renderer, content) = t
           _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(screens.exists(_.text.contains("полны")))
       },
 
-      test("Refill без пояса → «пояса нет», золото не списано") {
+      test("Refill без пояса → «пояса нет», серебро не списано") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           _       <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(h.gold == 5000L) &&
+        } yield assertTrue(h.silver == 5000L) &&
                 assertTrue(screens.exists(_.text.contains("пояса-то у тебя и нет")))
       },
 

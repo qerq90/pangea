@@ -92,15 +92,15 @@ case class MerchantState(
       idx   = payloadIdx(ua).getOrElse(-1)
       _ <- data.items.lift(idx) match {
              case Some(mi) if !mi.bought =>
-               if (hero.gold < mi.price)
-                 renderer.show(user, Screen(content.text("merchant.notEnoughGold"), Nil)) *> showMenu(user, renderer)
+               if (hero.silver < mi.price)
+                 renderer.show(user, Screen(content.text("merchant.notEnoughSilver"), Nil)) *> showMenu(user, renderer)
                else
                  for {
                    persisted <- itemRepo.persist(hero.id, mi.item)
                    added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
                    _ <- if (added) {
                           val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
-                          heroDao.updateGold(user.userId, hero.gold - mi.price) *>
+                          heroDao.updateSilver(user.userId, hero.silver - mi.price) *>
                             heroDao.writeMerchantData(user.userId, newData.asJson) *>
                             InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
                               renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil))) *>
@@ -141,7 +141,7 @@ case class MerchantState(
              val header  = content.format("merchant.sellHeader",
                "page"  -> (p + 1).toString,
                "total" -> totalPages.toString,
-               "gold"  -> hero.gold.toString)
+               "silver" -> hero.silver.toString)
              val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
              val nav     = sellNavRow(p, totalPages)
              heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *>
@@ -181,7 +181,7 @@ case class MerchantState(
         case Some(item) =>
           val price = sellPrice(item)
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            heroDao.updateGold(user.userId, hero.gold + price) *>
+            heroDao.updateSilver(user.userId, hero.silver + price) *>
             renderer.show(user, Screen(
               content.format("merchant.sold", "name" -> item.name, "price" -> price.toString), Nil))
         case None => ZIO.unit
@@ -201,9 +201,9 @@ case class MerchantState(
              renderer.show(user, Screen(content.text("merchant.sellJunkEmpty"), Nil)) *> showMenu(user, renderer)
            else
              inventoryRepo.removeItems(junk.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
-               heroDao.updateGold(user.userId, hero.gold + total) *>
+               heroDao.updateSilver(user.userId, hero.silver + total) *>
                renderer.show(user, Screen(content.format("merchant.sellJunkDone",
-                 "count" -> junk.size.toString, "gold" -> total.toString), Nil)) *>
+                 "count" -> junk.size.toString, "silver" -> total.toString), Nil)) *>
                showMenu(user, renderer)
     } yield StateType.Merchant
 

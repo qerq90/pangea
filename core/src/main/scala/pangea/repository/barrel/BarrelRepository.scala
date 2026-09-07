@@ -10,8 +10,8 @@ trait BarrelRepository {
   def get(heroId: HeroId): IO[BarrelRepoError, Barrel]
   def deposit(heroId: HeroId, item: Item): IO[BarrelRepoError, Unit]
   def withdraw(heroId: HeroId, itemId: Long): IO[BarrelRepoError, Item]
-  def depositGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit]
-  def withdrawGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit]
+  def depositSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit]
+  def withdrawSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit]
 }
 
 object BarrelRepository {
