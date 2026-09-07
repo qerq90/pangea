@@ -107,9 +107,12 @@ case class EquipmentState(
       inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       slot  = slots(slotIdx)
       item  = slot.get(hero.equipment)
-      // Снятие «Тайника» убирает +10 слотов: если сумка (с возвращаемым предметом)
-      // не влезет в базовую вставимость — блокируем, надо сперва вынуть вещи.
-      blockedByStash = InventoryState.stashBonus(item) > 0 && !InventoryState.fitsWithoutStash(inv, returningItems = 1)
+      newEq = slot.clear(hero.equipment)
+      // Снятие последнего «Тайника» в экипировке (дубли не стакаются — см.
+      // InventoryState.equipmentStashDelta) убирает +10 слотов: если сумка (с
+      // возвращаемым предметом) не влезет в уменьшенную вместимость — блокируем.
+      capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq)
+      blockedByStash = capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 1)
       _ <- if (item.itemType == pangea.model.item.ItemType.NoItem)
              renderer.show(user, Screen(content.text("equipment.slotEmpty"), Nil))
            else if (blockedByStash)
@@ -118,11 +121,10 @@ case class EquipmentState(
              inventoryRepo.addItem(hero.id, item).foldZIO(
                _ => renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)),
                _ => {
-                 val newEq    = slot.clear(hero.equipment)
                  val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
                  heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-                   ZIO.when(InventoryState.stashBonus(item) > 0)(
-                     inventoryRepo.increaseCapacity(hero.id, -InventoryState.stashBonus(item)).orElse(ZIO.unit)) *>
+                   ZIO.when(capDelta != 0)(
+                     inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
                    InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slotsLine =>
                      renderer.show(user, Screen(
                        content.format("equipment.unequipped", "name" -> item.name) + "\n" + slotsLine, Nil)))

@@ -147,26 +147,41 @@ object PassivesSpec extends ZIOSpecDefault {
     },
 
     // ── Хелперы Тайника ────────────────────────────────────────────────────────
-    test("stashBonus/stashDelta считают +10 только для Тайника") {
+    test("stashBonus считает +10 только для Тайника") {
       val stashBoots = passiveItem(ItemType.Boots, PassiveKind.Stash)
       val plainBoots = passiveItem(ItemType.Boots, PassiveKind.QuickFeet)
       assertTrue(
         InventoryState.stashBonus(stashBoots) == 10L,
-        InventoryState.stashBonus(plainBoots) == 0L,
-        InventoryState.stashDelta(plainBoots, stashBoots) == 10L,
-        InventoryState.stashDelta(stashBoots, plainBoots) == -10L
+        InventoryState.stashBonus(plainBoots) == 0L
       )
     },
 
-    test("fitsWithoutStash: сумка влезает в базовую вместимость только с запасом ≥10") {
+    test("equipmentStashDelta: +10 только на первом «Тайнике» в экипировке, второй не даёт delta (дубли не стакаются)") {
+      val stashBoots     = passiveItem(ItemType.Boots, PassiveKind.Stash)
+      val stashShoulders = passiveItem(ItemType.ShoulderPads, PassiveKind.Stash)
+      val plainBoots     = passiveItem(ItemType.Boots, PassiveKind.QuickFeet)
+      val noStash  = TestFixtures.emptyEquipment
+      val oneStash = noStash.copy(boots = stashBoots)
+      val twoStash = oneStash.copy(shoulderPads = stashShoulders)
+      assertTrue(
+        InventoryState.equipmentStashDelta(noStash, oneStash) == 10L,   // надели первый Тайник
+        InventoryState.equipmentStashDelta(oneStash, twoStash) == 0L,   // второй Тайник — бонус уже был учтён
+        InventoryState.equipmentStashDelta(twoStash, oneStash) == 0L,   // сняли один из двух — бонус остаётся
+        InventoryState.equipmentStashDelta(oneStash, noStash) == -10L,  // сняли последний — бонус пропадает
+        InventoryState.equipmentStashDelta(noStash, noStash.copy(boots = plainBoots)) == 0L
+      )
+    },
+
+    test("fitsAfterCapacityChange: сумка влезает в новую вместимость только с запасом") {
       def inv(items: Int, maxItems: Long) = pangea.model.inventory.Inventory(
         0L, TestFixtures.hero(userId).id, maxItems,
         pangea.model.inventory.Inventory.Items(List.fill(items)(
           Item(1L, "x", 1L, Rarity.Gray, ItemType.Trophy, 0, 0, 0, 0, 0, 0))))
-      // maxItems=30 (20 база + 10 тайник). Возвращаем 1 предмет при снятии.
+      // maxItems=30 (20 база + 10 тайник), снимаем последний Тайник → capDelta = -10.
+      // Возвращаем 1 предмет при снятии.
       assertTrue(
-        InventoryState.fitsWithoutStash(inv(items = 19, maxItems = 30L), returningItems = 1),  // 19+1 ≤ 20
-        !InventoryState.fitsWithoutStash(inv(items = 20, maxItems = 30L), returningItems = 1)   // 20+1 > 20
+        InventoryState.fitsAfterCapacityChange(inv(items = 19, maxItems = 30L), capDelta = -10L, returningItems = 1),  // 19+1 ≤ 20
+        !InventoryState.fitsAfterCapacityChange(inv(items = 20, maxItems = 30L), capDelta = -10L, returningItems = 1)  // 20+1 > 20
       )
     }
   )
