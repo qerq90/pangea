@@ -76,8 +76,8 @@ case class GustavoBoostState(
                  case None =>
                    val free  = !data.freeBoostsUsed.contains(bs.key)
                    val price = if (free) 0L else cost(hero)
-                   if (price > 0 && hero.gold < price)
-                     renderer.show(user, Screen(content.format("gustavo.boostNotEnoughGold",
+                   if (price > 0 && hero.silver < price)
+                     renderer.show(user, Screen(content.format("gustavo.boostNotEnoughSilver",
                        "potion" -> bs.potion, "cost" -> price.toString), Nil))
                    else
                      applyBoost(user, hero, data, bs, free, price, now, renderer)
@@ -93,7 +93,7 @@ case class GustavoBoostState(
     val newBoosts = hero.statBoosts.add(StatBoost(bs.boostName, bs.buff, now + GustavoData.BoostDurationMs), now)
     val newFree   = if (free) data.freeBoostsUsed :+ bs.key else data.freeBoostsUsed
     val msgKey    = if (free) "gustavo.boostAppliedFree" else "gustavo.boostApplied"
-    heroDao.updateGold(user.userId, hero.gold - price) *>
+    heroDao.updateSilver(user.userId, hero.silver - price) *>
       heroDao.updateStatBoosts(user.userId, newBoosts) *>
       heroDao.writeGustavoData(user.userId, data.copy(freeBoostsUsed = newFree).asJson) *>
       renderer.show(user, Screen(content.format(msgKey, "potion" -> bs.potion, "stat" -> bs.label), Nil))

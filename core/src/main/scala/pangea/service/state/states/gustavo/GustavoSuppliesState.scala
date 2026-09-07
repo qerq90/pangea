@@ -12,8 +12,8 @@ import zio.Task
  *  1. «Фляга» → [[GustavoFlaskState]] (пополнение зарядов фляги);
  *  2. «Пояс»  → [[GustavoBeltState]] (пополнение бутылей пояса);
  *  3. «Назад» → меню [[GustavoState]].
- * Цена считается за каждую недостающую единицу: 25 золота за глоток фляги
- * ([[GustavoData.FlaskRefillCostPerCharge]]), 100 золота за бутыль пояса
+ * Цена считается за каждую недостающую единицу: 25 серебра за глоток фляги
+ * ([[GustavoData.FlaskRefillCostPerCharge]]), 100 серебра за бутыль пояса
  * ([[GustavoData.BeltRefillCostPerBottle]]).
  */
 case class GustavoSuppliesState(

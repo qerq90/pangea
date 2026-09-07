@@ -104,7 +104,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       (reward, _) = SchronGenerator.roll(race, hero.dungeonLevel.toLong, DoubloonMin, DoubloonMax, Rng(seed))
       loot     = LootData(
                    items     = reward.items,
-                   golds     = if (reward.gold > 0L) List(reward.gold) else Nil,
+                   silvers   = if (reward.silver > 0L) List(reward.silver) else Nil,
                    doubloons = reward.doubloons)
       _ <- renderer.show(user, Screen(content.text("treasureDig.success"), Nil))
       _ <- heroDao.writeSceneData(user.userId, loot.asJson)
@@ -135,7 +135,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
   private def graveWithSkull(user: User, race: Race, skull: Item, renderer: Renderer): Task[StateType] =
     for {
       _ <- renderer.show(user, Screen(content.format("treasureDig.skull.text", "race" -> race.toString), Nil))
-      _ <- heroDao.writeSceneData(user.userId, LootData(items = List(skull), golds = Nil).asJson)
+      _ <- heroDao.writeSceneData(user.userId, LootData(items = List(skull), silvers = Nil).asJson)
     } yield StateType.Loot
 
   // «Мародёра»: свежая могила даёт добычу, будто повержено Необычное существо этой
@@ -152,7 +152,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
                          case pangea.generator.loot.LootGenerator.LootDrop.Trophy(i)  => i
                          case pangea.generator.loot.LootGenerator.LootDrop.MapHalf(i) => i
                        } ++ skull.toList,
-                       golds     = drops.collect { case pangea.generator.loot.LootGenerator.LootDrop.Gold(a, _) => a },
+                       silvers   = drops.collect { case pangea.generator.loot.LootGenerator.LootDrop.Silver(a, _) => a },
                        doubloons = 0)
       _ <- renderer.show(user, Screen(content.format("treasureDig.marauder.text", "race" -> race.toString), Nil))
       _ <- heroDao.writeSceneData(user.userId, loot.asJson)

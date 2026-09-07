@@ -27,7 +27,7 @@ object TestFixtures {
     equipment    = emptyEquipment,
     dungeonLevel    = dungeonLevel,
     maxDungeonLevel = maxDungeonLevel,
-    gold         = 0L,
+    silver       = 0L,
     traumaUntil  = None,
     traumaNames  = Nil,
     guildReputation = 0L,

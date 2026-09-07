@@ -916,12 +916,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     for {
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       azat <- loadAzat(user)
-      // Недельное благословение Азата: +10% опыта/золота, +10% редкости, +5% доп. дроп.
+      // Недельное благословение Азата: +10% опыта/серебра, +10% редкости, +5% доп. дроп.
       blessed = azat.blessingActive(now)
       baseExp = (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
       expGained = if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
-      // лут катаем чистым ядром; начисление (инвентарь/золото) — в LootState
+      // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
       monster = battle.toMonster
       (baseDrops, rngAfter) = LootGenerator.roll(
@@ -952,14 +952,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       prev <- heroDao
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
-      goldScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
+      silverScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
       lootData = LootState.LootData(
         items = drops.collect {
           case LootGenerator.LootDrop.Gear(i)    => i
           case LootGenerator.LootDrop.Trophy(i)  => i
           case LootGenerator.LootDrop.MapHalf(i) => i
         } ++ blessingGear.toList,
-        golds = drops.collect { case LootGenerator.LootDrop.Gold(a, _) => a * goldScalePct / 100L },
+        silvers = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct / 100L },
         returnState = prev.flatMap(_.returnState),
         eventData = prev.flatMap(_.eventData)
       )
@@ -1237,7 +1237,7 @@ object BattleState {
     case _                   => None
   }
 
-  /** Бонус благословения Азата (в %): к опыту, золоту и редкости добычи. */
+  /** Бонус благословения Азата (в %): к опыту, серебру и редкости добычи. */
   val BlessingBonusPct: Long = AzatState.BlessingBonusPct
   /** Шанс (в %) дополнительной экипировки после боя при благословении. */
   val BlessingExtraDropPct: Long = AzatState.BlessingExtraDropPct

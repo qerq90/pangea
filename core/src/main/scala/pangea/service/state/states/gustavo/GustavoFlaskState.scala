@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
-/** Пополнение зарядов надетой фляги у Густаво. За 25 золота за каждый недостающий глоток
+/** Пополнение зарядов надетой фляги у Густаво. За 25 серебра за каждый недостающий глоток
  *  восстанавливает `charges` фляги до `maxCharges`. Нет надетой фляги или она уже полная —
  *  сообщение без списаний. По завершении возвращает в раздел припасов [[GustavoSuppliesState]]. */
 case class GustavoFlaskState(
@@ -65,14 +65,14 @@ case class GustavoFlaskState(
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskNone"), back))
            else if (isFull(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskFull"), back))
-           else if (hero.gold < price)
-             renderer.show(user, Screen(content.format("gustavo.supplies.flaskNotEnoughGold", "cost" -> price.toString), back))
+           else if (hero.silver < price)
+             renderer.show(user, Screen(content.format("gustavo.supplies.flaskNotEnoughSilver", "cost" -> price.toString), back))
            else
              refill(user, hero, flask, price, renderer)
     } yield StateType.GustavoSupplies
 
   private def refill(user: User, hero: Hero, flask: Item, price: Long, renderer: Renderer): Task[Unit] =
-    heroDao.updateGold(user.userId, hero.gold - price) *>
+    heroDao.updateSilver(user.userId, hero.silver - price) *>
       heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = flask.copy(details = flaskDetails(flask).map(_.refilled).getOrElse(flask.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.flaskRefilled",
         "charges" -> flaskDetails(flask).map(_.maxCharges).getOrElse(0).toString), back))

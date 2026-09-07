@@ -21,7 +21,7 @@ case class Hero(
   equipment: Equipment,
   dungeonLevel: Int,
   maxDungeonLevel: Int,
-  gold: Long,
+  silver: Long,
   traumaUntil: Option[Long],
   traumaNames: List[String],
   guildReputation: Long,

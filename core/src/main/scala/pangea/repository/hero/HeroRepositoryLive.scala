@@ -70,7 +70,7 @@ object HeroRepositoryLive {
       ),
       dungeonLevel = 1,
       maxDungeonLevel = 1,
-      gold = 0L,
+      silver = 0L,
       traumaUntil = None,
       traumaNames = Nil,
       guildReputation = 0L,

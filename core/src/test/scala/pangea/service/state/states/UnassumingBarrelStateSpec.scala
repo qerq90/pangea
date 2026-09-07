@@ -24,13 +24,13 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
   private def makeState(
     inventory: List[Item],
     barrelItems: List[Item] = Nil,
-    barrelGold: Long = 0L,
-    heroGold: Long = 0L
+    barrelSilver: Long = 0L,
+    heroSilver: Long = 0L
   ) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(gold = heroGold))
+      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(silver = heroSilver))
       invRepo   = TestInventoryRepository.withItems(inventory)
-      barrelRepo = TestBarrelRepository.of(barrelItems, barrelGold)
+      barrelRepo = TestBarrelRepository.of(barrelItems, barrelSilver)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
     } yield (UnassumingBarrelState(heroDao, invRepo, barrelRepo, content), heroDao, invRepo, barrelRepo, renderer)
@@ -44,7 +44,7 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
         _      <- state.enter(testUser, renderer)
         screens <- renderer.sentScreens
       } yield assertTrue(screens.last.choices.map(_.id).toSet ==
-        Set("DepositItemsMenu", "WithdrawItemsMenu", "DepositGoldMenu", "WithdrawGoldMenu", "LeaveBarrel"))
+        Set("DepositItemsMenu", "WithdrawItemsMenu", "DepositSilverMenu", "WithdrawSilverMenu", "LeaveBarrel"))
     },
 
     test("LeaveBarrel → переход в HarborQuarter") {
@@ -83,77 +83,77 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
               assertTrue(invRepo.snapshot.map(_.id) == List(7L))
     },
 
-    test("Положить золото: вход в режим + текст → списываем у героя, кладём в бочку") {
+    test("Положить серебро: вход в режим + текст → списываем у героя, кладём в бочку") {
       for {
-        t <- makeState(Nil, heroGold = 5000L)
+        t <- makeState(Nil, heroSilver = 5000L)
         (state, heroDao, _, barrelRepo, renderer) = t
-        _    <- state.action(testUser, tap("DepositGoldMenu"), renderer)
+        _    <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _    <- state.action(testUser, text("500"), renderer)
         hero <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(hero.exists(_.gold == 4500L)) &&
-              assertTrue(barrelRepo.goldSnapshot == 500L)
+      } yield assertTrue(hero.exists(_.silver == 4500L)) &&
+              assertTrue(barrelRepo.silverSnapshot == 500L)
     },
 
-    test("Положить золото больше, чем у героя → отказ, ничего не меняем") {
+    test("Положить серебро больше, чем у героя → отказ, ничего не меняем") {
       for {
-        t <- makeState(Nil, heroGold = 100L)
+        t <- makeState(Nil, heroSilver = 100L)
         (state, heroDao, _, barrelRepo, renderer) = t
-        _    <- state.action(testUser, tap("DepositGoldMenu"), renderer)
+        _    <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _    <- state.action(testUser, text("500"), renderer)
         hero <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(hero.exists(_.gold == 100L)) &&
-              assertTrue(barrelRepo.goldSnapshot == 0L)
+      } yield assertTrue(hero.exists(_.silver == 100L)) &&
+              assertTrue(barrelRepo.silverSnapshot == 0L)
     },
 
-    test("Положить золото больше, чем влезает в бочку → отказ") {
+    test("Положить серебро больше, чем влезает в бочку → отказ") {
       for {
-        t <- makeState(Nil, heroGold = 10000L, barrelGold = 9999L)
+        t <- makeState(Nil, heroSilver = 10000L, barrelSilver = 9999L)
         (state, _, _, barrelRepo, renderer) = t
-        _ <- state.action(testUser, tap("DepositGoldMenu"), renderer)
+        _ <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _ <- state.action(testUser, text("500"), renderer)
-      } yield assertTrue(barrelRepo.goldSnapshot == 9999L)
+      } yield assertTrue(barrelRepo.silverSnapshot == 9999L)
     },
 
     test("Не число в режиме ввода → ошибка, режим сохраняется") {
       for {
-        t <- makeState(Nil, heroGold = 1000L)
+        t <- makeState(Nil, heroSilver = 1000L)
         (state, _, _, barrelRepo, renderer) = t
-        _       <- state.action(testUser, tap("DepositGoldMenu"), renderer)
+        _       <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _       <- state.action(testUser, text("abc"), renderer)
         screens <- renderer.sentScreens
-      } yield assertTrue(barrelRepo.goldSnapshot == 0L) &&
+      } yield assertTrue(barrelRepo.silverSnapshot == 0L) &&
               assertTrue(screens.exists(_.text.contains("Это не число")))
     },
 
     test("Отрицательное число → ошибка") {
       for {
-        t <- makeState(Nil, heroGold = 1000L)
+        t <- makeState(Nil, heroSilver = 1000L)
         (state, _, _, barrelRepo, renderer) = t
-        _ <- state.action(testUser, tap("DepositGoldMenu"), renderer)
+        _ <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _ <- state.action(testUser, text("-50"), renderer)
-      } yield assertTrue(barrelRepo.goldSnapshot == 0L)
+      } yield assertTrue(barrelRepo.silverSnapshot == 0L)
     },
 
-    test("Забрать золото: списываем из бочки, добавляем герою") {
+    test("Забрать серебро: списываем из бочки, добавляем герою") {
       for {
-        t <- makeState(Nil, heroGold = 100L, barrelGold = 800L)
+        t <- makeState(Nil, heroSilver = 100L, barrelSilver = 800L)
         (state, heroDao, _, barrelRepo, renderer) = t
-        _    <- state.action(testUser, tap("WithdrawGoldMenu"), renderer)
+        _    <- state.action(testUser, tap("WithdrawSilverMenu"), renderer)
         _    <- state.action(testUser, text("300"), renderer)
         hero <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(hero.exists(_.gold == 400L)) &&
-              assertTrue(barrelRepo.goldSnapshot == 500L)
+      } yield assertTrue(hero.exists(_.silver == 400L)) &&
+              assertTrue(barrelRepo.silverSnapshot == 500L)
     },
 
-    test("Забрать больше золота, чем в бочке → отказ") {
+    test("Забрать больше серебра, чем в бочке → отказ") {
       for {
-        t <- makeState(Nil, heroGold = 0L, barrelGold = 100L)
+        t <- makeState(Nil, heroSilver = 0L, barrelSilver = 100L)
         (state, heroDao, _, barrelRepo, renderer) = t
-        _    <- state.action(testUser, tap("WithdrawGoldMenu"), renderer)
+        _    <- state.action(testUser, tap("WithdrawSilverMenu"), renderer)
         _    <- state.action(testUser, text("500"), renderer)
         hero <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(hero.exists(_.gold == 0L)) &&
-              assertTrue(barrelRepo.goldSnapshot == 100L)
+      } yield assertTrue(hero.exists(_.silver == 0L)) &&
+              assertTrue(barrelRepo.silverSnapshot == 100L)
     },
 
     test("DepositItemsMenu при 12 предметах → 8 кнопок и кнопка След.") {

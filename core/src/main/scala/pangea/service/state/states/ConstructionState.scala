@@ -15,12 +15,12 @@ import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
 /** Городская стройка. На входе — меню из трёх работ разной длительности; после
-  * выбора игрок «занят» (как [[events.GoldVeinState]]): scene_data хранит вид
-  * работы и старт, поллер по таймеру (`Construction`) выдаёт золото и
+  * выбора игрок «занят» (как [[events.SilverVeinState]]): scene_data хранит вид
+  * работы и старт, поллер по таймеру (`Construction`) выдаёт серебро и
   * возвращает в GlobalMap. Кнопка «Уйти» — досрочное прерывание с
   * подтверждением.
   *
-  * Формула золота: `lvl(героя) × часы`, домноженное на `100 ± d` процентов, где
+  * Формула серебра: `lvl(героя) × часы`, домноженное на `100 ± d` процентов, где
   * `d ∈ [10, 20]` (знак и величина роллятся отдельно).
   */
 case class ConstructionState(
@@ -173,7 +173,7 @@ case class ConstructionState(
       }
     } yield result
 
-  // Досрочный выход: золота нет, снимаем задачу, чистим scene_data.
+  // Досрочный выход: серебра нет, снимаем задачу, чистим scene_data.
   private def confirmLeave(user: User, renderer: Renderer): Task[StateType] =
     scheduler.cancel(user.userId, TaskKind.Construction) *>
       heroDao.writeSceneData(user.userId, Json.Null) *>
@@ -181,7 +181,7 @@ case class ConstructionState(
         .show(user, Screen(content.text("construction.left"), Nil))
         .as(StateType.MarketSquare)
 
-  // Завершение работы — выдача золота и финальный текст. Возврат в GlobalMap.
+  // Завершение работы — выдача серебра и финальный текст. Возврат в GlobalMap.
   private def finish(user: User, renderer: Renderer): Task[StateType] =
     activeJob(user).flatMap {
       case None => ZIO.succeed(StateType.MarketSquare)
@@ -195,7 +195,7 @@ case class ConstructionState(
           // Опыт: уровень героя × множитель работы (0.5 / 1 / 2 за 1 / 4 / 8 ч), вверх.
           expGained = math.ceil(hero.lvl.toDouble * job.expMult).toLong
           leveled   = hero.gainExp(expGained)
-          _ <- heroDao.updateGold(user.userId, hero.gold + reward)
+          _ <- heroDao.updateSilver(user.userId, hero.silver + reward)
           _ <- heroDao.updateExpAndLevel(
             user.userId,
             leveled.exp,
@@ -219,8 +219,8 @@ case class ConstructionState(
             Screen(
               content.format(
                 "construction.done",
-                "gold" -> reward.toString,
-                "exp"  -> expGained.toString
+                "silver" -> reward.toString,
+                "exp"    -> expGained.toString
               ) + doubloonSuffix,
               Nil
             )

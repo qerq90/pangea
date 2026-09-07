@@ -35,8 +35,8 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
         assertTrue(lvls.forall(l => l >= zone.levels.min.toLong && l <= zone.levels.max.toLong))
     },
 
-    test("золото выпадает всегда (гарантированно положительное)") {
-      assertTrue(rewards.forall(_.gold > 0L))
+    test("серебро выпадает всегда (гарантированно положительное)") {
+      assertTrue(rewards.forall(_.silver > 0L))
     },
 
     test("дублоны выпадают часто, но не всегда (~80%)") {
@@ -64,7 +64,7 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
     test("детерминизм: один seed → одинаковая добыча") {
       val (a, _) = TreasureHuntGenerator.roll(zone, Rng(777L))
       val (b, _) = TreasureHuntGenerator.roll(zone, Rng(777L))
-      assertTrue(a.gold == b.gold) &&
+      assertTrue(a.silver == b.silver) &&
         assertTrue(a.doubloons == b.doubloons) &&
         assertTrue(a.items.map(_.name) == b.items.map(_.name))
     }

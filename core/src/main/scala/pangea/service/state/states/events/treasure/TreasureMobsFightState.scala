@@ -40,7 +40,7 @@ case class TreasureMobsFightState(heroDao: HeroDao, content: SceneContent) exten
       returnTarget = if (afterThis > 0) StateType.TreasureMobsFight else StateType.TreasureSchron
       routing      = LootData(
                        items       = Nil,
-                       golds       = Nil,
+                       silvers     = Nil,
                        returnState = Some(returnTarget),
                        eventData   = Some(chain.copy(remaining = afterThis).asJson))
       _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.from(monster, hero).asJson)

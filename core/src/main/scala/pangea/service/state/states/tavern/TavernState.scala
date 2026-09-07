@@ -58,8 +58,8 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
           // «Раз в час» ролл продавца карт (лениво, с почасовым гейтом внутри).
           seller <- CardSeller.rollAndLoad(heroDao, user.userId, now)
           text = content.format("tavern.menu.text",
-            "cost" -> roomCost(hero).toString,
-            "gold" -> hero.gold.toString)
+            "cost"   -> roomCost(hero).toString,
+            "silver" -> hero.silver.toString)
           byId = content.screen("tavern.menu").choices.map(c => c.id -> c).toMap
           present = seller.present(now)
           // «Подозрительный человек» — зелёная кнопка над «Персонаж» (только когда он тут).
@@ -81,18 +81,18 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  // Снять комнату: списываем золото, фиксируем время старта, показываем комнату.
+  // Снять комнату: списываем серебро, фиксируем время старта, показываем комнату.
   private def rentRoom(user: User, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
       cost  = roomCost(hero)
-      _ <- if (hero.gold < cost)
+      _ <- if (hero.silver < cost)
              renderer.show(user, Screen(
-               content.format("tavern.notEnoughGold",
-                 "cost" -> cost.toString, "gold" -> hero.gold.toString), Nil))
+               content.format("tavern.notEnoughSilver",
+                 "cost" -> cost.toString, "silver" -> hero.silver.toString), Nil))
            else
-             heroDao.updateGold(user.userId, hero.gold - cost) *>
+             heroDao.updateSilver(user.userId, hero.silver - cost) *>
                heroDao.writeSceneData(user.userId, Json.obj(RoomStartKey -> now.asJson)) *>
                // push-исцеление: поллер сам выполнит LeaveRoom через 3 часа, если
                // игрок всё ещё в таверне; иначе исцеление забирается вручную при

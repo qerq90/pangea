@@ -14,7 +14,7 @@ import pangea.model.state.StateType.{
   Equipment,
   FoundItem,
   GlobalMap,
-  GoldVein,
+  SilverVein,
   Guild,
   Gustavo,
   GustavoBoost,
@@ -55,7 +55,7 @@ import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
-import pangea.service.state.states.events.GoldVeinState
+import pangea.service.state.states.events.SilverVeinState
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
@@ -175,7 +175,7 @@ object StatesMap {
           ),
           QuestBoard        -> QuestBoardState(heroDao, content),
           Innkeeper         -> InnkeeperState(heroDao, inventoryRepo, content),
-          GoldVein          -> GoldVeinState(heroDao, scheduler, content),
+          SilverVein        -> SilverVeinState(heroDao, scheduler, content),
           TreasureMobs      -> TreasureMobsState(heroDao, content),
           TreasureMobsFight -> TreasureMobsFightState(heroDao, content),
           TreasureSchron    -> TreasureSchronState(heroDao, content),

@@ -28,7 +28,7 @@ object DeathStateSpec extends ZIOSpecDefault {
     } yield (DeathState(heroDao, invRepo, content), heroDao, invRepo, renderer)
 
   // exp=80 (внутри уровня 1), теряет 10% = 8, newExp=72
-  private val richHero = TestFixtures.hero(userId).copy(exp = 80L, gold = 500L)
+  private val richHero = TestFixtures.hero(userId).copy(exp = 80L, silver = 500L)
 
   override def spec = suite("DeathState")(
 
@@ -43,7 +43,7 @@ object DeathStateSpec extends ZIOSpecDefault {
               assertTrue(state.autoAdvance.contains(StateType.Rest))
     },
 
-    test("enter → теряет 10% опыта текущего уровня и 50% золота, пишет restDurationMs") {
+    test("enter → теряет 10% опыта текущего уровня и 50% серебра, пишет restDurationMs") {
       for {
         triple                    <- makeState(richHero)
         (state, heroDao, _, renderer) = triple
@@ -52,9 +52,9 @@ object DeathStateSpec extends ZIOSpecDefault {
         screens                   <- renderer.sentScreens
         sceneData                 <- heroDao.readSceneData(userId)
       } yield assertTrue(updated.exists(_.exp == 72L)) &&
-              assertTrue(updated.exists(_.gold == 250L)) &&
+              assertTrue(updated.exists(_.silver == 250L)) &&
               assertTrue(screens.exists(_.text.contains("опыта"))) &&
-              assertTrue(screens.exists(_.text.contains("золота"))) &&
+              assertTrue(screens.exists(_.text.contains("серебра"))) &&
               // уровень 1 → ровно 1 минута (90 - 89*exp(0) = 1)
               assertTrue(sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).contains(60000L))
     },

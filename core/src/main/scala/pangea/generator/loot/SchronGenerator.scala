@@ -13,24 +13,24 @@ import scala.annotation.tailrec
   *
   *   - 2 слота: первый срабатывает на 100%, второй — на 60% (как «гарантированно
   *     что-то + 60% ещё одно, но не той же категории»);
-  *   - категории слота: Экипировка 35% · Трофей 35% · Золото 27% · Половинка
-  *     карты сокровищ 3% (сумма = 100; половинка забрала свои 3% у золота);
+  *   - категории слота: Экипировка 35% · Трофей 35% · Серебро 27% · Половинка
+  *     карты сокровищ 3% (сумма = 100; половинка забрала свои 3% у серебра);
   *   - редкость экипировки: Green 50 · Blue 42 · Purple 5 · Violet 2 · Orange 1;
   *   - трофей: Реликвия 35 · Талисман 65 (всегда ровно один);
-  *   - золото: `lvl × 8 ± 20%`, плюс дублоны в диапазоне события.
+  *   - серебро: `lvl × 8 ± 20%`, плюс дублоны в диапазоне события.
   *
-  * Дублоны выдаются только вместе с золотой категорией. Раса трофея — раса мобов
+  * Дублоны выдаются только вместе с серебряной категорией. Раса трофея — раса мобов
   * события (для цепочки) или случайная (для прикопанного схрона).
   */
 object SchronGenerator {
 
-  final case class Reward(items: List[Item], gold: Long, doubloons: Long)
+  final case class Reward(items: List[Item], silver: Long, doubloons: Long)
 
   private sealed trait Category
   private object Category {
     case object Gear    extends Category
     case object Trophy  extends Category
-    case object Gold    extends Category
+    case object Silver  extends Category
     case object MapHalf extends Category
   }
 
@@ -39,9 +39,9 @@ object SchronGenerator {
 
   // Веса категорий (в %, сумма = 100). На втором слоте уже выпавшая категория
   // исключается — суммарный вес активных падает, появляется доля «пусто».
-  // Половинка карты сокровищ (MapHalf) — 3%, забранные у золота (Gold: 30 → 27).
+  // Половинка карты сокровищ (MapHalf) — 3%, забранные у серебра (Silver: 30 → 27).
   private val categoryWeights: List[(Category, Int)] =
-    List(Category.Gear -> 35, Category.Trophy -> 35, Category.Gold -> 27, Category.MapHalf -> 3)
+    List(Category.Gear -> 35, Category.Trophy -> 35, Category.Silver -> 27, Category.MapHalf -> 3)
 
   // Редкость выпавшей экипировки (в %, сумма = 100). Без серой/белой.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -60,9 +60,9 @@ object SchronGenerator {
   /** Прокатать схрон.
     *
     * @param race        раса трофея
-    * @param killLevel   уровень для масштабирования предметов/золота
-    * @param doubloonMin минимум дублонов вместе с золотом
-    * @param doubloonMax максимум дублонов вместе с золотом
+    * @param killLevel   уровень для масштабирования предметов/серебра
+    * @param doubloonMin минимум дублонов вместе с серебром
+    * @param doubloonMax максимум дублонов вместе с серебром
     */
   def roll(
       race: Race,
@@ -76,35 +76,35 @@ object SchronGenerator {
         rest: List[Int],
         used: Set[Category],
         items: List[Item],
-        gold: Long,
+        silver: Long,
         doubloons: Long,
         r: Rng
     ): (Reward, Rng) =
       rest match {
-        case Nil => (Reward(items.reverse, gold, doubloons), r)
+        case Nil => (Reward(items.reverse, silver, doubloons), r)
         case chance :: tail =>
           val (hit, r1) = r.between(0L, 100L)
-          if (hit >= chance) loop(tail, used, items, gold, doubloons, r1)
+          if (hit >= chance) loop(tail, used, items, silver, doubloons, r1)
           else
             pickCategory(used, r1) match {
-              case (None, r2) => loop(tail, used, items, gold, doubloons, r2)
+              case (None, r2) => loop(tail, used, items, silver, doubloons, r2)
               case (Some(cat), r2) =>
                 cat match {
                   case Category.Gear =>
                     val (rarity, r3) = pickWeighted(gearRarityWeights, r2)
                     val (item, r4)   = ItemGenerator.createItem(killLevel, rarity, r3)
-                    loop(tail, used + cat, item :: items, gold, doubloons, r4)
+                    loop(tail, used + cat, item :: items, silver, doubloons, r4)
                   case Category.Trophy =>
                     val (kind, r3) = pickWeighted(trophyWeights, r2)
-                    loop(tail, used + cat, trophy(kind, race, killLevel) :: items, gold, doubloons, r3)
-                  case Category.Gold =>
-                    val (g, r3) = rollGold(killLevel, r2)
+                    loop(tail, used + cat, trophy(kind, race, killLevel) :: items, silver, doubloons, r3)
+                  case Category.Silver =>
+                    val (s, r3) = rollSilver(killLevel, r2)
                     val (d, r4) = r3.between(doubloonMin.toLong, doubloonMax.toLong + 1L)
-                    loop(tail, used + cat, items, gold + g, doubloons + d, r4)
+                    loop(tail, used + cat, items, silver + s, doubloons + d, r4)
                   case Category.MapHalf =>
                     // половинка карты по уровню схрона; RNG не тратит
                     val half = TreasureMapGenerator.create(killLevel, half = true)
-                    loop(tail, used + cat, half :: items, gold, doubloons, r2)
+                    loop(tail, used + cat, half :: items, silver, doubloons, r2)
                 }
             }
       }
@@ -126,8 +126,8 @@ object SchronGenerator {
     (walk(active, 0L), next)
   }
 
-  // Золото: базис lvl×8 с разбросом ±20%, минимум 1.
-  private def rollGold(killLevel: Long, rng: Rng): (Long, Rng) = {
+  // Серебро: базис lvl×8 с разбросом ±20%, минимум 1.
+  private def rollSilver(killLevel: Long, rng: Rng): (Long, Rng) = {
     val base        = killLevel.max(1L) * 8L
     val (pct, next) = rng.between(80L, 121L) // 80..120 %
     ((base * pct / 100L).max(1L), next)

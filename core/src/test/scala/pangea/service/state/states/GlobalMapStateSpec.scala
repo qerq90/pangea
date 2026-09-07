@@ -23,11 +23,11 @@ object GlobalMapStateSpec extends ZIOSpecDefault {
 
   private val baseHero    = TestFixtures.hero(userId)
   private val fullHp      = baseHero.baseStats.vit * 24L  // 240
-  private val richHero    = baseHero.copy(gold = 500L, fightStats = baseHero.fightStats.copy(hp = fullHp))
+  private val richHero    = baseHero.copy(silver = 500L, fightStats = baseHero.fightStats.copy(hp = fullHp))
 
   override def spec = suite("GlobalMapState")(
 
-    test("enter → показывает HP, gold, кнопки Tavern и ReturnToDungeon") {
+    test("enter → показывает HP, silver, кнопки Tavern и ReturnToDungeon") {
       for {
         triple              <- makeState(richHero)
         (state, _, renderer) = triple

@@ -40,26 +40,26 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
 
     test("первый слот 100% → награда никогда не пустая") {
       val all = rewards(Race.Human, 30L, 2, 3)
-      assertTrue(all.forall(r => r.items.nonEmpty || r.gold > 0L))
+      assertTrue(all.forall(r => r.items.nonEmpty || r.silver > 0L))
     },
 
     test("не больше двух категорий за раз, без повтора (2 слота, used)") {
       val all = rewards(Race.Elf, 30L, 2, 3)
-      // максимум: 1 gear + 1 trophy ИЛИ предмет + золото — суммарно ≤ 2 категорий
-      assertTrue(all.forall(r => r.items.size + (if (r.gold > 0L) 1 else 0) <= 2))
+      // максимум: 1 gear + 1 trophy ИЛИ предмет + серебро — суммарно ≤ 2 категорий
+      assertTrue(all.forall(r => r.items.size + (if (r.silver > 0L) 1 else 0) <= 2))
     },
 
-    test("дублоны выпадают только вместе с золотом и в заданном диапазоне") {
+    test("дублоны выпадают только вместе с серебром и в заданном диапазоне") {
       val all = rewards(Race.Gnome, 10L, 2, 3)
-      assertTrue(all.forall(r => (r.doubloons > 0L) == (r.gold > 0L))) &&
-      assertTrue(all.forall(r => r.gold <= 0L || (r.doubloons >= 2L && r.doubloons <= 3L)))
+      assertTrue(all.forall(r => (r.doubloons > 0L) == (r.silver > 0L))) &&
+      assertTrue(all.forall(r => r.silver <= 0L || (r.doubloons >= 2L && r.doubloons <= 3L)))
     },
 
-    test("золото около lvl×8 ±20%") {
-      val golds = rewards(Race.Goblin, 10L, 1, 2).map(_.gold).filter(_ > 0L)
+    test("серебро около lvl×8 ±20%") {
+      val silvers = rewards(Race.Goblin, 10L, 1, 2).map(_.silver).filter(_ > 0L)
       // база = 80, разброс 80..120% → [64, 96]
-      assertTrue(golds.nonEmpty) &&
-      assertTrue(golds.forall(g => g >= 64L && g <= 96L))
+      assertTrue(silvers.nonEmpty) &&
+      assertTrue(silvers.forall(g => g >= 64L && g <= 96L))
     },
 
     test("экипировка: редкости только Green/Blue/Purple/Violet/Orange, не трофей") {

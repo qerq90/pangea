@@ -66,7 +66,7 @@ case class TempleAzatState(heroDao: HeroDao, content: SceneContent) extends Stat
         content.choice("Donate", "temple.blessing.donate"),
         content.choice("BackToPriest", "temple.back")
       )
-      _ <- renderer.show(user, Screen(s"💰 ${hero.gold}  🪙 ${hero.doubloons}\n\n$text", choices))
+      _ <- renderer.show(user, Screen(s"💰 ${hero.silver}  🪙 ${hero.doubloons}\n\n$text", choices))
     } yield StateType.TempleAzat
 
   private def donate(user: User, renderer: Renderer): Task[StateType] =

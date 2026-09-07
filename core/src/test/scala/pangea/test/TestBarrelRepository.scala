@@ -7,11 +7,11 @@ import pangea.model.item.Item
 import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}
 import zio.{IO, ZIO}
 
-class TestBarrelRepository(private var items: List[Item] = Nil, private var gold: Long = 0L)
+class TestBarrelRepository(private var items: List[Item] = Nil, private var silver: Long = 0L)
     extends BarrelRepository {
 
   private val heroId = HeroId(1L)
-  private def barrel: Barrel = Barrel(1L, heroId, Items(items), gold)
+  private def barrel: Barrel = Barrel(1L, heroId, Items(items), silver)
 
   def get(heroId: HeroId): IO[BarrelRepoError, Barrel] = ZIO.succeed(barrel)
 
@@ -27,23 +27,23 @@ class TestBarrelRepository(private var items: List[Item] = Nil, private var gold
         ZIO.succeed(it)
     }
 
-  def depositGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
-    if (amount <= 0)                         ZIO.fail(BarrelRepoError.NonPositiveAmount)
-    else if (amount + gold > Barrel.MaxGold) ZIO.fail(BarrelRepoError.GoldOverflow)
-    else                                     ZIO.succeed { gold += amount }
+  def depositSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
+    if (amount <= 0)                             ZIO.fail(BarrelRepoError.NonPositiveAmount)
+    else if (amount + silver > Barrel.MaxSilver) ZIO.fail(BarrelRepoError.SilverOverflow)
+    else                                         ZIO.succeed { silver += amount }
 
-  def withdrawGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
-    if (amount <= 0)        ZIO.fail(BarrelRepoError.NonPositiveAmount)
-    else if (amount > gold) ZIO.fail(BarrelRepoError.NotEnoughGold)
-    else                    ZIO.succeed { gold -= amount }
+  def withdrawSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
+    if (amount <= 0)          ZIO.fail(BarrelRepoError.NonPositiveAmount)
+    else if (amount > silver) ZIO.fail(BarrelRepoError.NotEnoughSilver)
+    else                      ZIO.succeed { silver -= amount }
 
   def itemsSnapshot: List[Item] = items
-  def goldSnapshot:  Long       = gold
+  def silverSnapshot: Long      = silver
 }
 
 object TestBarrelRepository {
   def empty: TestBarrelRepository = new TestBarrelRepository()
   def withItems(items: List[Item]): TestBarrelRepository = new TestBarrelRepository(items = items)
-  def withGold(gold: Long): TestBarrelRepository = new TestBarrelRepository(gold = gold)
-  def of(items: List[Item], gold: Long): TestBarrelRepository = new TestBarrelRepository(items, gold)
+  def withSilver(silver: Long): TestBarrelRepository = new TestBarrelRepository(silver = silver)
+  def of(items: List[Item], silver: Long): TestBarrelRepository = new TestBarrelRepository(items, silver)
 }

@@ -19,8 +19,8 @@ object MerchantStateSpec extends ZIOSpecDefault {
   private def tapIdx(key: String, idx: Int): UserAction =
     UserAction("", Some(s"""{"action":"$key","idx":"$idx"}"""))
 
-  private def richHero = TestFixtures.hero(userId).copy(lvl = 10L, gold = 1000000L)
-  private def poorHero = TestFixtures.hero(userId).copy(lvl = 10L, gold = 0L)
+  private def richHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 1000000L)
+  private def poorHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 0L)
 
   private def makeState(hero: pangea.model.hero.Hero, items: List[Item] = Nil) =
     for {
@@ -76,7 +76,7 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(screens.last.choices.map(_.id).toSet == Set("ConfirmBuy", "CancelBuy"))
     },
 
-    test("ConfirmBuy с достаточным золотом → списывает цену, кладёт предмет, помечает купленным") {
+    test("ConfirmBuy с достаточным серебром → списывает цену, кладёт предмет, помечает купленным") {
       for {
         t <- makeState(richHero)
         (state, heroDao, invRepo, renderer) = t
@@ -88,12 +88,12 @@ object MerchantStateSpec extends ZIOSpecDefault {
         data2   <- readMerchant(heroDao)
         screens <- renderer.sentScreens
       } yield assertTrue(invRepo.snapshot.size == 1) &&
-              assertTrue(hero.exists(_.gold == 1000000L - price)) &&
+              assertTrue(hero.exists(_.silver == 1000000L - price)) &&
               assertTrue(data2.items.head.bought) &&
               assertTrue(screens.exists(_.text.contains("купили")))
     },
 
-    test("ConfirmBuy без золота → сообщение «как будет достаточно звонких монет», ничего не списано") {
+    test("ConfirmBuy без серебра → сообщение «как будет достаточно звонких монет», ничего не списано") {
       for {
         t <- makeState(poorHero)
         (state, heroDao, invRepo, renderer) = t
@@ -103,7 +103,7 @@ object MerchantStateSpec extends ZIOSpecDefault {
         data    <- readMerchant(heroDao)
         screens <- renderer.sentScreens
       } yield assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(hero.exists(_.gold == 0L)) &&
+              assertTrue(hero.exists(_.silver == 0L)) &&
               assertTrue(!data.items.head.bought) &&
               assertTrue(screens.exists(_.text.contains("звонких монет")))
     },
@@ -121,13 +121,13 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Загляните")))
     },
 
-    test("Sell → показывает список предметов; выбор → цена; ConfirmSellItem начисляет золото и убирает предмет") {
+    test("Sell → показывает список предметов; выбор → цена; ConfirmSellItem начисляет серебро и убирает предмет") {
       // green helmet lvl 5 → sellPrice = (5+5)*1.2*4 = 48
       val helmet = Item(7L, "Шлем", 5L, Rarity.Green, ItemType.Helmet,
         attack = 0, accuracy = 0, energy = 0, armor = 10, defence = 1, evasion = 0)
       val selectHelmet = UserAction("", Some(s"""{"action":"${MerchantState.SellItemPrefix}${helmet.id}"}"""))
       for {
-        t <- makeState(richHero.copy(gold = 100L), items = List(helmet))
+        t <- makeState(richHero.copy(silver = 100L), items = List(helmet))
         (state, heroDao, invRepo, renderer) = t
         _        <- state.action(testUser, tap("Sell"), renderer)
         listScr  <- renderer.sentScreens.map(_.last)
@@ -138,7 +138,7 @@ object MerchantStateSpec extends ZIOSpecDefault {
       } yield assertTrue(listScr.choices.exists(_.id == s"${MerchantState.SellItemPrefix}${helmet.id}")) &&
               assertTrue(confScr.text.contains("48")) &&
               assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(hero.exists(_.gold == 100L + 48L))
+              assertTrue(hero.exists(_.silver == 100L + 48L))
     },
 
     test("всё снаряжение куплено → сообщение «занят подготовкой новой партии», есть Продать/Назад") {

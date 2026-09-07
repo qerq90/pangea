@@ -27,19 +27,19 @@ final class BarrelRepositoryLive(dao: BarrelDao) extends BarrelRepository {
       _      <- dao.update(barrel.withItems(rest)).orElseFail(BarrelRepoError.CantUpdateBarrel)
     } yield item
 
-  def depositGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
+  def depositSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
     for {
       _      <- ZIO.when(amount <= 0)(ZIO.fail(BarrelRepoError.NonPositiveAmount))
       barrel <- get(heroId)
-      _      <- ZIO.when(amount > barrel.freeGoldSpace)(ZIO.fail(BarrelRepoError.GoldOverflow))
-      _      <- dao.update(barrel.copy(gold = barrel.gold + amount)).orElseFail(BarrelRepoError.CantUpdateBarrel)
+      _      <- ZIO.when(amount > barrel.freeSilverSpace)(ZIO.fail(BarrelRepoError.SilverOverflow))
+      _      <- dao.update(barrel.copy(silver = barrel.silver + amount)).orElseFail(BarrelRepoError.CantUpdateBarrel)
     } yield ()
 
-  def withdrawGold(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
+  def withdrawSilver(heroId: HeroId, amount: Long): IO[BarrelRepoError, Unit] =
     for {
       _      <- ZIO.when(amount <= 0)(ZIO.fail(BarrelRepoError.NonPositiveAmount))
       barrel <- get(heroId)
-      _      <- ZIO.when(amount > barrel.gold)(ZIO.fail(BarrelRepoError.NotEnoughGold))
-      _      <- dao.update(barrel.copy(gold = barrel.gold - amount)).orElseFail(BarrelRepoError.CantUpdateBarrel)
+      _      <- ZIO.when(amount > barrel.silver)(ZIO.fail(BarrelRepoError.NotEnoughSilver))
+      _      <- dao.update(barrel.copy(silver = barrel.silver - amount)).orElseFail(BarrelRepoError.CantUpdateBarrel)
     } yield ()
 }

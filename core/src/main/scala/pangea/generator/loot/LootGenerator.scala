@@ -20,25 +20,25 @@ import scala.annotation.tailrec
   *      исключается из следующих слотов (без повторов, ответ 4). 3. Экипировка:
   *      редкость по тиру моба (`gearRarityWeights`), уровень — с разбросом из
   *      `ItemGenerator` (ответ 5). Трофей: тип по тиру (`trophyWeights`) +
-  *      раса/уровень. Золото: `lvl×4 ±20%` (и «груда», и обычное — одна
+  *      раса/уровень. Серебро: `lvl×4 ±20%` (и «груда», и обычное — одна
   *      формула).
   */
 object LootGenerator {
 
   sealed trait LootDrop
   object LootDrop {
-    final case class Gear(item: Item)                  extends LootDrop
-    final case class Trophy(item: Item)                extends LootDrop
-    final case class MapHalf(item: Item)               extends LootDrop
-    final case class Gold(amount: Long, pile: Boolean) extends LootDrop
+    final case class Gear(item: Item)                    extends LootDrop
+    final case class Trophy(item: Item)                  extends LootDrop
+    final case class MapHalf(item: Item)                 extends LootDrop
+    final case class Silver(amount: Long, pile: Boolean) extends LootDrop
   }
 
   sealed trait Category
   object Category {
-    case object Gear     extends Category
-    case object Trophy   extends Category
-    case object GoldPile extends Category
-    case object MapHalf  extends Category
+    case object Gear       extends Category
+    case object Trophy     extends Category
+    case object SilverPile extends Category
+    case object MapHalf    extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -54,13 +54,13 @@ object LootGenerator {
   // Веса категорий (в %); сумма = 100 → «пусто» нет (для первого слота). На
   // последующих слотах уже выпавшая категория исключается, суммарный вес активных
   // падает, и появляется доля «пусто». У мифических и легендарных мобов 1% забран
-  // у золота под половинку карты сокровищ (MapHalf).
+  // у серебра под половинку карты сокровищ (MapHalf).
   private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
     tier match {
       case MobRarity.Mythical | MobRarity.Legendary =>
-        List(Category.Gear -> 35, Category.Trophy -> 39, Category.GoldPile -> 25, Category.MapHalf -> 1)
+        List(Category.Gear -> 35, Category.Trophy -> 39, Category.SilverPile -> 25, Category.MapHalf -> 1)
       case _ =>
-        List(Category.Gear -> 35, Category.Trophy -> 39, Category.GoldPile -> 26)
+        List(Category.Gear -> 35, Category.Trophy -> 39, Category.SilverPile -> 26)
     }
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
@@ -189,7 +189,7 @@ object LootGenerator {
 
   /** Доп. дропы от пассивок героя, независимые от основного ролла [[roll]] (каждый
     * со своим шансом): «Таксидермиста» — 10% на лишний трофей, «Ювелира» — 10% на
-    * отдельную груду золота по обычной формуле дропа. Чистое ядро: флаги, не Hero. */
+    * отдельную груду серебра по обычной формуле дропа. Чистое ядро: флаги, не Hero. */
   def rollPassiveDrops(
       taxidermist: Boolean,
       jeweler: Boolean,
@@ -201,13 +201,13 @@ object LootGenerator {
     val (trophy, r1) =
       if (taxidermist) rollChance(PassiveTrophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
       else (None, rng)
-    val (gold, r2) =
-      if (jeweler) rollChance(PassiveGoldChancePct, r1) { r =>
-        val (amount, rr) = rollGold(killLevel, r)
-        (LootDrop.Gold(amount, pile = false), rr)
+    val (silver, r2) =
+      if (jeweler) rollChance(PassiveSilverChancePct, r1) { r =>
+        val (amount, rr) = rollSilver(killLevel, r)
+        (LootDrop.Silver(amount, pile = false), rr)
       }
       else (None, r1)
-    (List(trophy, gold).flatten, r2)
+    (List(trophy, silver).flatten, r2)
   }
 
   /** Благословение Азата: с шансом `chancePct`% — дополнительная экипировка (редкость
@@ -222,7 +222,7 @@ object LootGenerator {
   }
 
   private val PassiveTrophyChancePct: Long = 10L
-  private val PassiveGoldChancePct: Long   = 10L
+  private val PassiveSilverChancePct: Long = 10L
 
   // С шансом `pct`% выполнить `make` (даёт дроп), иначе None. RNG тратится всегда.
   private def rollChance(pct: Long, rng: Rng)(make: Rng => (LootDrop, Rng)): (Option[LootDrop], Rng) = {
@@ -284,17 +284,17 @@ object LootGenerator {
         )
         (LootDrop.Trophy(trophy), r1)
 
-      case Category.GoldPile =>
-        val (amount, r1) = rollGold(killLevel, rng)
-        (LootDrop.Gold(amount, pile = true), r1)
+      case Category.SilverPile =>
+        val (amount, r1) = rollSilver(killLevel, rng)
+        (LootDrop.Silver(amount, pile = true), r1)
 
       case Category.MapHalf =>
         // половинка карты сокровищ — по уровню убитого моба; RNG не тратит
         (LootDrop.MapHalf(TreasureMapGenerator.create(killLevel, half = true)), rng)
     }
 
-  // Золото: базис lvl×4 с разбросом ±20%, минимум 1.
-  private def rollGold(killLevel: Long, rng: Rng): (Long, Rng) = {
+  // Серебро: базис lvl×4 с разбросом ±20%, минимум 1.
+  private def rollSilver(killLevel: Long, rng: Rng): (Long, Rng) = {
     val base        = killLevel.max(1L) * 4L
     val (pct, next) = rng.between(80L, 121L) // 80..120 %
     ((base * pct / 100L).max(1L), next)

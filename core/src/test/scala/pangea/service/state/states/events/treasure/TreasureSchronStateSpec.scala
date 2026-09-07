@@ -33,7 +33,7 @@ object TreasureSchronStateSpec extends ZIOSpecDefault {
       } yield assertTrue(state.autoAdvance.contains(StateType.Loot))
     },
 
-    test("enter → показывает «схрон», кладёт непустую добычу в scene_data (дублоны 2-3 при золоте)") {
+    test("enter → показывает «схрон», кладёт непустую добычу в scene_data (дублоны 2-3 при серебре)") {
       for {
         t <- setup(TreasureMobsChain(Race.Orc.entryName, remaining = 0, 2, 3))
         (state, renderer, heroDao) = t
@@ -43,7 +43,7 @@ object TreasureSchronStateSpec extends ZIOSpecDefault {
         loot    <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
       } yield assertTrue(screens.exists(_.text.contains("схрон"))) &&
               assertTrue(loot.isDefined) &&
-              assertTrue(loot.exists(l => l.items.nonEmpty || l.golds.nonEmpty)) &&
+              assertTrue(loot.exists(l => l.items.nonEmpty || l.silvers.nonEmpty)) &&
               assertTrue(loot.exists(l => l.doubloons == 0L || (l.doubloons >= 2L && l.doubloons <= 3L)))
     }
   )
