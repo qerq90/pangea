@@ -138,7 +138,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       _ <- heroDao.writeSceneData(user.userId, LootData(items = List(skull), silvers = Nil).asJson)
     } yield StateType.Loot
 
-  // «Мародёра»: свежая могила даёт добычу, будто повержено Необычное существо этой
+  // «Мародёр»: свежая могила даёт добычу, будто повержено Необычное существо этой
   // расы (LootGenerator тир Uncommon, уровень — глубина лабиринта). Череп (если выпал)
   // добавляется к добыче.
   private def maraudGrave(user: User, hero: Hero, race: Race, skull: Option[Item], renderer: Renderer): Task[StateType] =

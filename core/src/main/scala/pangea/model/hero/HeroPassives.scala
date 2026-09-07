@@ -13,7 +13,7 @@ final case class HeroPassives(kinds: Set[PassiveKind]) {
   private def has(k: PassiveKind): Boolean = kinds.contains(k)
 
   // ── Подземелье (шанс встречи боевого события) ───────────────────────────────
-  /** Множитель к весу боевого события: Охотника ×1.2, Скрытный ×0.8. Обе на шлеме,
+  /** Множитель к весу боевого события: Охотник ×1.2, Скрытность ×0.8. Обе на шлеме,
    *  поэтому одновременно активна максимум одна. */
   def battleEncounterFactor: Double = {
     var f = 1.0
@@ -23,39 +23,43 @@ final case class HeroPassives(kinds: Set[PassiveKind]) {
   }
 
   // ── Уклонение / попадание ────────────────────────────────────────────────────
-  /** Прибавка (в п.п.) к итоговому шансу уклонения героя: Быстрые ноги +5,
-   *  Сливающиеся −шанс попадания врага = +уклонение героя. */
+  /** Прибавка (в п.п.) к итоговому шансу уклонения героя: Быстрые ноги +5. */
   def dodgeBonusPct: Long = {
     var b = 0L
     if (has(PassiveKind.QuickFeet)) b += PassiveKind.QuickFeet.DodgeBonusPct
-    if (has(PassiveKind.Blending)) b += PassiveKind.Blending.EnemyHitPenaltyPct
     b
   }
 
   /** Дополнительная прибавка (в п.п.) к шансу уклона ТОЛЬКО при бегстве
-   *  (Сверкающие +25). Применяется поверх [[dodgeBonusPct]]. */
+   *  (Сверкающий +25). Применяется поверх [[dodgeBonusPct]]. */
   def fleeDodgeBonusPct: Long =
     if (has(PassiveKind.Glittering)) PassiveKind.Glittering.FleeDodgeBonusPct else 0L
 
+  /** Множитель точности МОБА, атакующего героя: Сливающийся ×0.9 (−10%). Снижает
+   *  саму точность атакующего в формуле уклонения ([[BattleState.dodgeChance]]),
+   *  а не добавляет уклонение герою напрямую. */
+  def enemyAccuracyMult: Double =
+    if (has(PassiveKind.Blending)) 1.0 - PassiveKind.Blending.EnemyAccuracyReductionPct / 100.0 else 1.0
+
   // ── Плоские бафы статов (не мультипликативные — как зелья пояса) ─────────────
-  /** Плоская прибавка к защите: +5% от переданного значения защиты (Укреплённые). */
+  /** Плоская прибавка к защите: +5% от переданного значения защиты (Укреплённый). */
   def defenceFlatBonus(defence: Long): Long =
     if (has(PassiveKind.Reinforced)) (defence * PassiveKind.Reinforced.DefenceBonusPct / 100L).max(1L) else 0L
 
-  /** Плоская прибавка к точности: +5% от переданного значения точности (Точности). */
+  /** Плоская прибавка к точности: +5% от переданного значения точности (Точность). */
   def accuracyFlatBonus(accuracy: Long): Long =
     if (has(PassiveKind.Precise)) (accuracy * PassiveKind.Precise.AccuracyBonusPct / 100L).max(1L) else 0L
 
   // ── Урон и лечение ───────────────────────────────────────────────────────────
-  /** Множитель финального урона игрока: Разбойника ×1.05. */
+  /** Множитель финального урона игрока: Разбойник ×1.05. */
   def finalDamageMult: Double =
     if (has(PassiveKind.Robber)) 1.0 + PassiveKind.Robber.DamageBonusPct / 100.0 else 1.0
 
-  /** Множитель активного лечения в бою (скилл/фляга/зелье пояса): Целителя ×1.10. */
+  /** Множитель активного лечения в бою (скилл/фляга/зелье пояса): Целитель ×1.10. */
   def healMult: Double =
     if (has(PassiveKind.Healer)) 1.0 + PassiveKind.Healer.HealBonusPct / 100.0 else 1.0
 
-  /** Множитель восстановления энергии в бою: Сосредоточенный ×1.10. */
+  /** Множитель восстановления энергии в бою: Сосредоточенность ×1.10. */
   def energyRegenMult: Double =
     if (has(PassiveKind.Focused)) 1.0 + PassiveKind.Focused.EnergyRegenBonusPct / 100.0 else 1.0
 

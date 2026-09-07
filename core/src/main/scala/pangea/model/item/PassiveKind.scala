@@ -53,21 +53,21 @@ object PassiveKind extends Enum[PassiveKind] {
 
   // ── Шлем ────────────────────────────────────────────────────────────────────
   case object Stealthy extends PassiveKind(
-    "Скрытный",
-    "Скрытный: на 20% реже встречаются боевые события в лабиринте.",
+    "Скрытность",
+    "Скрытность: на 20% реже встречаются боевые события в лабиринте.",
     Helmet
   ) { val EncounterReductionPct: Long = 20L }
 
   case object Hunter extends PassiveKind(
-    "Охотника",
-    "Охотника: на 20% чаще встречаются боевые события в лабиринте.",
+    "Охотник",
+    "Охотник: на 20% чаще встречаются боевые события в лабиринте.",
     Helmet
   ) { val EncounterBonusPct: Long = 20L }
 
   // ── Плечи + Брасы + Перчатки ─────────────────────────────────────────────────
   case object Taxidermist extends PassiveKind(
-    "Таксидермиста",
-    "Таксидермиста: 10% шанс получить дополнительный трофей при победе над мобом.",
+    "Таксидермист",
+    "Таксидермист: 10% шанс получить дополнительный трофей при победе над мобом.",
     Arms
   ) { val TrophyChancePct: Long = 10L }
 
@@ -93,14 +93,14 @@ object PassiveKind extends Enum[PassiveKind] {
   ) { val RepeatChancePct: Long = 25L }
 
   case object Blending extends PassiveKind(
-    "Сливающиеся",
-    "Сливающиеся: снижает шанс попадания врага на 10%.",
+    "Сливающийся",
+    "Сливающийся: снижает точность противника на 10%.",
     Arms
-  ) { val EnemyHitPenaltyPct: Long = 10L }
+  ) { val EnemyAccuracyReductionPct: Long = 10L }
 
   case object Terrifying extends PassiveKind(
-    "Ужасающие",
-    "Ужасающие: снижает восстановление энергии противника на 10%.",
+    "Ужасающий",
+    "Ужасающий: снижает восстановление энергии противника на 10%.",
     Arms
   ) { val EnemyEnergyRegenPenaltyPct: Long = 10L }
 
@@ -127,52 +127,52 @@ object PassiveKind extends Enum[PassiveKind] {
   ) { val ExtraSlots: Long = 10L }
 
   case object Reinforced extends PassiveKind(
-    "Укреплённые",
-    "Укреплённые: +5% к защите.",
+    "Укреплённый",
+    "Укреплённый: +5% к защите.",
     Legs
   ) { val DefenceBonusPct: Long = 5L }
 
   case object Glittering extends PassiveKind(
-    "Сверкающие",
-    "Сверкающие: +25% к шансу успешно сбежать.",
+    "Сверкающий",
+    "Сверкающий: +25% к шансу успешно сбежать.",
     Legs
   ) { val FleeDodgeBonusPct: Long = 25L }
 
   // ── Кольца ────────────────────────────────────────────────────────────────────
   case object Jeweler extends PassiveKind(
-    "Ювелира",
-    "Ювелира: +10% шанс получить дополнительное серебро после боя.",
+    "Ювелир",
+    "Ювелир: +10% шанс получить дополнительное серебро после боя.",
     Rings
   ) { val SilverChancePct: Long = 10L }
 
   case object Marauder extends PassiveKind(
-    "Мародёра",
-    "Мародёра: раскопанная свежая могила существа даёт добычу, будто повержено Необычное существо этой расы.",
+    "Мародёр",
+    "Мародёр: раскопанная свежая могила существа даёт добычу, будто повержено Необычное существо этой расы.",
     Rings
   )
 
   case object Robber extends PassiveKind(
-    "Разбойника",
-    "Разбойника: +5% к итоговому урону.",
+    "Разбойник",
+    "Разбойник: +5% к итоговому урону.",
     Rings
   ) { val DamageBonusPct: Long = 5L }
 
   case object Healer extends PassiveKind(
-    "Целителя",
-    "Целителя: +10% к эффективности активного лечения в бою.",
+    "Целитель",
+    "Целитель: +10% к эффективности активного лечения в бою.",
     Rings
   ) { val HealBonusPct: Long = 10L }
 
   // ── Амулеты ───────────────────────────────────────────────────────────────────
   case object Focused extends PassiveKind(
-    "Сосредоточенный",
-    "Сосредоточенный: +10% к восстановлению энергии в бою.",
+    "Сосредоточенность",
+    "Сосредоточенность: +10% к восстановлению энергии в бою.",
     Amulets
   ) { val EnergyRegenBonusPct: Long = 10L }
 
   case object Precise extends PassiveKind(
-    "Точности",
-    "Точности: +5% к точности.",
+    "Точность",
+    "Точность: +5% к точности.",
     Amulets
   ) { val AccuracyBonusPct: Long = 5L }
 

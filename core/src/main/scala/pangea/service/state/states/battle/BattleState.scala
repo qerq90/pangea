@@ -159,7 +159,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             noWeapon =
               hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
-            // «Разбойника» (+5%) множит итоговый урон; грейды стихийных камней в
+            // «Разбойник» (+5%) множит итоговый урон; грейды стихийных камней в
             // оружии добавляют +2%/грейд стихийного урона (elementalDamageMult).
             damage =
               (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult * hero.gems.elementalDamageMult).toLong
@@ -470,11 +470,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         else (battleAfterHero, "")
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
-      // выше максимума. «Сосредоточенный» множит реген на 1.1. Пока герой жив.
+      // выше максимума. «Сосредоточенность» множит реген на 1.1. Пока герой жив.
       finalHeroWithEnergy =
         if (heroAlive) {
           val b        = tickedHero.effectiveBaseStats(nowMs)
-          // «Сосредоточенный» (пассивка) и черепа в оружии множат реген энергии.
+          // «Сосредоточенность» (пассивка) и черепа в оружии множат реген энергии.
           val regen    = ((b.int + 0.5 * b.agi) * tickedHero.passives.energyRegenMult * tickedHero.gems.energyRegenMult).toLong.max(1L)
           val maxEn    = tickedHero.maxEnergy(nowMs)
           val newEn    = (tickedHero.fightStats.energy + regen).min(maxEn)
@@ -647,7 +647,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
 
         case Skill.Effect.Heal =>
-          // «Целителя» множит активное лечение на 1.1.
+          // «Целитель» множит активное лечение на 1.1.
           val amount   = (raw * hero.passives.healMult).toLong.max(1L)
           val maxHp    = hero.effectiveMaxHp(nowMs)
           val newHp    = (hero.fightStats.hp + amount).min(maxHp)
@@ -736,7 +736,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           f.effect match {
             case FlaskEffect.HealPercent(pct) =>
               val maxHp    = hero.effectiveMaxHp(nowMs)
-              // «Целителя» множит лечение фляги на 1.1.
+              // «Целитель» множит лечение фляги на 1.1.
               val healAmt  = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
               val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
               val healed   = newHp - hero.fightStats.hp
@@ -799,7 +799,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     potion match {
       case PotionKind.Healing =>
         val maxHp  = hero.effectiveMaxHp(nowMs)
-        // «Целителя» множит лечение зелья на 1.1.
+        // «Целитель» множит лечение зелья на 1.1.
         val heal   = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
         val newHp  = (hero.fightStats.hp + heal).min(maxHp)
         val healed = newHp - hero.fightStats.hp
@@ -868,7 +868,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       buffedEff = battle.heroBattleState.applyTo(eff)
       monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
-      // «Сверкающие» дают +25% к уклонению именно при бегстве.
+      // «Сверкающий» дают +25% к уклонению именно при бегстве.
       result <-
         if (hitRoll > playerDodgeChance(hero, battle, nowMs, fleeing = true)) {
           for {
@@ -932,7 +932,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         gearChanceBonusPct = hero.gems.gearDropBonusPct,
         rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
       )
-      // «Таксидермиста»/«Ювелира» дают отдельные доп. дропы поверх основного лута.
+      // «Таксидермист»/«Ювелир» дают отдельные доп. дропы поверх основного лута.
       (extraDrops, rngAfter2) = LootGenerator.rollPassiveDrops(
         hero.passives.hasTaxidermist,
         hero.passives.hasJeweler,
@@ -1172,15 +1172,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       .flatMap(json => ZIO.fromEither(json.as[SoloPveBattle]))
 
   /** Уклонение игрока от удара моба, в процентах [5;95]: защита игрока в знаменателе,
-    * точность моба ×1.5. Поверх базового шанса добавляются бонус боевых бафов (зелье
-    * уворота) и плоские бонусы пассивок — «Быстрые ноги»/«Сливающиеся» всегда, а
-    * «Сверкающие» — только при бегстве (`fleeing`). Потолок 95% абсолютный. */
+    * точность моба ×1.5 (снижена «Сливающимся» на 10%, см. [[HeroPassives.enemyAccuracyMult]] —
+    * это правит саму точность атакующего в формуле, а не добавляет уклонение герою напрямую).
+    * Поверх базового шанса добавляются бонус боевых бафов (зелье уворота) и плоские
+    * бонусы пассивок — «Быстрые ноги» всегда, а «Сверкающий» — только при бегстве
+    * (`fleeing`). Потолок 95% абсолютный. */
   private def playerDodgeChance(hero: Hero, battle: SoloPveBattle, nowMs: Long, fleeing: Boolean = false): Double = {
     // Буст Воздуха (+10% уклонения на airBoostTurns ходов) входит в effWithAir.
-    val buffed       = effWithAir(hero, battle, nowMs)
-    val agi          = hero.effectiveBaseStats(nowMs).agi
-    val passiveBonus = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
-    (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, battle.monsterStats.accuracy)
+    val buffed          = effWithAir(hero, battle, nowMs)
+    val agi             = hero.effectiveBaseStats(nowMs).agi
+    val passiveBonus    = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
+    val monsterAccuracy = (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult).toLong
+    (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, monsterAccuracy)
       + battle.heroBattleState.dodgeBonus + passiveBonus).min(95.0).max(5.0)
   }
 

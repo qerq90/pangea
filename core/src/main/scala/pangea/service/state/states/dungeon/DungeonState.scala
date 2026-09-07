@@ -84,7 +84,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       _      <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil))
-      // «Охотника»/«Скрытный» сдвигают долю боевых событий в пуле.
+      // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле.
       pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
