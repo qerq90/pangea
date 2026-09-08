@@ -1,9 +1,9 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.{GemGenerator, ItemGenerator, TreasureMapGenerator}
+import pangea.generator.item.{GemGenerator, ItemGenerator, ItemNameGenerator, MaterialGenerator, TreasureMapGenerator}
 import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
-import pangea.model.monster.{Race, Rarity => MobRarity}
+import pangea.model.monster.{Elemental, Race, Rarity => MobRarity}
 import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
@@ -211,6 +211,39 @@ object LootGenerator {
       }
     loop(dropChances(tier), Set.empty, Nil, rng)
   }
+
+  /** Дроп с элементаля-минибосса. В отличие от обычного лута он есть ВСЕГДА и не
+    * зависит от таблицы категорий: выпадает `0..1 + BossLvL` предметов, каждый с
+    * равным шансом — либо ингредиент стихии, либо фиолетовая вещь её набора.
+    *
+    * Уровень вещи берётся от уровня ГЕРОЯ с разбросом ±1: у босса свой BossLvL
+    * (1..10), и вещь по нему была бы мусором. */
+  def rollElemental(
+      elemental: Elemental,
+      bossLvl: Long,
+      heroLvl: Long,
+      rng: Rng
+  ): (List[LootDrop], Rng) = {
+    val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
+    val count       = (extra + bossLvl).toInt.max(1)
+    (0 until count).foldLeft((List.empty[LootDrop], r0)) { case ((acc, r), _) =>
+      val (roll, r1) = r.between(0L, 100L)
+      if (roll < ElementalIngredientChancePct)
+        (acc :+ LootDrop.Gear(MaterialGenerator.item(elemental.ingredient)), r1)
+      else {
+        // Уровень вещи: уровень героя ±1, но не ниже первого.
+        val (delta, r2) = r1.between(-1L, 2L)
+        val lvl         = (heroLvl + delta).max(1L)
+        val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, ItemRarity.Purple, r2)
+        // Имя перекатываем как сетовое: имя набора встаёт вместо титула.
+        val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, elemental.set, r3)
+        (acc :+ LootDrop.Gear(item.copy(name = name, set = Some(elemental.set))), r4)
+      }
+    }
+  }
+
+  /** Шанс (в %), что предмет с элементаля окажется ингредиентом, а не вещью набора. */
+  val ElementalIngredientChancePct: Long = 50L
 
   /** Доп. дропы от пассивок героя, независимые от основного ролла [[roll]] (каждый
     * со своим шансом): «Таксидермист» — 10% на лишний трофей, «Ювелир» — 10% на

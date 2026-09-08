@@ -152,6 +152,43 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       })
     },
 
+    // ── Дроп с элементаля ─────────────────────────────────────────────────────
+    test("дроп с элементаля есть всегда: 0..1 + BossLvL предметов") {
+      val counts = (1L to 300L).map { s =>
+        LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, bossLvl = 3L, heroLvl = 40L, Rng(s))._1.size
+      }
+      assertTrue(counts.forall(n => n == 3 || n == 4)) && // BossLvL 3 плюс 0 или 1
+      assertTrue(counts.contains(3)) && assertTrue(counts.contains(4))
+    },
+
+    test("с элементаля падают только его ингредиент и фиолетовые вещи его набора") {
+      val items = (1L to 300L).iterator
+        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt).toList
+      val (materials, gear) = items.partition(_.itemType == ItemType.Material)
+      assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
+      assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.EverburningIron))) &&
+      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      assertTrue(gear.forall(_.set.contains(pangea.model.item.ItemSet.WildFlame))) &&
+      // имя сетовое: набор встал вместо титула
+      assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.WildFlame.title)))
+    },
+
+    test("уровень сетовой вещи — уровень героя ±1, а не уровень босса") {
+      val gear = (1L to 300L).iterator
+        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+      assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
+    },
+
+    test("ингредиент и вещь выпадают примерно поровну") {
+      val items = (1L to 600L).iterator
+        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt).toList
+      val materialShare = items.count(_.itemType == ItemType.Material).toDouble / items.size
+      assertTrue(materialShare > 0.4 && materialShare < 0.6)
+    },
+
     // ── Пассивки лута ─────────────────────────────────────────────────────────
     test("без пассивок доп. дропов нет и RNG не тратится") {
       val (drops, r) = LootGenerator.rollPassiveDrops(

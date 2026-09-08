@@ -1246,20 +1246,28 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       azat <- loadAzat(user)
       // Недельное благословение Азата: +10% опыта/серебра, +10% редкости, +5% доп. дроп.
       blessed = azat.blessingActive(now)
-      baseExp = (hero.dungeonLevel.toLong * battle.rarity.factor).toLong.max(1L)
+      // У минибосса своя награда за уровень босса, а не по этажу и редкости.
+      baseExp = battle.elemental
+                  .map(_.expReward(battle.monsterLvl))
+                  .getOrElse((hero.dungeonLevel.toLong * battle.rarity.factor).toLong)
+                  .max(1L)
       expGained = if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
       monster = battle.toMonster
-      (baseDrops, rngAfter) = LootGenerator.roll(
-        battle.rarity,
-        monster.race,
-        hero.dungeonLevel.toLong,
-        Rng(seed),
-        gearChanceBonusPct = hero.gems.gearDropBonusPct,
-        rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
-      )
+      // У элементаля дроп свой и всегда есть; обычная таблица лута не катается.
+      (baseDrops, rngAfter) = battle.elemental match {
+        case Some(e) => LootGenerator.rollElemental(e, battle.monsterLvl, hero.lvl, Rng(seed))
+        case None    => LootGenerator.roll(
+          battle.rarity,
+          monster.race,
+          hero.dungeonLevel.toLong,
+          Rng(seed),
+          gearChanceBonusPct = hero.gems.gearDropBonusPct,
+          rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
+        )
+      }
       // «Таксидермист»/«Ювелир» дают отдельные доп. дропы поверх основного лута.
       (extraDrops, rngAfter2) = LootGenerator.rollPassiveDrops(
         hero.passives.hasTaxidermist,
@@ -1307,11 +1315,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon)
       )
     } yield VictoryOutcome(
-      monsterName     = monster.name,
-      expGained       = expGained,
-      newLvl          = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
-      unlocksDarkness = unlocksDarkness,
-      cubeDropped     = cubeDropped
+      monsterName       = monster.name,
+      expGained         = expGained,
+      newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
+      unlocksDarkness   = unlocksDarkness,
+      cubeDropped       = cubeDropped,
+      elementalDefeated = battle.elemental.isDefined
     )
 
   /** Показ итогов победы — вызывается ПОСЛЕ того, как [[applyVictory]] всё
@@ -1344,6 +1353,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       )
       _ <- ZIO.when(outcome.cubeDropped)(
         renderer.show(user, Screen(content.text("battle.cubeFound"), Nil))
+      )
+      // Победа над минибоссом: своя реплика перед экраном добычи.
+      _ <- ZIO.when(outcome.elementalDefeated)(
+        renderer.show(user, Screen(content.text("battle.elemental.victory"), Nil))
       )
     } yield ()
 
@@ -1543,7 +1556,9 @@ object BattleState {
       expGained: Long,
       newLvl: Option[Long],
       unlocksDarkness: Boolean,
-      cubeDropped: Boolean
+      cubeDropped: Boolean,
+      // Победа над минибоссом ведёт не в обычную добычу, а в осмотр логова.
+      elementalDefeated: Boolean = false
   )
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
