@@ -54,6 +54,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Socketing  extends StateType // вставка камня-усилителя в гнездо снаряжения
   case object Loot       extends StateType
   case object ElementalLair extends StateType // логово элементаля: подход к минибоссу
+  case object ElementalSearch extends StateType // осмотр логова после победы (афк-поиск камней)
   case object Merchant   extends StateType
   case object Gustavo         extends StateType
   case object GustavoHeal     extends StateType

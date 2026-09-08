@@ -533,6 +533,17 @@ elementalLair:
     color: "negative"
   left: "Вы тихо отступаете, оставляя логово позади."
 
+elementalSearch:
+  enter:
+    text: "Вы изучаете окрестности в поисках полезных вещей."
+    choices:
+      LeaveSearch:
+        label: "Уйти"
+        color: "negative"
+  found: "💎 Вы нашли {gem}!"
+  done: "Кажется я нашёл все что мог."
+  continueLabel: "Продолжить"
+
 equipment:
   header: "Снаряжение"
   empty: "Пусто"
