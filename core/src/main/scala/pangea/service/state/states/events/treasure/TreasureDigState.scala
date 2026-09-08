@@ -147,11 +147,7 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       (drops, _)   = pangea.generator.loot.LootGenerator.roll(
                        pangea.model.monster.Rarity.Uncommon, race, hero.dungeonLevel.toLong, Rng(seed))
       loot         = LootData(
-                       items = drops.collect {
-                         case pangea.generator.loot.LootGenerator.LootDrop.Gear(i)    => i
-                         case pangea.generator.loot.LootGenerator.LootDrop.Trophy(i)  => i
-                         case pangea.generator.loot.LootGenerator.LootDrop.MapHalf(i) => i
-                       } ++ skull.toList,
+                       items = drops.flatMap(_.itemOpt) ++ skull.toList,
                        silvers   = drops.collect { case pangea.generator.loot.LootGenerator.LootDrop.Silver(a, _) => a },
                        doubloons = 0)
       _ <- renderer.show(user, Screen(content.format("treasureDig.marauder.text", "race" -> race.toString), Nil))

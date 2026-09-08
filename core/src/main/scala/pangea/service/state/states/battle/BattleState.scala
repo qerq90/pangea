@@ -955,11 +955,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         .map(_.flatMap(_.as[LootState.LootData].toOption))
       silverScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
       lootData = LootState.LootData(
-        items = drops.collect {
-          case LootGenerator.LootDrop.Gear(i)    => i
-          case LootGenerator.LootDrop.Trophy(i)  => i
-          case LootGenerator.LootDrop.MapHalf(i) => i
-        } ++ blessingGear.toList,
+        items = drops.flatMap(_.itemOpt) ++ blessingGear.toList,
         silvers = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct / 100L },
         returnState = prev.flatMap(_.returnState),
         eventData = prev.flatMap(_.eventData)
