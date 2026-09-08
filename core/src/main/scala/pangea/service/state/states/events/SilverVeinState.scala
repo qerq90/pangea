@@ -104,10 +104,11 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
     } yield result
 
   // Серебро + камень через экран добычи (Loot начислит серебро и предложит забрать камень).
+  // Череп (Skull) намеренно исключён из пула — см. SilverVeinState.DroppableGemKinds.
   private def dropGem(user: User, reward: Long): Task[StateType] =
     for {
-      kindIdx <- Random.nextIntBounded(GemKind.values.size)
-      gem      = GemGenerator.item(GemKind.values(kindIdx), Gem.MinGrade)
+      kindIdx <- Random.nextIntBounded(SilverVeinState.DroppableGemKinds.size)
+      gem      = GemGenerator.item(SilverVeinState.DroppableGemKinds(kindIdx), Gem.MinGrade)
       loot     = LootData(items = List(gem), silvers = List(reward))
       _       <- heroDao.writeSceneData(user.userId, loot.asJson)
     } yield StateType.Loot
@@ -141,6 +142,10 @@ object SilverVeinState {
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
   val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы
+
+  /** Виды камней, которые может выкатить жила. Череп (Skull) намеренно исключён —
+   *  «Надколотый череп» не должен выпадать с добычи серебряной руды. */
+  val DroppableGemKinds: IndexedSeq[GemKind] = GemKind.values.filterNot(_ == GemKind.Skull)
 
   private val StartedAtKey  = "silverVeinStartedAt"
   private val HarvestAction = """{"action":"Harvest"}"""
