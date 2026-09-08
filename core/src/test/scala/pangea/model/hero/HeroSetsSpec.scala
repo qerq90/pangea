@@ -99,9 +99,29 @@ object HeroSetsSpec extends ZIOSpecDefault {
     test("бонусы без механики не «действуют», хотя и показываются игроку") {
       val full = HeroSets(Map(ItemSet.StoneGuard -> 12))
       val shown = full.bonuses(ItemSet.StoneGuard).map(b => b.pieces -> b.active)
-      assertTrue(shown == List(2 -> true, 4 -> false, 6 -> true, 8 -> true, 10 -> false, 12 -> true)) &&
+      // У «Каменного стража» реализованы пока только пороги 2 и 8.
+      assertTrue(shown == List(2 -> true, 4 -> false, 6 -> false, 8 -> true, 10 -> false, 12 -> false)) &&
       assertTrue(!full.has(ItemSet.StoneGuard, 4)) && // стихийного урона мобов нет
       assertTrue(!full.has(ItemSet.StoneGuard, 10))   // героя нечем поджечь
+    },
+
+    test("«Упырь» реализован целиком: все шесть порогов действуют") {
+      val full = HeroSets(Map(ItemSet.Ghoul -> 12))
+      assertTrue(full.bonuses(ItemSet.Ghoul).forall(_.active)) &&
+      assertTrue(full.lifestealPct == ItemSet.Ghoul.LifestealPct) &&
+      assertTrue(full.bleedOnHitChancePct == ItemSet.Ghoul.BleedChancePct) &&
+      assertTrue(full.healsFromBleed) &&
+      assertTrue(full.skillsAlwaysBleed) &&
+      assertTrue(full.feastsOnKill)
+    },
+
+    test("пороги «Упыря» включаются по одному, а не все сразу") {
+      val four = HeroSets(Map(ItemSet.Ghoul -> 4))
+      assertTrue(four.lifestealPct == 2L) &&        // порог 4 набран
+      assertTrue(four.bleedOnHitChancePct == 0L) && // порог 6 ещё нет
+      assertTrue(!four.healsFromBleed) &&
+      assertTrue(!four.skillsAlwaysBleed) &&
+      assertTrue(!four.feastsOnKill)
     },
 
     test("порог 8 у каждого набора даёт +300 HP и +10% HP, и они складываются") {

@@ -75,12 +75,12 @@ object ItemSet extends Enum[ItemSet] {
       SetBonus(2,  s"+$DefencePct% к защите."),
       // Мобы не наносят стихийный урон — механики, которую можно ослабить, ещё нет.
       SetBonus(4,  s"Любой стихийный урон на $ElementalTakenCutPct% слабее по вам.", active = false),
-      SetBonus(6,  s"Урон по вашей броне дополнительно снижен на $ArmorDamageCutPct%."),
+      SetBonus(6,  s"Урон по вашей броне дополнительно снижен на $ArmorDamageCutPct%.", active = false),
       SetBonus(8,  SetRates.HpBonusText),
       // Героя нечем поджечь: горение существует только в сторону моба.
       SetBonus(10, s"Шанс поджечь Вас снижен на $IgniteResistPct%.", active = false),
       SetBonus(12, s"При получении урона, после которого у вас остаётся менее $LowHpThresholdPct% HP, " +
-                   s"вы восстанавливаете $ArmorRestorePct% брони.")
+                   s"вы восстанавливаете $ArmorRestorePct% брони.", active = false)
     )
   }
 
@@ -93,12 +93,12 @@ object ItemSet extends Enum[ItemSet] {
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$AttackPct% к атаке."),
-      SetBonus(4,  s"Стихийный урон огнём по HP и броне увеличен на $FireDamageBonusPct%."),
-      SetBonus(6,  s"Рост урона от огня за раунд увеличен в $BurnGrowthMult раза."),
+      SetBonus(4,  s"Стихийный урон огнём по HP и броне увеличен на $FireDamageBonusPct%.", active = false),
+      SetBonus(6,  s"Рост урона от огня за раунд увеличен в $BurnGrowthMult раза.", active = false),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, s"Шанс поджечь врага увеличен на $IgniteChanceBonusPct%."),
+      SetBonus(10, s"Шанс поджечь врага увеличен на $IgniteChanceBonusPct%.", active = false),
       SetBonus(12, "Ваши активные умения всегда поджигают врага. Каждый процент огня дополнительно " +
-                   "снижает защиту противника на столько же процентов.")
+                   "снижает защиту противника на столько же процентов.", active = false)
     )
   }
 
@@ -132,10 +132,10 @@ object ItemSet extends Enum[ItemSet] {
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$AccuracyPct% к точности."),
       SetBonus(4,  s"+$EnergyPct% к энергии. Ловкость восстанавливает в $AgiRegenMult раза больше энергии за раунд."),
-      SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд."),
+      SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд.", active = false),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, "Первая применённая противником активная способность, наносящая вам урон, отменяется."),
-      SetBonus(12, "Первая применённая за бой активная способность, наносящая урон, наносит двойной урон.")
+      SetBonus(10, "Первая применённая противником активная способность, наносящая вам урон, отменяется.", active = false),
+      SetBonus(12, "Первая применённая за бой активная способность, наносящая урон, наносит двойной урон.", active = false)
     )
   }
 
