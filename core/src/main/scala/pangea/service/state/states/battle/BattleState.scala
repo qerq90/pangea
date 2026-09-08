@@ -1289,10 +1289,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
       silverScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
+      // После добычи с элементаля игрок идёт осматривать логово, а не в лабиринт.
+      lootReturn = if (battle.elemental.isDefined) Some(StateType.ElementalSearch)
+                   else prev.flatMap(_.returnState)
       lootData = LootState.LootData(
         items = drops.flatMap(_.itemOpt) ++ blessingGear.toList,
         silvers = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct / 100L },
-        returnState = prev.flatMap(_.returnState),
+        returnState = lootReturn,
         eventData = prev.flatMap(_.eventData)
       )
       // Первый поверженный легендарный моб роняет квестовый «Неактивный куб Азата»

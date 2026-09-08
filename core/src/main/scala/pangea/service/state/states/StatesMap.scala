@@ -12,6 +12,7 @@ import pangea.model.state.StateType.{
   Death,
   Dungeon,
   ElementalLair,
+  ElementalSearch,
   Equipment,
   FoundItem,
   GlobalMap,
@@ -57,7 +58,7 @@ import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
-import pangea.service.state.states.events.{ElementalLairState, SilverVeinState}
+import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, SilverVeinState}
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
@@ -157,6 +158,7 @@ object StatesMap {
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
           Skills    -> SkillsState(heroDao, content),
           ElementalLair -> ElementalLairState(heroDao, content),
+          ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
           TempleAzat -> TempleAzatState(heroDao, content),
