@@ -16,6 +16,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       "Back"           -> Target.Run { (user, _, _) => returnToCaller(user) },
       "OpenInventory"  -> Target.Goto(StateType.Inventory),
       "OpenEquipment"  -> Target.Goto(StateType.Equipment),
+      "OpenSkills"     -> Target.Goto(StateType.Skills),
       "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
@@ -122,6 +123,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     val choices = List(
       Some(content.choice("OpenInventory", "heroStats.inventory").copy(row = Some(0))),
       Some(content.choice("OpenEquipment", "heroStats.equipment").copy(row = Some(0))),
+      Some(content.choice("OpenSkills", "heroStats.skills").copy(row = Some(0))),
       Option.when(hero.activeTraumas(nowMs).nonEmpty)(
         content.choice("OpenTraumas", "heroStats.traumas").copy(color = ChoiceColor.Secondary, row = Some(1))),
       Option.when(hero.upgradePoints > 0)(
