@@ -141,7 +141,8 @@ case class Item(
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
-      case ItemDetails.Material(k)       => List(s"Материал: ${k.displayName}")
+      case ItemDetails.Material(k)       =>
+        s"Материал: ${k.displayName}" :: (if (k.description.isEmpty) Nil else List(k.description))
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines

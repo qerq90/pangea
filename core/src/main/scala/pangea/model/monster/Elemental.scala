@@ -2,6 +2,7 @@ package pangea.model.monster
 
 import enumeratum._
 import pangea.model.battle.Element
+import pangea.model.item.{ItemSet, MaterialKind}
 import pangea.model.stats.FightStats
 
 /** Вид элементаля-минибосса. Все элементали — раса [[Race.Elemental]] и потому
@@ -31,6 +32,12 @@ sealed abstract class Elemental(
 
   /** Можно ли навесить на элементаля этот эффект стихии. Огненный не горит. */
   def immuneToBurn: Boolean
+
+  /** Ингредиент, который остаётся после него. */
+  def ingredient: MaterialKind
+
+  /** Набор, вещи которого он роняет и в который переводит куб через ингредиент. */
+  def set: ItemSet
 }
 
 object Elemental extends Enum[Elemental] {
@@ -111,6 +118,9 @@ object Elemental extends Enum[Elemental] {
 
     /** Огненного нельзя поджечь — он и так пламя. */
     def immuneToBurn: Boolean = true
+
+    def ingredient: MaterialKind = MaterialKind.EverburningIron
+    def set: ItemSet             = ItemSet.WildFlame
 
     // ── «Скован холодом» ─────────────────────────────────────────────────────
     /** Сколько ходов держится оцепенение от прока Холода и на сколько % оно
