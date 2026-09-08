@@ -146,7 +146,7 @@ case class EquipmentState(
 
   private def slotLabel(slot: Slot, item: Item): String =
     if (item.itemType == pangea.model.item.ItemType.NoItem) s"${slot.name}: —"
-    else s"${slot.name}: ${item.name} Ур.${item.lvl}"
+    else s"${slot.name}: ${item.displayTitle}"
 
   private def navRow(page: Int, totalPages: Int, prevId: String, nextId: String, backId: String): List[Choice] = {
     val row = ItemMenu.NavRow
@@ -204,6 +204,6 @@ object EquipmentState {
   def itemStats(item: Item): String = {
     val stats    = item.statsLines
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
-    s"${item.name} Ур.${item.lvl}\n$statsStr"
+    s"${item.displayTitle}\n$statsStr"
   }
 }

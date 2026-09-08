@@ -280,7 +280,7 @@ case class MerchantState(
   private def itemDesc(item: Item): String = {
     val lines = item.statsLines
     val tail  = if (lines.isEmpty) "" else "\n" + lines.mkString("\n")
-    s"${item.name} Ур.${item.lvl}$tail"
+    s"${item.displayTitle}$tail"
   }
 
   private def loadOrInit(user: User, now: Long): Task[MerchantData] =

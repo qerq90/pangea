@@ -134,7 +134,7 @@ case class TrophyExchangeState(
   // ── Хелперы ─────────────────────────────────────────────────────────────────
 
   private def trophyLabel(item: Item): String =
-    s"${item.name} Ур.${item.lvl} (+${TrophyExchangeState.reputationFor(item)})"
+    s"${item.displayTitle} (+${TrophyExchangeState.reputationFor(item)})"
 
   private def navRow(page: Int, totalPages: Int): List[Choice] = {
     val row = ItemMenu.NavRow

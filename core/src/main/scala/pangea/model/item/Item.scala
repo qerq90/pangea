@@ -92,11 +92,20 @@ case class Item(
   def isTreasureMap: Boolean =
     itemType == ItemType.TreasureMap || itemType == ItemType.TreasureMapHalf
 
-  /** Заголовок для списков и экранов. У карт клада и камней-усилителей уровня нет —
-   *  показываем только имя; у прочих предметов — «Имя Ур.N». */
+  /** Заголовок для списков и экранов — единый формат «<кружок редкости> [Ур.N]
+   *  <имя>» (напр. «🔵 [Ур.12] Хороший Шлем Рыцаря»). Кружок редкости вшит в
+   *  начало сгенерированного имени (см. [[pangea.generator.item.ItemNameGenerator]]),
+   *  поэтому его вырезаем и ставим перед уровнем. У предметов без кружка в имени
+   *  (трофеи, тестовые предметы) остаётся «[Ур.N] <имя>».
+   *
+   *  У карт клада, камней-усилителей и материалов уровня нет — только имя. */
   def displayTitle: String =
     if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material) name
-    else s"$name Ур.$lvl"
+    else {
+      val prefix = s"${rarity.emoji} "
+      if (name.startsWith(prefix)) s"${rarity.emoji} [Ур.$lvl] ${name.stripPrefix(prefix)}"
+      else s"[Ур.$lvl] $name"
+    }
 
   /** Текст-описание карты (для целой — описание зоны, для половинки — заглушка).
    *  None у любого предмета, не являющегося картой. */
@@ -144,10 +153,11 @@ case class Item(
 
   /** Строка «надетого/сравниваемого» предмета — единый формат для всех экранов,
    *  где рядом с предметом показываем, что уже надето (дроп, надевание):
-   *  «<prefix>: Имя Ур.N» и текстовые характеристики ниже (как в [[statsLines]]). */
+   *  «<prefix>: <заголовок>» (см. [[displayTitle]]) и текстовые характеристики
+   *  ниже (как в [[statsLines]]). */
   def equippedComparison(prefix: String): String = {
     val body = if (statsLines.isEmpty) "" else "\n" + statsLines.mkString("\n")
-    s"$prefix: $name Ур.$lvl$body"
+    s"$prefix: $displayTitle$body"
   }
 }
 
