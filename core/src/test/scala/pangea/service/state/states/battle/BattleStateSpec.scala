@@ -84,6 +84,34 @@ object BattleStateSpec extends ZIOSpecDefault {
 
   private def ghoulHero(pieces: Int) = strongHero.copy(equipment = ghoulEquipment(pieces))
 
+  /** То же для «Охотника»: `n` предметов набора в сетовых слотах. */
+  private def hunterEquipment(n: Int): pangea.model.hero.Equipment = {
+    val slots = List(ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
+      ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
+      ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Weapon)
+    slots.take(n).zipWithIndex.foldLeft(TestFixtures.emptyEquipment) { case (eq, (t, i)) =>
+      val it = Item(300L + i, "Предмет", 1L, ItemRarity.Blue, t,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        set = Some(pangea.model.item.ItemSet.Hunter))
+      i match {
+        case 0  => eq.copy(helmet = it)
+        case 1  => eq.copy(shoulderPads = it)
+        case 2  => eq.copy(chestPlate = it)
+        case 3  => eq.copy(bracelets = it)
+        case 4  => eq.copy(gloves = it)
+        case 5  => eq.copy(pants = it)
+        case 6  => eq.copy(boots = it)
+        case 7  => eq.copy(amulet = it)
+        case 8  => eq.copy(firstRing = it)
+        case 9  => eq.copy(secondRing = it)
+        case 10 => eq.copy(belt = it)
+        case _  => eq.copy(weapon = it)
+      }
+    }
+  }
+
+  private def hunterHero(pieces: Int) = strongHero.copy(equipment = hunterEquipment(pieces))
+
   // Герой с 1 HP — умрёт от любого удара
   private def dyingHero = TestFixtures.hero(userId).copy(
     baseStats  = TestFixtures.hero(userId).baseStats.copy(agi = 0),
@@ -407,6 +435,25 @@ object BattleStateSpec extends ZIOSpecDefault {
     },
 
     // ── Набор «Упырь» ─────────────────────────────────────────────────────────
+    test("«Упырь» 4: удар, целиком поглощённый бронёй, крови не даёт") {
+      val hero = ghoulHero(4).copy(fightStats = strongHero.fightStats.copy(atk = 500, hp = 100))
+      // Броня моба с запасом — весь урон уходит в неё, до HP не доходит.
+      val armored = strongBattle.copy(
+        monsterCurrentArmor = 5000L,
+        monsterStats        = strongBattle.monsterStats.copy(armor = 5000L))
+      for {
+        t             <- makeState(hero, armored)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.getHeroByUserId(userId).map(_.get)
+        battle        <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(battle.monsterCurrentArmor < 5000L) && // урон по броне прошёл
+              assertTrue(battle.monsterCurrentHp == armored.monsterCurrentHp) && // в HP — нет
+              assertTrue(after.fightStats.hp == 100L) // и лечения не было
+    },
+
     test("«Упырь» 4: часть нанесённого урона возвращается герою в HP") {
       val hero = ghoulHero(4).copy(fightStats = strongHero.fightStats.copy(atk = 500, hp = 100))
       for {
@@ -495,6 +542,125 @@ object BattleStateSpec extends ZIOSpecDefault {
         screens       <- r.sentScreens
       } yield assertTrue(after.fightStats.hp == 10L) &&
               assertTrue(!screens.exists(_.text.contains("жуткий пир")))
+    },
+
+    // ── Набор «Охотник» ───────────────────────────────────────────────────────
+    test("«Охотник» 6: промах переигрывается при удачном броске") {
+      // Уклонение моба 100% → герой промахивается всегда; повтор тоже промажет,
+      // поэтому проверяем сам факт второй попытки по строке в логе.
+      val hero  = hunterHero(6)
+      val dodgy = strongBattle.copy(
+        monsterStats = strongBattle.monsterStats.copy(evasion = 100000L))
+      for {
+        t             <- makeState(hero, dodgy)
+        (state, _, r)  = t
+        // Броски: удар героя (промах), бросок повтора (10 ≤ 25 — сработал),
+        // удар героя повторно (промах), удар моба, каст моба.
+        _             <- TestRandom.feedInts(1, 10, 1, 3, 90)
+        _             <- state.action(testUser, tap("Attack"), r)
+        screens       <- r.sentScreens
+        text           = screens.map(_.text).mkString("\n")
+      } yield assertTrue(text.contains("Промах не в счёт")) &&
+              assertTrue(text.split("промахивается").length - 1 >= 1)
+    },
+
+    test("«Охотник» 6: повтор не больше одного за раунд") {
+      val hero  = hunterHero(6)
+      val dodgy = strongBattle.copy(
+        monsterStats = strongBattle.monsterStats.copy(evasion = 100000L))
+      for {
+        t             <- makeState(hero, dodgy)
+        (state, _, r)  = t
+        // Броски: промах, повтор (10 ≤ 25), снова промах, затем удар моба и его
+        // каст (100 — не кастует). Четвёртое число намеренно 10: если бы после
+        // повтора делался ещё один бросок, оно снова дало бы повтор и лог вырос бы.
+        _             <- TestRandom.feedInts(1, 10, 1, 10, 100)
+        _             <- state.action(testUser, tap("Attack"), r)
+        screens       <- r.sentScreens
+        text           = screens.map(_.text).mkString("\n")
+      } yield assertTrue(text.split("Промах не в счёт").length - 1 == 1)
+    },
+
+    test("«Охотник» 6: при неудачном броске повтора нет") {
+      val hero  = hunterHero(6)
+      val dodgy = strongBattle.copy(
+        monsterStats = strongBattle.monsterStats.copy(evasion = 100000L))
+      for {
+        t             <- makeState(hero, dodgy)
+        (state, _, r)  = t
+        _             <- TestRandom.feedInts(1, 90, 3, 90) // 90 > 25 — повтора нет
+        _             <- state.action(testUser, tap("Attack"), r)
+        screens       <- r.sentScreens
+      } yield assertTrue(!screens.map(_.text).mkString("\n").contains("Промах не в счёт"))
+    },
+
+    test("«Охотник» 10: первая вредящая способность моба гасится, вторая уже проходит") {
+      val hero = hunterHero(10).copy(fightStats = strongHero.fightStats.copy(hp = 500, armor = 0))
+      for {
+        t             <- makeState(hero, strongBattle)
+        (state, dao, r) = t
+        // Броски раунда: удар героя, удар моба, каст моба (1 ≤ шанс — кастует), выбор скилла.
+        _             <- TestRandom.feedInts(60, 3, 1, 0)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        afterFirst    <- dao.getHeroByUserId(userId).map(_.get)
+        battle1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        screens       <- r.sentScreens
+      } yield assertTrue(battle1.effects.cancelSpent) && // отмена израсходована
+              assertTrue(afterFirst.fightStats.hp == 500L) && // урон не прошёл
+              assertTrue(screens.map(_.text).mkString("\n").contains("срываете его приём"))
+    },
+
+    test("«Охотник» 12: первое умение бьёт вдвое, второе — обычно") {
+      val weapon = Item(5L, "Меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Weapon(pangea.model.skill.Skill.SweepingStrike),
+        set = Some(pangea.model.item.ItemSet.Hunter))
+      val hero = hunterHero(12).copy(
+        fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
+        equipment  = hunterEquipment(12).copy(weapon = weapon))
+      // Готовность умения живёт в самом бою (skillSlots), а не выводится из
+      // экипировки, — иначе слот считается незарегистрированным и ход не тратится.
+      val withSlot = strongBattle.copy(
+        skillSlots = List(pangea.model.battle.SkillSlotState(weapon.id, pangea.model.skill.Skill.SweepingStrike)))
+      // Контроль: тот же герой, но 10 предметов — порог 12 не набран, всё
+      // остальное (в т.ч. пороги 2/4/6/10) совпадает, значит разница только в удвоении.
+      val heroNoDouble = hunterHero(10).copy(
+        fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
+        equipment  = hunterEquipment(10).copy(weapon = weapon))
+      for {
+        t             <- makeState(hero, withSlot)
+        (state, dao, r) = t
+        // Два разброса: один на урон умения, второй на обычную атаку, которая
+        // идёт следом в том же ходу. Иначе второй бросок был бы случайным.
+        _             <- TestRandom.feedInts(60, 3, 90)
+        _             <- TestRandom.feedLongs(100L, 100L)
+        _             <- state.action(testUser, tap(s"Skill_${weapon.id}"), r)
+        battle1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        doubled        = withSlot.monsterCurrentHp - battle1.monsterCurrentHp
+
+        t2            <- makeState(heroNoDouble, withSlot)
+        (state2, dao2, r2) = t2
+        _             <- TestRandom.feedInts(60, 3, 90)
+        _             <- TestRandom.feedLongs(100L, 100L)
+        _             <- state2.action(testUser, tap(s"Skill_${weapon.id}"), r2)
+        battle2       <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        plain          = withSlot.monsterCurrentHp - battle2.monsterCurrentHp
+
+        // За умением в том же ходу идёт обычная атака, поэтому в суммах сидит и
+        // она. Меряем её отдельно на тех же бросках и вычитаем — остаётся чистый
+        // урон умения, который и должен удвоиться.
+        t3            <- makeState(heroNoDouble, withSlot)
+        (state3, dao3, r3) = t3
+        _             <- TestRandom.feedInts(60, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state3.action(testUser, tap("Attack"), r3)
+        battle3       <- dao3.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        attackOnly     = withSlot.monsterCurrentHp - battle3.monsterCurrentHp
+      } yield assertTrue(battle1.effects.doubleSpent) &&
+              assertTrue(!battle2.effects.doubleSpent) &&
+              assertTrue(plain - attackOnly > 0L) &&
+              assertTrue(doubled - attackOnly == (plain - attackOnly) * 2L)
     },
 
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
