@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{ItemType, Rarity}
+import pangea.model.item.{ItemSet, ItemType, Rarity}
 
 /**
  * Генератор названий предметов: «<кружок-редкости> <качество> <тип> <титул>»,
@@ -61,6 +61,15 @@ object ItemNameGenerator {
   private val titles = List("Рыцаря", "Командира", "Дворянина", "Аристократа", "Гвардейца",
                             "Кавалериста", "Стражника", "Охранника", "Повара", "Стрелка",
                             "Разведчика", "Оруженосца", "Бойца", "Вождя")
+
+  /** Название предмета из набора: имя набора встаёт вместо титула — третьим
+   *  словом после кружка редкости («🔵 Прочный Шлем Каменного стража»). Титул и
+   *  имя набора оба в родительном падеже, поэтому фраза читается одинаково. */
+  def setName(itemType: ItemType, rarity: Rarity, set: ItemSet, rng: Rng): (String, Rng) = {
+    val (adjMasc,        rng1) = rng.pick(adjectivesByRarity.getOrElse(rarity, List("Обычный")))
+    val ((base, gender), rng2) = rng1.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
+    (s"${rarity.emoji} ${inflect(adjMasc, gender)} $base ${set.title}", rng2)
+  }
 
   def generate(itemType: ItemType, rarity: Rarity, rng: Rng): (String, Rng) = {
     val (adjMasc,        rng1) = rng.pick(adjectivesByRarity.getOrElse(rarity, List("Обычный")))

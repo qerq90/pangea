@@ -477,8 +477,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       finalHeroWithEnergy =
         if (heroAlive) {
           val b        = tickedHero.effectiveBaseStats(nowMs)
-          // «Сосредоточенность» (пассивка) и черепа в оружии множат реген энергии.
-          val regen    = ((b.int + 0.5 * b.agi) * tickedHero.passives.energyRegenMult * tickedHero.gems.energyRegenMult).toLong.max(1L)
+          // «Сосредоточенность» (пассивка) и черепа в оружии множат реген энергии,
+          // а «Охотник» (порог 4) удваивает вклад именно ловкости.
+          val agiPart  = 0.5 * b.agi * tickedHero.sets.agiEnergyRegenMult
+          val regen    = ((b.int + agiPart) * tickedHero.passives.energyRegenMult * tickedHero.gems.energyRegenMult).toLong.max(1L)
           val maxEn    = tickedHero.maxEnergy(nowMs)
           val newEn    = (tickedHero.fightStats.energy + regen).min(maxEn)
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(energy = newEn))

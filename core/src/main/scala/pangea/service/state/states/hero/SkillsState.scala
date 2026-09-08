@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.PassiveKind
+import pangea.model.item.{ItemSet, PassiveKind}
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -141,17 +141,40 @@ object SkillsState {
       def label: String    = kind.label
       def describe(hero: Hero): String = kind.describe
     }
+
+    /** Набор снаряжения: в списке — сколько предметов надето, в описании —
+     *  только те пороги, до которых игрок добрал. */
+    final case class Set(set: ItemSet) extends SkillEntry {
+      def buttonId: String = s"$SetPrefix${set.entryName}"
+      def label: String    = s"🛡 ${set.label}"
+      def describe(hero: Hero): String = {
+        val sets   = hero.sets
+        val worn   = sets.pieces(set)
+        val header = s"Надето предметов: $worn из ${ItemSet.Thresholds.max}"
+        val lines  = sets.bonuses(set).map { b =>
+          val tail = if (b.active) "" else " (пока не действует)"
+          s"• ${b.pieces}: ${b.text}$tail"
+        }
+        val next = ItemSet.Thresholds.find(_ > worn)
+          .map(n => s"\n\nСледующий бонус — при $n предметах.")
+          .getOrElse("")
+        (header +: lines).mkString("\n") + next
+      }
+    }
   }
 
   private val ActivePrefix  = "ActiveSkill_"
   private val PassivePrefix = "PassiveSkill_"
+  private val SetPrefix     = "Set_"
 
-  /** Все умения/пассивки, реально действующие на герое прямо сейчас — снятые
-   *  с надетого снаряжения. Активные (оружие/нагрудник) идут первыми, затем
-   *  пассивки по алфавиту метки — стабильный порядок между перерисовками. */
+  /** Все умения/пассивки/наборы, реально действующие на герое прямо сейчас —
+   *  снятые с надетого снаряжения. Активные (оружие/нагрудник) идут первыми,
+   *  затем пассивки по алфавиту метки, затем наборы, набравшие хотя бы один
+   *  порог — стабильный порядок между перерисовками. */
   def entries(hero: Hero): List[SkillEntry] =
     hero.activeSkillSlots.map(s => SkillEntry.Active(s.itemId, s.skill)) ++
-      hero.passives.kinds.toList.sortBy(_.label).map(SkillEntry.Passive)
+      hero.passives.kinds.toList.sortBy(_.label).map(SkillEntry.Passive) ++
+      hero.sets.activeBonuses.map { case (set, _) => SkillEntry.Set(set) }
 
   final case class SkillsScene(page: Option[Int] = None)
   object SkillsScene {

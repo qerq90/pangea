@@ -22,7 +22,12 @@ case class Item(
   // Гнёзда под камни-усилители: длина = число гнёзд, элемент = вставленный камень
   // (None — свободное гнездо). Пусто у предметов без гнёзд (редкость ниже синей и
   // всё ненадеваемое). Раскатывается при генерации, см. ItemGenerator.
-  sockets: List[Option[Gem]] = Nil
+  sockets: List[Option[Gem]] = Nil,
+  // Набор, к которому принадлежит предмет. Option, а не значение по умолчанию:
+  // у уже сохранённых предметов этого поля в JSON нет, а производный декодер
+  // circe без него не собрал бы объект. Имя набора стоит в названии предмета
+  // вместо титула (см. ItemNameGenerator.setName).
+  set: Option[ItemSet] = None
 ) {
   def withId(id: Long): Item = copy(id = id)
 
@@ -129,6 +134,7 @@ case class Item(
       Option.when(evasion > 0)(s"💨 +$evasion"),
       Option.when(hp > 0)(s"❤ +$hp")
     ).flatten
+    val setLine = set.map(s => s"Набор: «${s.label}»").toList
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
@@ -138,7 +144,7 @@ case class Item(
       case ItemDetails.Material(k)       => List(s"Материал: ${k.displayName}")
       case _                             => Nil
     }
-    numeric ++ extra ++ socketLines
+    numeric ++ setLine ++ extra ++ socketLines
   }
 
   /** Строки о гнёздах: сводка «занято/всего» и по одному камню на строку.

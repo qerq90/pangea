@@ -41,6 +41,9 @@ case class Hero(
   /** Камни-усилители в гнёздах снаряжения — типизированный фасад для боя/лута. */
   def gems: HeroGems = HeroGems(equipment.weaponGems, equipment.armorGems)
 
+  /** Наборы надетого снаряжения и открытые их бонусы. */
+  def sets: HeroSets = HeroSets(equipment.setCounts)
+
   /** Можно ли двигаться к свету (выше): на первом этаже выше уже некуда. */
   def canGoLighter: Boolean = dungeonLevel > 1
 
@@ -109,9 +112,24 @@ case class Hero(
     )
   }
 
-  /** Текущие боевые статы — с учётом активных травм, плоских бафов пассивок и камней. */
+  /** Прибавки от наборов снаряжения (пороги «2 предмета»): каждый набор даёт +5%
+   *  к своему стату — «Каменный страж» к защите, «Дикое пламя» к атаке, «Упырь»
+   *  к уклонению, «Охотник» к точности. Считаются так же, как бафы камней —
+   *  от переданного, уже почти итогового значения. */
+  private def withSetStatBonuses(fs: FightStats): FightStats = {
+    val s = sets
+    fs.copy(
+      atk      = fs.atk + fs.atk * s.attackBonusPct / 100L,
+      defence  = fs.defence + fs.defence * s.defenceBonusPct / 100L,
+      accuracy = fs.accuracy + fs.accuracy * s.accuracyBonusPct / 100L,
+      evasion  = fs.evasion + fs.evasion * s.evasionBonusPct / 100L
+    )
+  }
+
+  /** Текущие боевые статы — с учётом активных травм, плоских бафов пассивок,
+   *  камней и наборов. */
   def effectiveFightStats(nowMs: Long): FightStats =
-    withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs))))
+    withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs)))))
 
   /** Реген перед атакой игрока от пассивок «Целебный» (4% макс.HP) и
    *  «Самовосстанавливающийся» (4% макс.брони). Прибавка каппится потолком, но
@@ -165,8 +183,8 @@ case class Hero(
     val p    = combinedPenalties(nowMs)
     val b    = effectiveBaseStats(nowMs)
     val base = 5L * b.int + 2L * b.agi + equipment.allEnergy + masterHornBoosts.energy
-    // Бриллианты в снаряжении дают +% к макс. Энергии.
-    (base * (1.0 - p.energyPct) * (100L + gems.energyBonusPct) / 100L).toLong.max(1L)
+    // Бриллианты в снаряжении и «Охотник» (порог 4) дают +% к макс. Энергии.
+    (base * (1.0 - p.energyPct) * (100L + gems.energyBonusPct + sets.energyBonusPct) / 100L).toLong.max(1L)
   }
 
   def effectiveMaxHp(nowMs: Long): Long = {
@@ -175,9 +193,10 @@ case class Hero(
     val base        = effectiveVit * 24L
     val subtotal    = (base * (1.0 - p.vitPct) * (1.0 - p.hpPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L) +
       equipment.allHp
-    // Рубины в снаряжении: плоская прибавка + % к макс. HP.
+    // Рубины в снаряжении и наборы (порог 8): плоские прибавки + % к макс. HP.
     val g = gems
-    (subtotal + g.flatHp) * (100L + g.maxHpBonusPct) / 100L
+    val s = sets
+    (subtotal + g.flatHp + s.flatHp) * (100L + g.maxHpBonusPct + s.maxHpBonusPct) / 100L
   }
 
   def traumaRemainingText(nowMs: Long): Option[String] =
