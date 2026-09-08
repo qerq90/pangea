@@ -1,7 +1,8 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{Gem, Item, ItemDetails, ItemType, MaterialKind, Rarity, TrophyKind}
+import pangea.model.item.{Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
+import pangea.model.monster.Elemental
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
  *  длинного к самому короткому; каждый рецепт применяется повторно, пока в пуле есть
@@ -13,7 +14,9 @@ import pangea.model.item.{Gem, Item, ItemDetails, ItemType, MaterialKind, Rarity
  *   - 9 голов существ → «Левитирующая голова монстра»;
  *   - легендарный предмет + 2 мифрила → тот же слот на +1 уровень (имя сохраняется);
  *   - легендарный предмет + 1 мифрил → тот же слот того же уровня (характеристики
- *     пересчитываются заново). */
+ *     пересчитываются заново);
+ *   - любая надеваемая вещь + ингредиент стихии → та же вещь из набора этой
+ *     стихии (характеристики сохраняются, меняется только название и набор). */
 object CubeCraft {
 
   /** Итог активации: новое содержимое куба (остаток + результаты), число
@@ -80,12 +83,38 @@ object CubeCraft {
     }
   }
 
+  // Любая надеваемая вещь + ингредиент стихии → та же вещь, но из набора этой
+  // стихии. Характеристики, уровень и редкость сохраняются полностью — меняются
+  // только принадлежность к набору и третье слово названия (титул уступает место
+  // имени набора): «Выдающийся Топор Дворянина» → «Выдающийся Топор Дикого пламени».
+  private object SetInfusion extends Recipe {
+    val size = 2
+
+    /** Ингредиент → набор, в который он переводит вещь. */
+    private def setOf(i: Item): Option[ItemSet] =
+      i.material.flatMap(m => Elemental.values.find(_.ingredient == m).map(_.set))
+
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
+      for {
+        ingredient <- pool.find(i => setOf(i).isDefined)
+        set        <- setOf(ingredient)
+        // Вещь, которой этот набор ещё не присвоен: иначе рецепт крутился бы
+        // впустую, тратя заряды на переименование в тот же самый набор.
+        target     <- pool.find(i =>
+                        i != ingredient && ItemType.equippable.contains(i.itemType) && !i.set.contains(set))
+      } yield {
+        val (name, r2) = ItemNameGenerator.setName(target.itemType, target.rarity, set, rng)
+        (List(target, ingredient), target.copy(name = name, set = Some(set)), r2)
+      }
+  }
+
   // От самого длинного рецепта к самому короткому.
   private val recipes: List[Recipe] = List(
     NineHeads,                                             // 9
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
-    LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false)  // 2
+    LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
+    SetInfusion                                            // 2
   )
 
   def craft(items: List[Item], charges: Int, rng: Rng): Result = {
