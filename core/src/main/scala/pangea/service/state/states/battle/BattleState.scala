@@ -179,7 +179,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             )
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
-            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, damage, hero.gems)
+            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, damage, hero)
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
             // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
@@ -301,11 +301,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * урон — см. [[pangea.model.hero.HeroGems.elementalBoost]]. Без стихий
     * (мультипликаторы = 1, доля молнии = 0) поведение прежнее: броня поглощает
     * `min(armor, damage)`, остальное — в HP. */
-  private def splitElementalDamage(curArmor: Long, damage: Long, g: pangea.model.hero.HeroGems): (Long, Long) = {
+  private def splitElementalDamage(curArmor: Long, damage: Long, hero: Hero): (Long, Long) = {
+    val g = hero.gems
+    // «Дикое пламя» (порог 4): обе грани урона огнём выше на свои п.п. Бонус
+    // работает только если Огонь реально есть в оружии — набор усиливает стихию,
+    // а не выдаёт её.
+    val fireBonus    = if (g.hasElement(Element.Fire)) hero.sets.fireDamageBonus else 0.0
     val rawArmorPart = math.min(curArmor, damage)
     val rawHpPart    = damage - rawArmorPart
-    val armorDmg     = math.min(curArmor, (rawArmorPart * g.armorDamageMult).toLong).max(0L)
-    val hpFromHp     = (rawHpPart * g.hpDamageMult).toLong
+    val armorDmg     = math.min(curArmor, (rawArmorPart * (g.armorDamageMult + fireBonus)).toLong).max(0L)
+    val hpFromHp     = (rawHpPart * (g.hpDamageMult + fireBonus)).toLong
     // Молния: часть урона по броне дополнительно бьёт по HP.
     val hpFromArmor  = (armorDmg * g.lightningArmorToHpFrac).toLong
     (armorDmg, (hpFromHp + hpFromArmor).max(0L))
@@ -321,7 +326,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     else
       // Роллим в фиксированном порядке Element.values для детерминизма тестов.
       ZIO.foreach(Element.values.filter(elems.contains).toList) { e =>
-        Random.nextIntBetween(1, 101).map(roll => e -> (roll <= Element.ProcChancePct))
+        // «Дикое пламя» (порог 10) поднимает шанс поджечь — только у Огня.
+        val chance =
+          if (e == Element.Fire) Element.ProcChancePct + hero.sets.igniteChanceBonusPct
+          else Element.ProcChancePct
+        Random.nextIntBetween(1, 101).map(roll => e -> (roll <= chance))
       }.map { rolls =>
         val fired      = rolls.collect { case (e, true) => e }.toSet
         val maxHp      = battle.monsterStats.hp
@@ -535,7 +544,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
         else (finalHero, finalBattle, "")
       (tickedBattle, monsterEffectLine, bleedDealt) =
-        if (heroAlive) tickMonsterEffects(battleAfterHero, monster.name)
+        if (heroAlive) tickMonsterEffects(battleAfterHero, monster.name, tickedHero.sets.burnGrowthMult)
         else (battleAfterHero, "", 0L)
       // «Упырь» (порог 10): чужая кровь идёт герою в лечение.
       heroFedByBleed =
@@ -603,7 +612,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * обновлённый бой и склеенную строку эффектов (пустую, если DoT нет). */
   private def tickMonsterEffects(
       battle: SoloPveBattle,
-      monsterName: String
+      monsterName: String,
+      burnGrowthMult: Long
   ): (SoloPveBattle, String, Long) = {
     val maxHp = battle.monsterStats.hp
     var eff   = battle.effects
@@ -627,7 +637,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     eff.monsterBurn.foreach { bn =>
       val dmg = bn.damageOn(maxHp)
       hp = (hp - dmg).max(0L)
-      eff = eff.copy(monsterBurn = Some(bn.grown))
+      // «Дикое пламя» (порог 6) ускоряет рост: шаг применяется несколько раз,
+      // сохраняя саму кривую роста (+2 п.п. до порога, дальше +1).
+      eff = eff.copy(monsterBurn = Some(
+        (1L to burnGrowthMult.max(1L)).foldLeft(bn)((b, _) => b.grown)))
       lines = lines :+ content.format("battle.burnTick", "damage" -> dmg.toString, "monster" -> monsterName)
     }
     (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"), bled)
@@ -689,7 +702,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           defenderInt = def0,
           attackerInt = hero.effectiveBaseStats(nowMs).int,
           bonusPct    = 0L)
-        val red = (red0 - battle.effects.monsterColdDefenceCut / 100.0).max(0.0)
+        // Холод режет итоговое %-снижение цели; «Дикое пламя» (порог 12)
+        // добавляет к срезу столько п.п., на сколько процентов цель горит.
+        val burnCut =
+          if (hero.sets.skillsAlwaysIgnite) battle.effects.monsterBurn.map(_.pct).getOrElse(0) else 0
+        val red = (red0 - (battle.effects.monsterColdDefenceCut + burnCut) / 100.0).max(0.0)
         (raw * (1.0 - red)).toLong.max(1L)
       }
       result <- slot.skill.effect match {
@@ -765,14 +782,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val raw     = if (doubles) value.max(1L) * 2L else value.max(1L)
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
-    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, raw, hero.gems)
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, raw, hero)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
-    val bledEffects =
+    val bledEffects0 =
       if (!hero.sets.skillsAlwaysBleed || newHp <= 0) battle.effects
       else battle.effects.copy(monsterBleed = Some(
         battle.effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
+    // «Дикое пламя» (порог 12): умение, нанёсшее урон, всегда поджигает — уже
+    // горящая цель разгорается сильнее, как от обычного прока Огня.
+    val bledEffects =
+      if (!hero.sets.skillsAlwaysIgnite || newHp <= 0) bledEffects0
+      else bledEffects0.copy(monsterBurn = Some(
+        bledEffects0.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)))
     // Удвоение тратится на первом же уроне — даже если он добил моба.
     val effects  = if (doubles) bledEffects.copy(doubleSpent = true) else bledEffects
     val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor, effects = effects)

@@ -112,6 +112,41 @@ object BattleStateSpec extends ZIOSpecDefault {
 
   private def hunterHero(pieces: Int) = strongHero.copy(equipment = hunterEquipment(pieces))
 
+  /** Экипировка набора `set` на `n` предметов; оружие можно задать своё
+   *  (например с камнем стихии) — оно займёт двенадцатый слот. */
+  private def setEquipment(set: pangea.model.item.ItemSet, n: Int,
+                           weapon: Option[Item]): pangea.model.hero.Equipment = {
+    val slots = List(ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
+      ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
+      ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Weapon)
+    val eq = slots.take(n).zipWithIndex.foldLeft(TestFixtures.emptyEquipment) { case (acc, (t, i)) =>
+      val it = Item(400L + i, "Предмет", 1L, ItemRarity.Blue, t,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0, set = Some(set))
+      i match {
+        case 0  => acc.copy(helmet = it)
+        case 1  => acc.copy(shoulderPads = it)
+        case 2  => acc.copy(chestPlate = it)
+        case 3  => acc.copy(bracelets = it)
+        case 4  => acc.copy(gloves = it)
+        case 5  => acc.copy(pants = it)
+        case 6  => acc.copy(boots = it)
+        case 7  => acc.copy(amulet = it)
+        case 8  => acc.copy(firstRing = it)
+        case 9  => acc.copy(secondRing = it)
+        case 10 => acc.copy(belt = it)
+        case _  => acc.copy(weapon = it)
+      }
+    }
+    weapon.fold(eq)(w => eq.copy(weapon = w))
+  }
+
+  /** Меч набора «Дикое пламя» с Рубином (Огонь) в гнезде. */
+  private def flameWeapon(grade: Int = 1) =
+    Item(500L, "Пламенный меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      sockets = List(Some(Gem(GemKind.Ruby, grade))),
+      set = Some(pangea.model.item.ItemSet.WildFlame))
+
   // Герой с 1 HP — умрёт от любого удара
   private def dyingHero = TestFixtures.hero(userId).copy(
     baseStats  = TestFixtures.hero(userId).baseStats.copy(agi = 0),
@@ -542,6 +577,123 @@ object BattleStateSpec extends ZIOSpecDefault {
         screens       <- r.sentScreens
       } yield assertTrue(after.fightStats.hp == 10L) &&
               assertTrue(!screens.exists(_.text.contains("жуткий пир")))
+    },
+
+    // ── Набор «Дикое пламя» ───────────────────────────────────────────────────
+    test("«Дикое пламя» 4: обе грани урона огнём выше на 10 п.п.") {
+      val wf   = pangea.model.item.ItemSet.WildFlame
+      // Рубин грейд 1 → усиление +2 п.п.: без набора HP ×1.12, с набором ×1.22.
+      def heroWith(pieces: Int) = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(atk = 500),
+        equipment  = setEquipment(wf, pieces, Some(flameWeapon())))
+      for {
+        t1            <- makeState(heroWith(4), strongBattle)
+        (s1, dao1, r1) = t1
+        _             <- TestRandom.feedInts(60, 90, 3, 90) // удар, прок огня (нет), моб, каст
+        _             <- TestRandom.feedLongs(100L)
+        _             <- s1.action(testUser, tap("Attack"), r1)
+        b1            <- dao1.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        withSet        = strongBattle.monsterCurrentHp - b1.monsterCurrentHp
+
+        t2            <- makeState(heroWith(2), strongBattle) // порог 4 не набран
+        (s2, dao2, r2) = t2
+        _             <- TestRandom.feedInts(60, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- s2.action(testUser, tap("Attack"), r2)
+        b2            <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        without        = strongBattle.monsterCurrentHp - b2.monsterCurrentHp
+        // Урон до стихии: атака 500 уже поднята порогом 2 на +5% → 525,
+        // плюс str 1×3 = 528. Грань по HP: огонь +10% и усиление грейда +2%,
+        // с порогом 4 — ещё +10 п.п.
+      } yield assertTrue(without == 591L) && // 528 × 1.12
+              assertTrue(withSet == 644L)    // 528 × 1.22
+    },
+
+    test("«Дикое пламя» 6: горение растёт за раунд вдвое быстрее") {
+      val wf = pangea.model.item.ItemSet.WildFlame
+      def burnAfterRound(pieces: Int) = {
+        val hero    = strongHero.copy(equipment = setEquipment(wf, pieces, Some(flameWeapon())))
+        val burning = strongBattle.copy(
+          effects = strongBattle.effects.copy(monsterBurn = Some(pangea.model.battle.Burn(2))))
+        for {
+          t             <- makeState(hero, burning)
+          (state, dao, r) = t
+          _             <- TestRandom.feedInts(60, 90, 3, 90)
+          _             <- TestRandom.feedLongs(100L)
+          _             <- state.action(testUser, tap("Attack"), r)
+          after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        } yield after.effects.monsterBurn.map(_.pct)
+      }
+      for {
+        fast <- burnAfterRound(6)
+        slow <- burnAfterRound(4)
+      } yield assertTrue(slow.contains(4)) && // 2 → +2
+              assertTrue(fast.contains(6))    // 2 → +2 +2
+    },
+
+    test("«Дикое пламя» 10: шанс поджечь выше — бросок 55 прокает только с набором") {
+      val wf = pangea.model.item.ItemSet.WildFlame
+      def burnedWith(pieces: Int) = {
+        val hero = strongHero.copy(equipment = setEquipment(wf, pieces, Some(flameWeapon())))
+        for {
+          t             <- makeState(hero, strongBattle)
+          (state, dao, r) = t
+          // 55 > 30 (базовый шанс), но ≤ 60 (30 + 30 от набора).
+          _             <- TestRandom.feedInts(60, 55, 3, 90)
+          _             <- TestRandom.feedLongs(100L)
+          _             <- state.action(testUser, tap("Attack"), r)
+          after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        } yield after.effects.monsterBurn.isDefined
+      }
+      for {
+        withSet    <- burnedWith(10)
+        withoutSet <- burnedWith(8)
+      } yield assertTrue(withSet) && assertTrue(!withoutSet)
+    },
+
+    test("«Дикое пламя» 12: умение поджигает врага даже без прока стихии") {
+      val wf     = pangea.model.item.ItemSet.WildFlame
+      val weapon = flameWeapon().copy(details = ItemDetails.Weapon(pangea.model.skill.Skill.SweepingStrike))
+      val hero   = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
+        equipment  = setEquipment(wf, 12, Some(weapon)))
+      val withSlot = strongBattle.copy(
+        skillSlots = List(pangea.model.battle.SkillSlotState(weapon.id, pangea.model.skill.Skill.SweepingStrike)))
+      for {
+        t             <- makeState(hero, withSlot)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(90, 60, 90, 3, 90) // прок огня не сработал
+        _             <- TestRandom.feedLongs(100L, 100L)
+        _             <- state.action(testUser, tap(s"Skill_${weapon.id}"), r)
+        after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.effects.monsterBurn.isDefined)
+    },
+
+    test("«Дикое пламя» 12: горение режет защиту врага — умение бьёт сильнее") {
+      val wf     = pangea.model.item.ItemSet.WildFlame
+      val weapon = flameWeapon().copy(details = ItemDetails.Weapon(pangea.model.skill.Skill.SweepingStrike))
+      // «Размашистый удар» режется защитой моба, поэтому срез защиты на нём виден.
+      def hitWith(pieces: Int) = {
+        val hero = strongHero.copy(
+          fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
+          equipment  = setEquipment(wf, pieces, Some(weapon)))
+        val burning = strongBattle.copy(
+          monsterStats = strongBattle.monsterStats.copy(defence = 200L),
+          effects      = strongBattle.effects.copy(monsterBurn = Some(pangea.model.battle.Burn(20))),
+          skillSlots   = List(pangea.model.battle.SkillSlotState(weapon.id, pangea.model.skill.Skill.SweepingStrike)))
+        for {
+          t             <- makeState(hero, burning)
+          (state, dao, r) = t
+          _             <- TestRandom.feedInts(90, 60, 90, 3, 90)
+          _             <- TestRandom.feedLongs(100L, 100L)
+          _             <- state.action(testUser, tap(s"Skill_${weapon.id}"), r)
+          after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        } yield burning.monsterCurrentHp - after.monsterCurrentHp
+      }
+      for {
+        shredded <- hitWith(12) // горение на 20% срезает защиту на 20 п.п.
+        plain    <- hitWith(10)
+      } yield assertTrue(shredded > plain)
     },
 
     // ── Набор «Охотник» ───────────────────────────────────────────────────────
