@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemType, Rarity}
@@ -40,6 +40,11 @@ case class MerchantState(
       "Refresh"         -> Target.Run { (u, _,  r) => refresh(u, r) },
       "Sell"            -> Target.Run { (u, _,  r) => showSellList(u, r, 0) },
       "SellJunk"        -> Target.Run { (u, _,  r) => sellJunk(u, r) },
+      "JunkSettings"    -> Target.Run { (u, _,  r) => showJunkSettings(u, r) },
+      "JunkRarity"      -> Target.Run { (u, ua, r) => toggleJunkRarity(u, ua, r) },
+      "JunkPassives"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(passives = !s.passives)) },
+      "JunkActives"     -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(actives = !s.actives)) },
+      "BackFromJunk"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
       "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
       "ConfirmSellItem" -> Target.Run { (u, _,  r) => doSell(u, r) },
@@ -124,7 +129,7 @@ case class MerchantState(
              renderer.show(user, Screen(content.format("merchant.refreshCooldown", "mins" -> mins.toString), Nil)) *>
                renderer.show(user, menuScreen(data, hero))
            } else
-             regenerate(user, now).flatMap(d => renderer.show(user, menuScreen(d, hero)))
+             regenerate(user, now, data.junkSale).flatMap(d => renderer.show(user, menuScreen(d, hero)))
     } yield StateType.Merchant
 
   // ── Продажа ─────────────────────────────────────────────────────────────────
@@ -189,13 +194,15 @@ case class MerchantState(
       _ <- showSellList(user, renderer, scene.page).unit
     } yield StateType.Merchant
 
-  /** Быстрая продажа всего «хлама» — снаряжения Серой и Белой редкости.
-    * Трофеи (ItemType.Trophy) не трогаем, даже если их редкость Серая/Белая. */
+  /** Быстрая продажа всего «хлама» — по настройке игрока (см. [[JunkSaleSettings]],
+    * по умолчанию Серая и Белая редкости). Трофеи и камни не продаются никогда. */
   private def sellJunk(user: User, renderer: Renderer): Task[StateType] =
     for {
+      now   <- nowMs
+      data  <- loadOrInit(user, now)
       hero  <- getHero(user)
       items <- inventoryItems(hero)
-      junk   = items.filter(isJunk)
+      junk   = items.filter(isJunk(_, data.junkSettings))
       total  = junk.map(sellPrice).sum
       _ <- if (junk.isEmpty)
              renderer.show(user, Screen(content.text("merchant.sellJunkEmpty"), Nil)) *> showMenu(user, renderer)
@@ -207,13 +214,60 @@ case class MerchantState(
                showMenu(user, renderer)
     } yield StateType.Merchant
 
-  /** «Хлам» — снаряжение Серой и Белой редкости. Трофеи (ItemType.Trophy) и
-    * камни-усилители (ItemType.Gem, все — Серой редкости формально, но ценность
-    * не в редкости) никогда не считаются хламом. */
-  private def isJunk(item: Item): Boolean =
-    item.itemType != ItemType.Trophy &&
-      item.itemType != ItemType.Gem &&
-      (item.rarity == Rarity.Gray || item.rarity == Rarity.White)
+  // ── Настройка автопродажи ───────────────────────────────────────────────────
+
+  private def showJunkSettings(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      data <- loadOrInit(user, now)
+      _    <- renderer.show(user, junkSettingsScreen(data.junkSettings))
+    } yield StateType.Merchant
+
+  private def junkSettingsScreen(s: JunkSaleSettings): Screen = {
+    def state(on: Boolean) = content.text(if (on) "merchant.junk.on" else "merchant.junk.off")
+    def color(on: Boolean) = if (on) ChoiceColor.Positive else ChoiceColor.Negative
+
+    val rarityButtons = JunkRarityGroups.zipWithIndex.map { case (g, i) =>
+      val on = s.groupOn(g)
+      Choice(
+        id    = "JunkRarity",
+        label = content.format("merchant.junk.rarity", "emoji" -> g.emoji, "state" -> state(on)),
+        color = color(on),
+        data  = Map("g" -> g.id),
+        row   = Some(i)
+      )
+    }
+    val abilityButtons = List(
+      ("JunkPassives", "merchant.junk.passives", s.passives),
+      ("JunkActives",  "merchant.junk.actives",  s.actives)
+    ).zipWithIndex.map { case ((id, key, on), i) =>
+      Choice(id, content.format(key, "state" -> state(on)), color = color(on),
+        row = Some(JunkRarityGroups.size + i))
+    }
+    Screen(
+      content.text("merchant.junk.header"),
+      rarityButtons ++ abilityButtons :+
+        content.choice("BackFromJunk", "merchant.junk.back").copy(row = Some(JunkRarityGroups.size + 2))
+    )
+  }
+
+  private def toggleJunkRarity(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    payloadStr(ua, "g").flatMap(id => JunkRarityGroups.find(_.id == id)) match {
+      case Some(group) => updateJunkSettings(user, renderer)(_.toggleGroup(group))
+      case None        => showJunkSettings(user, renderer)
+    }
+
+  // Применяет правку настройки, сохраняет её в merchant_data и перерисовывает экран.
+  private def updateJunkSettings(user: User, renderer: Renderer)(
+      f: JunkSaleSettings => JunkSaleSettings
+  ): Task[StateType] =
+    for {
+      now      <- nowMs
+      data     <- loadOrInit(user, now)
+      updated   = f(data.junkSettings)
+      _        <- heroDao.writeMerchantData(user.userId, data.copy(junkSale = Some(updated)).asJson)
+      _        <- renderer.show(user, junkSettingsScreen(updated))
+    } yield StateType.Merchant
 
   private def sellNavRow(page: Int, totalPages: Int): List[Choice] = {
     val row = ItemMenu.NavRow
@@ -261,6 +315,7 @@ case class MerchantState(
       content.choice("Refresh",       "merchant.refreshLabel"),
       content.choice("Sell",          "merchant.sellLabel"),
       content.choice("SellJunk",      "merchant.sellJunkLabel"),
+      content.choice("JunkSettings",  "merchant.junk.settingsLabel"),
       content.choice("OpenCharacter", "common.character"),
       content.choice("Back",          "merchant.backLabel")
     )
@@ -289,12 +344,14 @@ case class MerchantState(
       case None       => regenerate(user, now)
     }
 
-  private def regenerate(user: User, now: Long): Task[MerchantData] =
+  // Обновление стока не должно сбрасывать настройку автопродажи, поэтому она
+  // прокидывается в новый MerchantData (при самом первом заходе её ещё нет).
+  private def regenerate(user: User, now: Long, junkSale: Option[JunkSaleSettings] = None): Task[MerchantData] =
     for {
       hero <- getHero(user)
       seed <- Random.nextLong
       items = rollStock(hero.lvl, Rng(seed))
-      data  = MerchantData(items, now)
+      data  = MerchantData(items, now, junkSale)
       _    <- heroDao.writeMerchantData(user.userId, data.asJson)
     } yield data
 
@@ -334,9 +391,10 @@ case class MerchantState(
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[SellScene].toOption).getOrElse(SellScene()))
 
   private def payloadIdx(ua: UserAction): Option[Int] =
-    ua.payload
-      .flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("idx")))
-      .flatMap(_.toIntOption)
+    payloadStr(ua, "idx").flatMap(_.toIntOption)
+
+  private def payloadStr(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
 
   private def nowMs: Task[Long] = ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
 
@@ -355,7 +413,66 @@ object MerchantState {
     implicit val decoder: Decoder[MerchantItem] = deriveDecoder
   }
 
-  final case class MerchantData(items: List[MerchantItem], refreshedAt: Long)
+  /** Настройка автопродажи «хлама»: какие редкости уходят по кнопке «Продать
+    * хлам» и трогать ли предметы со способностями. По умолчанию — прежнее
+    * поведение: серое и белое, способности не берегутся. */
+  final case class JunkSaleSettings(
+    rarities: Set[Rarity] = Set(Rarity.Gray, Rarity.White),
+    passives: Boolean     = true,
+    actives:  Boolean     = true
+  ) {
+
+    /** Группа включена, если продаются все её редкости (переключатель ставит их
+      * только целиком, так что промежуточного состояния не бывает). */
+    def groupOn(group: JunkRarityGroup): Boolean = group.rarities.forall(rarities.contains)
+
+    def toggleGroup(group: JunkRarityGroup): JunkSaleSettings =
+      if (groupOn(group)) copy(rarities = rarities -- group.rarities)
+      else copy(rarities = rarities ++ group.rarities)
+  }
+  object JunkSaleSettings {
+    implicit val encoder: Encoder[JunkSaleSettings] = deriveEncoder
+    implicit val decoder: Decoder[JunkSaleSettings] = deriveDecoder
+
+    val default: JunkSaleSettings = JunkSaleSettings()
+  }
+
+  /** Переключатель редкости в настройке. Фиолетовая группа накрывает сразу
+    * Purple и Violet: у них общий значок 🟣, общий множитель цены и общий пул
+    * названий — игрок их нигде не различает, поэтому и переключатель один. */
+  final case class JunkRarityGroup(id: String, rarities: List[Rarity]) {
+    def emoji: String = rarities.head.emoji
+  }
+
+  val JunkRarityGroups: List[JunkRarityGroup] = List(
+    JunkRarityGroup("Gray",   List(Rarity.Gray)),
+    JunkRarityGroup("White",  List(Rarity.White)),
+    JunkRarityGroup("Green",  List(Rarity.Green)),
+    JunkRarityGroup("Blue",   List(Rarity.Blue)),
+    JunkRarityGroup("Purple", List(Rarity.Purple, Rarity.Violet)),
+    JunkRarityGroup("Orange", List(Rarity.Orange))
+  )
+
+  /** Пойдёт ли предмет под нож при «Продать хлам». Трофеи и камни-усилители не
+    * продаются никогда, независимо от настроек. Переключатели способностей —
+    * именно защита: выключенный «Пассивные способности» уводит предмет из
+    * продажи, даже если его редкость включена. */
+  def isJunk(item: Item, s: JunkSaleSettings): Boolean =
+    item.itemType != ItemType.Trophy &&
+      item.itemType != ItemType.Gem &&
+      s.rarities.contains(item.rarity) &&
+      (s.passives || item.passive.isEmpty) &&
+      (s.actives || item.activeSkill.isEmpty)
+
+  final case class MerchantData(
+    items: List[MerchantItem],
+    refreshedAt: Long,
+    // Option, а не значение с дефолтом: у уже сохранённых лавок этого поля в
+    // JSON нет, а circe без него не соберёт объект и сбросил бы весь сток.
+    junkSale: Option[JunkSaleSettings] = None
+  ) {
+    def junkSettings: JunkSaleSettings = junkSale.getOrElse(JunkSaleSettings.default)
+  }
   object MerchantData {
     implicit val encoder: Encoder[MerchantData] = deriveEncoder
     implicit val decoder: Decoder[MerchantData] = deriveDecoder
