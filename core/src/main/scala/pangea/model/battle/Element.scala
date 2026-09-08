@@ -13,13 +13,23 @@ import pangea.model.item.GemKind
  *  Модификаторы урона:
  *   - `armorMult` — множитель урона ПО БРОНЕ цели;
  *   - `hpMult` — множитель урона ПО HP цели;
- *  оба комбинируются мультипликативно при нескольких стихиях. */
+ *  при нескольких стихиях складываются их СДВИГИ в процентных пунктах
+ *  ([[armorDelta]]/[[hpDelta]]), а не перемножаются множители: огонь (−20% по
+ *  броне) вместе с молнией (−20%) дают −40% по броне, а не −36%. Туда же в п.п.
+ *  идёт усиление стихии (см. `HeroGems.elementalBoost`). */
 sealed abstract class Element(
   val emoji:      String,
   val armorMult:  Double,
   val hpMult:     Double,
   val procText:   String
-) extends EnumEntry
+) extends EnumEntry {
+
+  /** Сдвиг урона по броне в долях: 0.80 → −0.20. */
+  def armorDelta: Double = armorMult - 1.0
+
+  /** Сдвиг урона по HP в долях: 1.10 → +0.10. */
+  def hpDelta: Double = hpMult - 1.0
+}
 
 object Element extends Enum[Element] {
 

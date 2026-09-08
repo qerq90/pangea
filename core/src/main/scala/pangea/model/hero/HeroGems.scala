@@ -76,15 +76,16 @@ final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
   def elementalBoost: Double =
     0.02 * weapon.collect { case g if Element.of(g.kind).isDefined => g.grade.toLong }.sum
 
-  /** Множитель урона по броне цели: произведение armorMult стихий оружия плюс
-   *  усиление в п.п. (см. [[elementalBoost]]). Без стихий — ровно 1.0. */
+  /** Множитель урона по броне цели: 1 плюс сдвиги всех стихий оружия и усиление,
+   *  всё в процентных пунктах. Огонь (−20%) с молнией (−20%) дают −40% по броне.
+   *  Без стихий — ровно 1.0. */
   def armorDamageMult: Double =
-    weaponElements.foldLeft(1.0)((m, e) => m * e.armorMult) + elementalBoost
+    1.0 + weaponElements.toList.map(_.armorDelta).sum + elementalBoost
 
-  /** Множитель урона по HP цели: произведение hpMult стихий оружия плюс усиление
-   *  в п.п. (см. [[elementalBoost]]). Без стихий — ровно 1.0. */
+  /** Множитель урона по HP цели: 1 плюс сдвиги всех стихий оружия и усиление.
+   *  Огонь (+10%) с молнией (−10%) взаимно гасятся — по HP выходит 0%. */
   def hpDamageMult: Double =
-    weaponElements.foldLeft(1.0)((m, e) => m * e.hpMult) + elementalBoost
+    1.0 + weaponElements.toList.map(_.hpDelta).sum + elementalBoost
 
   /** Доля урона по броне, дополнительно бьющая по HP (молния, иначе 0). */
   def lightningArmorToHpFrac: Double =

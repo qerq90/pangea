@@ -104,12 +104,23 @@ object ElementSpec extends ZIOSpecDefault {
       assertTrue(g.hpDamageMult == 1.0)
     },
 
-    test("HeroGems: несколько стихий — базы перемножаются, усиление прибавляется один раз") {
+    test("огонь + молния: по броне −40%, по HP 0% (сдвиги складываются, а не множатся)") {
+      val g = HeroGems(weapon = List(gem(GemKind.Ruby, 0), gem(GemKind.Topaz, 0)), armor = Nil)
+      // броня: −20% (огонь) −20% (молния) = −40%; HP: +10% −10% = 0%.
+      // Перемножение множителей дало бы 0.64 и 0.99 — это НЕ то поведение.
+      assertTrue(g.weaponElements == Set[Element](Element.Fire, Element.Lightning)) &&
+      assertTrue(math.abs(g.armorDamageMult - 0.60) < 1e-9) &&
+      assertTrue(math.abs(g.hpDamageMult - 1.00) < 1e-9) &&
+      // особенность молнии никуда не делась: 20% урона по броне уходит в HP
+      assertTrue(math.abs(g.lightningArmorToHpFrac - 0.20) < 1e-9)
+    },
+
+    test("HeroGems: несколько стихий — сдвиги складываются, усиление прибавляется один раз") {
       val g = HeroGems(weapon = List(gem(GemKind.Ruby, 2), gem(GemKind.Diamond, 1)), armor = Nil)
-      // огонь×воздух: armor 0.8·0.9 = 0.72, hp 1.1·0.9 = 0.99; усиление 0.02·3 = 0.06
+      // огонь+воздух: armor −20% −10% = 0.70, hp +10% −10% = 1.00; усиление 0.02·3 = 0.06
       assertTrue(math.abs(g.elementalBoost - 0.06) < 1e-9) &&
-        assertTrue(math.abs(g.armorDamageMult - 0.78) < 1e-9) &&
-        assertTrue(math.abs(g.hpDamageMult - 1.05) < 1e-9)
+        assertTrue(math.abs(g.armorDamageMult - 0.76) < 1e-9) &&
+        assertTrue(math.abs(g.hpDamageMult - 1.06) < 1e-9)
     },
 
     test("одинаковые стихийные камни: база не стакается, а усиление копится по грейдам") {
