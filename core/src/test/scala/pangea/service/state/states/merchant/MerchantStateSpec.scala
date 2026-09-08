@@ -29,6 +29,12 @@ object MerchantStateSpec extends ZIOSpecDefault {
     Item(id, s"Предмет $id", 1L, rarity, itemType,
       attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0, details = details)
 
+  // Трофей: редкость у них всегда формально Серая, вид/раса для продажи не важны.
+  private def trophyItem(id: Long): Item =
+    Item(id, "Голова (Человек)", 5L, Rarity.Gray, ItemType.Trophy,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Trophy("Human", TrophyKind.Head))
+
   private def richHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 1000000L)
   private def poorHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 0L)
 
@@ -258,16 +264,45 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(after.refreshedAt > before.refreshedAt) // сток действительно обновился
     },
 
-    test("isJunk: трофеи и камни не продаются даже когда их редкость включена") {
+    test("isJunk: по умолчанию трофеи и камни не продаются даже когда их редкость включена") {
       val all = JunkRarityGroups.flatMap(_.rarities).toSet
       val s   = JunkSaleSettings(rarities = all, passives = true, actives = true)
-      val trophy = Item(1L, "Голова", 5L, Rarity.Gray, ItemType.Trophy,
-        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-        details = ItemDetails.Trophy("Human", TrophyKind.Head))
-      val gem = GemGenerator.item(GemKind.Skull, 1)
-      assertTrue(!MerchantState.isJunk(trophy, s)) &&
-      assertTrue(!MerchantState.isJunk(gem, s)) &&
+      assertTrue(!s.trophies) && // трофеи выключены по умолчанию
+      assertTrue(!MerchantState.isJunk(trophyItem(1L), s)) &&
+      assertTrue(!MerchantState.isJunk(GemGenerator.item(GemKind.Skull, 1), s)) &&
       assertTrue(MerchantState.isJunk(gear(3L, Rarity.Orange), s)) // обычное снаряжение — да
+    },
+
+    test("трофеи: переключатель по умолчанию выключен, после нажатия трофеи уходят в продажу") {
+      for {
+        t <- makeState(richHero, items = List(gear(1L, Rarity.Gray), trophyItem(2L)))
+        (state, heroDao, invRepo, renderer) = t
+        _        <- state.action(testUser, tap("JunkSettings"), renderer)
+        screens  <- renderer.sentScreens
+        btn       = screens.last.choices.find(_.id == "JunkTrophies")
+        _        <- state.action(testUser, tap("JunkTrophies"), renderer)
+        settings <- readMerchant(heroDao).map(_.junkSettings)
+        _        <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(btn.exists(_.label == "Трофеи: Выкл")) && // по умолчанию выключено
+              assertTrue(settings.trophies) &&
+              assertTrue(invRepo.snapshot.isEmpty) // ушли и серый предмет, и трофей
+    },
+
+    test("трофеи не смотрят на редкости: продаются даже с выключенной серой") {
+      val s = JunkSaleSettings(rarities = Set.empty, trophies = true)
+      for {
+        t <- makeState(richHero, items = List(gear(1L, Rarity.Gray), trophyItem(2L)))
+        (state, _, invRepo, renderer) = t
+        _ <- state.action(testUser, tapRarity("Gray"), renderer)  // выключаем серую
+        _ <- state.action(testUser, tap("JunkTrophies"), renderer) // включаем трофеи
+        _ <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(1L)) && // серый предмет уцелел
+              assertTrue(MerchantState.isJunk(trophyItem(2L), s))   // а трофей — нет
+    },
+
+    test("камни не продаются даже при включённых трофеях") {
+      val s = JunkSaleSettings(rarities = Set(Rarity.Gray), trophies = true)
+      assertTrue(!MerchantState.isJunk(GemGenerator.item(GemKind.Skull, 1), s))
     },
 
     test("всё снаряжение куплено → сообщение «занят подготовкой новой партии», есть Продать/Назад") {
