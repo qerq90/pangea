@@ -82,10 +82,11 @@ case class SocketingState(
         case Some((gemItemId, g)) =>
           val target = hero.equipment.allItems.find(i => i.id == targetId && i.itemType != ItemType.NoItem)
           target match {
-            // Огонь/Холод в оружие, где уже есть Огонь/Холод — взаимоуничтожение:
-            // вставляемый камень и существующий стихийный камень обращаются в пыль.
-            case Some(item) if isWeapon(item) && isFireOrCold(g) && hasFireOrCold(item) =>
-              val cleaned = removeFireOrCold(item)
+            // Огонь и Холод в одном оружии не уживаются: вставляемый камень и
+            // ПРОТИВОПОЛОЖНЫЙ ему обращаются в пыль. Одинаковые стихии при этом
+            // спокойно стакаются — два рубина усиливают друг друга по грейдам.
+            case Some(item) if isWeapon(item) && hasOpposite(item, g) =>
+              val cleaned = removeOpposite(item, g)
               heroDao.updateEquipmentAndFightStats(user.userId, withUpdatedItem(hero.equipment, cleaned), hero.fightStats) *>
                 inventoryRepo.removeItem(gemItemId, hero.id).mapError(e => new Throwable(e.toString)) *>
                 renderer.show(user, Screen(content.text("socketing.annihilate"), Nil)) *>
@@ -107,15 +108,25 @@ case class SocketingState(
   private def isWeapon(item: Item): Boolean =
     item.itemType == ItemType.Weapon || item.itemType == ItemType.AdditionalWeapon
 
-  private def isFireOrCold(gem: Gem): Boolean =
-    Element.of(gem.kind).exists(e => e == Element.Fire || e == Element.Cold)
+  /** Противоположная стихия: огонь ↔ холод. У остальных стихий пары нет. */
+  private def opposite(e: Element): Option[Element] = e match {
+    case Element.Fire => Some(Element.Cold)
+    case Element.Cold => Some(Element.Fire)
+    case _            => None
+  }
 
-  private def hasFireOrCold(item: Item): Boolean =
-    item.socketedGems.exists(isFireOrCold)
+  private def isOpposite(gem: Gem, to: Gem): Boolean =
+    (Element.of(gem.kind), Element.of(to.kind).flatMap(opposite)) match {
+      case (Some(a), Some(b)) => a == b
+      case _                  => false
+    }
 
-  // Убирает из гнёзд первый камень Огня/Холода (гнездо становится свободным).
-  private def removeFireOrCold(item: Item): Item =
-    item.sockets.indexWhere(_.exists(isFireOrCold)) match {
+  private def hasOpposite(item: Item, gem: Gem): Boolean =
+    item.socketedGems.exists(isOpposite(_, gem))
+
+  // Гасит первый камень противоположной стихии (гнездо становится свободным).
+  private def removeOpposite(item: Item, gem: Gem): Item =
+    item.sockets.indexWhere(_.exists(isOpposite(_, gem))) match {
       case -1  => item
       case idx => item.copy(sockets = item.sockets.updated(idx, None))
     }
