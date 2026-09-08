@@ -65,13 +65,13 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
     },
 
     test("DepositItem в полную бочку → отказ, инвентарь не тронут") {
-      val full = (1L to 10L).toList.map(i => gearItem(i, s"X$i"))
+      val full = (1L to 100L).toList.map(i => gearItem(i, s"X$i"))
       for {
         t <- makeState(inventory = List(gearItem(99L)), barrelItems = full)
         (state, _, invRepo, barrelRepo, renderer) = t
         _ <- state.action(testUser, tap("DepositItem_99"), renderer)
       } yield assertTrue(invRepo.snapshot.map(_.id) == List(99L)) &&
-              assertTrue(barrelRepo.itemsSnapshot.size == 10)
+              assertTrue(barrelRepo.itemsSnapshot.size == 100)
     },
 
     test("WithdrawItem_<id> → предмет возвращается в инвентарь") {
@@ -107,11 +107,11 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
 
     test("Положить серебро больше, чем влезает в бочку → отказ") {
       for {
-        t <- makeState(Nil, heroSilver = 10000L, barrelSilver = 9999L)
+        t <- makeState(Nil, heroSilver = 100000L, barrelSilver = 99999L)
         (state, _, _, barrelRepo, renderer) = t
         _ <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _ <- state.action(testUser, text("500"), renderer)
-      } yield assertTrue(barrelRepo.silverSnapshot == 9999L)
+      } yield assertTrue(barrelRepo.silverSnapshot == 99999L)
     },
 
     test("Не число в режиме ввода → ошибка, режим сохраняется") {
