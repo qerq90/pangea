@@ -320,14 +320,15 @@ guild:
           label: "↩ Назад"
           color: "negative"
     confirm:
-      text: "Вы можете улучшить «{stat}» на +{step} за {cost} очков репутации."
+      text: "Вы можете улучшить «{stat}» на +{step} за {cost} очков репутации и {cost} серебра."
       choices:
         ConfirmImprove: "Улучшить"
         CancelImprove:
           label: "↩ Назад"
           color: "negative"
-    applied: "✅ «{stat}» улучшена на +{step}. Списано {cost} очков репутации. Осталось репутации: {remaining}."
+    applied: "✅ «{stat}» улучшена на +{step}. Списано {cost} очков репутации и {cost} серебра. Осталось репутации: {remaining}, серебра: {remainingSilver}."
     notEnough: "Недостаточно репутации: нужно {cost} очков."
+    notEnoughSilver: "Недостаточно серебра: нужно {cost}."
     notReady: "Мастер Горн ждёт, пока вы выберете характеристику."
   mentorKazimir:
     text: "🧙 Наставник Казимир задумчиво смотрит в окно. Пока ему нечего вам предложить."
