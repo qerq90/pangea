@@ -157,7 +157,7 @@ case class MerchantState(
         case None => showSellList(user, renderer, 0).unit
         case Some(item) =>
           val price = sellPrice(item)
-          val text  = s"${itemDesc(item)}\n💰 Цена продажи: $price"
+          val text  = s"${itemDesc(item)}\n🪙 Цена продажи: $price"
           val choices = List(
             content.choice("ConfirmSellItem", "merchant.sellItemLabel").copy(data = Map("id" -> itemId.toString), row = Some(0)),
             content.choice("CancelSellItem",  "merchant.sellBackLabel").copy(row = Some(1))
@@ -271,7 +271,7 @@ case class MerchantState(
    *  формат и разделитель, что при находке/дропе ([[Item.ComparisonSeparator]]).
    *  Если слот пуст — сравнивать не с чем, показываем только предмет. */
   private def saleLine(mi: MerchantItem, i: Int, hero: Hero): String = {
-    val base     = s"${i + 1}) ${itemDesc(mi.item)}\n💰 Цена: ${mi.price}"
+    val base     = s"${i + 1}) ${itemDesc(mi.item)}\n🪙 Цена: ${mi.price}"
     val equipped = hero.equipment.equippedFor(mi.item.itemType).filter(_.itemType != ItemType.NoItem)
     if (equipped.isEmpty) base
     else base + "\n" + Item.ComparisonSeparator + "\n" + equipped.map(_.equippedComparison("Надето")).mkString("\n")

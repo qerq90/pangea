@@ -58,7 +58,7 @@ case class InventoryState(
       _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
            else {
              val (pageItems, totalPages, page) = ItemMenu.page(items, scene.page.getOrElse(0))
-             val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 💰 ${hero.silver} | 🪙 ${hero.doubloons}"
+             val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 🪙 ${hero.silver} | 🟡 ${hero.doubloons}"
              val itemBtns = ItemMenu.itemButtons(pageItems, ItemActionPrefix)
              val nav      = navRow(page, totalPages, "InventoryPrev", "InventoryNext", "BackFromInventory")
              renderer.show(user, Screen(header, itemBtns ++ nav))
@@ -238,7 +238,7 @@ case class InventoryState(
 
   private def emptyScreen(hero: Hero): Screen = {
     val base = content.screen("inventory.empty")
-    Screen(s"📦 Инвентарь пуст | 💰 ${hero.silver} | 🪙 ${hero.doubloons}", base.choices)
+    Screen(s"📦 Инвентарь пуст | 🪙 ${hero.silver} | 🟡 ${hero.doubloons}", base.choices)
   }
 
   private def navRow(page: Int, totalPages: Int, prevId: String, nextId: String, backId: String): List[Choice] = {
@@ -251,7 +251,7 @@ case class InventoryState(
   }
 
   private def itemDetail(item: Item, hero: Hero, silver: Long): String =
-    s"💰 $silver\n\n${itemText(item, hero.equipment, Some(hero))}"
+    s"🪙 $silver\n\n${itemText(item, hero.equipment, Some(hero))}"
 
   private def readScene(user: User): Task[InventoryScene] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[InventoryScene].toOption).getOrElse(InventoryScene()))
