@@ -1,7 +1,8 @@
 package pangea.service.state.states.merchant
 
 import pangea.engine.SceneContent
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.generator.item.GemGenerator
+import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, Rarity, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -139,6 +140,24 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(confScr.text.contains("48")) &&
               assertTrue(invRepo.snapshot.isEmpty) &&
               assertTrue(hero.exists(_.silver == 100L + 48L))
+    },
+
+    test("SellJunk продаёт только серое/белое снаряжение, не трогая трофеи и камни (даже Серой редкости)") {
+      val junkHelmet = Item(1L, "Ржавый шлем", 1L, Rarity.Gray, ItemType.Helmet,
+        attack = 0, accuracy = 0, energy = 0, armor = 2, defence = 0, evasion = 0)
+      val gem = GemGenerator.item(GemKind.Skull, 1).copy(id = 2L) // всегда Rarity.Gray
+      val trophy = Item(3L, "Голова (Человек)", 5L, Rarity.Gray, ItemType.Trophy,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Trophy("Human", TrophyKind.Head))
+      for {
+        t <- makeState(richHero, items = List(junkHelmet, gem, trophy))
+        (state, heroDao, invRepo, renderer) = t
+        _    <- state.action(testUser, tap("SellJunk"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(!invRepo.snapshot.exists(_.id == junkHelmet.id)) && // хлам продан
+              assertTrue(invRepo.snapshot.exists(_.id == gem.id)) &&         // камень остался
+              assertTrue(invRepo.snapshot.exists(_.id == trophy.id)) &&      // трофей остался
+              assertTrue(hero.exists(_.silver > richHero.silver))
     },
 
     test("всё снаряжение куплено → сообщение «занят подготовкой новой партии», есть Продать/Назад") {
