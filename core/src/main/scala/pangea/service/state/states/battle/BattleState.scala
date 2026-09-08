@@ -622,8 +622,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
           val stacked  = bumped.effects.monsterBleed.map(_.stackedWith(pct)).getOrElse(Bleed(pct))
           val bled     = bumped.copy(effects = bumped.effects.copy(monsterBleed = Some(stacked)))
-          val bleedMsg = tmpl.replace("{}", raw.toString) + "\n" +
-            content.format("battle.bleedApplied", "monster" -> battle.toMonster.name)
+          // Отдельное сообщение «истекает кровью» убрано — прок уже виден по
+          // компактному индикатору (🔴 -N ❤), приписанному к строке атаки.
+          val bleedMsg = tmpl.replace("{}", raw.toString)
           dealSkillDamage(hero, bled, raw, bleedMsg, nowMs, skip)
 
         case Skill.Effect.WeakSpotStrike =>
