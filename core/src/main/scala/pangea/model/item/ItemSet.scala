@@ -93,12 +93,12 @@ object ItemSet extends Enum[ItemSet] {
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$AttackPct% к атаке."),
-      SetBonus(4,  s"Стихийный урон огнём по HP и броне увеличен на $FireDamageBonusPct%.", active = false),
-      SetBonus(6,  s"Рост урона от огня за раунд увеличен в $BurnGrowthMult раза.", active = false),
+      SetBonus(4,  s"Стихийный урон огнём по HP и броне увеличен на $FireDamageBonusPct%."),
+      SetBonus(6,  s"Рост урона от огня за раунд увеличен в $BurnGrowthMult раза."),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, s"Шанс поджечь врага увеличен на $IgniteChanceBonusPct%.", active = false),
+      SetBonus(10, s"Шанс поджечь врага увеличен на $IgniteChanceBonusPct%."),
       SetBonus(12, "Ваши активные умения всегда поджигают врага. Каждый процент огня дополнительно " +
-                   "снижает защиту противника на столько же процентов.", active = false)
+                   "снижает защиту противника на столько же процентов.")
     )
   }
 

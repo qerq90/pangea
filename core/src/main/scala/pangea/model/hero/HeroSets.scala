@@ -80,6 +80,25 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   def feastHpPct: Long      = ItemSet.Ghoul.KillHpRestorePct
   def feastArmorPct: Long   = ItemSet.Ghoul.KillArmorRestorePct
 
+  // ── «Дикое пламя» ───────────────────────────────────────────────────────────
+
+  /** Прибавка к граням урона огнём, в долях (порог 4). Применяется только если в
+   *  оружии есть Огонь — см. `BattleState.splitElementalDamage`. */
+  def fireDamageBonus: Double =
+    if (has(ItemSet.WildFlame, 4)) ItemSet.WildFlame.FireDamageBonusPct / 100.0 else 0.0
+
+  /** Во сколько раз быстрее растёт горение за раунд (порог 6). */
+  def burnGrowthMult: Long =
+    if (has(ItemSet.WildFlame, 6)) ItemSet.WildFlame.BurnGrowthMult else 1L
+
+  /** Прибавка к шансу прока Огня, в п.п. (порог 10). */
+  def igniteChanceBonusPct: Long =
+    if (has(ItemSet.WildFlame, 10)) ItemSet.WildFlame.IgniteChanceBonusPct else 0L
+
+  /** Поджигают ли активные умения врага всегда, и режет ли горение его защиту
+   *  на столько же процентов, сколько горит (порог 12). */
+  def skillsAlwaysIgnite: Boolean = has(ItemSet.WildFlame, 12)
+
   // ── «Охотник» ───────────────────────────────────────────────────────────────
 
   /** Шанс (в %) повторить атаку после промаха, не чаще раза за раунд (порог 6). */
