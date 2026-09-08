@@ -36,6 +36,23 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
   private val baseHero = TestFixtures.hero(userId)
 
+  private def ring(id: Long, name: String, evasion: Long) =
+    Item(id, name, 1L, Rarity.Blue, ItemType.Ring,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = evasion)
+
+  // Названия короткие: подписи кнопок режутся по лимиту длины (ItemMenu.truncate).
+  private val wornRing1 = ring(41L, "Перстень", 1L)
+  private val wornRing2 = ring(42L, "Печатка", 2L)
+  private val newRing   = ring(43L, "Оникс", 5L)
+
+  /** Нажатие на кнопку выбора слота кольца на экране замены. */
+  private def chooseRingSlot(itemId: Long, slot: Int): UserAction =
+    UserAction("", Some(s"""{"action":"EquipRing","id":"$itemId","slot":"$slot"}"""))
+
+  // Герой с обоими занятыми слотами колец и новым кольцом в сумке.
+  private def heroWithBothRings = baseHero.copy(
+    equipment = TestFixtures.emptyEquipment.copy(firstRing = wornRing1, secondRing = wornRing2))
+
   private def makeState(hero: Hero, items: List[Item]) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
@@ -161,6 +178,85 @@ object InventoryStateSpec extends ZIOSpecDefault {
       } yield assertTrue(updatedHero.exists(_.equipment.weapon.name == sword.name)) &&
               assertTrue(items.exists(_.id == oldSword.id)) &&
               assertTrue(updatedHero.exists(_.fightStats.atk == baseHero.fightStats.atk + sword.attack))
+    },
+
+    // ── Кольца: выбор слота при двух занятых ──────────────────────────────────
+    test("Equip кольца при двух занятых слотах → экран выбора, кольцо пока не надето") {
+      for {
+        quad                                <- makeState(heroWithBothRings, List(newRing))
+        (state, heroDao, invRepo, renderer)  = quad
+        _        <- state.action(testUser, selectItem(newRing.id), renderer)
+        _        <- state.action(testUser, tap("Equip"), renderer)
+        screens  <- renderer.sentScreens
+        hero     <- heroDao.getHeroByUserId(userId)
+        btns      = screens.last.choices
+      } yield assertTrue(btns.count(_.id == "EquipRing") == 2) &&
+              // в подписях видно, какое кольцо снимаем
+              assertTrue(btns.exists(_.label.contains(wornRing1.name))) &&
+              assertTrue(btns.exists(_.label.contains(wornRing2.name))) &&
+              assertTrue(screens.last.text.contains(newRing.name)) &&
+              // ничего ещё не произошло: кольца на местах, новое в сумке
+              assertTrue(hero.exists(_.equipment.firstRing.id == wornRing1.id)) &&
+              assertTrue(hero.exists(_.equipment.secondRing.id == wornRing2.id)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(newRing.id))
+    },
+
+    test("выбор первого слота → меняется первое кольцо, второе не тронуто") {
+      for {
+        quad                                <- makeState(heroWithBothRings, List(newRing))
+        (state, heroDao, invRepo, renderer)  = quad
+        _    <- state.action(testUser, selectItem(newRing.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        _    <- state.action(testUser, chooseRingSlot(newRing.id, 1), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(_.equipment.firstRing.id == newRing.id)) &&
+              assertTrue(hero.exists(_.equipment.secondRing.id == wornRing2.id)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(wornRing1.id)) // снятое вернулось в сумку
+    },
+
+    test("выбор второго слота → меняется второе кольцо, первое не тронуто") {
+      for {
+        quad                                <- makeState(heroWithBothRings, List(newRing))
+        (state, heroDao, invRepo, renderer)  = quad
+        _    <- state.action(testUser, selectItem(newRing.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        _    <- state.action(testUser, chooseRingSlot(newRing.id, 2), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(_.equipment.firstRing.id == wornRing1.id)) &&
+              assertTrue(hero.exists(_.equipment.secondRing.id == newRing.id)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(wornRing2.id))
+    },
+
+    test("статы пересчитываются по реально снятому кольцу, а не по второму слоту") {
+      // Слот 1 даёт +1 уклонения, новое кольцо +5: замена первого → +4 к уклонению.
+      val hero0 = heroWithBothRings.copy(
+        fightStats = baseHero.fightStats.copy(
+          evasion = baseHero.fightStats.evasion + wornRing1.evasion + wornRing2.evasion))
+      for {
+        quad                          <- makeState(hero0, List(newRing))
+        (state, heroDao, _, renderer)  = quad
+        _    <- state.action(testUser, selectItem(newRing.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        _    <- state.action(testUser, chooseRingSlot(newRing.id, 1), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(_.fightStats.evasion ==
+                hero0.fightStats.evasion - wornRing1.evasion + newRing.evasion))
+    },
+
+    test("при свободном слоте кольцо надевается сразу, без экрана выбора") {
+      val heroOneRing = baseHero.copy(
+        equipment = TestFixtures.emptyEquipment.copy(firstRing = wornRing1))
+      for {
+        quad                                <- makeState(heroOneRing, List(newRing))
+        (state, heroDao, invRepo, renderer)  = quad
+        _       <- state.action(testUser, selectItem(newRing.id), renderer)
+        _       <- state.action(testUser, tap("Equip"), renderer)
+        screens <- renderer.sentScreens
+        hero    <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(!screens.exists(_.choices.exists(_.id == "EquipRing"))) &&
+              assertTrue(hero.exists(_.equipment.firstRing.id == wornRing1.id)) &&
+              assertTrue(hero.exists(_.equipment.secondRing.id == newRing.id)) &&
+              assertTrue(invRepo.snapshot.isEmpty)
     },
 
     test("Drop выбранного → предмет удалён из инвентаря") {
