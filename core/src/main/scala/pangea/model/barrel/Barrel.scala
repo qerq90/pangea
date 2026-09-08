@@ -4,8 +4,8 @@ import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory.Items
 import pangea.model.item.Item
 
-/** Личная неприметная бочка игрока в Портовом квартале: хранилище до 10 предметов
- *  и до 10 000 серебра, независимое от инвентаря и кошелька героя.
+/** Личная неприметная бочка игрока в Портовом квартале: хранилище до 100 предметов
+ *  и до 100 000 серебра, независимое от инвентаря и кошелька героя.
  */
 case class Barrel(
   id: Long,
@@ -24,8 +24,8 @@ case class Barrel(
 }
 
 object Barrel {
-  val MaxItems: Long  = 10L
-  val MaxSilver: Long = 10000L
+  val MaxItems: Long  = 100L
+  val MaxSilver: Long = 100000L
 
   def empty(heroId: HeroId): Barrel =
     Barrel(id = 0L, heroId = heroId, items = Items(Nil), silver = 0L)
