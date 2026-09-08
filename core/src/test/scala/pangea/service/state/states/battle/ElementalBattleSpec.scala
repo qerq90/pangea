@@ -68,7 +68,8 @@ object ElementalBattleSpec extends ZIOSpecDefault {
     test("всплеск: урон по герою, поджог на 1% и списание энергии") {
       val h = hero(hp = 100000L)
       for {
-        t <- makeState(h, lairBattle(turn = 0))
+        // Броня выбита: иначе шипы сами подожгут героя и смешаются со всплеском.
+        t <- makeState(h, lairBattle(turn = 0, armorPct = 0L))
         (state, dao, r) = t
         _       <- seedTurn()
         _       <- state.action(testUser, tap("Attack"), r)
@@ -108,7 +109,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
     test("смерч бьёт на 2×атаки плюс 5% от максимумов HP и брони героя") {
       val h = hero(hp = 100000L, armor = 0L)
       for {
-        t <- makeState(h, lairBattle(turn = 1, orbs = 2))
+        t <- makeState(h, lairBattle(turn = 1, orbs = 2, armorPct = 0L)) // без шипов
         (state, dao, r) = t
         _       <- seedTurn(90) // травма не выпала
         _       <- state.action(testUser, tap("Attack"), r)
@@ -174,7 +175,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
 
     test("без энергии способность не применяется, но очередь едет дальше") {
       for {
-        t <- makeState(hero(), lairBattle(turn = 0, energy = 0L))
+        t <- makeState(hero(), lairBattle(turn = 0, energy = 0L, armorPct = 0L))
         (state, dao, r) = t
         _       <- seedTurn()
         _       <- state.action(testUser, tap("Attack"), r)
@@ -188,7 +189,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
     test("горение на герое тикает в конце раунда и усиливается") {
       val h = hero(hp = 100000L)
       for {
-        t <- makeState(h, lairBattle(turn = 0))
+        t <- makeState(h, lairBattle(turn = 0, armorPct = 0L)) // без шипов
         (state, dao, r) = t
         _      <- seedTurn()
         _      <- state.action(testUser, tap("Attack"), r)
@@ -199,6 +200,89 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         second <- battleAfter(dao)
       } yield assertTrue(first.effects.heroBurn.exists(_.pct == 3)) &&  // 1 наложили, +2 за тик
               assertTrue(second.effects.heroBurn.exists(_.pct == 5))    // ещё один тик
+    },
+
+    // ── Особенности огненного ─────────────────────────────────────────────────
+    test("огонь по огненному почти не проходит, холод бьёт в полтора раза сильнее") {
+      // Сравниваем оружие БЕЗ камня против оружия С камнем: «голые руки» дали бы
+      // штраф к урону (×0.5) и сравнение было бы не про стихию.
+      def weapon(gem: Option[pangea.model.item.GemKind]) =
+        pangea.model.item.Item(7L, "Меч", 1L, pangea.model.item.Rarity.Blue, pangea.model.item.ItemType.Weapon,
+          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+          sockets = gem.map(k => Some(pangea.model.item.Gem(k, 1))).toList)
+      def damageWith(w: pangea.model.item.Item) = {
+        val h = hero().copy(
+          fightStats = hero().fightStats.copy(atk = 1000),
+          equipment  = TestFixtures.emptyEquipment.copy(weapon = w))
+        for {
+          t <- makeState(h, lairBattle(turn = 3, armorPct = 0L)) // пропуск, без шипов
+          (state, dao, r) = t
+          _     <- seedTurn(90, 90) // возможные проки стихии оружия — мимо
+          _     <- state.action(testUser, tap("Attack"), r)
+          after <- battleAfter(dao)
+        } yield Elemental.Fire.stats(bossLvl).hp - after.monsterCurrentHp
+      }
+      for {
+        plain <- damageWith(weapon(None))
+        fire  <- damageWith(weapon(Some(pangea.model.item.GemKind.Ruby)))
+        cold  <- damageWith(weapon(Some(pangea.model.item.GemKind.Sapphire)))
+      } yield assertTrue(fire < plain / 3) &&  // ×0.2, с поправкой на грани огня
+              assertTrue(cold > plain)         // ×1.5, холод бьёт сильнее
+    },
+
+    test("огненного нельзя поджечь") {
+      val battle = lairBattle(turn = 3)
+      assertTrue(battle.withEffects(
+        battle.effects.copy(monsterBurn = Some(pangea.model.battle.Burn(10)))).effects.monsterBurn.isEmpty)
+    },
+
+    test("шипы: пока цела броня, удар возвращается и поджигает героя") {
+      val h = hero(hp = 100000L)
+      for {
+        // Броня цела — шипы отвечают.
+        t1 <- makeState(h, lairBattle(turn = 3, armorPct = 100L))
+        (s1, dao1, r1) = t1
+        _        <- seedTurn()
+        _        <- s1.action(testUser, tap("Attack"), r1)
+        withArmor <- battleAfter(dao1)
+        screens  <- r1.sentScreens
+
+        // Броня выбита — шипов нет.
+        t2 <- makeState(h, lairBattle(turn = 3, armorPct = 0L))
+        (s2, dao2, r2) = t2
+        _        <- seedTurn()
+        _        <- s2.action(testUser, tap("Attack"), r2)
+        noArmor  <- battleAfter(dao2)
+      } yield assertTrue(withArmor.effects.heroBurn.isDefined) &&
+              assertTrue(screens.map(_.text).mkString.contains("Раскалённая броня элементаля обжигает")) &&
+              assertTrue(noArmor.effects.heroBurn.isEmpty)
+    },
+
+    test("скованный холодом не отвечает шипами и не поджигает") {
+      val h = hero(hp = 100000L)
+      val chilled = lairBattle(turn = 3, armorPct = 100L)
+      val frozen  = chilled.copy(effects = chilled.effects.copy(chilledTurns = 5))
+      for {
+        t <- makeState(h, frozen)
+        (state, dao, r) = t
+        _       <- seedTurn()
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleAfter(dao)
+        screens <- r.sentScreens
+      } yield assertTrue(after.effects.heroBurn.isEmpty) &&
+              assertTrue(!screens.map(_.text).mkString.contains("Раскалённая броня"))
+    },
+
+    test("оцепенение тикает и само спадает") {
+      val chilled = lairBattle(turn = 3, armorPct = 0L)
+      val frozen  = chilled.copy(effects = chilled.effects.copy(chilledTurns = 2))
+      for {
+        t <- makeState(hero(), frozen)
+        (state, dao, r) = t
+        _      <- seedTurn()
+        _      <- state.action(testUser, tap("Attack"), r)
+        after  <- battleAfter(dao)
+      } yield assertTrue(after.effects.chilledTurns == 1) && assertTrue(after.effects.chilled)
     },
 
     test("яд и кровотечение на элементале не держатся") {

@@ -181,7 +181,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             )
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
-            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, damage, hero)
+            // Сопротивление элементаля стихии оружия — до разбивки по броне/HP.
+            resisted = (damage * elementalResistance(hero, battle)).toLong.max(1L)
+            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
             // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
@@ -228,17 +230,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             elemResult <- if (newHp > 0) resolveElementProcs(hero, hitBattle)
                           else ZIO.succeed((hitBattle, Vector.empty[String]))
             (updated, elemLog) = elemResult
-            log1 = log :+ (attackLine + dotIndicators(updated))
+            // Шипы огненного элементаля: пока цела броня, он возвращает часть
+            // урона и поджигает бьющего. Скованный холодом молчит.
+            thornsResult = elementalThorns(healedHero, updated, battle.monsterCurrentArmor, resisted)
+            (thornedHero, thornedBattle, thornsLine) = thornsResult
+            log1 = log :+ (attackLine + dotIndicators(thornedBattle))
             log2 =
               if (poisonsNow || gemPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> monster.name)
               else log1
             log3 =
               if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
               else log2
-            log4 = log3 ++ elemLog
+            log4 = (log3 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
             r <-
-              if (updated.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(healedHero, updated, log4, Outcome.Victory))
-              else monsterPhase(healedHero, updated, nowMs, log4, skip)
+              if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Victory))
+              else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Death))
+              else monsterPhase(thornedHero, thornedBattle, nowMs, log4, skip)
           } yield r
         } else {
           val attackLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
@@ -293,6 +300,37 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         hero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor)),
         log  = res.log :+ content.format("battle.ghoulFeast",
                  "hp" -> hpGained.toString, "armor" -> armorGained.toString))
+    }
+
+  /** Насколько урон героя по элементалю ослаблен или усилен его стихией: своя
+    * стихия почти не вредит (огонь по огненному — 20%), противоположная бьёт
+    * сильнее (холод — 150%). Оружие сразу с двумя стихиями перемножает их
+    * множители. Для обычных мобов всегда 1.0. */
+  private def elementalResistance(hero: Hero, battle: SoloPveBattle): Double =
+    battle.elemental.fold(1.0) { e =>
+      hero.gems.weaponElements.foldLeft(1.0)((m, el) => m * e.damageTakenMult(el))
+    }
+
+  /** Шипы огненного элементаля. Пока у него ЦЕЛА БРОНЯ (проверяется её запас до
+    * удара), обычная атака героя возвращается частью урона и поджигает бьющего.
+    * Скованный холодом элементаль шипами не отвечает.
+    *
+    * Возвращает героя после отдачи, бой с наложенным горением и строку лога
+    * (пустую, если шипов не было). */
+  private def elementalThorns(
+      hero: Hero,
+      battle: SoloPveBattle,
+      armorBeforeHit: Long,
+      damageDealt: Long
+  ): (Hero, SoloPveBattle, String) =
+    battle.elemental match {
+      case Some(_) if armorBeforeHit > 0 && !battle.effects.chilled =>
+        val thorns = (damageDealt * Elemental.Fire.ThornsPct / 100L).max(1L)
+        val (hurt, _) = burnHero(hero, thorns)
+        val burned = battle.copy(effects = battle.effects.copy(heroBurn = Some(
+          battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct)))))
+        (hurt, burned, content.format("battle.elemental.thorns", "damage" -> thorns.toString))
+      case _ => (hero, battle, "")
     }
 
   /** Ход элементаля-минибосса: он применяет способности строго ПО КРУГУ, а не
@@ -494,6 +532,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           b = b.copy(effects = b.effects.copy(
             monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
           log = log :+ Element.Cold.procText
+          // Огненного элементаля прок Холода вдобавок сковывает: шипы молчат,
+          // его атаки перестают поджигать, точность срезана, и одна собранная
+          // сфера гаснет.
+          if (b.elemental.isDefined) {
+            val orbsLeft = (b.fireOrbs - 1).max(0)
+            if (b.fireOrbs > 0)
+              log = log :+ content.format("battle.elemental.orbDestroyed", "orbs" -> orbsLeft.toString)
+            b = b.copy(
+              fireOrbs = orbsLeft,
+              effects  = b.effects.copy(chilledTurns = Elemental.Fire.ChilledTurns))
+          }
         }
         if (fired(Element.Fire) && !fireAir) {
           val burn = b.effects.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)
@@ -584,15 +633,26 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               if (toughTriggered) (hero.effectiveMaxArmor(nowMs) * PassiveKind.Toughness.RestorePct / 100L).max(1L) else 0L
             // «Шипастый»: вернуть 5% полученного урона врагу (по HP моба, мимо брони).
             thorns = if (hero.passives.hasSpiky) (reducedDamage * PassiveKind.Spiky.ThornsPct / 100L).max(1L) else 0L
+            // Обычная атака огненного элементаля поджигает героя с шансом 50% —
+            // но не пока он скован холодом. Без элементаля бросок не тратится.
+            ignites <- chanceRoll(
+              ticked.elemental.isDefined && !ticked.effects.chilled,
+              Elemental.Fire.IgniteChancePct
+            )
             battleAfterAtk = ticked.copy(
               monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
-              toughnessUsed    = ticked.toughnessUsed || toughTriggered
+              toughnessUsed    = ticked.toughnessUsed || toughTriggered,
+              effects =
+                if (!ignites) ticked.effects
+                else ticked.effects.copy(heroBurn = Some(
+                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct))))
             )
             lines = List(
               Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)),
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
-              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> monster.name))
+              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> monster.name)),
+              Option.when(ignites)(content.text("battle.elemental.ignites"))
             ).flatten.mkString("\n")
           } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
         } else
@@ -935,7 +995,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val raw     = if (doubles) value.max(1L) * 2L else value.max(1L)
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
-    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, raw, hero)
+    val resisted          = (raw * elementalResistance(hero, battle)).toLong.max(1L)
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
@@ -1445,7 +1506,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val buffed          = effWithAir(hero, battle, nowMs)
     val agi             = hero.effectiveBaseStats(nowMs).agi
     val passiveBonus    = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
-    val monsterAccuracy = (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult).toLong
+    // Скованный холодом элементаль бьёт менее точно — срез в п.п. от его точности.
+    val chillCut        = if (battle.effects.chilled) Elemental.Fire.ChilledAccuracyCutPct else 0L
+    val monsterAccuracy =
+      (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult * (100L - chillCut) / 100.0).toLong
     (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, monsterAccuracy)
       + battle.heroBattleState.dodgeBonus + passiveBonus).min(95.0).max(5.0)
   }

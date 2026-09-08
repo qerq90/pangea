@@ -56,10 +56,12 @@ case class SoloPveBattle(
    *  навесить яд или кровотечение — ему нечему течь и нечего травить. Все точки,
    *  накладывающие эффекты на моба, идут через этот метод, а не через `copy`,
    *  чтобы иммунитет нельзя было обойти, забыв про него в новом источнике. */
-  def withEffects(e: BattleEffects): SoloPveBattle =
-    copy(effects =
-      if (Race.immuneToDots(Race.withName(monsterRace))) e.copy(monsterPoison = None, monsterBleed = None)
-      else e)
+  def withEffects(e: BattleEffects): SoloPveBattle = {
+    val noDots  = if (Race.immuneToDots(Race.withName(monsterRace))) e.copy(monsterPoison = None, monsterBleed = None) else e
+    // Огненного элементаля вдобавок нельзя поджечь — он и так пламя.
+    val noBurn  = if (elemental.exists(_.immuneToBurn)) noDots.copy(monsterBurn = None) else noDots
+    copy(effects = noBurn)
+  }
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
 
@@ -79,6 +81,8 @@ case class SoloPveBattle(
     // защиты цели (комбо Молния+Холод) живут ограниченное число ходов.
     effects = effects.copy(
       airBoostTurns        = (effects.airBoostTurns - 1).max(0),
+      // Оцепенение элементаля от холода тикает вместе с прочими временными эффектами.
+      chilledTurns         = (effects.chilledTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
