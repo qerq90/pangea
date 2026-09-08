@@ -3,7 +3,7 @@ package pangea.service.state.states.tavern
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
-import pangea.model.hero.Hero
+import pangea.model.hero.{Hero, LoreData}
 import pangea.model.item.{Item, ItemDetails}
 import pangea.model.monster.Race
 import pangea.model.quest.QuestData
@@ -34,6 +34,8 @@ case class InnkeeperState(
       "OpenCharacter" -> Target.Run { (user, _, _) =>
         CharacterMenu.open(heroDao, user.userId, StateType.Innkeeper)
       },
+      "ElementalLore"     -> Target.Run { (user, _, renderer) => offerLore(user, renderer) },
+      "PayElementalLore"  -> Target.Run { (user, _, renderer) => payLore(user, renderer) },
       "BackFromInnkeeper" -> Target.Goto(StateType.Tavern)
     ),
     fallback = Target.Run { (user, _, renderer) =>
@@ -54,17 +56,53 @@ case class InnkeeperState(
   ): Task[StateType] = branch.act(user, ua, renderer)
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(
-      user,
-      Screen(
-        content.text("innkeeper.text"),
-        List(
-          content.choice("TurnInQuest", "innkeeper.turnInLabel"),
-          content.choice("OpenCharacter", "common.character"),
-          content.choice("BackFromInnkeeper", "innkeeper.backLabel")
+    readLore(user).flatMap { lore =>
+      // Кнопка про элементалей появляется, только когда герой их уже видел, и
+      // висит, пока он не заплатит за рассказ.
+      val loreBtn = Option.when(lore.metElemental && !lore.elementalLore)(
+        content.choice("ElementalLore", "innkeeper.elementalLoreLabel"))
+      renderer.show(
+        user,
+        Screen(
+          content.text("innkeeper.text"),
+          List(
+            Some(content.choice("TurnInQuest", "innkeeper.turnInLabel")),
+            loreBtn,
+            Some(content.choice("OpenCharacter", "common.character")),
+            Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel"))
+          ).flatten
         )
       )
-    )
+    }
+
+  /** Предложение купить рассказ об элементалях. */
+  private def offerLore(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(
+      content.format("innkeeper.elementalLoreOffer", "price" -> InnkeeperState.LorePrice.toString),
+      List(
+        content.choice("PayElementalLore", "innkeeper.elementalLorePay"),
+        content.choice("BackFromLore", "innkeeper.elementalLoreDecline")
+      ))).as(StateType.Innkeeper)
+
+  /** Оплата: списываем серебро, запоминаем покупку и рассказываем легенду. */
+  private def payLore(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      lore <- readLore(user)
+      _ <- if (lore.elementalLore) showMenu(user, renderer)
+           else if (hero.silver < InnkeeperState.LorePrice)
+             renderer.show(user, Screen(content.text("innkeeper.elementalLoreNoSilver"), Nil)) *>
+               showMenu(user, renderer)
+           else
+             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.LorePrice) *>
+               heroDao.writeLoreData(user.userId, lore.copy(elementalLore = true).asJson) *>
+               renderer.show(user, Screen(
+                 content.text("innkeeper.elementalLoreText"),
+                 List(content.choice("BackFromLore", "innkeeper.elementalLoreDone")))) 
+    } yield StateType.Innkeeper
+
+  private def readLore(user: User): Task[LoreData] =
+    heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
 
   // Сдать квест: забираем самый ценный подходящий трофей, начисляем опыт, закрываем задание.
   private def turnInQuest(user: User, renderer: Renderer): Task[StateType] =
@@ -157,6 +195,9 @@ case class InnkeeperState(
 }
 
 object InnkeeperState {
+
+  /** Сколько трактирщик просит за рассказ об элементалях. */
+  val LorePrice: Long = 2000L
 
   /** Трофей, который уйдёт в счёт задания по расе `raceName`: из подходящих
     * берём с наибольшим коэффициентом вида, при равных — старший по уровню

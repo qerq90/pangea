@@ -4,6 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.Race
+import pangea.model.hero.LoreData
 import pangea.model.quest.QuestData
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -24,9 +25,14 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Trophy(race.entryName, kind))
 
-  private def makeState(items: List[Item], active: Option[Race]) =
+  private def makeState(items: List[Item], active: Option[Race]) = makeStateWith(items, active, LoreData.empty, 0L)
+
+  /** То же, но с заданными знаниями о мире и серебром — для рассказа об элементалях. */
+  private def makeStateWith(items: List[Item], active: Option[Race], lore: LoreData, silver: Long) =
     for {
-      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, state = StateType.Innkeeper))
+      heroDao  <- TestHeroDao.withHero(userId,
+                    TestFixtures.hero(userId, state = StateType.Innkeeper).copy(silver = silver))
+      _        <- heroDao.writeLoreData(userId, lore.asJson)
       _        <- ZIO.foreachDiscard(active.toList)(r =>
                     heroDao.writeQuestData(userId, QuestData(3, Some(r.entryName), Long.MaxValue, Some(r.entryName)).asJson))
       invRepo   = TestInventoryRepository.withItems(items)
@@ -133,6 +139,61 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
         (state, _, _, renderer) = t
         result <- state.action(testUser, tap("BackFromInnkeeper"), renderer)
       } yield assertTrue(result == StateType.Tavern)
+    },
+    // ── Рассказ об элементалях ────────────────────────────────────────────────
+    test("кнопки про элементалей нет, пока герой их не встречал") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData.empty, 5000L)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+      } yield assertTrue(!screens.last.choices.map(_.id).contains("ElementalLore"))
+    },
+
+    test("встретил элементаля → кнопка появилась и держится, пока не заплатил") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metElemental = true), 5000L)
+        (state, dao, _, renderer) = t
+        _        <- state.enter(testUser, renderer)
+        before   <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        _        <- state.action(testUser, tap("ElementalLore"), renderer)
+        offer    <- renderer.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap("PayElementalLore"), renderer)
+        lore     <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver   <- dao.getHeroByUserId(userId).map(_.get.silver)
+        told     <- renderer.sentScreens.map(_.last)
+        _        <- state.enter(testUser, renderer)
+        after    <- renderer.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(before.contains("ElementalLore")) &&
+              assertTrue(offer.text.contains("2000 серебра")) &&
+              assertTrue(lore.elementalLore) &&
+              assertTrue(silver == 3000L) &&
+              assertTrue(told.text.contains("Сноходцы")) &&
+              assertTrue(told.choices.map(_.label).contains("Надеюсь это стоило моего серебра.")) &&
+              // после оплаты кнопка исчезает
+              assertTrue(!after.contains("ElementalLore"))
+    },
+
+    test("не хватает серебра → рассказа нет и деньги не списаны") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metElemental = true), 100L)
+        (state, dao, _, renderer) = t
+        _       <- state.action(testUser, tap("PayElementalLore"), renderer)
+        lore    <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver  <- dao.getHeroByUserId(userId).map(_.get.silver)
+        screens <- renderer.sentScreens
+      } yield assertTrue(!lore.elementalLore) && assertTrue(silver == 100L) &&
+              assertTrue(screens.map(_.text).mkString.contains("Столько серебра у тебя нет"))
+    },
+
+    test("повторная оплата невозможна — второй раз серебро не спишется") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metElemental = true, elementalLore = true), 5000L)
+        (state, dao, _, renderer) = t
+        _      <- state.action(testUser, tap("PayElementalLore"), renderer)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+      } yield assertTrue(silver == 5000L)
     }
+
   )
 }

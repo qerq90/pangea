@@ -84,6 +84,50 @@ object CubeCraftSpec extends ZIOSpecDefault {
       assertTrue(result.chargesUsed == 1) &&
         assertTrue(result.items.size == 1) &&
         assertTrue(result.items.head.gem.exists(_.grade == 2))
+    },
+    // ── Перевод вещи в набор ──────────────────────────────────────────────────
+    test("вещь + вечно огненное железо → та же вещь набора «Дикое пламя»") {
+      val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
+        attack = 42, accuracy = 7, energy = 3, armor = 0, defence = 2, evasion = 1)
+      val iron = MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 2L)
+      val result = CubeCraft.craft(List(axe, iron), charges = 50, rng)
+      val made   = result.items.find(_.set.contains(ItemSet.WildFlame))
+      assertTrue(result.chargesUsed == 1) &&
+      assertTrue(made.isDefined) &&
+      // характеристики, уровень, редкость и слот сохранены полностью
+      assertTrue(made.exists(i => i.attack == 42 && i.accuracy == 7 && i.energy == 3 &&
+                                  i.defence == 2 && i.evasion == 1)) &&
+      assertTrue(made.exists(i => i.lvl == 30L && i.rarity == Rarity.Violet && i.itemType == ItemType.Weapon)) &&
+      // третье слово названия уступило место имени набора
+      assertTrue(made.exists(_.name.endsWith(ItemSet.WildFlame.title))) &&
+      assertTrue(made.exists(!_.name.contains("Дворянина"))) &&
+      // и вещь, и железо израсходованы
+      assertTrue(!result.items.exists(_.material.contains(MaterialKind.EverburningIron))) &&
+      assertTrue(result.items.size == 1)
+    },
+
+    test("без железа вещь в набор не переводится") {
+      val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
+        attack = 42, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
+      val result = CubeCraft.craft(List(axe), charges = 50, rng)
+      assertTrue(result.chargesUsed == 0) && assertTrue(result.items == List(axe))
+    },
+
+    test("железо не тратится впустую на вещь, которая уже в этом наборе") {
+      val axe = Item(1L, "🟣 Выдающийся Топор Дикого пламени", 30L, Rarity.Violet, ItemType.Weapon,
+        attack = 42, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        set = Some(ItemSet.WildFlame))
+      val iron = MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 2L)
+      val result = CubeCraft.craft(List(axe, iron), charges = 50, rng)
+      assertTrue(result.chargesUsed == 0) &&
+      assertTrue(result.items.exists(_.material.contains(MaterialKind.EverburningIron)))
+    },
+
+    test("ненадеваемое железом не переводится — камни и трофеи не годятся") {
+      val iron = MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 2L)
+      val result = CubeCraft.craft(List(gem(GemKind.Ruby, 1, id = 3L), head(4L), iron), charges = 50, rng)
+      assertTrue(!result.items.exists(_.set.isDefined))
     }
+
   )
 }
