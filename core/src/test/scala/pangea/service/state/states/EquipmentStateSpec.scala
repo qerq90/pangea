@@ -121,7 +121,7 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         updated  <- heroDao.getHeroByUserId(userId)
         screens  <- renderer.sentScreens
       } yield assertTrue(updated.exists(_.equipment.weapon.itemType == ItemType.Weapon)) &&
-              assertTrue(screens.exists(_.text.contains("Сумка странника переполнена")))
+              assertTrue(screens.exists(_.text.contains("надо бы очистить место прежде чем снять с себя")))
     },
 
     test("надеть два кольца из инвентаря через детальные экраны → оба в разных слотах") {

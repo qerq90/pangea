@@ -119,7 +119,7 @@ case class EquipmentState(
              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
            else
              inventoryRepo.addItem(hero.id, item).foldZIO(
-               _ => renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)),
+               _ => renderer.show(user, Screen(content.text("equipment.unequipInventoryFull"), Nil)),
                _ => {
                  val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
                  heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>

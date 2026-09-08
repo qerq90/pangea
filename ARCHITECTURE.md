@@ -560,7 +560,7 @@ restDurationMs   = deathTimeMinutes × 60 000
 
 **При получении предмета любым способом** (лут `LootState`, найденный предмет `FoundItemState`, покупка `MerchantState`, снятие экипировки `EquipmentState`) к сообщению добавляется строка «🎒 Свободных слотов в сумке: {free}/{max}» (`common.freeSlots`). Общий хелпер — `InventoryFeedback.freeSlotsLine`.
 
-**При переполнении** (предмет не влез) показывается единое сообщение `common.inventoryFull` — «❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места.» (раньше у каждого экрана был свой текст: `foundItem.inventoryFull`/`merchant.inventoryFull`/`equipment.inventoryFull`/`loot.itemLost` — удалены).
+**При переполнении** (предмет не влез) показывается единое сообщение `common.inventoryFull` — «❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места.» (раньше у каждого экрана был свой текст: `foundItem.inventoryFull`/`merchant.inventoryFull`/`equipment.inventoryFull`/`loot.itemLost` — удалены). Исключение — снятие предмета в `EquipmentState`: там своё сообщение `equipment.unequipInventoryFull` («Инвентарь переполнен, надо бы очистить место прежде чем снять с себя.»), потому что смысл действия другой (снимаешь то, что уже носишь, а не пытаешься подобрать новое).
 
 ### «Персонаж» как модальный экран (`HeroStatsState`)
 
