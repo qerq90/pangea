@@ -55,6 +55,17 @@ case class Equipment(
   def passiveKinds: Set[pangea.model.item.PassiveKind] =
     allItems.flatMap(_.passive).toSet
 
+  /** Двенадцать слотов, которые считаются в наборы. Фляга и доп. оружие в них не
+   *  входят, поэтому полный набор — ровно 12 предметов (см. [[pangea.model.item.ItemSet]]). */
+  def setSlots: List[Item] = List(
+    helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
+    firstRing, secondRing, belt, weapon
+  )
+
+  /** Сколько надето предметов каждого набора (учитываются только сетовые слоты). */
+  def setCounts: Map[pangea.model.item.ItemSet, Int] =
+    setSlots.flatMap(_.set).groupBy(identity).map { case (s, xs) => s -> xs.size }
+
   /** Камни в гнёздах оружия (основного и дополнительного) — дают «оружейную» грань. */
   def weaponGems: List[pangea.model.item.Gem] =
     weapon.socketedGems ++ additionalWeapon.socketedGems
