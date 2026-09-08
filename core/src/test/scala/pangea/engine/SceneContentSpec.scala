@@ -39,6 +39,21 @@ object SceneContentSpec extends ZIOSpecDefault {
     test("VkRenderer маппит ChoiceColor.Negative → ButtonColor.Negative") {
       assertTrue(VkRenderer.toButtonColor(ChoiceColor.Negative) == ButtonColor.Negative) &&
       assertTrue(VkRenderer.toButtonColor(ChoiceColor.Primary) == ButtonColor.Primary)
+    },
+
+    // Валюты различаются только смайликом, поэтому их легко перепутать местами
+    // при массовой замене: серебро — 🪙 (монета), дублоны — 🟡 (золотой кружок).
+    test("серебро помечено монетой, дублоны — золотым кружком") {
+      for {
+        c <- ZIO.attempt(SceneContent.load())
+        silverFound    = c.format("loot.silver", "amount" -> "10")
+        doubloonsFound = c.format("loot.doubloons", "amount" -> "2")
+      } yield assertTrue(silverFound.startsWith("🪙")) &&
+              assertTrue(doubloonsFound.startsWith("🟡")) &&
+              assertTrue(!silverFound.contains("🟡")) &&
+              assertTrue(!doubloonsFound.contains("🪙")) &&
+              // 💰 больше не используется ни для одной валюты
+              assertTrue(!c.text("globalMap.enter.text").contains("💰"))
     }
   )
 }

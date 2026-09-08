@@ -82,7 +82,7 @@ registration:
 
 globalMap:
   enter:
-    text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor} ⚡ {heroEnergy}/{heroMaxEnergy}\n💰 Серебро: {silver}"
+    text: "Добро пожаловать в Кинэт!\n❤ {heroHp}/{heroMax} 🧥 {heroArmor} ⚡ {heroEnergy}/{heroMaxEnergy}\n🪙 Серебро: {silver}"
     choices:
       HarborQuarter: "Портовый квартал"
       MarketSquare: "Торговая площадь"
@@ -180,7 +180,7 @@ cube:
 
 barrel:
   menu:
-    text: "🪵 Неприметная бочка.\n📦 {items}/{maxItems} предметов · 💰 {silver}/{maxSilver} серебра"
+    text: "🪵 Неприметная бочка.\n📦 {items}/{maxItems} предметов · 🪙 {silver}/{maxSilver} серебра"
     depositItems:    "Положить вещи"
     withdrawItems:   "Забрать вещи"
     depositSilver:   "Положить серебро"
@@ -195,8 +195,8 @@ barrel:
   barrelFull:    "В бочке нет места."
   itemDeposited: "{name} убран в бочку."
   itemWithdrawn: "{name} забран из бочки."
-  depositSilverPrompt:  "Напишите сумму, которую хотите положить в бочку.\n💰 У вас: {heroSilver}. Свободно в бочке: {free}."
-  withdrawSilverPrompt: "Напишите сумму, которую хотите забрать из бочки.\n💰 В бочке: {barrelSilver}."
+  depositSilverPrompt:  "Напишите сумму, которую хотите положить в бочку.\n🪙 У вас: {heroSilver}. Свободно в бочке: {free}."
+  withdrawSilverPrompt: "Напишите сумму, которую хотите забрать из бочки.\n🪙 В бочке: {barrelSilver}."
   depositSilverAll:    "Положить всё"
   withdrawSilverAll:   "Забрать всё"
   silverNothingToDeposit:  "Нечего класть: у вас нет серебра или в бочке нет места."
@@ -207,8 +207,8 @@ barrel:
   silverOverflow:      "В бочке нет столько места."
   silverNotEnoughHero: "У вас нет столько серебра."
   silverNotEnoughBarrel: "В бочке нет столько серебра."
-  silverDeposited: "💰 {amount} убрано в бочку."
-  silverWithdrawn: "💰 {amount} забрано из бочки."
+  silverDeposited: "🪙 {amount} убрано в бочку."
+  silverWithdrawn: "🪙 {amount} забрано из бочки."
 
 marketSquare:
   enter:
@@ -250,7 +250,7 @@ gustavo:
   boost:
     intro: "Экспериментальные зелья быка, медоеда, кошки и злобомозга. Они немного увеличивают ваши характеристики, однако эффект временный и бывает похмелье, вызывают привыкание. Поэтому первые бесплатно!"
   boostFreeLabel: "{stat} — бесплатно"
-  boostPaidLabel: "{stat} — {cost} 💰"
+  boostPaidLabel: "{stat} — {cost} 🪙"
   boostBusyLabel: "{stat} (готовится ⏳ {mins} мин)"
   boostBack:
     label: "↩ Назад"
@@ -261,8 +261,8 @@ gustavo:
   boostAppliedFree: "🧪 Первое {potion} — за счёт заведения! +15% к «{stat}» на час."
   supplies:
     intro: "Густаво кивает на полку с припасами: «Пополню флягу — 25 серебра за глоток, пояс — 100 серебра за бутыль». Чего пополнить?"
-    flaskLabel: "Фляга — {cost} 💰"
-    beltLabel: "Пояс — {cost} 💰"
+    flaskLabel: "Фляга — {cost} 🪙"
+    beltLabel: "Пояс — {cost} 🪙"
     back:
       label: "↩ Назад"
       color: "negative"
@@ -365,7 +365,7 @@ construction:
       CancelLeaveWork: "Остаться"
   left: "Вы бросили работу и ушли со стройки."
   done: "Вы внесли свой вклад в развитие этого города! Можете гордиться собой! Вы получили {silver} серебра и {exp} опыта."
-  doneDoubloons: "🪙 А ещё вам перепал дублон!"
+  doneDoubloons: "🟡 А ещё вам перепал дублон!"
   levelUp: "🎉 Новый уровень: {level}!"
 
 tavern:
@@ -442,7 +442,7 @@ innkeeper:
     color: "negative"
   noActive: "У вас нет активного задания."
   noItem: "В вашем инвентаре нет подходящего трофея (нужен трофей расы «{race}»)."
-  completed: "Задание выполнено! Вы сдали «{item}» и получили {exp} опыта и 🪙 1 дублон."
+  completed: "Задание выполнено! Вы сдали «{item}» и получили {exp} опыта и 🟡 1 дублон."
   levelUp: "Вы получили новый уровень {level}!"
 
 merchant:
@@ -465,9 +465,9 @@ merchant:
   bought: "Вы купили предмет {name}."
   notEnoughSilver: "Ага конечно, как будет достаточно звонких монет тогда и продам."
   refreshCooldown: "Ришелье уже недавно обновлял товар. Загляните примерно через {mins} мин."
-  sellHeader: "Продажа ({page}/{total}) | 💰 {silver}"
+  sellHeader: "Продажа ({page}/{total}) | 🪙 {silver}"
   sellEmpty: "У вас нет вещей на продажу."
-  sellItemLabel: "💰 Продать"
+  sellItemLabel: "🪙 Продать"
   sellBackLabel:
     label: "↩ Назад"
     color: "negative"
@@ -717,8 +717,8 @@ loot:
   empty: "Осматривая добычу, вы не находите ничего ценного."
   claimed: "Вы забираете добычу:"
   left: "Вы оставляете предметы и идёте дальше."
-  silver: "💰 Вы нашли {amount} серебра"
-  doubloons: "🪙 Вы нашли {amount} дублона(ов)"
+  silver: "🪙 Вы нашли {amount} серебра"
+  doubloons: "🟡 Вы нашли {amount} дублона(ов)"
   takeLabel: "Забрать"
   leaveLabel:
     label: "Оставить"
