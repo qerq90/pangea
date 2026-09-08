@@ -60,6 +60,11 @@ trait HeroDao {
   // Durable состояние храма Азата (куб/заряды/содержимое, благословение, отдыхи)
   def writeAzatData(userId: UserId, data: Json): Task[Unit]
   def readAzatData(userId: UserId): Task[Option[Json]]
+
+  /** Знания героя о мире: встречал ли он элементалей, купил ли легенду у
+   *  трактирщика. Durable, живёт в `heroes.lore_data`. */
+  def writeLoreData(userId: UserId, data: Json): Task[Unit]
+  def readLoreData(userId: UserId): Task[Option[Json]]
 }
 
 object HeroDao {

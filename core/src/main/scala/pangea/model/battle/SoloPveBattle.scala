@@ -35,8 +35,24 @@ case class SoloPveBattle(
   monsterMarked:       Boolean = false,
   skillSlots:          List[SkillSlotState] = Nil,
   effects:             BattleEffects = BattleEffects.empty, // тикающие статус-эффекты (яд/реген)
-  toughnessUsed:       Boolean = false // пассивка «Крепкость» срабатывает один раз за бой
+  toughnessUsed:       Boolean = false, // пассивка «Крепкость» срабатывает один раз за бой
+  // Вид элементаля, если это бой с минибоссом (имя варианта Elemental). У
+  // обычных мобов пусто — по нему бой и отличает босса от рядового врага.
+  elementalKind:       Option[String] = None
 ) {
+
+  /** Элементаль этого боя, если сражаемся с минибоссом. */
+  def elemental: Option[pangea.model.monster.Elemental] =
+    elementalKind.flatMap(pangea.model.monster.Elemental.byName)
+
+  /** Обновляет эффекты боя, уважая иммунитеты расы моба: элементалю нельзя
+   *  навесить яд или кровотечение — ему нечему течь и нечего травить. Все точки,
+   *  накладывающие эффекты на моба, идут через этот метод, а не через `copy`,
+   *  чтобы иммунитет нельзя было обойти, забыв про него в новом источнике. */
+  def withEffects(e: BattleEffects): SoloPveBattle =
+    copy(effects =
+      if (Race.immuneToDots(Race.withName(monsterRace))) e.copy(monsterPoison = None, monsterBleed = None)
+      else e)
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
 
@@ -97,6 +113,8 @@ object SoloPveBattle {
       skillSlots          <- c.getOrElse[List[SkillSlotState]]("skillSlots")(Nil)
       effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
+      elementalKind       <- c.getOrElse[Option[String]]("elementalKind")(None)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
-                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked, skillSlots, effects, toughnessUsed)
+                         monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
+                         skillSlots, effects, toughnessUsed, elementalKind)
 }

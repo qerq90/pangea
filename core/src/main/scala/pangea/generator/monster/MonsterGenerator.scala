@@ -30,7 +30,7 @@ object MonsterGenerator {
     rarityPool.filter(MarkedRarities.contains)
 
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
-    val (race, rng1) = rng.pick(Race.values.toList)
+    val (race, rng1) = rng.pick(Race.mortals.toList)
     generateOfRace(dungeonLevel, race, rng1)
   }
 
@@ -58,7 +58,7 @@ object MonsterGenerator {
     * спуститься), а не текущий.
     */
   def generateMarked(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
-    val (race, rng1)   = rng.pick(Race.values.toList)
+    val (race, rng1)   = rng.pick(Race.mortals.toList)
     val (rarity, rng2) = rng1.pick(markedRarityPool)
     val stats = boost(buildStats(dungeonLevel, rarity, race), MarkedMultiplier)
     (Monster(0L, dungeonLevel.toLong, race, rarity, stats, marked = true), rng2)

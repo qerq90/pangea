@@ -122,4 +122,10 @@ object Queries {
 
   def readAzatData(userId: UserId): Fragment =
     sql"select azat_data from $tableName where user_id = $userId"
+
+  def writeLoreData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set lore_data = $data where user_id = $userId"
+
+  def readLoreData(userId: UserId): Fragment =
+    sql"select lore_data from $tableName where user_id = $userId"
 }

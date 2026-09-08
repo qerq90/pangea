@@ -83,7 +83,7 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
                for {
                  seed         <- Random.nextLong
                  remaining     = data.remaining - 1
-                 (nextRace, _) = Rng(seed).pick(Race.values.toList)
+                 (nextRace, _) = Rng(seed).pick(Race.mortals.toList)
                  newCurrent    = if (remaining > 0) Some(nextRace.entryName) else None
                  newData       = data.copy(remaining = remaining, current = newCurrent, active = Some(raceName))
                  _ <- heroDao.writeQuestData(user.userId, newData.asJson)
@@ -130,7 +130,7 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
   private def regenerate(user: User, now: Long, active: Option[String]): Task[QuestData] =
     for {
       seed     <- Random.nextLong
-      (race, _) = Rng(seed).pick(Race.values.toList)
+      (race, _) = Rng(seed).pick(Race.mortals.toList)
       data      = QuestData(QuestSlots, Some(race.entryName), now + QuestRefreshMs, active)
       _        <- heroDao.writeQuestData(user.userId, data.asJson)
     } yield data

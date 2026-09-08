@@ -35,8 +35,8 @@ case class TreasureMobsState(heroDao: HeroDao, content: SceneContent) extends St
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      raceIdx <- Random.nextIntBounded(Race.values.size)
-      race     = Race.values(raceIdx)
+      raceIdx <- Random.nextIntBounded(Race.mortals.size)
+      race     = Race.mortals(raceIdx)
       count   <- Random.nextIntBetween(2, 4) // 2 или 3
       chain    = TreasureMobsChain(race.entryName, remaining = count, doubloonMin = 2, doubloonMax = 3)
       _       <- heroDao.writeSceneData(user.userId, chain.asJson)
