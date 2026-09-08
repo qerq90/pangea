@@ -22,6 +22,22 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
     items.count(_.passive.isDefined).toDouble / items.size.max(1)
   }
 
+  // Распределение числа гнёзд (число гнёзд -> доля выборки) для конкретного
+  // слота и редкости. Слот форсируем, чтобы набрать выборку по оружию/броне
+  // отдельно — таблицы гнёзд у них разные.
+  private def socketDist(itemType: ItemType, rarity: Rarity, samples: Long = 3000L): Map[Int, Double] =
+    (1L to samples)
+      .map(s => ItemGenerator.createItemOfType(itemType, 10L, rarity, Rng(s))._1.sockets.size)
+      .groupBy(identity)
+      .map { case (n, xs) => n -> xs.size.toDouble / samples }
+
+  private def near(actual: Double, expected: Double, tol: Double = 0.05): Boolean =
+    math.abs(actual - expected) <= tol
+
+  // Слоты «не-оружие», по которым проверяем броневую таблицу гнёзд.
+  private val gearSlots =
+    List(ItemType.Helmet, ItemType.ChestPlate, ItemType.Ring, ItemType.Boots, ItemType.Amulet)
+
   def spec = suite("ItemGeneratorSpec")(
     test("same seed produces identical item") {
       val rng        = Rng(42L)
@@ -160,6 +176,60 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       val expected = Set[PassiveKind](
         PassiveKind.Jeweler, PassiveKind.Marauder, PassiveKind.Robber, PassiveKind.Healer)
       assertTrue(ringPassives.nonEmpty) && assertTrue(ringPassives.subsetOf(expected))
+    },
+
+    // ── Гнёзда под камни ──────────────────────────────────────────────────────
+    test("серый/белый/зелёный — без гнёзд и у оружия, и у остального снаряжения") {
+      val rarities = List(Rarity.Gray, Rarity.White, Rarity.Green)
+      val slots    = ItemType.Weapon :: gearSlots
+      assertTrue(rarities.forall(r => slots.forall(t => socketDist(t, r, 300L).keySet == Set(0))))
+    },
+
+    test("многогнёздность — только у оружия: остальным слотам не больше одного гнезда") {
+      val rarities = List(Rarity.Blue, Rarity.Purple, Rarity.Violet, Rarity.Orange)
+      assertTrue(gearSlots.forall(t => rarities.forall(r => socketDist(t, r, 300L).keys.forall(_ <= 1))))
+    },
+
+    test("синее ОРУЖИЕ: 20% ноль / 30% одно / 30% два / 20% три") {
+      val d = socketDist(ItemType.Weapon, Rarity.Blue)
+      assertTrue(near(d.getOrElse(0, 0.0), 0.20)) &&
+      assertTrue(near(d.getOrElse(1, 0.0), 0.30)) &&
+      assertTrue(near(d.getOrElse(2, 0.0), 0.30)) &&
+      assertTrue(near(d.getOrElse(3, 0.0), 0.20))
+    },
+
+    test("фиолетовое ОРУЖИЕ: 10% ноль / 30% одно / 30% два / 30% три") {
+      val d = socketDist(ItemType.Weapon, Rarity.Purple)
+      assertTrue(near(d.getOrElse(0, 0.0), 0.10)) &&
+      assertTrue(near(d.getOrElse(1, 0.0), 0.30)) &&
+      assertTrue(near(d.getOrElse(2, 0.0), 0.30)) &&
+      assertTrue(near(d.getOrElse(3, 0.0), 0.30))
+    },
+
+    test("пурпурное и легендарное ОРУЖИЕ: только 2 или 3 гнезда, поровну") {
+      val dists = List(Rarity.Violet, Rarity.Orange).map(socketDist(ItemType.Weapon, _))
+      assertTrue(dists.forall(_.keySet == Set(2, 3))) &&
+      assertTrue(dists.forall(d => near(d(2), 0.50))) &&
+      assertTrue(dists.forall(d => near(d(3), 0.50)))
+    },
+
+    test("синее не-оружие: 60% ноль / 40% одно") {
+      val d = socketDist(ItemType.Helmet, Rarity.Blue)
+      assertTrue(d.keySet == Set(0, 1)) &&
+      assertTrue(near(d(0), 0.60)) &&
+      assertTrue(near(d(1), 0.40))
+    },
+
+    test("фиолетовое не-оружие: 10% ноль / 90% одно") {
+      val d = socketDist(ItemType.Helmet, Rarity.Purple)
+      assertTrue(d.keySet == Set(0, 1)) &&
+      assertTrue(near(d(0), 0.10)) &&
+      assertTrue(near(d(1), 0.90))
+    },
+
+    test("пурпурное и легендарное не-оружие: всегда ровно одно гнездо") {
+      val dists = List(Rarity.Violet, Rarity.Orange).flatMap(r => gearSlots.map(socketDist(_, r, 300L)))
+      assertTrue(dists.forall(_.keySet == Set(1)))
     }
   )
 }

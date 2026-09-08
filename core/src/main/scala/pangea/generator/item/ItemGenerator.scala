@@ -189,25 +189,33 @@ object ItemGenerator {
   /** Максимум гнёзд на предмете (в т.ч. оружии) — 3. */
   private val MaxSockets: Int = 3
 
-  // Число гнёзд по редкости (пороги в %, from Rng.between [0,100)):
-  //   Синяя:       0 — 60, 1 — 30, 2 — 10 (2 гнезда только у оружия);
-  //   Фиолетовая:  0 — 10, 1 — 60, 2 — 20, 3 — 10;
-  //   Пурпурная и легендарная: 1 — 20, 2 — 50, 3 — 30.
-  // Серый/белый/зелёный — без гнёзд.
+  // Число гнёзд по редкости (пороги в %, from Rng.between [0,100)). У оружия и у
+  // остального снаряжения таблицы РАЗНЫЕ: многогнёздность — привилегия оружия,
+  // прочие слоты получают максимум одно гнездо. Серый/белый/зелёный — без гнёзд.
+  //
+  //                          ОРУЖИЕ                |     ОСТАЛЬНОЕ
+  //   Синяя:       0 — 20, 1 — 30, 2 — 30, 3 — 20  |  0 — 60, 1 — 40
+  //   Фиолетовая:  0 — 10, 1 — 30, 2 — 30, 3 — 30  |  0 — 10, 1 — 90
+  //   Пурпурная и легендарная:      2 — 50, 3 — 50  |          1 — 100
   private def socketCount(rarity: Rarity, isWeapon: Boolean, rng: Rng): (Int, Rng) = {
     val (roll, next) = rng.between(0L, 100L)
-    val raw = rarity match {
-      case Rarity.Blue =>
-        if (roll < 60) 0 else if (roll < 90) 1 else 2
-      case Rarity.Purple => // фиолетовая
-        if (roll < 10) 0 else if (roll < 70) 1 else if (roll < 90) 2 else 3
-      case Rarity.Violet | Rarity.Orange => // пурпурная и легендарная
-        if (roll < 20) 1 else if (roll < 70) 2 else 3
-      case _ => 0
-    }
-    // У синей 2 гнезда — только на оружии; у прочей брони синей режем до 1.
-    val capped = if (!isWeapon && rarity == Rarity.Blue) raw.min(1) else raw
-    (capped.min(MaxSockets), next)
+    val raw =
+      if (isWeapon) rarity match {
+        case Rarity.Blue =>
+          if (roll < 20) 0 else if (roll < 50) 1 else if (roll < 80) 2 else 3
+        case Rarity.Purple => // фиолетовая
+          if (roll < 10) 0 else if (roll < 40) 1 else if (roll < 70) 2 else 3
+        case Rarity.Violet | Rarity.Orange => // пурпурная и легендарная
+          if (roll < 50) 2 else 3
+        case _ => 0
+      }
+      else rarity match {
+        case Rarity.Blue                   => if (roll < 60) 0 else 1
+        case Rarity.Purple                 => if (roll < 10) 0 else 1
+        case Rarity.Violet | Rarity.Orange => 1
+        case _                             => 0
+      }
+    (raw.min(MaxSockets), next)
   }
 
   // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу.
