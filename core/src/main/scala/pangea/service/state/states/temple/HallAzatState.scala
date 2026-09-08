@@ -50,7 +50,7 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
       azat.cube match {
         case CubeStatus.None =>
           renderer.show(user, Screen(content.format("hall.cube.absent", "price" -> CubePrice.toString),
-            List(content.choice("BuyCube", "hall.cube.buy"), content.choice("BackToHall", "hall.back"))))
+            List(content.choice("BuyCube", "hall.cube.buy", "price" -> CubePrice.toString), content.choice("BackToHall", "hall.back"))))
         case CubeStatus.FoundInactive =>
           renderer.show(user, Screen(content.format("hall.cube.inactive",
             "doubloons" -> ActivateDoubloons.toString, "silver" -> ActivateSilver.toString),

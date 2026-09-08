@@ -52,6 +52,19 @@ object TempleAzatSpec extends ZIOSpecDefault {
       } yield assertTrue(azat.blessingUntil.isEmpty) && assertTrue(left == 10L)
     },
 
+    test("ApproachCube без куба → кнопка «Купить куб» с подставленной ценой, не сырым {price}") {
+      for {
+        dao      <- TestHeroDao.withHero(userId, hero())
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HallAzatState(dao, content)
+        _        <- state.action(testUser, tap("ApproachCube"), renderer)
+        screens  <- renderer.sentScreens
+        buyBtn    = screens.last.choices.find(_.id == "BuyCube")
+      } yield assertTrue(buyBtn.exists(_.label == "Купить куб за 200 дублонов.")) &&
+              assertTrue(buyBtn.exists(b => !b.label.contains("{")))
+    },
+
     test("BuyCube: 200 дублонов → активный куб с 50 зарядами, дублоны списаны") {
       for {
         dao      <- TestHeroDao.withHero(userId, hero(doubloons = 300L))
