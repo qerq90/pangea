@@ -761,6 +761,8 @@ inventory:
     label: "↩ Выйти"
     color: "negative"
   equipped: "{name} надет! Прежний: {old}."
+  ringChoice: "Оба слота колец заняты. Какое кольцо снять, чтобы надеть {name}?"
+  ringSlot: "Снять из слота {slot}: {name}"
   dropped: "{name} выброшен."
   tooHighLevel: "❌ Недостаточный уровень! Требуется {required}, ваш уровень {current}."
   notEquippable: "❌ Этот предмет нельзя надеть."

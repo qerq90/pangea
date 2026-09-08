@@ -32,6 +32,7 @@ case class InventoryState(
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
+      "EquipRing"         -> Target.Run { (u, ua, r) => equipChosenRing(u, ua, r) },
       "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
       "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) }
@@ -110,42 +111,77 @@ case class InventoryState(
       scene <- readScene(user)
       res <- scene.selectedId match {
         case None => showList(user, renderer)
-        case Some(id) => equipById(user, id, renderer)
+        case Some(id) => equipById(user, id, renderer, ringSlot = None)
       }
     } yield res
 
-  private def equipById(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
+  // Игрок выбрал, какое из двух надетых колец снять (кнопки экрана выбора).
+  private def equipChosenRing(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    (payloadField(ua, "id").flatMap(_.toLongOption), payloadField(ua, "slot").flatMap(_.toIntOption)) match {
+      case (Some(id), Some(slot)) => equipById(user, id, renderer, ringSlot = Some(slot))
+      case _                      => showList(user, renderer)
+    }
+
+  /** Экран выбора кольца: какое из двух надетых снять ради нового. */
+  private def ringChoiceScreen(newRing: Item, eq: Equipment, itemId: Long): Screen = {
+    def slotButton(slot: Int, worn: Item) =
+      Choice(
+        id    = "EquipRing",
+        label = ItemMenu.truncate(content.format("inventory.ringSlot",
+                  "slot" -> slot.toString, "name" -> worn.displayTitle)),
+        data  = Map("id" -> itemId.toString, "slot" -> slot.toString),
+        row   = Some(slot - 1)
+      )
+    Screen(
+      content.format("inventory.ringChoice", "name" -> newRing.displayTitle) + "\n\n" +
+        eq.firstRing.equippedComparison("Слот 1") + "\n" + Item.ComparisonSeparator + "\n" +
+        eq.secondRing.equippedComparison("Слот 2"),
+      List(
+        slotButton(1, eq.firstRing),
+        slotButton(2, eq.secondRing),
+        content.choice("InventoryList", "inventory.exit").copy(row = Some(2))
+      )
+    )
+  }
+
+  private def equipById(user: User, itemId: Long, renderer: Renderer, ringSlot: Option[Int]): Task[StateType] =
     for {
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      _ <- inv.items.data.find(_.id == itemId) match {
-        case None => ZIO.unit
+      // true — остаёмся на показанном экране (выбор кольца ждёт нажатия и
+      // перерисовывать поверх него список нельзя).
+      keepScreen <- inv.items.data.find(_.id == itemId) match {
+        case None => ZIO.succeed(false)
         case Some(item) =>
           if (!ItemType.equippable.contains(item.itemType))
-            renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil))
+            renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil)).as(false)
           else if (item.lvl > hero.lvl)
             renderer.show(user, Screen(
               content.format("inventory.tooHighLevel",
                 "required" -> item.lvl.toString,
-                "current"  -> hero.lvl.toString), Nil))
+                "current"  -> hero.lvl.toString), Nil)).as(false)
+          // Оба слота колец заняты и слот ещё не выбран — спрашиваем, какое снять.
+          else if (item.itemType == ItemType.Ring && ringSlot.isEmpty &&
+                   InventoryState.ringSlotsFull(hero.equipment))
+            renderer.show(user, ringChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
-            val (newEq, newFight, oldItem) = InventoryState.equip(hero, item)
+            val (newEq, newFight, oldItem) = InventoryState.equip(hero, item, ringSlot)
             val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq)
             // Замена, снимающая последний «Тайник» в экипировке (делта < 0), переполнит сумку → блокируем.
             if (capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 0))
-              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
+              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil)).as(false)
             else
-              heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+              (heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
                 inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
                 ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
                 ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
                 renderer.show(user, Screen(
                   content.format("inventory.equipped",
                     "name" -> item.name,
-                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))
+                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))).as(false)
           }
       }
-      res <- showList(user, renderer)
+      res <- if (keepScreen) ZIO.succeed(StateType.Inventory) else showList(user, renderer)
     } yield res
 
   private def dropSelected(user: User, renderer: Renderer): Task[StateType] =
@@ -262,6 +298,10 @@ case class InventoryState(
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
+  // Произвольное поле payload кнопки (напр. выбранный слот кольца).
+  private def payloadField(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
+
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)
       .flatMap(ZIO.fromOption(_))
@@ -278,9 +318,21 @@ object InventoryState {
     implicit val decoder: Decoder[InventoryScene] = deriveDecoder
   }
 
-  def equip(hero: Hero, item: Item): (Equipment, FightStats, Item) = {
-    val oldItem  = equippedIn(hero.equipment, item.itemType)
-    val newEq    = withSlot(hero.equipment, item)
+  /** Оба слота колец заняты — новое кольцо можно надеть только вместо одного из
+    * них, поэтому слот спрашиваем у игрока (см. `ringChoiceScreen`). */
+  def ringSlotsFull(eq: Equipment): Boolean =
+    eq.firstRing.itemType != ItemType.NoItem && eq.secondRing.itemType != ItemType.NoItem
+
+  /** `ringSlot` — выбранный игроком слот кольца (1 или 2); имеет смысл только
+    * когда оба слота заняты. None — обычное правило слотов: первый свободный,
+    * а если свободных нет, второй. */
+  def equip(hero: Hero, item: Item, ringSlot: Option[Int]): (Equipment, FightStats, Item) = {
+    val eq = hero.equipment
+    val (newEq, oldItem) = (item.itemType, ringSlot) match {
+      case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), eq.firstRing)
+      case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), eq.secondRing)
+      case _                        => (withSlot(eq, item), equippedIn(eq, item.itemType))
+    }
     val newFight = applyDelta(hero.fightStats, item, oldItem)
     (newEq, newFight, oldItem)
   }
