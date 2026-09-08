@@ -44,6 +44,7 @@ case class MerchantState(
       "JunkRarity"      -> Target.Run { (u, ua, r) => toggleJunkRarity(u, ua, r) },
       "JunkPassives"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(passives = !s.passives)) },
       "JunkActives"     -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(actives = !s.actives)) },
+      "JunkTrophies"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(trophies = !s.trophies)) },
       "BackFromJunk"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
       "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
@@ -237,17 +238,21 @@ case class MerchantState(
         row   = Some(i)
       )
     }
-    val abilityButtons = List(
+    // Переключатели, не привязанные к редкости: защита способностей и трофеи.
+    val flags = List(
       ("JunkPassives", "merchant.junk.passives", s.passives),
-      ("JunkActives",  "merchant.junk.actives",  s.actives)
-    ).zipWithIndex.map { case ((id, key, on), i) =>
+      ("JunkActives",  "merchant.junk.actives",  s.actives),
+      ("JunkTrophies", "merchant.junk.trophies", s.trophies)
+    )
+    val flagButtons = flags.zipWithIndex.map { case ((id, key, on), i) =>
       Choice(id, content.format(key, "state" -> state(on)), color = color(on),
         row = Some(JunkRarityGroups.size + i))
     }
     Screen(
       content.text("merchant.junk.header"),
-      rarityButtons ++ abilityButtons :+
-        content.choice("BackFromJunk", "merchant.junk.back").copy(row = Some(JunkRarityGroups.size + 2))
+      rarityButtons ++ flagButtons :+
+        content.choice("BackFromJunk", "merchant.junk.back")
+          .copy(row = Some(JunkRarityGroups.size + flags.size))
     )
   }
 
@@ -414,12 +419,14 @@ object MerchantState {
   }
 
   /** Настройка автопродажи «хлама»: какие редкости уходят по кнопке «Продать
-    * хлам» и трогать ли предметы со способностями. По умолчанию — прежнее
-    * поведение: серое и белое, способности не берегутся. */
+    * хлам», трогать ли предметы со способностями и продавать ли трофеи. По
+    * умолчанию — прежнее поведение: серое и белое, способности не берегутся,
+    * трофеи не продаются (они нужны для заданий и репутации). */
   final case class JunkSaleSettings(
     rarities: Set[Rarity] = Set(Rarity.Gray, Rarity.White),
     passives: Boolean     = true,
-    actives:  Boolean     = true
+    actives:  Boolean     = true,
+    trophies: Boolean     = false
   ) {
 
     /** Группа включена, если продаются все её редкости (переключатель ставит их
@@ -453,16 +460,22 @@ object MerchantState {
     JunkRarityGroup("Orange", List(Rarity.Orange))
   )
 
-  /** Пойдёт ли предмет под нож при «Продать хлам». Трофеи и камни-усилители не
-    * продаются никогда, независимо от настроек. Переключатели способностей —
-    * именно защита: выключенный «Пассивные способности» уводит предмет из
-    * продажи, даже если его редкость включена. */
+  /** Пойдёт ли предмет под нож при «Продать хлам». Камни-усилители не продаются
+    * никогда, независимо от настроек. Переключатели способностей — именно
+    * защита: выключенный «Пассивные способности» уводит предмет из продажи,
+    * даже если его редкость включена.
+    *
+    * Трофеи идут по своему переключателю и НЕ смотрят на редкости: у них она
+    * формально всегда Серая (как и у камней), так что фильтр по редкости для
+    * них ничего осмысленного не значил бы. Способности у трофеев не бывают,
+    * поэтому их защита трофеев тоже не касается. */
   def isJunk(item: Item, s: JunkSaleSettings): Boolean =
-    item.itemType != ItemType.Trophy &&
+    if (item.itemType == ItemType.Trophy) s.trophies
+    else
       item.itemType != ItemType.Gem &&
-      s.rarities.contains(item.rarity) &&
-      (s.passives || item.passive.isEmpty) &&
-      (s.actives || item.activeSkill.isEmpty)
+        s.rarities.contains(item.rarity) &&
+        (s.passives || item.passive.isEmpty) &&
+        (s.actives || item.activeSkill.isEmpty)
 
   final case class MerchantData(
     items: List[MerchantItem],
