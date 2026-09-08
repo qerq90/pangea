@@ -76,7 +76,7 @@ case class RegistrationState(
     } yield Registration
 
   private lazy val raceChoices: List[Choice] =
-    Race.values.toList.map(r => Choice("RaceDescription", r.toString))
+    Race.mortals.toList.map(r => Choice("RaceDescription", r.toString))
 
   private def getRaceDescription(user: User, raceName: String, renderer: Renderer): Task[StateType] =
     Race.withNameOption(raceName) match {

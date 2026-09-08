@@ -219,11 +219,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             setSteal   = if (hero.sets.lifestealPct > 0 && hpDmg > 0) (hpDmg * hero.sets.lifestealPct / 100L).max(0L) else 0L
             healedHero = if (vamp + setSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
-            hitBattle = battle.copy(
-              monsterCurrentHp = newHp,
-              monsterCurrentArmor = newArmor,
-              effects = effectsBled
-            )
+            hitBattle = battle
+              .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+              .withEffects(effectsBled)
             // Проки стихий оружия (30% каждый) — только если моб жив после удара.
             elemResult <- if (newHp > 0) resolveElementProcs(hero, hitBattle)
                           else ZIO.succeed((hitBattle, Vector.empty[String]))
@@ -717,7 +715,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
           val stacked  = bumped.effects.monsterBleed.map(_.stackedWith(pct)).getOrElse(Bleed(pct))
-          val bled     = bumped.copy(effects = bumped.effects.copy(monsterBleed = Some(stacked)))
+          val bled     = bumped.withEffects(bumped.effects.copy(monsterBleed = Some(stacked)))
           // Отдельное сообщение «истекает кровью» убрано — прок уже виден по
           // компактному индикатору (🔴 -N ❤), приписанному к строке атаки.
           val bleedMsg = tmpl.replace("{}", raw.toString)
@@ -798,7 +796,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         bledEffects0.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)))
     // Удвоение тратится на первом же уроне — даже если он добил моба.
     val effects  = if (doubles) bledEffects.copy(doubleSpent = true) else bledEffects
-    val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor, effects = effects)
+    val hit      = battle
+      .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+      .withEffects(effects)
     if (newHp <= 0) ZIO.succeed(TurnResult(hero, hit, Vector(skillLine + dotIndicators(hit)), Outcome.Victory))
     else
       resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>

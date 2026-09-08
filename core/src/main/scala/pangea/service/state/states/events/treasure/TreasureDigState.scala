@@ -98,8 +98,8 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
 
   private def digSuccess(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
     for {
-      raceIdx <- Random.nextIntBounded(Race.values.size)
-      race     = Race.values(raceIdx)
+      raceIdx <- Random.nextIntBounded(Race.mortals.size)
+      race     = Race.mortals(raceIdx)
       seed    <- Random.nextLong
       (reward, _) = SchronGenerator.roll(race, hero.dungeonLevel.toLong, DoubloonMin, DoubloonMax, Rng(seed))
       loot     = LootData(
@@ -112,8 +112,8 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
 
   private def digGrave(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
     for {
-      raceIdx <- Random.nextIntBounded(Race.values.size)
-      race     = Race.values(raceIdx)
+      raceIdx <- Random.nextIntBounded(Race.mortals.size)
+      race     = Race.mortals(raceIdx)
       // Раскапывая труп, с шансом SkullDropChancePct находим череп (1-й тир).
       skullRoll <- Random.nextIntBetween(1, 101)
       skull      = Option.when(skullRoll <= SkullDropChancePct)(GemGenerator.item(GemKind.Skull, Gem.MinGrade))
