@@ -1,10 +1,10 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.{ItemGenerator, TreasureMapGenerator}
+import pangea.generator.item.{GemGenerator, ItemGenerator, TreasureMapGenerator}
 import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
-import pangea.model.item.{Rarity => ItemRarity}
+import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
 
@@ -25,11 +25,24 @@ import scala.annotation.tailrec
   */
 object LootGenerator {
 
-  sealed trait LootDrop
+  sealed trait LootDrop {
+
+    /** Предмет этого дропа, если дроп предметный (у серебра предмета нет).
+      * Единая точка для экранов добычи: раньше каждый из них перечислял виды
+      * дропа своим `collect`, и новый вид молча терялся бы в обоих. */
+    def itemOpt: Option[Item] = this match {
+      case LootDrop.Gear(i)      => Some(i)
+      case LootDrop.Trophy(i)    => Some(i)
+      case LootDrop.MapHalf(i)   => Some(i)
+      case LootDrop.Gem(i)       => Some(i)
+      case LootDrop.Silver(_, _) => None
+    }
+  }
   object LootDrop {
     final case class Gear(item: Item)                    extends LootDrop
     final case class Trophy(item: Item)                  extends LootDrop
     final case class MapHalf(item: Item)                 extends LootDrop
+    final case class Gem(item: Item)                     extends LootDrop
     final case class Silver(amount: Long, pile: Boolean) extends LootDrop
   }
 
@@ -39,6 +52,7 @@ object LootGenerator {
     case object Trophy     extends Category
     case object SilverPile extends Category
     case object MapHalf    extends Category
+    case object Gem        extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -55,10 +69,21 @@ object LootGenerator {
   // последующих слотах уже выпавшая категория исключается, суммарный вес активных
   // падает, и появляется доля «пусто». У мифических и легендарных мобов 1% забран
   // у серебра под половинку карты сокровищ (MapHalf).
+  //
+  // Камень-усилитель (Gem) забран у уже существующих категорий, а не добавлен
+  // сверху, чтобы сумма осталась 100:
+  //   Редкие и мифические — 1% у трофея;
+  //   Легендарные        — 5%: 2% у трофея и 3% у серебра.
   private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
     tier match {
-      case MobRarity.Mythical | MobRarity.Legendary =>
-        List(Category.Gear -> 35, Category.Trophy -> 39, Category.SilverPile -> 25, Category.MapHalf -> 1)
+      case MobRarity.Rare =>
+        List(Category.Gear -> 35, Category.Trophy -> 38, Category.SilverPile -> 26, Category.Gem -> 1)
+      case MobRarity.Mythical =>
+        List(Category.Gear -> 35, Category.Trophy -> 38, Category.SilverPile -> 25, Category.MapHalf -> 1,
+             Category.Gem -> 1)
+      case MobRarity.Legendary =>
+        List(Category.Gear -> 35, Category.Trophy -> 37, Category.SilverPile -> 22, Category.MapHalf -> 1,
+             Category.Gem -> 5)
       case _ =>
         List(Category.Gear -> 35, Category.Trophy -> 39, Category.SilverPile -> 26)
     }
@@ -291,6 +316,12 @@ object LootGenerator {
       case Category.MapHalf =>
         // половинка карты сокровищ — по уровню убитого моба; RNG не тратит
         (LootDrop.MapHalf(TreasureMapGenerator.create(killLevel, half = true)), rng)
+
+      case Category.Gem =>
+        // Камень-усилитель 1-го тира («надколотый»). Вид равновероятен среди всех
+        // семи, черепа в том числе — в отличие от серебряной жилы, где череп исключён.
+        val (gem, r1) = GemGenerator.randomGem(GemModel.MinGrade, rng)
+        (LootDrop.Gem(gem), r1)
     }
 
   // Серебро: базис lvl×4 с разбросом ±20%, минимум 1.

@@ -3,7 +3,7 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.loot.LootGenerator
 import pangea.generator.loot.LootGenerator.LootDrop
-import pangea.model.item.{Item, ItemDetails, ItemType}
+import pangea.model.item.{Gem => GemModel, GemKind, Item, ItemDetails, ItemType}
 import pangea.model.monster.{Race, Rarity}
 import zio.test._
 
@@ -18,8 +18,17 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     case LootDrop.Gear(_)         => "gear"
     case LootDrop.Trophy(_)       => "trophy"
     case LootDrop.MapHalf(_)      => "mapHalf"
+    case LootDrop.Gem(_)          => "gem"
     case LootDrop.Silver(_, true) => "silverPile"
     case LootDrop.Silver(_, _)    => "silverSmall"
+  }
+
+  // Доля боёв (в %), в которых выпала категория `cat`, по выборке сидов.
+  private def catRatePct(tier: Rarity, cat: String, samples: Long = 20000L): Double = {
+    val hits = (1L to samples).count { s =>
+      LootGenerator.roll(tier, Race.Orc, 30L, Rng(s))._1.map(category).contains(cat)
+    }
+    hits * 100.0 / samples
   }
 
   def spec = suite("LootGeneratorSpec")(
@@ -98,6 +107,49 @@ object LootGeneratorSpec extends ZIOSpecDefault {
           .exists { case LootDrop.MapHalf(_) => true; case _ => false }
       }
       assertTrue(!anyHalf)
+    },
+
+    // ── Камни-усилители ───────────────────────────────────────────────────────
+    test("камень падает у редких, мифических и легендарных; у обычных и необычных — нет") {
+      def hasGem(tier: Rarity) = (1L to 5000L).iterator
+        .flatMap(s => LootGenerator.roll(tier, Race.Orc, 30L, Rng(s))._1)
+        .exists { case LootDrop.Gem(_) => true; case _ => false }
+      assertTrue(hasGem(Rarity.Rare)) &&
+      assertTrue(hasGem(Rarity.Mythical)) &&
+      assertTrue(hasGem(Rarity.Legendary)) &&
+      assertTrue(!hasGem(Rarity.Common)) &&
+      assertTrue(!hasGem(Rarity.Uncommon))
+    },
+
+    test("выпавший камень — 1-го тира, вид случаен и черепа тоже падают") {
+      val gems = (1L to 6000L).iterator
+        .flatMap(s => LootGenerator.roll(Rarity.Legendary, Race.Orc, 30L, Rng(s))._1)
+        .collect { case LootDrop.Gem(i) => i }
+        .toList
+      val kinds = gems.flatMap(_.gem).map(_.kind).toSet
+      assertTrue(gems.nonEmpty) &&
+      assertTrue(gems.forall(_.itemType == ItemType.Gem)) &&
+      assertTrue(gems.flatMap(_.gem).forall(_.grade == GemModel.MinGrade)) &&
+      assertTrue(kinds.contains(GemKind.Skull)) &&
+      assertTrue(kinds.size == GemKind.values.size) // встречаются все семь видов
+    },
+
+    test("легендарный роняет камень заметно чаще редкого и мифического (вес 5% против 1%)") {
+      val rare = catRatePct(Rarity.Rare, "gem")
+      val myth = catRatePct(Rarity.Mythical, "gem")
+      val leg  = catRatePct(Rarity.Legendary, "gem")
+      assertTrue(math.abs(rare - myth) < 0.5) && // у обоих вес 1%
+      assertTrue(leg > rare * 4)                 // у легендарного впятеро больший вес
+    },
+
+    // Веса категорий должны в сумме давать ровно 100, иначе в первом слоте
+    // появляется дыра «пусто». У редких и выше первый слот срабатывает всегда,
+    // поэтому пустая добыча тут же выдала бы ошибку в арифметике весов.
+    test("у редких и выше добыча никогда не пуста (сумма весов категорий = 100)") {
+      val tiers = List(Rarity.Rare, Rarity.Mythical, Rarity.Legendary)
+      assertTrue(tiers.forall { tier =>
+        (1L to 3000L).forall(s => LootGenerator.roll(tier, Race.Orc, 30L, Rng(s))._1.nonEmpty)
+      })
     },
 
     // ── Пассивки лута ─────────────────────────────────────────────────────────
