@@ -80,6 +80,34 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   def feastHpPct: Long      = ItemSet.Ghoul.KillHpRestorePct
   def feastArmorPct: Long   = ItemSet.Ghoul.KillArmorRestorePct
 
+  // ── «Каменный страж» ────────────────────────────────────────────────────────
+
+  /** Множитель ЛЮБОГО стихийного урона по герою (порог 4). Стихийным считается
+   *  весь урон элементаля: он и есть чистая стихия — и удар, и всплеск, и смерч,
+   *  и шипы, и горение. */
+  def elementalDamageTakenMult: Double =
+    if (has(ItemSet.StoneGuard, 4)) (100L - ItemSet.StoneGuard.ElementalTakenCutPct) / 100.0 else 1.0
+
+  /** Множитель урона, снимаемого с БРОНИ героя (порог 6): броня тает медленнее.
+   *  Урон по HP при этом не меняется — режется именно расход брони. */
+  def armorDamageTakenMult: Double =
+    if (has(ItemSet.StoneGuard, 6)) (100L - ItemSet.StoneGuard.ArmorDamageCutPct) / 100.0 else 1.0
+
+  /** Сколько брони реально уйдёт, когда она поглотила `absorbed` урона. Броня
+   *  прикрывает HP на всю поглощённую величину — порог 6 удешевляет только её
+   *  собственный расход. */
+  def armorSpent(absorbed: Long): Long =
+    if (absorbed <= 0L) absorbed else (absorbed * armorDamageTakenMult).toLong.max(1L)
+
+  /** На сколько п.п. снижен шанс поджечь героя (порог 10). */
+  def igniteResistPct: Long =
+    if (has(ItemSet.StoneGuard, 10)) ItemSet.StoneGuard.IgniteResistPct else 0L
+
+  /** Спасает ли броня на низком HP (порог 12) и её ставки. */
+  def rescuesOnLowHp: Boolean  = has(ItemSet.StoneGuard, 12)
+  def lowHpThresholdPct: Long  = ItemSet.StoneGuard.LowHpThresholdPct
+  def rescueArmorPct: Long     = ItemSet.StoneGuard.ArmorRestorePct
+
   // ── «Дикое пламя» ───────────────────────────────────────────────────────────
 
   /** Прибавка к граням урона огнём, в долях (порог 4). Применяется только если в

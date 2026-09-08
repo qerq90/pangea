@@ -14,34 +14,6 @@ object HeroSetsSpec extends ZIOSpecDefault {
     Item(id, "Предмет", 1L, Rarity.Blue, itemType,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0, set = set)
 
-  // Двенадцать сетовых слотов в том же порядке, что Equipment.setSlots.
-  private val setSlotTypes = List(
-    ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
-    ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
-    ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Weapon)
-
-  /** Экипировка, где первые `n` сетовых слотов заняты предметами набора `set`. */
-  private def wearing(set: ItemSet, n: Int): Equipment = {
-    val eq = TestFixtures.emptyEquipment
-    val items = setSlotTypes.take(n).zipWithIndex.map { case (t, i) => piece(i.toLong, t, Some(set)) }
-    items.zipWithIndex.foldLeft(eq) { case (acc, (it, i)) =>
-      i match {
-        case 0  => acc.copy(helmet = it)
-        case 1  => acc.copy(shoulderPads = it)
-        case 2  => acc.copy(chestPlate = it)
-        case 3  => acc.copy(bracelets = it)
-        case 4  => acc.copy(gloves = it)
-        case 5  => acc.copy(pants = it)
-        case 6  => acc.copy(boots = it)
-        case 7  => acc.copy(amulet = it)
-        case 8  => acc.copy(firstRing = it)
-        case 9  => acc.copy(secondRing = it)
-        case 10 => acc.copy(belt = it)
-        case _  => acc.copy(weapon = it)
-      }
-    }
-  }
-
   private def heroWearing(eq: Equipment) = TestFixtures.hero(userId).copy(equipment = eq)
 
   override def spec = suite("HeroSets")(
@@ -96,13 +68,27 @@ object HeroSetsSpec extends ZIOSpecDefault {
       assertTrue(three.accuracyBonusPct == 5L) // порог 2 ещё держится
     },
 
-    test("бонусы без механики не «действуют», хотя и показываются игроку") {
+    test("все четыре набора реализованы целиком — «показываем, но не работает» не осталось") {
+      assertTrue(ItemSet.values.forall(_.bonuses.forall(_.active)))
+    },
+
+    test("«Каменный страж» реализован целиком: все шесть порогов действуют") {
       val full = HeroSets(Map(ItemSet.StoneGuard -> 12))
-      val shown = full.bonuses(ItemSet.StoneGuard).map(b => b.pieces -> b.active)
-      // У «Каменного стража» реализованы пока только пороги 2 и 8.
-      assertTrue(shown == List(2 -> true, 4 -> false, 6 -> false, 8 -> true, 10 -> false, 12 -> false)) &&
-      assertTrue(!full.has(ItemSet.StoneGuard, 4)) && // стихийного урона мобов нет
-      assertTrue(!full.has(ItemSet.StoneGuard, 10))   // героя нечем поджечь
+      assertTrue(full.defenceBonusPct == ItemSet.StoneGuard.DefencePct) &&
+      assertTrue(full.elementalDamageTakenMult == 0.8) &&
+      assertTrue(full.armorDamageTakenMult == 0.8) &&
+      assertTrue(full.igniteResistPct == ItemSet.StoneGuard.IgniteResistPct) &&
+      assertTrue(full.rescuesOnLowHp)
+    },
+
+    test("пороги «Каменного стража» включаются по одному, а не все сразу") {
+      val six = HeroSets(Map(ItemSet.StoneGuard -> 6))
+      assertTrue(six.elementalDamageTakenMult == 0.8) && // порог 4 набран
+      assertTrue(six.armorSpent(100L) == 80L) &&         // порог 6 набран
+      assertTrue(six.igniteResistPct == 0L) &&           // порог 10 ещё нет
+      assertTrue(!six.rescuesOnLowHp) &&                 // порог 12 ещё нет
+      // без набора броня тратится ровно на поглощённое
+      assertTrue(HeroSets(Map.empty).armorSpent(100L) == 100L)
     },
 
     test("«Упырь» реализован целиком: все шесть порогов действуют") {
@@ -142,21 +128,21 @@ object HeroSetsSpec extends ZIOSpecDefault {
 
     test("два предмета «Дикого пламени» дают +5% к атаке в итоговых статах") {
       val hero0 = heroWearing(TestFixtures.emptyEquipment)
-      val hero2 = heroWearing(wearing(ItemSet.WildFlame, 2))
+      val hero2 = heroWearing(TestFixtures.wearingSet(ItemSet.WildFlame, 2))
       val base  = hero0.effectiveFightStats(0L).atk
       assertTrue(hero2.effectiveFightStats(0L).atk == base + base * 5L / 100L)
     },
 
     test("восемь предметов набора поднимают макс. HP на 300 и на 10%") {
       val hero0 = heroWearing(TestFixtures.emptyEquipment)
-      val hero8 = heroWearing(wearing(ItemSet.StoneGuard, 8))
+      val hero8 = heroWearing(TestFixtures.wearingSet(ItemSet.StoneGuard, 8))
       val base  = hero0.effectiveMaxHp(0L)
       assertTrue(hero8.effectiveMaxHp(0L) == (base + 300L) * 110L / 100L)
     },
 
     test("«Охотник» на 4 предметах поднимает макс. энергию на 10%") {
       val hero0 = heroWearing(TestFixtures.emptyEquipment)
-      val hero4 = heroWearing(wearing(ItemSet.Hunter, 4))
+      val hero4 = heroWearing(TestFixtures.wearingSet(ItemSet.Hunter, 4))
       assertTrue(hero4.maxEnergy(0L) > hero0.maxEnergy(0L)) &&
       assertTrue(hero4.sets.agiEnergyRegenMult == 2L)
     },

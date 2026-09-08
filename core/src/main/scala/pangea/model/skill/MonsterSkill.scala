@@ -121,14 +121,17 @@ object MonsterSkill extends Enum[MonsterSkill] {
     battle.monsterStats.armor * battle.monsterStats.defence.max(1L)
 
   /** Урон по герою с учётом баффовой брони и текущей физической брони. Возвращает
-   *  новые `hp` и `armor` героя. */
+   *  новые `hp` и `armor` героя.
+   *
+   *  «Каменный страж» (порог 6) режет РАСХОД брони: прикрывает она по-прежнему
+   *  весь поглощённый урон, но тает при этом медленнее. */
   def applyPhysicalDamage(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) = {
     val buffReduct  = math.min(battle.heroBattleState.armorBonus, damage)
     val afterBuff   = damage - buffReduct
     val curArmor    = hero.fightStats.armor.max(0L)
     val armorAbsorb = math.min(curArmor, afterBuff)
     val hpDmg       = afterBuff - armorAbsorb
-    val newArmor    = curArmor - armorAbsorb
+    val newArmor    = curArmor - hero.sets.armorSpent(armorAbsorb)
     val newHp       = (hero.fightStats.hp - hpDmg).max(0L)
     (newHp, newArmor)
   }
