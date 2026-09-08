@@ -6,9 +6,10 @@ import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, Rarity, TrophyKi
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.service.state.states.merchant.MerchantState.MerchantData
+import pangea.model.skill.Skill
+import pangea.service.state.states.merchant.MerchantState.{JunkRarityGroups, JunkSaleSettings, MerchantData}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
-import zio.{Task, ZIO}
+import zio.{durationInt, Task, ZIO}
 import zio.test._
 
 object MerchantStateSpec extends ZIOSpecDefault {
@@ -19,6 +20,14 @@ object MerchantStateSpec extends ZIOSpecDefault {
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
   private def tapIdx(key: String, idx: Int): UserAction =
     UserAction("", Some(s"""{"action":"$key","idx":"$idx"}"""))
+  // Нажатие на переключатель редкости в настройке продажи хлама.
+  private def tapRarity(group: String): UserAction =
+    UserAction("", Some(s"""{"action":"JunkRarity","g":"$group"}"""))
+
+  private def gear(id: Long, rarity: Rarity, details: ItemDetails = ItemDetails.Plain,
+                   itemType: ItemType = ItemType.Helmet): Item =
+    Item(id, s"Предмет $id", 1L, rarity, itemType,
+      attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0, details = details)
 
   private def richHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 1000000L)
   private def poorHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 0L)
@@ -158,6 +167,107 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(invRepo.snapshot.exists(_.id == gem.id)) &&         // камень остался
               assertTrue(invRepo.snapshot.exists(_.id == trophy.id)) &&      // трофей остался
               assertTrue(hero.exists(_.silver > richHero.silver))
+    },
+
+    // ── Настройка продажи хлама ───────────────────────────────────────────────
+    test("JunkSettings → 6 переключателей редкости, 2 способностей и Назад; по умолчанию вкл ⚫ и ⚪") {
+      for {
+        t <- makeState(richHero)
+        (state, _, _, renderer) = t
+        _       <- state.action(testUser, tap("JunkSettings"), renderer)
+        screens <- renderer.sentScreens
+        btns     = screens.last.choices
+        rarity   = btns.filter(_.id == "JunkRarity")
+      } yield assertTrue(rarity.size == JunkRarityGroups.size) &&
+              assertTrue(btns.map(_.id).count(id => id == "JunkPassives" || id == "JunkActives") == 2) &&
+              assertTrue(btns.exists(_.id == "BackFromJunk")) &&
+              // серая и белая включены, остальные выключены
+              assertTrue(rarity.take(2).forall(_.label.endsWith("Вкл"))) &&
+              assertTrue(rarity.drop(2).forall(_.label.endsWith("Выкл"))) &&
+              // способности по умолчанию включены (прежнее поведение сохранено)
+              assertTrue(btns.filter(_.id == "JunkPassives").forall(_.label.endsWith("Вкл")))
+    },
+
+    test("нажатие на переключатель редкости сохраняется в merchant_data и переключает обратно") {
+      for {
+        t <- makeState(richHero)
+        (state, heroDao, _, renderer) = t
+        _      <- state.action(testUser, tap("JunkSettings"), renderer)
+        _      <- state.action(testUser, tapRarity("Green"), renderer)
+        after  <- readMerchant(heroDao).map(_.junkSettings)
+        _      <- state.action(testUser, tapRarity("Green"), renderer)
+        back   <- readMerchant(heroDao).map(_.junkSettings)
+      } yield assertTrue(after.rarities.contains(Rarity.Green)) &&
+              assertTrue(!back.rarities.contains(Rarity.Green)) &&
+              assertTrue(after.rarities.contains(Rarity.Gray)) // остальное не тронуто
+    },
+
+    test("фиолетовый переключатель накрывает сразу Purple и Violet (у них общий значок)") {
+      for {
+        t <- makeState(richHero)
+        (state, heroDao, _, renderer) = t
+        _ <- state.action(testUser, tapRarity("Purple"), renderer)
+        s <- readMerchant(heroDao).map(_.junkSettings)
+      } yield assertTrue(s.rarities.contains(Rarity.Purple)) &&
+              assertTrue(s.rarities.contains(Rarity.Violet))
+    },
+
+    test("SellJunk продаёт по настройке: включённая зелёная уходит, выключенная белая остаётся") {
+      for {
+        t <- makeState(richHero, items = List(gear(1L, Rarity.Gray), gear(2L, Rarity.White), gear(3L, Rarity.Green)))
+        (state, _, invRepo, renderer) = t
+        _ <- state.action(testUser, tapRarity("Green"), renderer) // зелёную включили
+        _ <- state.action(testUser, tapRarity("White"), renderer) // белую выключили
+        _ <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(2L)) // остался только белый
+    },
+
+    test("выключенные пассивки защищают предмет, даже если его редкость включена") {
+      val plain   = gear(1L, Rarity.Gray)
+      val passive = gear(2L, Rarity.Gray, ItemDetails.Passive(pangea.model.item.PassiveKind.Jeweler), ItemType.Ring)
+      for {
+        t <- makeState(richHero, items = List(plain, passive))
+        (state, _, invRepo, renderer) = t
+        _ <- state.action(testUser, tap("JunkPassives"), renderer) // выключаем пассивки
+        _ <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(2L)) // серый с пассивкой уцелел
+    },
+
+    test("выключенные активные способности защищают предмет включённой редкости") {
+      val plain  = gear(1L, Rarity.Gray)
+      val active = gear(2L, Rarity.Gray, ItemDetails.Armor(Skill.MinorHeal), ItemType.ChestPlate)
+      for {
+        t <- makeState(richHero, items = List(plain, active))
+        (state, _, invRepo, renderer) = t
+        _ <- state.action(testUser, tap("JunkActives"), renderer)
+        _ <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(2L))
+    },
+
+    test("настройка переживает обновление стока (Refresh её не сбрасывает)") {
+      for {
+        t <- makeState(richHero)
+        (state, heroDao, _, renderer) = t
+        _      <- state.action(testUser, tapRarity("Orange"), renderer)
+        before <- readMerchant(heroDao)
+        // переводим часы за кулдаун, чтобы Refresh реально перекатил сток
+        _      <- TestClock.adjust(2.hours)
+        _      <- state.action(testUser, tap("Refresh"), renderer)
+        after  <- readMerchant(heroDao)
+      } yield assertTrue(after.junkSettings.rarities.contains(Rarity.Orange)) &&
+              assertTrue(after.refreshedAt > before.refreshedAt) // сток действительно обновился
+    },
+
+    test("isJunk: трофеи и камни не продаются даже когда их редкость включена") {
+      val all = JunkRarityGroups.flatMap(_.rarities).toSet
+      val s   = JunkSaleSettings(rarities = all, passives = true, actives = true)
+      val trophy = Item(1L, "Голова", 5L, Rarity.Gray, ItemType.Trophy,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Trophy("Human", TrophyKind.Head))
+      val gem = GemGenerator.item(GemKind.Skull, 1)
+      assertTrue(!MerchantState.isJunk(trophy, s)) &&
+      assertTrue(!MerchantState.isJunk(gem, s)) &&
+      assertTrue(MerchantState.isJunk(gear(3L, Rarity.Orange), s)) // обычное снаряжение — да
     },
 
     test("всё снаряжение куплено → сообщение «занят подготовкой новой партии», есть Продать/Назад") {
