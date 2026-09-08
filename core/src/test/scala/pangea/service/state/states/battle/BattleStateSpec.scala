@@ -303,6 +303,43 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(after.effects.monsterBurn.isDefined)
     },
 
+    test("огонь в бою: по HP ×(1.10+усиление), по броне ×(0.80+усиление), общий урон не накручивается") {
+      // Рубин грейд 5 → усиление +10 п.п.: по HP ×1.20, по броне ×0.90.
+      // Урон до стихии: (str 1×3 + атака 500) × spread 100% = 503.
+      // Регрессия: раньше усиление множило ВЕСЬ урон (503×1.10=553), а грани
+      // оставались базовыми — выходило 608 по HP и 442 по броне вместо 603 и 452.
+      val fireWeapon = Item(2L, "Пламенный меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        sockets = List(Some(Gem(GemKind.Ruby, 5))))
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(atk = 500),
+        equipment  = TestFixtures.emptyEquipment.copy(weapon = fireWeapon))
+      val armored = strongBattle.copy(
+        monsterCurrentArmor = 5000L,
+        monsterStats        = strongBattle.monsterStats.copy(armor = 5000L))
+      for {
+        // Броня 0 → весь урон в HP: 503 × 1.20 = 603.
+        t1            <- makeState(hero, strongBattle)
+        (s1, dao1, r1) = t1
+        // Броски: удар героя (попал), прок огня (90 > 30 — не сработал, чтобы
+        // горение не путало числа), удар моба, каст моба.
+        _             <- TestRandom.feedInts(60, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L) // spread = 100%
+        _             <- s1.action(testUser, tap("Attack"), r1)
+        b1            <- dao1.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+
+        // Брони с запасом → весь урон в броню: 503 × 0.90 = 452, в HP ничего.
+        t2            <- makeState(hero, armored)
+        (s2, dao2, r2) = t2
+        _             <- TestRandom.feedInts(60, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- s2.action(testUser, tap("Attack"), r2)
+        b2            <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(strongBattle.monsterCurrentHp - b1.monsterCurrentHp == 603L) &&
+              assertTrue(armored.monsterCurrentArmor - b2.monsterCurrentArmor == 452L) &&
+              assertTrue(b2.monsterCurrentHp == armored.monsterCurrentHp)
+    },
+
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
       val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Attack, 1)))
       for {
