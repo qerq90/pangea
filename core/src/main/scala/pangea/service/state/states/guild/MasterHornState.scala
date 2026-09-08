@@ -12,8 +12,9 @@ import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
 /**
- * Мастер Горн прокачивает шесть характеристик за репутацию: Броню, Уклонение,
- * Атаку, Защиту, Энергию, Вместимость инвентаря. На каждой клавише —
+ * Мастер Горн прокачивает характеристики (Броня, Уклонение, Атака, Защита,
+ * Точность, Энергия, Вместимость инвентаря) за репутацию охотников И серебро
+ * одновременно — обе валюты списываются в одинаковом числе. На каждой клавише —
  * confirm-экран с ценой; формула цены — `a(n) = 35·1.2^(n−1) − 30`, округление
  * вверх, где `n` — порядковый номер следующего улучшения этой характеристики
  * для героя (см. `hero.masterHornBoosts`).
@@ -88,6 +89,10 @@ case class MasterHornState(
             renderer.show(user, Screen(
               content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil)) *>
               askImprove(user, renderer, stat)
+          else if (hero.silver < price)
+            renderer.show(user, Screen(
+              content.format("guild.masterHorn.notEnoughSilver", "cost" -> price.toString), Nil)) *>
+              askImprove(user, renderer, stat)
           else
             applyBoost(user, hero, stat, price, renderer) *>
               askImprove(user, renderer, stat)
@@ -99,17 +104,23 @@ case class MasterHornState(
   // `maxArmor`. Единственное исключение — Inventory: вместимость живёт в
   // отдельном репозитории. Значение буста — накопленный прирост стата
   // (`stat.step` за прокачку), поэтому его можно прибавлять к статам напрямую.
+  //
+  // Цена списывается ОБЕИМИ валютами — репутацией и серебром — в одинаковом
+  // числе (см. `cost`): прокачка стоит `price` очков репутации И `price` серебра.
   private def applyBoost(user: User, hero: Hero, stat: Stat, price: Long, renderer: Renderer): Task[Unit] = {
-    val remaining = hero.guildReputation - price
+    val remainingRep    = hero.guildReputation - price
+    val remainingSilver = hero.silver - price
     for {
-      _ <- heroDao.updateGuildReputation(user.userId, remaining)
+      _ <- heroDao.updateGuildReputation(user.userId, remainingRep)
+      _ <- heroDao.updateSilver(user.userId, remainingSilver)
       _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
       newBoosts = bumped(hero.masterHornBoosts, stat)
       _ <- heroDao.updateMasterHornBoosts(user.userId, newBoosts)
       _ <- renderer.show(user, Screen(
         content.format("guild.masterHorn.applied",
           "stat" -> stat.label, "step" -> stat.step.toString,
-          "cost" -> price.toString, "remaining" -> remaining.toString), Nil))
+          "cost" -> price.toString, "remaining" -> remainingRep.toString,
+          "remainingSilver" -> remainingSilver.toString), Nil))
     } yield ()
   }
 
