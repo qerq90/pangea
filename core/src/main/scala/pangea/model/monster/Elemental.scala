@@ -100,7 +100,9 @@ object Elemental extends Enum[Elemental] {
     def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
 
     /** Огонь по огню почти не проходит, холод — наоборот. Остальные стихии бьют
-     *  как обычно; при оружии сразу с огнём и холодом множители перемножаются. */
+     *  как обычно. Оружия сразу с огнём и холодом не бывает — эти камни гасят
+     *  друг друга при вставке (см. `SocketingState`), так что множитель всегда
+     *  один. */
     def damageTakenMult(e: Element): Double = e match {
       case Element.Fire => FireDamageTakenPct / 100.0
       case Element.Cold => ColdDamageTakenPct / 100.0
