@@ -59,9 +59,8 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
 
   // ── «Упырь» ─────────────────────────────────────────────────────────────────
 
-  /** % ВСЕГО нанесённого урона (по броне и по HP), возвращаемого в лечение
-   *  (порог 4). В отличие от вампиризма черепа, который считает только урон по
-   *  HP: у набора в тексте «от нанесённого урона», без оговорки про HP. */
+  /** % нанесённого по HP урона, возвращаемого в лечение (порог 4) — как и
+   *  вампиризм черепа: удар, поглощённый бронёй, крови не даёт. */
   def lifestealPct: Long = if (has(ItemSet.Ghoul, 4)) ItemSet.Ghoul.LifestealPct else 0L
 
   /** Шанс (в %), что обычная атака, прошедшая в HP, вызовет кровотечение (порог 6). */
@@ -80,6 +79,18 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   def feastsOnKill: Boolean = has(ItemSet.Ghoul, 12)
   def feastHpPct: Long      = ItemSet.Ghoul.KillHpRestorePct
   def feastArmorPct: Long   = ItemSet.Ghoul.KillArmorRestorePct
+
+  // ── «Охотник» ───────────────────────────────────────────────────────────────
+
+  /** Шанс (в %) повторить атаку после промаха, не чаще раза за раунд (порог 6). */
+  def repeatOnMissChancePct: Long =
+    if (has(ItemSet.Hunter, 6)) ItemSet.Hunter.RepeatChancePct else 0L
+
+  /** Отменяется ли первая за бой вражеская способность, наносящая урон (порог 10). */
+  def cancelsFirstEnemySkill: Boolean = has(ItemSet.Hunter, 10)
+
+  /** Удваивает ли первая за бой способность героя свой урон (порог 12). */
+  def doublesFirstSkill: Boolean = has(ItemSet.Hunter, 12)
 }
 
 object HeroSets {

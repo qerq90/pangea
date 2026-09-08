@@ -138,15 +138,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * пробрасывается в `monsterPhase → tickBuffs`, чтобы только что использованный
     * слот не тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
     */
+  /** `isRepeat` — это переигранный промах от «Охотника» (порог 6). Такой заход не
+    * повторяется ещё раз (не чаще раза за раунд) и НЕ прогоняет боевой реген
+    * второй раз: раунд остался тем же, регенерировать герою заново нечего. */
   private def playerStrike(
       hero0: Hero,
       battle: SoloPveBattle,
       nowMs: Long,
       log: Vector[String],
-      skip: Set[Long]
+      skip: Set[Long],
+      isRepeat: Boolean = false
   ): Task[TurnResult] = {
     // Реген пассивок «Целебный»/«Самовосстанавливающийся» учитывается перед атакой.
-    val hero = hero0.withCombatRegen(nowMs)
+    val hero = if (isRepeat) hero0 else hero0.withCombatRegen(nowMs)
     for {
       buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
       monster   = battle.toMonster
@@ -208,11 +212,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               if (!setBleeds) effects
               else effects.copy(monsterBleed = Some(
                 effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
-            // Череп в оружии: вампиризм — % нанесённого по HP урона в лечение героя.
-            // «Упырь» (порог 4) добавляет свой % — но от ВСЕГО урона, включая броню.
+            // Череп в оружии и «Упырь» (порог 4): вампиризм с урона по HP. Кровь
+            // пьётся только с раны — удар, целиком поглощённый бронёй, не лечит.
             maxHp      = hero.effectiveMaxHp(nowMs)
             vamp       = if (hero.gems.vampirismPct > 0 && hpDmg > 0) (hpDmg * hero.gems.vampirismPct / 100L).max(0L) else 0L
-            setSteal   = if (hero.sets.lifestealPct > 0) ((armorDmg + hpDmg) * hero.sets.lifestealPct / 100L).max(0L) else 0L
+            setSteal   = if (hero.sets.lifestealPct > 0 && hpDmg > 0) (hpDmg * hero.sets.lifestealPct / 100L).max(0L) else 0L
             healedHero = if (vamp + setSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
             hitBattle = battle.copy(
@@ -237,9 +241,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               else monsterPhase(healedHero, updated, nowMs, log4, skip)
           } yield r
         } else {
-          val attackLine =
-            content.format("battle.miss", "chance" -> heroHitPct.toString)
-          monsterPhase(hero, battle, nowMs, log :+ attackLine, skip)
+          val attackLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
+          val missLog    = log :+ attackLine
+          // «Охотник» (порог 6): промах можно переиграть — но не больше одного
+          // повтора за раунд, поэтому повторный заход идёт с canRepeat = false.
+          // Бросок не тратится без набора: детерминизм боевых тестов.
+          chanceRoll(!isRepeat && hero.sets.repeatOnMissChancePct > 0, hero.sets.repeatOnMissChancePct)
+            .flatMap { repeats =>
+              if (repeats)
+                playerStrike(hero, battle, nowMs, missLog :+ content.text("battle.hunterRepeat"), skip,
+                  isRepeat = true)
+              else monsterPhase(hero, battle, nowMs, missLog, skip)
+            }
         }
     } yield result
   }
@@ -486,14 +499,31 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   idx <- Random.nextIntBetween(0, applicable.size)
                   ms   = applicable(idx)
                   cast = ms.cast(battleAfterAtk, heroAfterAtk, nowMs)
-                } yield (
-                  cast.battle,
-                  heroAfterAtk.copy(
-                    fightStats = heroAfterAtk.fightStats
-                      .copy(hp = cast.heroHp, armor = cast.heroArmor)
-                  ),
-                  cast.line
-                )
+                  // «Охотник» (порог 10): первая за бой вражеская способность,
+                  // которая реально снимает HP или броню, гасится целиком. Хилы и
+                  // починку моба не трогаем — отмена тратится только на уроне.
+                  hurts = cast.heroHp < heroAfterAtk.fightStats.hp ||
+                          cast.heroArmor < heroAfterAtk.fightStats.armor
+                  cancels = hurts && heroAfterAtk.sets.cancelsFirstEnemySkill &&
+                            !battleAfterAtk.effects.cancelSpent
+                } yield
+                  if (cancels)
+                    (
+                      // Урона нет, но бой мог измениться иначе (кулдауны моба) —
+                      // берём состояние из каста и лишь помечаем отмену.
+                      cast.battle.copy(effects = cast.battle.effects.copy(cancelSpent = true)),
+                      heroAfterAtk,
+                      content.text("battle.hunterCancel")
+                    )
+                  else
+                    (
+                      cast.battle,
+                      heroAfterAtk.copy(
+                        fightStats = heroAfterAtk.fightStats
+                          .copy(hp = cast.heroHp, armor = cast.heroArmor)
+                      ),
+                      cast.line
+                    )
               else ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
           } yield out
       (finalBattle, finalHero, castLine) = castResult
@@ -730,16 +760,21 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       nowMs: Long,
       skip: Set[Long]
   ): Task[TurnResult] = {
+    // «Охотник» (порог 12): первая за бой способность, наносящая урон, бьёт вдвое.
+    val doubles = hero.sets.doublesFirstSkill && !battle.effects.doubleSpent
+    val raw     = if (doubles) value.max(1L) * 2L else value.max(1L)
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
-    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, value.max(1L), hero.gems)
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, raw, hero.gems)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
-    val effects  =
+    val bledEffects =
       if (!hero.sets.skillsAlwaysBleed || newHp <= 0) battle.effects
       else battle.effects.copy(monsterBleed = Some(
         battle.effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
+    // Удвоение тратится на первом же уроне — даже если он добил моба.
+    val effects  = if (doubles) bledEffects.copy(doubleSpent = true) else bledEffects
     val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor, effects = effects)
     if (newHp <= 0) ZIO.succeed(TurnResult(hero, hit, Vector(skillLine + dotIndicators(hit)), Outcome.Victory))
     else

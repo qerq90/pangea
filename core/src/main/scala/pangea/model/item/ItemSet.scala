@@ -113,7 +113,7 @@ object ItemSet extends Enum[ItemSet] {
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$EvasionPct% к уклонению."),
-      SetBonus(4,  s"+$LifestealPct% от нанесённого урона восстанавливает вам HP."),
+      SetBonus(4,  s"+$LifestealPct% от нанесённого по HP урона восстанавливает вам HP."),
       SetBonus(6,  s"$BleedChancePct% шанс, что ваша атака, нанёсшая урон по HP, вызовет кровотечение $BleedPct%."),
       SetBonus(8,  SetRates.HpBonusText),
       SetBonus(10, "Урон от кровотечения врага также восстанавливает ваше HP."),
@@ -132,10 +132,10 @@ object ItemSet extends Enum[ItemSet] {
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$AccuracyPct% к точности."),
       SetBonus(4,  s"+$EnergyPct% к энергии. Ловкость восстанавливает в $AgiRegenMult раза больше энергии за раунд."),
-      SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд.", active = false),
+      SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд."),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, "Первая применённая противником активная способность, наносящая вам урон, отменяется.", active = false),
-      SetBonus(12, "Первая применённая за бой активная способность, наносящая урон, наносит двойной урон.", active = false)
+      SetBonus(10, "Первая применённая противником активная способность, наносящая вам урон, отменяется."),
+      SetBonus(12, "Первая применённая за бой активная способность, наносящая урон, наносит двойной урон.")
     )
   }
 
