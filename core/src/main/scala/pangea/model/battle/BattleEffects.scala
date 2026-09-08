@@ -121,6 +121,10 @@ case class BattleEffects(
   monsterDefenceDebuff: Option[TimedDefenceDebuff] = None,
   airBoostTurns:        Int                        = 0,
   heroRegen:            Option[Regen]              = None,
+  // Горение НА ГЕРОЕ — первый негативный эффект в его сторону: раньше яд,
+  // кровь и огонь существовали только в сторону моба. Поджигают огненный
+  // элементаль и его шипы.
+  heroBurn:             Option[Burn]               = None,
   heroPoisonousAttacks: Boolean                    = false,
   // Флаги «один раз за бой» набора «Охотник» (пороги 10 и 12).
   cancelSpent:          Boolean                    = false,

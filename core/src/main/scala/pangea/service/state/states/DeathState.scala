@@ -8,7 +8,7 @@ import pangea.model.battle.SoloPveBattle
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.model.trauma.Trauma
+import pangea.model.trauma.{Trauma, TraumaRoll}
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
@@ -45,18 +45,11 @@ case class DeathState(
       // traumas that are still active are kept; expired ones reset to empty list
       existingNames = if (hero.traumaActive(now)) hero.traumaNames else Nil
 
-      // pick the right tier: light → medium → heavy (progression); empty pool
-      // means every trauma is already collected (max reached)
-      hasAllLight   = Trauma.light.forall(t => existingNames.contains(t.name))
-      hasAllMedium  = Trauma.medium.forall(t => existingNames.contains(t.name))
-      pool          = if (!hasAllLight)
-                        Trauma.light.filterNot(t => existingNames.contains(t.name))
-                      else if (!hasAllMedium)
-                        Trauma.medium.filterNot(t => existingNames.contains(t.name))
-                      else
-                        Trauma.heavy.filterNot(t => existingNames.contains(t.name))
+      // Тир травмы (лёгкие → средние → тяжёлые) выбирает общий хелпер: тем же
+      // правилом пользуются и другие источники травм, напр. смерч элементаля.
+      pool          = TraumaRoll.pool(existingNames)
 
-      traumaUntil   = now + 8L * 3600 * 1000
+      traumaUntil   = now + TraumaRoll.DurationMs
 
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateSilver(user.userId, newSilver)

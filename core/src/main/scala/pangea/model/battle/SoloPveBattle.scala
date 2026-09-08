@@ -38,7 +38,14 @@ case class SoloPveBattle(
   toughnessUsed:       Boolean = false, // пассивка «Крепкость» срабатывает один раз за бой
   // Вид элементаля, если это бой с минибоссом (имя варианта Elemental). У
   // обычных мобов пусто — по нему бой и отличает босса от рядового врага.
-  elementalKind:       Option[String] = None
+  elementalKind:       Option[String] = None,
+  // Какую способность элементаль применит следующей (он ходит строго по кругу),
+  // и сколько сфер огня он уже собрал рядом с собой.
+  elementalTurn:       Int = 0,
+  fireOrbs:            Int = 0,
+  // Текущая энергия моба. У рядовых мобов не расходуется (их скиллы бесплатны),
+  // а элементаль тратит её на способности и восстанавливает по столько-то за раунд.
+  monsterCurrentEnergy: Long = 0L
 ) {
 
   /** Элементаль этого боя, если сражаемся с минибоссом. */
@@ -94,7 +101,8 @@ object SoloPveBattle {
     monsterCurrentHp    = monster.fightStats.hp,
     monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L),
     monsterMarked       = monster.marked,
-    skillSlots          = hero.activeSkillSlots
+    skillSlots          = hero.activeSkillSlots,
+    monsterCurrentEnergy = monster.fightStats.energy
   )
 
   implicit val encoder: Encoder[SoloPveBattle] = deriveEncoder
@@ -114,7 +122,10 @@ object SoloPveBattle {
       effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
       elementalKind       <- c.getOrElse[Option[String]]("elementalKind")(None)
+      elementalTurn       <- c.getOrElse[Int]("elementalTurn")(0)
+      fireOrbs            <- c.getOrElse[Int]("fireOrbs")(0)
+      monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, elementalKind)
+                         skillSlots, effects, toughnessUsed, elementalKind, elementalTurn, fireOrbs, monsterEnergy)
 }

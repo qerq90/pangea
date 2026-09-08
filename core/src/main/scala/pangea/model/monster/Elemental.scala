@@ -60,6 +60,25 @@ object Elemental extends Enum[Elemental] {
     /** Шанс, что обычная атака элементаля подожжёт героя. */
     val IgniteChancePct: Long = 50L
 
+    // ── Способности (применяются по кругу) ──────────────────────────────────
+    /** Огненный всплеск: доля атаки в урон и на сколько % поджигает героя. */
+    val SplashDamageFactor: Double = 0.4
+    val SplashBurnPct: Int         = 1
+    val SplashCostPerLvl: Long     = 7L
+
+    /** Сфера огня: сколько сфер собирается до смерча и сколько стоит каждая. */
+    val OrbsToBurst: Int       = 3
+    val OrbCostPerLvl: Long    = 14L
+    /** Смерч добавляет к двойной атаке по столько % от макс. HP и брони героя. */
+    val BurstHeroStatPct: Long = 5L
+    /** Шанс травмы, если смерч дошёл до HP героя. */
+    val BurstTraumaChancePct: Long = 20L
+
+    /** Огненный щит: сколько % максимумов элементаль себе возвращает. */
+    val ShieldArmorPct: Long  = 20L
+    val ShieldHpPct: Long     = 5L
+    val ShieldCostPerLvl: Long = 7L
+
     def stats(bossLvl: Long): FightStats = FightStats(
       atk      = AtkPerLvl * bossLvl,
       hp       = HpPerLvl * bossLvl,
