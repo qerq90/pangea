@@ -56,6 +56,30 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   /** Множитель вклада ловкости в реген энергии за раунд («Охотник», порог 4). */
   def agiEnergyRegenMult: Long =
     if (has(ItemSet.Hunter, 4)) ItemSet.Hunter.AgiRegenMult else 1L
+
+  // ── «Упырь» ─────────────────────────────────────────────────────────────────
+
+  /** % ВСЕГО нанесённого урона (по броне и по HP), возвращаемого в лечение
+   *  (порог 4). В отличие от вампиризма черепа, который считает только урон по
+   *  HP: у набора в тексте «от нанесённого урона», без оговорки про HP. */
+  def lifestealPct: Long = if (has(ItemSet.Ghoul, 4)) ItemSet.Ghoul.LifestealPct else 0L
+
+  /** Шанс (в %), что обычная атака, прошедшая в HP, вызовет кровотечение (порог 6). */
+  def bleedOnHitChancePct: Long = if (has(ItemSet.Ghoul, 6)) ItemSet.Ghoul.BleedChancePct else 0L
+
+  /** Сила накладываемого набором кровотечения, в % макс. HP цели. */
+  def bleedPct: Int = ItemSet.Ghoul.BleedPct
+
+  /** Лечит ли героя урон от кровотечения врага (порог 10). */
+  def healsFromBleed: Boolean = has(ItemSet.Ghoul, 10)
+
+  /** Всегда ли активные умения накладывают кровотечение (порог 12). */
+  def skillsAlwaysBleed: Boolean = has(ItemSet.Ghoul, 12)
+
+  /** Восстановление при убийстве врага — «жуткий пир» (порог 12). */
+  def feastsOnKill: Boolean = has(ItemSet.Ghoul, 12)
+  def feastHpPct: Long      = ItemSet.Ghoul.KillHpRestorePct
+  def feastArmorPct: Long   = ItemSet.Ghoul.KillArmorRestorePct
 }
 
 object HeroSets {

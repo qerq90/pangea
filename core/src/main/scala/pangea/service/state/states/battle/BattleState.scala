@@ -88,10 +88,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * так терялось добивание навыком (моб оживал с прежним HP). */
   private def commit(
       user: User,
-      res: TurnResult,
+      raw: TurnResult,
       nowMs: Long,
       renderer: Renderer
   ): Task[StateType] = {
+    // «Упырь» (порог 12): победа — это пир, герой сразу восстанавливает часть HP
+    // и брони. Считаем ДО persistHero, чтобы восстановленное сохранилось вместе с
+    // остальным исходом боя, а сообщение попало в тот же лог.
+    val res     = ghoulFeast(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
     val msg     = res.log.mkString("\n")
@@ -195,15 +199,26 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 monsterPoison = Some(effectsAfterPotion.monsterPoison
                   .map(p => Poison(p.pct + gemPoisonPct))
                   .getOrElse(Poison(gemPoisonPct))))
+            // «Упырь» (порог 6): шанс, что удар по HP пустит цели кровь. Бросок
+            // не тратится, если набора нет, — детерминизм боевых тестов.
+            setBleeds <- chanceRoll(
+                           hero.sets.bleedOnHitChancePct > 0 && hpDmg > 0 && newHp > 0,
+                           hero.sets.bleedOnHitChancePct)
+            effectsBled =
+              if (!setBleeds) effects
+              else effects.copy(monsterBleed = Some(
+                effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
             // Череп в оружии: вампиризм — % нанесённого по HP урона в лечение героя.
+            // «Упырь» (порог 4) добавляет свой % — но от ВСЕГО урона, включая броню.
             maxHp      = hero.effectiveMaxHp(nowMs)
             vamp       = if (hero.gems.vampirismPct > 0 && hpDmg > 0) (hpDmg * hero.gems.vampirismPct / 100L).max(0L) else 0L
-            healedHero = if (vamp > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp).min(maxHp))) else hero
+            setSteal   = if (hero.sets.lifestealPct > 0) ((armorDmg + hpDmg) * hero.sets.lifestealPct / 100L).max(0L) else 0L
+            healedHero = if (vamp + setSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
             hitBattle = battle.copy(
               monsterCurrentHp = newHp,
               monsterCurrentArmor = newArmor,
-              effects = effects
+              effects = effectsBled
             )
             // Проки стихий оружия (30% каждый) — только если моб жив после удара.
             elemResult <- if (newHp > 0) resolveElementProcs(hero, hitBattle)
@@ -245,6 +260,27 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       )
     }
   }
+
+  /** «Упырь» (порог 12): при убийстве врага герой мгновенно восстанавливает часть
+    * HP и брони. Проценты считаются от эффективных потолков, восстановленное не
+    * может опустить текущее значение (если оно почему-то выше потолка). Возвращает
+    * исход как есть, если набор не собран, победы не случилось или лечить нечего. */
+  private def ghoulFeast(res: TurnResult, nowMs: Long): TurnResult =
+    if (res.outcome != Outcome.Victory || !res.hero.sets.feastsOnKill) res
+    else {
+      val hero     = res.hero
+      val maxHp    = hero.effectiveMaxHp(nowMs)
+      val maxArmor = hero.effectiveMaxArmor(nowMs)
+      val newHp    = (hero.fightStats.hp + maxHp * hero.sets.feastHpPct / 100L).min(maxHp).max(hero.fightStats.hp)
+      val newArmor = (hero.fightStats.armor + maxArmor * hero.sets.feastArmorPct / 100L).min(maxArmor).max(hero.fightStats.armor)
+      val hpGained    = newHp - hero.fightStats.hp
+      val armorGained = newArmor - hero.fightStats.armor
+      if (hpGained <= 0 && armorGained <= 0) res
+      else res.copy(
+        hero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor)),
+        log  = res.log :+ content.format("battle.ghoulFeast",
+                 "hp" -> hpGained.toString, "armor" -> armorGained.toString))
+    }
 
   /** Разбивает `damage` на урон по броне и по HP с учётом стихийных модификаторов
     * оружия. Здесь же учитывается усиление стихии (+2%/грейд): оно входит в
@@ -468,23 +504,29 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       (tickedHero, battleAfterHero, heroEffectLine) =
         if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
         else (finalHero, finalBattle, "")
-      (tickedBattle, monsterEffectLine) =
+      (tickedBattle, monsterEffectLine, bleedDealt) =
         if (heroAlive) tickMonsterEffects(battleAfterHero, monster.name)
-        else (battleAfterHero, "")
+        else (battleAfterHero, "", 0L)
+      // «Упырь» (порог 10): чужая кровь идёт герою в лечение.
+      heroFedByBleed =
+        if (bleedDealt > 0 && tickedHero.sets.healsFromBleed)
+          tickedHero.copy(fightStats = tickedHero.fightStats.copy(
+            hp = (tickedHero.fightStats.hp + bleedDealt).min(tickedHero.effectiveMaxHp(nowMs))))
+        else tickedHero
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
       // выше максимума. «Сосредоточенность» множит реген на 1.1. Пока герой жив.
       finalHeroWithEnergy =
         if (heroAlive) {
-          val b        = tickedHero.effectiveBaseStats(nowMs)
+          val b        = heroFedByBleed.effectiveBaseStats(nowMs)
           // «Сосредоточенность» (пассивка) и черепа в оружии множат реген энергии,
           // а «Охотник» (порог 4) удваивает вклад именно ловкости.
-          val agiPart  = 0.5 * b.agi * tickedHero.sets.agiEnergyRegenMult
-          val regen    = ((b.int + agiPart) * tickedHero.passives.energyRegenMult * tickedHero.gems.energyRegenMult).toLong.max(1L)
-          val maxEn    = tickedHero.maxEnergy(nowMs)
-          val newEn    = (tickedHero.fightStats.energy + regen).min(maxEn)
-          tickedHero.copy(fightStats = tickedHero.fightStats.copy(energy = newEn))
-        } else tickedHero
+          val agiPart  = 0.5 * b.agi * heroFedByBleed.sets.agiEnergyRegenMult
+          val regen    = ((b.int + agiPart) * heroFedByBleed.passives.energyRegenMult * heroFedByBleed.gems.energyRegenMult).toLong.max(1L)
+          val maxEn    = heroFedByBleed.maxEnergy(nowMs)
+          val newEn    = (heroFedByBleed.fightStats.energy + regen).min(maxEn)
+          heroFedByBleed.copy(fightStats = heroFedByBleed.fightStats.copy(energy = newEn))
+        } else heroFedByBleed
 
       // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
       // порядке) каст моба, тик яда моба, тик регена героя — только непустые.
@@ -532,11 +574,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def tickMonsterEffects(
       battle: SoloPveBattle,
       monsterName: String
-  ): (SoloPveBattle, String) = {
+  ): (SoloPveBattle, String, Long) = {
     val maxHp = battle.monsterStats.hp
     var eff   = battle.effects
     var hp    = battle.monsterCurrentHp
     var lines = Vector.empty[String]
+    var bled  = 0L // урон кровотечения за этот тик — «Упырь» (порог 10) лечит им героя
 
     eff.monsterPoison.foreach { p =>
       val dmg = p.damageOn(maxHp)
@@ -547,6 +590,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     eff.monsterBleed.foreach { b =>
       val dmg = b.damageOn(maxHp)
       hp = (hp - dmg).max(0L)
+      bled += dmg
       // Кровотечение не затухает — сила остаётся прежней.
       lines = lines :+ content.format("battle.bleedTick", "damage" -> dmg.toString, "monster" -> monsterName)
     }
@@ -556,7 +600,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       eff = eff.copy(monsterBurn = Some(bn.grown))
       lines = lines :+ content.format("battle.burnTick", "damage" -> dmg.toString, "monster" -> monsterName)
     }
-    (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"))
+    (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"), bled)
   }
 
   // ── Ход игрока: активный навык ──────────────────────────────────────────────
@@ -691,7 +735,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, value.max(1L), hero.gems)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
-    val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
+    // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
+    val effects  =
+      if (!hero.sets.skillsAlwaysBleed || newHp <= 0) battle.effects
+      else battle.effects.copy(monsterBleed = Some(
+        battle.effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
+    val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor, effects = effects)
     if (newHp <= 0) ZIO.succeed(TurnResult(hero, hit, Vector(skillLine + dotIndicators(hit)), Outcome.Victory))
     else
       resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>

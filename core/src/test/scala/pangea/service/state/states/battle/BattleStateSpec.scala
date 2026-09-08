@@ -47,6 +47,43 @@ object BattleStateSpec extends ZIOSpecDefault {
     baseStats  = TestFixtures.hero(userId).baseStats.copy(str = 1)
   )
 
+  // ── Снаряжение набора «Упырь» ───────────────────────────────────────────────
+  private def setPiece(id: Long, itemType: ItemType, armor: Long = 0L): Item =
+    Item(id, "Предмет", 1L, ItemRarity.Blue, itemType,
+      attack = 0, accuracy = 0, energy = 0, armor = armor, defence = 0, evasion = 0,
+      set = Some(pangea.model.item.ItemSet.Ghoul))
+
+  private def armorPiece(id: Long, armor: Long): Item =
+    Item(id, "Нагрудник", 1L, ItemRarity.Blue, ItemType.ChestPlate,
+      attack = 0, accuracy = 0, energy = 0, armor = armor, defence = 0, evasion = 0,
+      set = Some(pangea.model.item.ItemSet.Ghoul))
+
+  /** Экипировка с `n` предметами «Упыря» в сетовых слотах (порядок как в Equipment.setSlots). */
+  private def ghoulEquipment(n: Int): pangea.model.hero.Equipment = {
+    val slots = List(ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
+      ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
+      ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Weapon)
+    slots.take(n).zipWithIndex.foldLeft(TestFixtures.emptyEquipment) { case (eq, (t, i)) =>
+      val it = setPiece(200L + i, t)
+      i match {
+        case 0  => eq.copy(helmet = it)
+        case 1  => eq.copy(shoulderPads = it)
+        case 2  => eq.copy(chestPlate = it)
+        case 3  => eq.copy(bracelets = it)
+        case 4  => eq.copy(gloves = it)
+        case 5  => eq.copy(pants = it)
+        case 6  => eq.copy(boots = it)
+        case 7  => eq.copy(amulet = it)
+        case 8  => eq.copy(firstRing = it)
+        case 9  => eq.copy(secondRing = it)
+        case 10 => eq.copy(belt = it)
+        case _  => eq.copy(weapon = it)
+      }
+    }
+  }
+
+  private def ghoulHero(pieces: Int) = strongHero.copy(equipment = ghoulEquipment(pieces))
+
   // Герой с 1 HP — умрёт от любого удара
   private def dyingHero = TestFixtures.hero(userId).copy(
     baseStats  = TestFixtures.hero(userId).baseStats.copy(agi = 0),
@@ -367,6 +404,97 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(armorLost == 321L) &&              // 503 × 0.64
               assertTrue(hpLost == 64L) &&                  // 20% от 321 — особенность молнии
               assertTrue(hpLost == (armorLost * 0.20).toLong)
+    },
+
+    // ── Набор «Упырь» ─────────────────────────────────────────────────────────
+    test("«Упырь» 4: часть нанесённого урона возвращается герою в HP") {
+      val hero = ghoulHero(4).copy(fightStats = strongHero.fightStats.copy(atk = 500, hp = 100))
+      for {
+        t             <- makeState(hero, strongBattle)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60, 3, 90) // удар героя, удар моба, каст моба
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(after.fightStats.hp > 100L) // 2% от 503 ушли в лечение
+    },
+
+    test("«Упырь» 6: удар по HP с шансом пускает цели кровь") {
+      val hero = ghoulHero(6).copy(fightStats = strongHero.fightStats.copy(atk = 500))
+      for {
+        t             <- makeState(hero, strongBattle)
+        (state, dao, r) = t
+        // Броски: удар героя, бросок кровотечения (10 ≤ 30 — сработал), удар моба, каст моба.
+        _             <- TestRandom.feedInts(60, 10, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.effects.monsterBleed.exists(_.pct == 4))
+    },
+
+    test("«Упырь» 6: при неудачном броске кровотечения нет") {
+      val hero = ghoulHero(6).copy(fightStats = strongHero.fightStats.copy(atk = 500))
+      for {
+        t             <- makeState(hero, strongBattle)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60, 90, 3, 90) // 90 > 30 — не сработало
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.effects.monsterBleed.isEmpty)
+    },
+
+    test("«Упырь» 10: урон кровотечения врага лечит героя ровно на свою величину") {
+      val hero    = ghoulHero(10).copy(fightStats = strongHero.fightStats.copy(atk = 1, hp = 100))
+      // Моб уже истекает кровью: 10% от 9999 макс. HP = 999 урона за тик.
+      val bleeding = strongBattle.copy(
+        effects = strongBattle.effects.copy(monsterBleed = Some(pangea.model.battle.Bleed(10))))
+      for {
+        t             <- makeState(hero, bleeding)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.getHeroByUserId(userId).map(_.get)
+        maxHp          = hero.effectiveMaxHp(0L)
+      } yield assertTrue(after.fightStats.hp == (100L + 999L).min(maxHp))
+    },
+
+    test("«Упырь» 12: победа даёт пир — HP и броня восстановлены, сообщение показано") {
+      val eq   = ghoulEquipment(12).copy(chestPlate = armorPiece(99L, armor = 100L))
+      val hero = strongHero.copy(
+        equipment  = eq,
+        fightStats = strongHero.fightStats.copy(hp = 10, armor = 0))
+      for {
+        t             <- makeState(hero, weakBattle) // моб с 1 HP — умрёт от удара
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60)
+        _             <- TestRandom.feedLongs(100L)
+        result        <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.getHeroByUserId(userId).map(_.get)
+        screens       <- r.sentScreens
+        maxHp          = hero.effectiveMaxHp(0L)
+        // На 12 предметах работает и порог 4: удар (str 1×3 + атака 50 = 53)
+        // сперва вернул 2% в HP, и только потом сработал пир.
+        lifesteal      = 53L * 2L / 100L
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(after.fightStats.hp == 10L + lifesteal + maxHp * 25L / 100L) &&
+              assertTrue(after.fightStats.armor == 100L * 20L / 100L) && // 20% от потолка брони
+              assertTrue(screens.exists(_.text.contains("жуткий пир")))
+    },
+
+    test("без набора «Упырь» пира при победе нет") {
+      val hero = strongHero.copy(fightStats = strongHero.fightStats.copy(hp = 10))
+      for {
+        t             <- makeState(hero, weakBattle)
+        (state, dao, r) = t
+        _             <- TestRandom.feedInts(60)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.getHeroByUserId(userId).map(_.get)
+        screens       <- r.sentScreens
+      } yield assertTrue(after.fightStats.hp == 10L) &&
+              assertTrue(!screens.exists(_.text.contains("жуткий пир")))
     },
 
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
