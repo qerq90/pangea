@@ -1,9 +1,10 @@
 package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.model.battle.Element
 import pangea.model.hero.{Equipment, Hero}
 import pangea.model.item.{Gem, Item, ItemType}
@@ -18,7 +19,11 @@ import zio.{Task, ZIO}
  *  кладётся в scene_data ([[Scene]]). Показываем надетое снаряжение со свободным
  *  гнездом; выбор предмета вставляет камень в его первое свободное гнездо, тратит
  *  камень из инвентаря и возвращает в инвентарь. Извлечение камней пока не
- *  поддерживается (отдельный тикет). */
+ *  поддерживается (отдельный тикет).
+ *
+ *  Список постраничный, как в инвентаре: гнёзда бывают в любом из 14 надетых
+ *  предметов, а клавиатура ВК держит только 10 рядов — без разбивки экран просто
+ *  не отправлялся бы. Текущая страница живёт в той же сцене. */
 case class SocketingState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
@@ -27,7 +32,9 @@ case class SocketingState(
 
   private val branch = new Branch(
     routes = Map(
-      "BackFromSocketing" -> Target.Goto(StateType.Inventory)
+      "BackFromSocketing" -> Target.Goto(StateType.Inventory),
+      "SocketPrev"        -> Target.Run { (u, _, r) => navigate(u, r, -1) },
+      "SocketNext"        -> Target.Run { (u, _, r) => navigate(u, r, +1) }
     ),
     fallback = Target.Run { (user, ua, renderer) => handleFallback(user, ua, renderer) }
   )
@@ -40,7 +47,7 @@ case class SocketingState(
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  // Список надетого снаряжения со свободным гнездом (кнопками).
+  // Список надетого снаряжения со свободным гнездом (кнопками), страницами.
   private def showTargets(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
@@ -48,19 +55,47 @@ case class SocketingState(
       _ <- ctx match {
         case None => renderer.show(user, Screen(content.text("socketing.gemGone"),
                        List(content.choice("BackFromSocketing", "socketing.back"))))
-        case Some((_, g)) =>
+        case Some((scene, g)) =>
           val targets = socketableItems(hero.equipment)
           if (targets.isEmpty)
             renderer.show(user, Screen(content.text("socketing.noTargets"),
               List(content.choice("BackFromSocketing", "socketing.back"))))
           else {
-            val header  = content.format("socketing.choose", "gem" -> g.displayName)
-            val btns    = ItemMenu.itemButtons(targets, TargetPrefix)
-            val back    = content.choice("BackFromSocketing", "socketing.back").copy(row = Some(ItemMenu.NavRow))
-            renderer.show(user, Screen(header, btns :+ back))
+            val (pageItems, totalPages, page) = ItemMenu.page(targets, scene.page.getOrElse(0))
+            val base   = content.format("socketing.choose", "gem" -> g.displayName)
+            val header = if (totalPages > 1) s"$base (${page + 1}/$totalPages)" else base
+            val btns   = ItemMenu.itemButtons(pageItems, TargetPrefix)
+            renderer.show(user, Screen(header, btns ++ navRow(page, totalPages)))
           }
       }
     } yield StateType.Socketing
+
+  /** Нав-ряд последним рядом: «Назад» всегда, стрелки — только когда есть куда
+    * листать (на первой странице нет «Пред.», на последней — «След.»). */
+  private def navRow(page: Int, totalPages: Int): List[Choice] = {
+    val row = ItemMenu.NavRow
+    List(
+      Some(content.choice("BackFromSocketing", "socketing.back").copy(row = Some(row))),
+      Option.when(page > 0)(Choice("SocketPrev", content.text("common.prev"), row = Some(row))),
+      Option.when(page < totalPages - 1)(Choice("SocketNext", content.text("common.next"), row = Some(row)))
+    ).flatten
+  }
+
+  /** Листание: страница нормализуется по текущему числу целей, так что «След.»
+    * с последней страницы никуда не уедет. */
+  private def navigate(user: User, renderer: Renderer, delta: Int): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      scene <- readScene(user)
+      _ <- scene match {
+        case None => ZIO.unit
+        case Some(s) =>
+          val (_, totalPages, _) = ItemMenu.page(socketableItems(hero.equipment), 0)
+          val np = (s.page.getOrElse(0) + delta).max(0).min(totalPages - 1)
+          heroDao.writeSceneData(user.userId, s.copy(page = Some(np)).asJson)
+      }
+      res <- showTargets(user, renderer)
+    } yield res
 
   // Fallback: кнопки вида SocketTarget_<itemId>.
   private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -79,7 +114,7 @@ case class SocketingState(
       ctx  <- gemContext(user, hero)
       res <- ctx match {
         case None => showTargets(user, renderer)
-        case Some((gemItemId, g)) =>
+        case Some((scene, g)) =>
           val target = hero.equipment.allItems.find(i => i.id == targetId && i.itemType != ItemType.NoItem)
           target match {
             // Огонь и Холод в одном оружии не уживаются: вставляемый камень и
@@ -88,7 +123,7 @@ case class SocketingState(
             case Some(item) if isWeapon(item) && hasOpposite(item, g) =>
               val cleaned = removeOpposite(item, g)
               heroDao.updateEquipmentAndFightStats(user.userId, withUpdatedItem(hero.equipment, cleaned), hero.fightStats) *>
-                inventoryRepo.removeItem(gemItemId, hero.id).mapError(e => new Throwable(e.toString)) *>
+                inventoryRepo.removeItem(scene.gemId, hero.id).mapError(e => new Throwable(e.toString)) *>
                 renderer.show(user, Screen(content.text("socketing.annihilate"), Nil)) *>
                 heroDao.writeSceneData(user.userId, io.circe.Json.Null).as(StateType.Inventory)
             case _ =>
@@ -96,7 +131,7 @@ case class SocketingState(
                 case None => showTargets(user, renderer)
                 case Some((newEq, item)) =>
                   heroDao.updateEquipmentAndFightStats(user.userId, newEq, hero.fightStats) *>
-                    inventoryRepo.removeItem(gemItemId, hero.id).mapError(e => new Throwable(e.toString)) *>
+                    inventoryRepo.removeItem(scene.gemId, hero.id).mapError(e => new Throwable(e.toString)) *>
                     renderer.show(user, Screen(
                       content.format("socketing.done", "gem" -> g.displayName, "item" -> item.name), Nil)) *>
                     heroDao.writeSceneData(user.userId, io.circe.Json.Null).as(StateType.Inventory)
@@ -167,13 +202,13 @@ case class SocketingState(
     case ItemType.NoItem           => eq
   }
 
-  /** id камня-предмета из scene_data и сам камень, если он ещё в инвентаре. */
-  private def gemContext(user: User, hero: Hero): Task[Option[(Long, Gem)]] =
+  /** Сцена экрана и сам камень, если он ещё в инвентаре. */
+  private def gemContext(user: User, hero: Hero): Task[Option[(Scene, Gem)]] =
     for {
       scene <- readScene(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
     } yield scene.flatMap { s =>
-      inv.items.data.find(_.id == s.gemId).flatMap(_.gem).map(g => (s.gemId, g))
+      inv.items.data.find(_.id == s.gemId).flatMap(_.gem).map(g => (s, g))
     }
 
   private def readScene(user: User): Task[Option[Scene]] =
@@ -191,8 +226,9 @@ case class SocketingState(
 object SocketingState {
   val TargetPrefix = "SocketTarget_"
 
-  /** scene_data экрана: id камня-предмета, выбранного в инвентаре. */
-  final case class Scene(gemId: Long)
+  /** scene_data экрана: id камня-предмета, выбранного в инвентаре, и текущая
+   *  страница списка целей (None — первая). */
+  final case class Scene(gemId: Long, page: Option[Int] = None)
   object Scene {
     implicit val encoder: Encoder[Scene] = deriveEncoder
     implicit val decoder: Decoder[Scene] = deriveDecoder
