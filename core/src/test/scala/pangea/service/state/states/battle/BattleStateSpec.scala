@@ -340,6 +340,35 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(b2.monsterCurrentHp == armored.monsterCurrentHp)
     },
 
+    test("огонь + молния в бою: по броне −40%+усиление, по HP 0%+усиление, 20% урона брони уходит в HP") {
+      // Рубин и Топаз по 1 грейду → усиление 0.02·2 = +4 п.п.
+      // Броня: (−20% огонь −20% молния) + 4% = ×0.64. HP: (+10% −10%) + 4% = ×1.04.
+      // Урон до стихий: (str 1×3 + атака 500) × spread 100% = 503.
+      val stormWeapon = Item(3L, "Грозовой меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        sockets = List(Some(Gem(GemKind.Ruby, 1)), Some(Gem(GemKind.Topaz, 1))))
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(atk = 500),
+        equipment  = TestFixtures.emptyEquipment.copy(weapon = stormWeapon))
+      val armored = strongBattle.copy(
+        monsterCurrentArmor = 5000L,
+        monsterStats        = strongBattle.monsterStats.copy(armor = 5000L))
+      for {
+        t             <- makeState(hero, armored)
+        (state, dao, r) = t
+        // Броски: удар героя, прок огня, прок молнии (оба 90 > 30 — не сработали),
+        // удар моба, каст моба. Порядок проков — по Element.values: огонь, молния.
+        _             <- TestRandom.feedInts(60, 90, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L) // spread = 100%
+        _             <- state.action(testUser, tap("Attack"), r)
+        after         <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        armorLost      = armored.monsterCurrentArmor - after.monsterCurrentArmor
+        hpLost         = armored.monsterCurrentHp - after.monsterCurrentHp
+      } yield assertTrue(armorLost == 321L) &&              // 503 × 0.64
+              assertTrue(hpLost == 64L) &&                  // 20% от 321 — особенность молнии
+              assertTrue(hpLost == (armorLost * 0.20).toLong)
+    },
+
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
       val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Attack, 1)))
       for {
