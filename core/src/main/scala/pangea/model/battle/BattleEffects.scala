@@ -128,8 +128,15 @@ case class BattleEffects(
   heroPoisonousAttacks: Boolean                    = false,
   // Флаги «один раз за бой» набора «Охотник» (пороги 10 и 12).
   cancelSpent:          Boolean                    = false,
-  doubleSpent:          Boolean                    = false
-)
+  doubleSpent:          Boolean                    = false,
+  // Сколько ходов элементаль ещё скован холодом: шипы молчат, его атаки не
+  // поджигают, точность срезана (см. Elemental.Fire.ChilledTurns).
+  chilledTurns:         Int                        = 0
+) {
+
+  /** Скован ли сейчас элементаль холодом. */
+  def chilled: Boolean = chilledTurns > 0
+}
 
 object BattleEffects {
   val empty: BattleEffects = BattleEffects()

@@ -24,6 +24,13 @@ sealed abstract class Elemental(
 
   /** Опыт за победу. */
   def expReward(bossLvl: Long): Long
+
+  /** Множитель урона, который элементаль получает от оружия стихии `e`. Своя
+   *  стихия ему почти не вредит, противоположная — наоборот. 1.0 — обычный урон. */
+  def damageTakenMult(e: Element): Double
+
+  /** Можно ли навесить на элементаля этот эффект стихии. Огненный не горит. */
+  def immuneToBurn: Boolean
 }
 
 object Elemental extends Enum[Elemental] {
@@ -91,6 +98,24 @@ object Elemental extends Enum[Elemental] {
 
     def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
     def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    /** Огонь по огню почти не проходит, холод — наоборот. Остальные стихии бьют
+     *  как обычно; при оружии сразу с огнём и холодом множители перемножаются. */
+    def damageTakenMult(e: Element): Double = e match {
+      case Element.Fire => FireDamageTakenPct / 100.0
+      case Element.Cold => ColdDamageTakenPct / 100.0
+      case _            => 1.0
+    }
+
+    /** Огненного нельзя поджечь — он и так пламя. */
+    def immuneToBurn: Boolean = true
+
+    // ── «Скован холодом» ─────────────────────────────────────────────────────
+    /** Сколько ходов держится оцепенение от прока Холода и на сколько % оно
+     *  срезает точность элементаля. Пока он скован, шипы не отвечают, его атаки
+     *  не поджигают, а одна из собранных сфер гаснет. */
+    val ChilledTurns: Int        = 5
+    val ChilledAccuracyCutPct: Long = 5L
   }
 
   /** Вид по названию стихии — для восстановления из сохранённого боя. */
