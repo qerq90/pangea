@@ -8,7 +8,9 @@ import pangea.generator.loot.LootGenerator
 import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
+import pangea.model.monster.Elemental
 import pangea.model.stats.FightStats
+import pangea.model.trauma.TraumaRoll
 import pangea.model.skill.{MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -293,6 +295,133 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                  "hp" -> hpGained.toString, "armor" -> armorGained.toString))
     }
 
+  /** Ход элементаля-минибосса: он применяет способности строго ПО КРУГУ, а не
+    * случайно, как рядовые мобы. Не хватило энергии или способность сейчас
+    * бесполезна (щит на целом элементале) — раунд пропускается, но очередь всё
+    * равно сдвигается: иначе он навсегда застрял бы на дорогом умении.
+    *
+    * Возвращает то же, что обычный каст: обновлённый бой, героя и строку лога. */
+  private def elementalTurnCast(
+      hero: Hero,
+      battle: SoloPveBattle,
+      nowMs: Long
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val lvl      = battle.monsterLvl
+    val atk      = battle.monsterStats.atk
+    val energy   = battle.monsterCurrentEnergy
+    val next     = battle.copy(elementalTurn = (battle.elementalTurn + 1) % BattleState.ElementalAbilities)
+
+    def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
+
+    battle.elementalTurn match {
+      // 1) Огненный всплеск: урон огнём + поджог героя на 1%.
+      case 0 =>
+        val cost = Elemental.Fire.SplashCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else {
+          val dmg     = (atk * Elemental.Fire.SplashDamageFactor).toLong.max(1L)
+          val (h, l)  = burnHero(hero, dmg)
+          val effects = next.effects.copy(heroBurn = Some(
+            next.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.SplashBurnPct))))
+          ZIO.succeed((spend(cost, next).copy(effects = effects), h,
+            content.format("battle.elemental.fireSplash", "damage" -> l.toString)))
+        }
+
+      // 2) Сфера огня: копится до трёх, третья сразу срывается в смерч.
+      case 1 =>
+        val cost = Elemental.Fire.OrbCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else {
+          val orbs = battle.fireOrbs + 1
+          if (orbs < Elemental.Fire.OrbsToBurst)
+            ZIO.succeed((spend(cost, next).copy(fireOrbs = orbs), hero,
+              content.text("battle.elemental.orbCreated")))
+          else fireOrbBurst(hero, spend(cost, next).copy(fireOrbs = 0), atk, nowMs)
+        }
+
+      // 3) Огненный щит: чинит броню и HP, но только если есть что чинить.
+      case 2 =>
+        val cost     = Elemental.Fire.ShieldCostPerLvl * lvl
+        val maxHp    = battle.monsterStats.hp
+        val maxArmor = battle.monsterStats.armor
+        val hurt     = battle.monsterCurrentHp < maxHp || battle.monsterCurrentArmor < maxArmor
+        if (energy < cost || !hurt) ZIO.succeed((next, hero, ""))
+        else {
+          val newHp    = (battle.monsterCurrentHp + maxHp * Elemental.Fire.ShieldHpPct / 100L).min(maxHp)
+          val newArmor = (battle.monsterCurrentArmor + maxArmor * Elemental.Fire.ShieldArmorPct / 100L).min(maxArmor)
+          val healed   = newHp - battle.monsterCurrentHp
+          val repaired = newArmor - battle.monsterCurrentArmor
+          ZIO.succeed((
+            spend(cost, next).copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor),
+            hero,
+            content.format("battle.elemental.shield",
+              "hp" -> healed.toString, "armor" -> repaired.toString)))
+        }
+
+      // 4) Пропуск хода.
+      case _ => ZIO.succeed((next, hero, ""))
+    }
+  }
+
+  /** Смерч из трёх сфер: ×2 атаки моба плюс 5% от максимумов HP и брони героя.
+    * Если урон дошёл до HP, с шансом 20% герой получает травму — ту же, что при
+    * смерти (тот же прогресс по тирам, см. [[pangea.model.trauma.TraumaRoll]]). */
+  private def fireOrbBurst(
+      hero: Hero,
+      battle: SoloPveBattle,
+      atk: Long,
+      nowMs: Long
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val maxHp    = hero.effectiveMaxHp(nowMs)
+    val maxArmor = hero.effectiveMaxArmor(nowMs)
+    val damage   = atk * 2L + (maxHp * Elemental.Fire.BurstHeroStatPct / 100L) + (maxArmor * Elemental.Fire.BurstHeroStatPct / 100L)
+    // Смерч бьёт как обычная атака: сперва броня, остаток — в HP.
+    val toArmor  = damage.min(hero.fightStats.armor)
+    val toHp     = damage - toArmor
+    val hit = hero.copy(fightStats = hero.fightStats.copy(
+      armor = hero.fightStats.armor - toArmor,
+      hp    = (hero.fightStats.hp - toHp).max(0L)))
+    val line = content.format("battle.elemental.orbBurst", "damage" -> damage.toString)
+    if (toHp <= 0 || hit.fightStats.hp <= 0) ZIO.succeed((battle, hit, line))
+    else
+      for {
+        roll   <- Random.nextIntBetween(1, 101)
+        result <- if (roll > Elemental.Fire.BurstTraumaChancePct) ZIO.succeed((battle, hit, line))
+                  else giveTrauma(hit, nowMs).map { case (h, traumaLine) => (battle, h, line + "\n" + traumaLine) }
+      } yield result
+  }
+
+  /** Травма от смерча — та же механика, что и при смерти: прогресс по тирам
+    * (лёгкие → средние → тяжёлые), уже полученные исключаются. Пишется сразу,
+    * потому что `commit` сохраняет только экипировку и боевые статы. */
+  private def giveTrauma(hero: Hero, nowMs: Long): Task[(Hero, String)] = {
+    val existing = if (hero.traumaActive(nowMs)) hero.traumaNames else Nil
+    val pool     = TraumaRoll.pool(existing)
+    val until    = nowMs + TraumaRoll.DurationMs
+    if (pool.isEmpty) ZIO.succeed((hero, content.text("battle.elemental.orbTraumaMax")))
+    else
+      for {
+        idx   <- Random.nextIntBetween(0, pool.length)
+        trauma = pool(idx)
+        names  = existing :+ trauma.name
+        _     <- heroDao.updateTrauma(hero.userId, Some(until), names)
+      } yield (
+        hero.copy(traumaUntil = Some(until), traumaNames = names),
+        content.format("battle.elemental.orbTrauma", "traumaName" -> trauma.name)
+      )
+  }
+
+  /** Урон герою огнём: сперва броня, остаток в HP. Возвращает героя и сколько
+    * урона реально прошло (для строки лога). */
+  private def burnHero(hero: Hero, damage: Long): (Hero, Long) = {
+    val toArmor = damage.min(hero.fightStats.armor)
+    val toHp    = damage - toArmor
+    (hero.copy(fightStats = hero.fightStats.copy(
+       armor = hero.fightStats.armor - toArmor,
+       hp    = (hero.fightStats.hp - toHp).max(0L))),
+     damage)
+  }
+
   /** Разбивает `damage` на урон по броне и по HP с учётом стихийных модификаторов
     * оружия. Здесь же учитывается усиление стихии (+2%/грейд): оно входит в
     * `armorDamageMult`/`hpDamageMult` процентными пунктами, а не множит общий
@@ -493,6 +622,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         // Моб не кастует, если герой мёртв или моб добит Шипастым (battleAfterAtk).
         if (heroAfterAtk.fightStats.hp <= 0 || battleAfterAtk.monsterCurrentHp <= 0)
           ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
+        // Элементаль не катает случайный скилл: он идёт строго по своему кругу.
+        else if (battleAfterAtk.elemental.isDefined)
+          elementalTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
         else
           for {
             skillRoll <- Random.nextIntBetween(1, 101)
@@ -541,9 +673,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       (tickedHero, battleAfterHero, heroEffectLine) =
         if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
         else (finalHero, finalBattle, "")
+      // Элементаль восстанавливает свою энергию в конце раунда — из неё он
+      // платит за способности следующего круга.
+      battleWithEnergy = battleAfterHero.elemental match {
+        case Some(e) =>
+          val maxEn = battleAfterHero.monsterStats.energy
+          battleAfterHero.copy(monsterCurrentEnergy =
+            (battleAfterHero.monsterCurrentEnergy + e.energyRegen(battleAfterHero.monsterLvl)).min(maxEn))
+        case None => battleAfterHero
+      }
       (tickedBattle, monsterEffectLine, bleedDealt) =
-        if (heroAlive) tickMonsterEffects(battleAfterHero, monster.name, tickedHero.sets.burnGrowthMult)
-        else (battleAfterHero, "", 0L)
+        if (heroAlive) tickMonsterEffects(battleWithEnergy, monster.name, tickedHero.sets.burnGrowthMult)
+        else (battleWithEnergy, "", 0L)
       // «Упырь» (порог 10): чужая кровь идёт герою в лечение.
       heroFedByBleed =
         if (bleedDealt > 0 && tickedHero.sets.healsFromBleed)
@@ -589,20 +730,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       hero: Hero,
       battle: SoloPveBattle,
       nowMs: Long
-  ): (Hero, SoloPveBattle, String) =
-    battle.effects.heroRegen match {
-      case Some(regen) =>
-        val maxHp  = hero.effectiveMaxHp(nowMs)
-        val heal   = regen.healOn(maxHp)
-        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
-        val healed = newHp - hero.fightStats.hp
-        (
-          hero.copy(fightStats = hero.fightStats.copy(hp = newHp)),
-          battle.copy(effects = battle.effects.copy(heroRegen = regen.decayed)),
-          content.format("battle.regenTick", "healed" -> healed.toString)
-        )
+  ): (Hero, SoloPveBattle, String) = {
+    // Горение на герое (огненный элементаль) тикает до регена: оно усиливается
+    // каждый раунд, как и горение на мобе.
+    val (burnedHero, burnedBattle, burnLine) = battle.effects.heroBurn match {
+      case Some(burn) =>
+        val maxHp = hero.effectiveMaxHp(nowMs)
+        val dmg   = burn.damageOn(maxHp)
+        (hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - dmg).max(0L))),
+         battle.copy(effects = battle.effects.copy(heroBurn = Some(burn.grown))),
+         content.format("battle.elemental.burnTick", "damage" -> dmg.toString))
       case None => (hero, battle, "")
     }
+    val (finalHero, finalBattle, regenLine) = burnedBattle.effects.heroRegen match {
+      case Some(regen) =>
+        val maxHp  = burnedHero.effectiveMaxHp(nowMs)
+        val heal   = regen.healOn(maxHp)
+        val newHp  = (burnedHero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - burnedHero.fightStats.hp
+        (
+          burnedHero.copy(fightStats = burnedHero.fightStats.copy(hp = newHp)),
+          burnedBattle.copy(effects = burnedBattle.effects.copy(heroRegen = regen.decayed)),
+          content.format("battle.regenTick", "healed" -> healed.toString)
+        )
+      case None => (burnedHero, burnedBattle, "")
+    }
+    // Обе строки непустые бывают одновременно (горим и регенерируем) — склеиваем.
+    (finalHero, finalBattle, List(burnLine, regenLine).filter(_.nonEmpty).mkString("\n"))
+  }
 
   /** Тик DoT-эффектов МОНСТРА в конце раунда (каждый снимает `pct`% макс.HP мимо
     * брони). Порядок: яд → кровотечение → горение. Яд слабеет ([[Poison.decayed]]),
@@ -1352,6 +1507,9 @@ object BattleState {
   val BlessingBonusPct: Long = AzatState.BlessingBonusPct
   /** Шанс (в %) дополнительной экипировки после боя при благословении. */
   val BlessingExtraDropPct: Long = AzatState.BlessingExtraDropPct
+
+  /** Сколько способностей в круге элементаля: всплеск, сфера, щит, пропуск. */
+  val ElementalAbilities: Int = 4
 
   /** ЗАГЛУШКА множителя шанса каста моба от редкости. Позже может стать формулой. */
   val MonsterSkillChancePerRarity: Double = 20.0
