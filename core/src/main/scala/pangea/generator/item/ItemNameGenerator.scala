@@ -39,19 +39,6 @@ object ItemNameGenerator {
     ItemType.NoItem           -> List("Пусто" -> Neut)
   )
 
-  // Цветной кружок для редкости. Purple и Violet делят один цвет — в emoji нет
-  // двух разных «фиолетовых кругов»; при необходимости легко развести через
-  // подмену здесь.
-  private val rarityEmoji: Map[Rarity, String] = Map(
-    Rarity.Gray   -> "⚫",
-    Rarity.White  -> "⚪",
-    Rarity.Green  -> "🟢",
-    Rarity.Blue   -> "🔵",
-    Rarity.Purple -> "🟣",
-    Rarity.Violet -> "🟣",
-    Rarity.Orange -> "🟠"
-  )
-
   // Прилагательные качества по редкости (мужская форма; согласование делает inflect).
   // Violet и Purple используют один пул (в спеке они объединены как «фиолетовые/пурпурные»).
   private val purpleAdjectives = List("Превосходный", "Высококлассный", "Первоклассный", "Впечатляющий", "Выдающийся")
@@ -79,9 +66,8 @@ object ItemNameGenerator {
     val (adjMasc,        rng1) = rng.pick(adjectivesByRarity.getOrElse(rarity, List("Обычный")))
     val ((base, gender), rng2) = rng1.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
     val (title,          rng3) = rng2.pick(titles)
-    val emoji                  = rarityEmoji.getOrElse(rarity, "⚪")
     val adj                    = inflect(adjMasc, gender)
-    (s"$emoji $adj $base $title", rng3)
+    (s"${rarity.emoji} $adj $base $title", rng3)
   }
 
   /**

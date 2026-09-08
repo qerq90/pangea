@@ -12,6 +12,12 @@ sealed trait Rarity extends EnumEntry {
   val factorR3: Double
   val paramsChance: List[Long]
 
+  /** Цветной кружок редкости. Им начинается сгенерированное имя предмета
+   *  (см. [[pangea.generator.item.ItemNameGenerator]]) и заголовок предмета в
+   *  списках (см. `Item.displayTitle`) — источник правды один, здесь.
+   *  Purple и Violet делят цвет: двух разных «фиолетовых кругов» в emoji нет. */
+  val emoji: String
+
   def getNumOfExtraParams(rng: Rng): (Long, Rng) =
     paramsChance.foldLeft((0L, rng)) { case ((acc, r), chance) =>
       val (roll, next) = r.between(0L, 100L)
@@ -24,6 +30,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   val values = findValues
 
   case object Gray extends Rarity {
+    override val emoji: String            = "⚫"
     override val factorR: Double          = 2
     override val factorR1: Double         = 0.1
     override val factorR3: Double         = 2
@@ -31,6 +38,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object White extends Rarity {
+    override val emoji: String            = "⚪"
     override val factorR: Double          = 3
     override val factorR1: Double         = 0.15
     override val factorR3: Double         = 2
@@ -38,6 +46,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object Green extends Rarity {
+    override val emoji: String            = "🟢"
     override val factorR: Double          = 4
     override val factorR1: Double         = 0.2
     override val factorR3: Double         = 4
@@ -45,6 +54,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object Blue extends Rarity {
+    override val emoji: String            = "🔵"
     override val factorR: Double          = 6
     override val factorR1: Double         = 0.3
     override val factorR3: Double         = 6
@@ -52,6 +62,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object Purple extends Rarity {
+    override val emoji: String            = "🟣"
     override val factorR: Double          = 8
     override val factorR1: Double         = 0.5
     override val factorR3: Double         = 8
@@ -59,6 +70,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object Violet extends Rarity {
+    override val emoji: String            = "🟣"
     override val factorR: Double          = 8
     override val factorR1: Double         = 0.5
     override val factorR3: Double         = 8
@@ -66,6 +78,7 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
   }
 
   case object Orange extends Rarity {
+    override val emoji: String            = "🟠"
     override val factorR: Double          = 10
     override val factorR1: Double         = 0.7
     override val factorR3: Double         = 10

@@ -26,7 +26,8 @@ object ItemMenu {
   def truncate(s: String): String =
     if (s.length <= MaxButtonLen) s else s.take(MaxButtonLen - 1) + "…"
 
-  /** Лейбл по умолчанию: `<имя> Ур.<уровень>` (у карт клада — только имя),
+  /** Лейбл по умолчанию — заголовок предмета `<кружок> [Ур.N] <имя>`
+   *  (см. `Item.displayTitle`; у карт клада и камней — только имя),
    *  обрезанный по лимиту. */
   def itemButtonLabel(item: Item): String =
     truncate(item.displayTitle)

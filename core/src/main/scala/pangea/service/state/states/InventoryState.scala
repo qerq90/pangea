@@ -349,7 +349,7 @@ object InventoryState {
     }
     // Описание пассивного навыка (статичный текст — без стоимости/кулдауна).
     val passiveStr = item.passive.map(k => s"\n\n${k.describe}").getOrElse("")
-    s"${item.name} Ур.${item.lvl}\n$statsStr$skillStr$passiveStr$slotInfo"
+    s"${item.displayTitle}\n$statsStr$skillStr$passiveStr$slotInfo"
   }
 
   // Возвращает предмет, который будет вытеснен в инвентарь при надевании
