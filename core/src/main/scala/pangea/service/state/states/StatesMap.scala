@@ -36,6 +36,7 @@ import pangea.model.state.StateType.{
   QuestBoard,
   Registration,
   Rest,
+  Skills,
   Socketing,
   Tavern,
   TempleAzat,
@@ -82,7 +83,7 @@ import pangea.service.state.states.gustavo.{
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
-import pangea.service.state.states.hero.HeroStatsState
+import pangea.service.state.states.hero.{HeroStatsState, SkillsState}
 import pangea.service.state.states.tavern.{
   CardSellerState,
   InnkeeperState,
@@ -153,6 +154,7 @@ object StatesMap {
             content
           ),
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
+          Skills    -> SkillsState(heroDao, content),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
           TempleAzat -> TempleAzatState(heroDao, content),

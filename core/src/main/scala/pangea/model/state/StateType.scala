@@ -48,6 +48,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Spring    extends StateType
   case object Inventory  extends StateType
   case object Equipment  extends StateType
+  case object Skills     extends StateType // список активных умений/пассивок героя
   case object Socketing  extends StateType // вставка камня-усилителя в гнездо снаряжения
   case object Loot       extends StateType
   case object Merchant   extends StateType
