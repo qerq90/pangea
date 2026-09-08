@@ -1,5 +1,7 @@
 package pangea.service.state
 
+import io.circe.Json
+import pangea.dao.hero.HeroDao
 import pangea.engine.Renderer
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -14,6 +16,7 @@ class StateHandler(
   api: Api,
   userRepo: UserRepository,
   heroRepo: HeroRepository,
+  heroDao: HeroDao,
   states: Map[StateType, State],
   lock: PlayerLock
 ) {
@@ -110,16 +113,39 @@ class StateHandler(
         case Some(h) => ZIO.succeed(h)
         case None    => heroRepo.registerNewHero(user.userId)
       }
-      state <- ZIO
-        .fromOption(states.get(hero.state))
-        .orElseFail(
-          new Throwable(
-            s"Not found state of hero with id ${hero.id} of user ${user.userId}: state - ${hero.state}"
-          )
-        )
+      _ <-
+        if (StateHandler.isHomeCommand(action))
+          goHome(user, renderer)
+        else
+          for {
+            state <- ZIO
+              .fromOption(states.get(hero.state))
+              .orElseFail(
+                new Throwable(
+                  s"Not found state of hero with id ${hero.id} of user ${user.userId}: state - ${hero.state}"
+                )
+              )
 
-      potentiallyNewState <- state.action(user, action, renderer)
-      _ <- transitionTo(user, hero.state, potentiallyNewState, renderer)
+            potentiallyNewState <- state.action(user, action, renderer)
+            _ <- transitionTo(user, hero.state, potentiallyNewState, renderer)
+          } yield ()
+    } yield ()
+
+  /** Глобальная команда `/home` (см. ARCHITECTURE.md §10) — аварийный выход в
+    * город из ЛЮБОГО состояния, минуя обработчик текущей сцены (на случай если
+    * игрок застрял из-за возможного бага). Работает поверх обычного диспетчера:
+    * durable-статы, инвентарь и исход боя не трогаются — герой не умирает, не
+    * получает и не теряет ничего. Сбрасывается только эфемерный слой (активный
+    * бой, `scene_data`), чтобы не тащить за собой зависшую/битую сцену в город. */
+  private def goHome(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      _ <- heroDao.clearActiveBattle(user.userId)
+      _ <- heroDao.writeSceneData(user.userId, Json.Null)
+      target <- ZIO
+        .fromOption(states.get(StateType.GlobalMap))
+        .orElseFail(new Throwable("GlobalMap state is not registered in StatesMap"))
+      _ <- target.enter(user, renderer)
+      _ <- heroRepo.updateState(user.userId, StateType.GlobalMap)
     } yield ()
 
   /** Performs a state transition (enter + persist) and follows any
@@ -170,8 +196,14 @@ object StateHandler {
     case object Skipped extends RunResult
   }
 
+  /** `/home` — глобальная команда, а не кнопка: срабатывает только на «голый»
+    * текст без payload (иначе кнопка с совпадающей по случайности подписью
+    * тоже считалась бы командой). Регистр и пробелы по краям не важны. */
+  private def isHomeCommand(action: UserAction): Boolean =
+    action.payload.isEmpty && action.text.trim.equalsIgnoreCase("/home")
+
   val live: ZLayer[
-    Api with StatesMap with HeroRepository with UserRepository,
+    Api with StatesMap with HeroRepository with UserRepository with HeroDao,
     Nothing,
     StateHandler
   ] =
@@ -180,8 +212,9 @@ object StateHandler {
         api       <- ZIO.service[Api]
         userRepo  <- ZIO.service[UserRepository]
         heroRepo  <- ZIO.service[HeroRepository]
+        heroDao   <- ZIO.service[HeroDao]
         statesMap <- ZIO.service[StatesMap]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
-      } yield new StateHandler(api, userRepo, heroRepo, statesMap.states, lock)
+      } yield new StateHandler(api, userRepo, heroRepo, heroDao, statesMap.states, lock)
     )
 }
