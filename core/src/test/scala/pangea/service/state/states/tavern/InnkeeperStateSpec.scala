@@ -70,14 +70,51 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Задание выполнено")))
     },
 
-    test("TurnInQuest забирает ПЕРВЫЙ подходящий трофей по порядку инвентаря") {
+    test("TurnInQuest забирает трофей с наибольшим коэффициентом, а не первый по порядку") {
+      // В инвентаре Орки: Мешок (0.5), Реликвия (4.0), Голова (1.0) — уходит Реликвия,
+      // хотя лежит не первой. Эльф не подходит по расе и остаётся.
       for {
         t <- makeState(
-               List(trophy(1L, Race.Elf, 1L), trophy(2L, Race.Orc, 5L), trophy(3L, Race.Orc, 9L)),
+               List(trophy(1L, Race.Elf, 9L, TrophyKind.Relic),
+                    trophy(2L, Race.Orc, 5L, TrophyKind.Sack),
+                    trophy(3L, Race.Orc, 5L, TrophyKind.Relic),
+                    trophy(4L, Race.Orc, 5L, TrophyKind.Head)),
                active = Some(Race.Orc))
-        (state, _, invRepo, renderer) = t
-        _ <- state.action(testUser, tap("TurnInQuest"), renderer)
-      } yield assertTrue(invRepo.snapshot.map(_.id) == List(1L, 3L)) // забрал id=2 (первый Орк)
+        (state, heroDao, invRepo, renderer) = t
+        _    <- state.action(testUser, tap("TurnInQuest"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(1L, 2L, 4L)) && // ушла id=3 (Реликвия)
+              assertTrue(hero.exists(_.exp == 25L))                         // ceil(5 + 5*4.0)
+    },
+
+    test("при равных коэффициентах уходит трофей старшего уровня") {
+      for {
+        t <- makeState(
+               List(trophy(1L, Race.Orc, 2L, TrophyKind.Talisman),
+                    trophy(2L, Race.Orc, 11L, TrophyKind.Talisman),
+                    trophy(3L, Race.Orc, 7L, TrophyKind.Talisman)),
+               active = Some(Race.Orc))
+        (state, heroDao, invRepo, renderer) = t
+        _    <- state.action(testUser, tap("TurnInQuest"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(invRepo.snapshot.map(_.id) == List(1L, 3L)) && // ушла id=2 (11 ур.)
+              assertTrue(hero.exists(_.exp == 27L))                     // ceil(5 + 11*2.0)
+    },
+
+    test("bestTrophyFor: порядок видов Реликвия > Талисман > Голова > Мешок, чужая раса не берётся") {
+      val orcs = List(
+        trophy(1L, Race.Orc, 5L, TrophyKind.Sack),
+        trophy(2L, Race.Orc, 5L, TrophyKind.Head),
+        trophy(3L, Race.Orc, 5L, TrophyKind.Talisman),
+        trophy(4L, Race.Orc, 5L, TrophyKind.Relic))
+      val race = Race.Orc.entryName
+      // Убираем лучший вид по одному — каждый раз всплывает следующий по коэффициенту.
+      assertTrue(InnkeeperState.bestTrophyFor(orcs, race).map(_.id).contains(4L)) &&
+      assertTrue(InnkeeperState.bestTrophyFor(orcs.filterNot(_.id == 4L), race).map(_.id).contains(3L)) &&
+      assertTrue(InnkeeperState.bestTrophyFor(orcs.filterNot(i => i.id == 4L || i.id == 3L), race).map(_.id).contains(2L)) &&
+      assertTrue(InnkeeperState.bestTrophyFor(List(orcs.head), race).map(_.id).contains(1L)) &&
+      assertTrue(InnkeeperState.bestTrophyFor(orcs, Race.Elf.entryName).isEmpty) &&
+      assertTrue(InnkeeperState.bestTrophyFor(Nil, race).isEmpty)
     },
 
     test("TurnInQuest без подходящего трофея → сообщение, инвентарь не тронут") {

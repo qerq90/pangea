@@ -13,10 +13,12 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.{CharacterMenu, State, UserAction}
 import zio.{Task, ZIO}
 
-/** Трактирщик. Принимает квестовые предметы: забирает ПЕРВЫЙ подходящий трофей
-  * из инвентаря (тип `Trophy`, нужная раса) и начисляет опыт по формуле `5 +
-  * Ур.трофея × коэффициент(вид трофея)`, округляя вверх. Коэффициент берётся
-  * из [[pangea.model.item.TrophyKind]].
+/** Трактирщик. Принимает квестовые предметы: из подходящих трофеев инвентаря
+  * (тип `Trophy`, нужная раса) забирает САМЫЙ ЦЕННЫЙ — с наибольшим
+  * коэффициентом вида (Реликвия 4.0 > Талисман 2.0 > Голова 1.0 > Мешок 0.5),
+  * при равных коэффициентах — старший по уровню. Опыт начисляется по формуле
+  * `5 + Ур.трофея × коэффициент(вид трофея)`, округляя вверх. Коэффициент
+  * берётся из [[pangea.model.item.TrophyKind]].
   */
 case class InnkeeperState(
   heroDao: HeroDao,
@@ -64,7 +66,7 @@ case class InnkeeperState(
       )
     )
 
-  // Сдать квест: забираем первый подходящий трофей, начисляем опыт, закрываем задание.
+  // Сдать квест: забираем самый ценный подходящий трофей, начисляем опыт, закрываем задание.
   private def turnInQuest(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
@@ -80,12 +82,7 @@ case class InnkeeperState(
             inv <- inventoryRepo
               .get(hero.id)
               .mapError(e => new Throwable(e.toString))
-            matching = inv.items.data.find(i =>
-              i.details match {
-                case ItemDetails.Trophy(race, _) => race == raceName
-                case _                           => false
-              }
-            )
+            matching = InnkeeperState.bestTrophyFor(inv.items.data, raceName)
             _ <- matching match {
               case None =>
                 renderer.show(
@@ -146,13 +143,8 @@ case class InnkeeperState(
     } yield StateType.Innkeeper
 
   // Опыт за трофей: 5 + Ур.трофея × коэффициент(вид), округление вверх.
-  private def questExp(trophy: Item): Long = {
-    val coef = trophy.details match {
-      case ItemDetails.Trophy(_, kind) => kind.coef
-      case _                           => 0.0
-    }
-    math.ceil(5.0 + trophy.lvl.toDouble * coef).toLong
-  }
+  private def questExp(trophy: Item): Long =
+    math.ceil(5.0 + trophy.lvl.toDouble * InnkeeperState.trophyCoef(trophy)).toLong
 
   private def readQuests(user: User): Task[Option[QuestData]] =
     heroDao.readQuestData(user.userId).map(_.flatMap(_.as[QuestData].toOption))
@@ -162,4 +154,25 @@ case class InnkeeperState(
       .getHeroByUserId(user.userId)
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
+}
+
+object InnkeeperState {
+
+  /** Трофей, который уйдёт в счёт задания по расе `raceName`: из подходящих
+    * берём с наибольшим коэффициентом вида, при равных — старший по уровню
+    * (он даёт больше опыта по формуле `5 + Ур. × коэффициент`). None, если
+    * подходящих трофеев в инвентаре нет. */
+  def bestTrophyFor(items: List[Item], raceName: String): Option[Item] =
+    items
+      .filter(_.details match {
+        case ItemDetails.Trophy(race, _) => race == raceName
+        case _                           => false
+      })
+      .sortBy(i => (-trophyCoef(i), -i.lvl))
+      .headOption
+
+  private def trophyCoef(item: Item): Double = item.details match {
+    case ItemDetails.Trophy(_, kind) => kind.coef
+    case _                           => 0.0
+  }
 }
