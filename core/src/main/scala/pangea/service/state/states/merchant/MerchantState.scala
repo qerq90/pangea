@@ -207,10 +207,12 @@ case class MerchantState(
                showMenu(user, renderer)
     } yield StateType.Merchant
 
-  /** «Хлам» — снаряжение Серой и Белой редкости. Трофеи (ItemType.Trophy)
-    * никогда не считаются хламом, даже при Серой/Белой редкости. */
+  /** «Хлам» — снаряжение Серой и Белой редкости. Трофеи (ItemType.Trophy) и
+    * камни-усилители (ItemType.Gem, все — Серой редкости формально, но ценность
+    * не в редкости) никогда не считаются хламом. */
   private def isJunk(item: Item): Boolean =
     item.itemType != ItemType.Trophy &&
+      item.itemType != ItemType.Gem &&
       (item.rarity == Rarity.Gray || item.rarity == Rarity.White)
 
   private def sellNavRow(page: Int, totalPages: Int): List[Choice] = {

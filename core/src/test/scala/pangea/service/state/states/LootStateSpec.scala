@@ -2,7 +2,8 @@ package pangea.service.state.states
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
+import pangea.generator.item.GemGenerator
+import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -51,6 +52,17 @@ object LootStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(s => s.choices.map(_.id).toSet == Set("Take", "Leave"))) &&
               assertTrue(invRepo.snapshot.isEmpty) &&        // предметы ждут решения, не положены
               assertTrue(hero.exists(_.silver == 100L + 42L))  // серебро забрано сразу
+    },
+
+    test("enter с камнем в добыче → показывает только название, без описания граней") {
+      val gem = GemGenerator.item(GemKind.Skull, 3)
+      for {
+        t <- makeState(LootData(items = List(gem), silvers = Nil))
+        (state, renderer, _, _) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+      } yield assertTrue(screens.exists(_.text.contains(gem.name))) &&
+              assertTrue(!screens.exists(_.text.contains("В гнезде")))
     },
 
     test("enter только с серебром → серебро начислено, кнопка Continue, без Take/Leave") {
