@@ -130,9 +130,9 @@ case class InventoryState(
                 "current"  -> hero.lvl.toString), Nil))
           else {
             val (newEq, newFight, oldItem) = InventoryState.equip(hero, item)
-            val capDelta = InventoryState.stashDelta(oldItem, item)
-            // Замена, снимающая «Тайник» (делта < 0), переполнит сумку → блокируем.
-            if (capDelta < 0 && !InventoryState.fitsWithoutStash(inv, returningItems = 0))
+            val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq)
+            // Замена, снимающая последний «Тайник» в экипировке (делта < 0), переполнит сумку → блокируем.
+            if (capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 0))
               renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
             else
               heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
@@ -286,21 +286,30 @@ object InventoryState {
   }
 
   /** Бонус вместимости сумки от пассивки «Тайник» на предмете (0, если её нет).
-   *  Вместимость моделируется прибавкой к `maxItems` на время ношения (как бусты
-   *  Мастера Горна): +10 при надевании, −10 при снятии. */
+   *  Хелпер для одного предмета — для итогового изменения вместимости при
+   *  надевании/снятии используй [[equipmentStashDelta]] (он дедуплицирует
+   *  несколько «Тайников» так же, как остальные пассивки). */
   def stashBonus(item: Item): Long =
     if (item.passive.contains(pangea.model.item.PassiveKind.Stash)) pangea.model.item.PassiveKind.Stash.ExtraSlots
     else 0L
 
-  /** Изменение вместимости при замене `oldItem` на `newItem` в слоте: разница
-   *  бонусов «Тайника». Положительное — надеваем Тайник, отрицательное — снимаем. */
-  def stashDelta(oldItem: Item, newItem: Item): Long = stashBonus(newItem) - stashBonus(oldItem)
+  /** Изменение вместимости сумки при переходе от `oldEq` к `newEq`: разница
+   *  бонусов «Тайника», посчитанная по ПОЛНОМУ набору пассивок экипировки
+   *  (`Equipment.passiveKinds` — множество, дубли схлопнуты), а не по одному
+   *  заменяемому предмету. Поэтому надевание второго «Тайника», пока первый уже
+   *  на герое, не даёт delta (бонус уже был учтён) — как и остальные пассивки,
+   *  «работает только одна». Положительное — надет первый «Тайник» в экипировке,
+   *  отрицательное — снят последний. */
+  def equipmentStashDelta(oldEq: Equipment, newEq: Equipment): Long =
+    pangea.model.hero.HeroPassives(newEq.passiveKinds).extraInventorySlots -
+      pangea.model.hero.HeroPassives(oldEq.passiveKinds).extraInventorySlots
 
-  /** Влезет ли сумка в базовую вместимость (без бонуса Тайника) с учётом
-   *  `returningItems` предметов, возвращаемых в неё. Ложь → снятие Тайника
-   *  переполнит сумку и его надо блокировать. */
-  def fitsWithoutStash(inv: Inventory, returningItems: Int): Boolean =
-    inv.items.data.length + returningItems <= inv.maxItems - pangea.model.item.PassiveKind.Stash.ExtraSlots
+  /** Хватит ли места в сумке, если её вместимость изменится на `capDelta` (может
+   *  быть отрицательным — например, теряем бонус «Тайника»), с учётом
+   *  `returningItems` предметов, которые вернутся в сумку. Ложь → изменение
+   *  переполнит сумку, и его надо блокировать. */
+  def fitsAfterCapacityChange(inv: Inventory, capDelta: Long, returningItems: Int): Boolean =
+    inv.items.data.length + returningItems <= inv.maxItems + capDelta
 
   /** Зона карты клада (для целой карты и её половинки); None у прочих предметов. */
   private def zoneOf(item: Item): Option[pangea.model.item.MapZone] = item.details match {
