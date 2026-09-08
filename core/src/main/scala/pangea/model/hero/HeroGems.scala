@@ -66,18 +66,25 @@ final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
 
   def hasElement(e: Element): Boolean = weaponElements.contains(e)
 
-  /** Множитель стихийного урона от грейдов ВСЕХ стихийных камней в оружии:
-   *  1 + 2%·(сумма грейдов). 1.0, если стихийных камней нет. */
-  def elementalDamageMult: Double = {
-    val gradeSum = weapon.collect { case g if Element.of(g.kind).isDefined => g.grade.toLong }.sum
-    1.0 + 0.02 * gradeSum
-  }
+  /** Усиление стихии от грейдов ВСЕХ стихийных камней в оружии: +2% за грейд
+   *  (в долях: 0.02·сумма грейдов). 0, если стихийных камней нет.
+   *
+   *  Усиление НЕ множит общий урон — оно сдвигает обе стихийные грани в
+   *  ПРОЦЕНТНЫХ ПУНКТАХ: прибавляется и к множителю урона по броне, и к
+   *  множителю урона по HP. Огонь (−20% по броне, +10% по HP) с усилением 5%
+   *  бьёт на −15% по броне и +15% по HP. */
+  def elementalBoost: Double =
+    0.02 * weapon.collect { case g if Element.of(g.kind).isDefined => g.grade.toLong }.sum
 
-  /** Множитель урона по броне цели от стихий оружия (произведение armorMult). */
-  def armorDamageMult: Double = weaponElements.foldLeft(1.0)((m, e) => m * e.armorMult)
+  /** Множитель урона по броне цели: произведение armorMult стихий оружия плюс
+   *  усиление в п.п. (см. [[elementalBoost]]). Без стихий — ровно 1.0. */
+  def armorDamageMult: Double =
+    weaponElements.foldLeft(1.0)((m, e) => m * e.armorMult) + elementalBoost
 
-  /** Множитель урона по HP цели от стихий оружия (произведение hpMult). */
-  def hpDamageMult: Double = weaponElements.foldLeft(1.0)((m, e) => m * e.hpMult)
+  /** Множитель урона по HP цели: произведение hpMult стихий оружия плюс усиление
+   *  в п.п. (см. [[elementalBoost]]). Без стихий — ровно 1.0. */
+  def hpDamageMult: Double =
+    weaponElements.foldLeft(1.0)((m, e) => m * e.hpMult) + elementalBoost
 
   /** Доля урона по броне, дополнительно бьющая по HP (молния, иначе 0). */
   def lightningArmorToHpFrac: Double =

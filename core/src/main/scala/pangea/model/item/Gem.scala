@@ -81,7 +81,7 @@ object GemKind extends Enum[GemKind] {
   // ── Топаз (стихия молнии; броневая грань — шанс экипировки) ───────────────────
   case object Topaz extends GemKind("Топаз") {
     val ArmorGearChancePctPerGrade: Long = 1L
-    def weaponEffectText(g: Int): String = s"В гнезде оружия: стихия Молнии, +${2 * g}% к стихийному урону. -20% по броне; 20% урона по броне бьёт и по HP."
+    def weaponEffectText(g: Int): String = s"В гнезде оружия: стихия Молнии, +${2 * g}% к стихийному урону. -20% по броне, -10% по HP; 20% урона по броне бьёт и по HP."
     def armorEffectText(g: Int): String  = s"В гнезде снаряжения: +${ArmorGearChancePctPerGrade * g}% к шансу получения экипировки."
   }
 

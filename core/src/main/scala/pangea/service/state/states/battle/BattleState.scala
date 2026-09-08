@@ -159,10 +159,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             noWeapon =
               hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
-            // «Разбойник» (+5%) множит итоговый урон; грейды стихийных камней в
-            // оружии добавляют +2%/грейд стихийного урона (elementalDamageMult).
+            // «Разбойник» (+5%) множит итоговый урон. Усиление стихии сюда НЕ
+            // входит: оно сдвигает грани урона по броне/HP в splitElementalDamage.
             damage =
-              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult * hero.gems.elementalDamageMult).toLong
+              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult).toLong
                 .max(1L)
             attackLine = content.format(
               "battle.hit",
@@ -247,8 +247,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   }
 
   /** Разбивает `damage` на урон по броне и по HP с учётом стихийных модификаторов
-    * оружия. Без стихий (мультипликаторы = 1, доля молнии = 0) поведение прежнее:
-    * броня поглощает `min(armor, damage)`, остальное — в HP. */
+    * оружия. Здесь же учитывается усиление стихии (+2%/грейд): оно входит в
+    * `armorDamageMult`/`hpDamageMult` процентными пунктами, а не множит общий
+    * урон — см. [[pangea.model.hero.HeroGems.elementalBoost]]. Без стихий
+    * (мультипликаторы = 1, доля молнии = 0) поведение прежнее: броня поглощает
+    * `min(armor, damage)`, остальное — в HP. */
   private def splitElementalDamage(curArmor: Long, damage: Long, g: pangea.model.hero.HeroGems): (Long, Long) = {
     val rawArmorPart = math.min(curArmor, damage)
     val rawHpPart    = damage - rawArmorPart
@@ -681,10 +684,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       nowMs: Long,
       skip: Set[Long]
   ): Task[TurnResult] = {
-    // Урон навыка тоже несёт стихию оружия: грейд-множитель + раздельный урон по
-    // броне/HP. Проки стихий роллятся отдельным броском (как и на обычной атаке).
-    val scaled = (value * hero.gems.elementalDamageMult).toLong.max(1L)
-    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, scaled, hero.gems)
+    // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
+    // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, value.max(1L), hero.gems)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     val hit      = battle.copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
