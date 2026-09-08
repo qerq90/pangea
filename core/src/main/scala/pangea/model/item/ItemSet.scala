@@ -73,14 +73,12 @@ object ItemSet extends Enum[ItemSet] {
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$DefencePct% к защите."),
-      // Мобы не наносят стихийный урон — механики, которую можно ослабить, ещё нет.
-      SetBonus(4,  s"Любой стихийный урон на $ElementalTakenCutPct% слабее по вам.", active = false),
-      SetBonus(6,  s"Урон по вашей броне дополнительно снижен на $ArmorDamageCutPct%.", active = false),
+      SetBonus(4,  s"Любой стихийный урон на $ElementalTakenCutPct% слабее по вам."),
+      SetBonus(6,  s"Урон по вашей броне дополнительно снижен на $ArmorDamageCutPct%."),
       SetBonus(8,  SetRates.HpBonusText),
-      // Героя нечем поджечь: горение существует только в сторону моба.
-      SetBonus(10, s"Шанс поджечь Вас снижен на $IgniteResistPct%.", active = false),
+      SetBonus(10, s"Шанс поджечь Вас снижен на $IgniteResistPct%."),
       SetBonus(12, s"При получении урона, после которого у вас остаётся менее $LowHpThresholdPct% HP, " +
-                   s"вы восстанавливаете $ArmorRestorePct% брони.", active = false)
+                   s"вы восстанавливаете $ArmorRestorePct% брони.")
     )
   }
 

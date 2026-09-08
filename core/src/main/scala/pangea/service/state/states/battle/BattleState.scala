@@ -75,8 +75,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       hero   <- getHero(user)
       battle <- getBattle(user)
       result <- turn(hero, battle, now)
-      state  <- commit(user, result, now, renderer)
+      // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
+      // именно источник добил героя до полоски, а что за этот ход он её перешёл.
+      guarded = stoneGuardRescue(hero, result, now)
+      state  <- commit(user, guarded, now, renderer)
     } yield state
+
+  /** «Каменный страж» (порог 12): ход, за который HP героя провалилось ниже
+    * порога, поднимает ему броню. Срабатывает именно НА ПЕРЕСЕЧЕНИИ — пока герой
+    * сидит под порогом, каждый следующий удар брони уже не даёт. */
+  private def stoneGuardRescue(before: Hero, res: TurnResult, nowMs: Long): TurnResult = {
+    val hero = res.hero
+    if (!hero.sets.rescuesOnLowHp || hero.fightStats.hp <= 0) res
+    else {
+      val limit = hero.effectiveMaxHp(nowMs) * hero.sets.lowHpThresholdPct / 100L
+      if (before.fightStats.hp < limit || hero.fightStats.hp >= limit) res
+      else {
+        val maxArmor = hero.effectiveMaxArmor(nowMs)
+        val restore  = (maxArmor * hero.sets.rescueArmorPct / 100L).max(1L)
+        val newArmor = (hero.fightStats.armor + restore).min(maxArmor)
+        val gained   = newArmor - hero.fightStats.armor
+        if (gained <= 0L) res
+        else res.copy(
+          hero = hero.copy(fightStats = hero.fightStats.copy(armor = newArmor)),
+          log  = res.log :+ content.format("battle.stoneGuardRescue", "armor" -> gained.toString)
+        )
+      }
+    }
+  }
 
   /** Единственная точка записи и показа за ход. Персист итоговых
     * снаряжения+статов героя выполняется ВСЕГДА и вне ветвления по исходу —
@@ -325,7 +351,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   ): (Hero, SoloPveBattle, String) =
     battle.elemental match {
       case Some(_) if armorBeforeHit > 0 && !battle.effects.chilled =>
-        val thorns = (damageDealt * Elemental.Fire.ThornsPct / 100L).max(1L)
+        val thorns = elementalTaken(hero, battle, (damageDealt * Elemental.Fire.ThornsPct / 100L).max(1L))
         val (hurt, _) = burnHero(hero, thorns)
         val burned = battle.copy(effects = battle.effects.copy(heroBurn = Some(
           battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct)))))
@@ -357,7 +383,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         val cost = Elemental.Fire.SplashCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg     = (atk * Elemental.Fire.SplashDamageFactor).toLong.max(1L)
+          val dmg     = elementalTaken(hero, battle, (atk * Elemental.Fire.SplashDamageFactor).toLong.max(1L))
           val (h, l)  = burnHero(hero, dmg)
           val effects = next.effects.copy(heroBurn = Some(
             next.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.SplashBurnPct))))
@@ -412,12 +438,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   ): Task[(SoloPveBattle, Hero, String)] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val maxArmor = hero.effectiveMaxArmor(nowMs)
-    val damage   = atk * 2L + (maxHp * Elemental.Fire.BurstHeroStatPct / 100L) + (maxArmor * Elemental.Fire.BurstHeroStatPct / 100L)
+    val raw      = atk * 2L + (maxHp * Elemental.Fire.BurstHeroStatPct / 100L) + (maxArmor * Elemental.Fire.BurstHeroStatPct / 100L)
+    val damage   = elementalTaken(hero, battle, raw)
     // Смерч бьёт как обычная атака: сперва броня, остаток — в HP.
     val toArmor  = damage.min(hero.fightStats.armor)
     val toHp     = damage - toArmor
     val hit = hero.copy(fightStats = hero.fightStats.copy(
-      armor = hero.fightStats.armor - toArmor,
+      armor = hero.fightStats.armor - hero.sets.armorSpent(toArmor),
       hp    = (hero.fightStats.hp - toHp).max(0L)))
     val line = content.format("battle.elemental.orbBurst", "damage" -> damage.toString)
     if (toHp <= 0 || hit.fightStats.hp <= 0) ZIO.succeed((battle, hit, line))
@@ -449,13 +476,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       )
   }
 
+  /** «Каменный страж» (порог 4): стихийный урон по герою слабее на 20%.
+    * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
+    * и есть огонь: и удар, и всплеск, и смерч, и шипы, и горение. У прочих мобов
+    * стихийного урона нет, поэтому им порог ничего не режет. */
+  private def elementalTaken(hero: Hero, battle: SoloPveBattle, damage: Long): Long =
+    if (battle.elemental.isEmpty || damage <= 0L) damage
+    else (damage * hero.sets.elementalDamageTakenMult).toLong.max(1L)
+
   /** Урон герою огнём: сперва броня, остаток в HP. Возвращает героя и сколько
-    * урона реально прошло (для строки лога). */
+    * урона реально прошло (для строки лога). Расход брони режет порог 6
+    * «Каменного стража» — прикрывает она при этом всё так же. */
   private def burnHero(hero: Hero, damage: Long): (Hero, Long) = {
     val toArmor = damage.min(hero.fightStats.armor)
     val toHp    = damage - toArmor
     (hero.copy(fightStats = hero.fightStats.copy(
-       armor = hero.fightStats.armor - toArmor,
+       armor = hero.fightStats.armor - hero.sets.armorSpent(toArmor),
        hp    = (hero.fightStats.hp - toHp).max(0L))),
      damage)
   }
@@ -619,9 +655,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
-            reducedDamage =
+            impenDamage =
               if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
               else baseReduced
+            // Удар элементаля — это стихия огня, а не сталь: «Каменный страж» его режет.
+            reducedDamage = elementalTaken(hero, ticked, impenDamage)
             (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(ticked, hero, reducedDamage)
             // «Крепкость»: при обнулении брони 25% шанс одноразово восстановить 10% макс.брони.
             armorEmptied = hero.fightStats.armor > 0 && newArmor <= 0
@@ -637,7 +675,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // но не пока он скован холодом. Без элементаля бросок не тратится.
             ignites <- chanceRoll(
               ticked.elemental.isDefined && !ticked.effects.chilled,
-              Elemental.Fire.IgniteChancePct
+              (Elemental.Fire.IgniteChancePct - hero.sets.igniteResistPct).max(0L)
             )
             battleAfterAtk = ticked.copy(
               monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
@@ -796,7 +834,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val (burnedHero, burnedBattle, burnLine) = battle.effects.heroBurn match {
       case Some(burn) =>
         val maxHp = hero.effectiveMaxHp(nowMs)
-        val dmg   = burn.damageOn(maxHp)
+        val dmg   = elementalTaken(hero, battle, burn.damageOn(maxHp))
         (hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - dmg).max(0L))),
          battle.copy(effects = battle.effects.copy(heroBurn = Some(burn.grown))),
          content.format("battle.elemental.burnTick", "damage" -> dmg.toString))
@@ -1214,15 +1252,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             reducedDamage =
               if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
               else baseReduced
-            buffReduct  = math.min(battle.heroBattleState.armorBonus, reducedDamage)
-            afterBuff   = reducedDamage - buffReduct
-            curArmor    = hero.fightStats.armor.max(0L)
-            armorAbsorb = math.min(curArmor, afterBuff)
-            hpDmg       = afterBuff - armorAbsorb
-            newArmor    = curArmor - armorAbsorb
-            newHp       = (hero.fightStats.hp - hpDmg).max(0L)
+            // Удар в спину при бегстве разбирается тем же расчётом, что и обычная
+            // атака в бою: та же баффовая броня, тот же порог 6 «Каменного стража».
+            parting     = elementalTaken(hero, battle, reducedDamage)
+            (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, parting)
             hero2       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
-            mobLine     = content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)
+            mobLine     = content.format("battle.mobHit", "damage" -> parting.toString, "monster" -> monster.name)
           } yield
             if (newHp <= 0) TurnResult(hero2, battle, Vector(mobLine), Outcome.Death)
             else TurnResult(hero2, battle, Vector(mobLine), Outcome.Fled)
