@@ -86,7 +86,7 @@ object MobEnergySpec extends ZIOSpecDefault {
       def rounds(l: Long) =
         MonsterSkill.QuickStrike.cost(l).toDouble / MonsterEnergy.regen(l, Rarity.Common).toDouble
       assertTrue(MonsterEnergy.baseCost(10L) == 50L) &&   // 30 + 2×10
-      assertTrue(MonsterEnergy.maxEnergy(10L) == 150L) &&  // три обычных умения
+      assertTrue(MonsterEnergy.maxEnergy(10L) == 250L) &&  // пять базовых цен
       assertTrue(MonsterEnergy.regen(10L, Rarity.Common) == 28L) && // (15+20)×0.8
       assertTrue(rounds(150L) < rounds(1L)) &&
       // обычный моб копит четыре раунда на первом уровне и около двух на 150-м
@@ -115,8 +115,9 @@ object MobEnergySpec extends ZIOSpecDefault {
       assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 150L) &&
       // округление идёт вверх, а не вниз
       assertTrue(MonsterSkill.QuickStrike.cost(1L) == 52L) &&       // ceil(32 × 1.6) = 52
-      // расовое умение ровно втискивается в потолок запаса
-      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == MonsterEnergy.maxEnergy(lvl))
+      // после расового умения в запасе остаётся ещё на базовое
+      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) + MonsterSkill.QuickStrike.cost(lvl)
+                   <= MonsterEnergy.maxEnergy(lvl))
     },
 
     // ── Расовые пулы ──────────────────────────────────────────────────────────
