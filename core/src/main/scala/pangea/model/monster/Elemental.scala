@@ -7,14 +7,15 @@ import pangea.model.stats.FightStats
 
 /** Вид элементаля-минибосса. Все элементали — раса [[Race.Elemental]] и потому
  *  не подвержены яду и кровотечению; каждый вид дополнительно завязан на свою
- *  стихию и получает от неё свои иммунитеты и уязвимости.
+ *  стихию и получает от неё свои иммунитеты и уязвимости. Стихия вида — это не
+ *  [[Element]] оружия: земли среди камней в игре нет, а уязвимости задаёт сам
+ *  вариант через [[damageTakenMult]].
  *
  *  Статы считаются от `BossLvL` (см. [[Elemental.bossLvl]]) — базовые числа
  *  живут ЗДЕСЬ, на варианте, как у [[pangea.model.item.PassiveKind]]. */
 sealed abstract class Elemental(
   val label:    String,
-  val genitive: String,
-  val element:  Element
+  val genitive: String
 ) extends EnumEntry {
 
   /** Боевые статы элементаля на данном уровне босса. */
@@ -32,6 +33,18 @@ sealed abstract class Elemental(
 
   /** Можно ли навесить на элементаля этот эффект стихии. Огненный не горит. */
   def immuneToBurn: Boolean
+
+  /** Сколько шагов в круге его способностей (последний — пропуск хода). */
+  def abilities: Int
+
+  /** Множитель урона от оружия БЕЗ стихий вообще. Каменного голая сталь почти не
+   *  берёт; огненному всё равно. */
+  def plainDamageTakenMult: Double
+
+  /** Как его обычная атака делится по герою: доли (по броне, по HP) от урона.
+   *  None — обычный порядок «сперва броня, остаток в HP». Каменный бьёт иначе:
+   *  90% урона уходит в броню и одновременно 30% — в HP. */
+  def heroHitSplit: Option[(Double, Double)]
 
   /** Ингредиент, который остаётся после него. */
   def ingredient: MaterialKind
@@ -52,7 +65,7 @@ object Elemental extends Enum[Elemental] {
   def bossLvl(heroLvl: Long): Long = ((heroLvl - 1L) / 5L).max(1L)
 
   // ── Огненный ────────────────────────────────────────────────────────────────
-  case object Fire extends Elemental("Огненный", "Огненного", Element.Fire) {
+  case object Fire extends Elemental("Огненный", "Огненного") {
 
     val HpPerLvl: Long       = 1500L
     val ArmorPerLvl: Long    = 750L
@@ -123,6 +136,15 @@ object Elemental extends Enum[Elemental] {
     /** Огненного нельзя поджечь — он и так пламя. */
     def immuneToBurn: Boolean = true
 
+    /** Всплеск, сфера, щит и пропуск. */
+    def abilities: Int = 4
+
+    /** Голая сталь бьёт огненного как обычно. */
+    def plainDamageTakenMult: Double = 1.0
+
+    /** Бьёт как все: сперва броня, остаток в HP. */
+    def heroHitSplit: Option[(Double, Double)] = None
+
     def ingredient: MaterialKind = MaterialKind.EverburningIron
     def set: ItemSet             = ItemSet.WildFlame
 
@@ -132,6 +154,93 @@ object Elemental extends Enum[Elemental] {
      *  не поджигают, а одна из собранных сфер гаснет. */
     val ChilledTurns: Int        = 5
     val ChilledAccuracyCutPct: Long = 5L
+  }
+
+  // ── Каменный ────────────────────────────────────────────────────────────────
+  case object Stone extends Elemental("Каменный", "Каменного") {
+
+    val HpPerLvl: Long          = 1250L
+    val ArmorPerLvl: Long       = 1500L
+    val AtkPerLvl: Long         = 350L
+    val EnergyPerLvl: Long      = 100L
+    val AccuracyPerLvl: Long    = 200L
+    val EvasionPerLvl: Long     = 50L
+    val EnergyRegenPerLvl: Long = 7L
+    val ExpPerLvl: Long         = 200L
+
+    /** Голую сталь камень почти не чувствует, а вот огонь плавит его сильнее. */
+    val PlainDamageTakenPct: Long = 20L
+    val FireDamageTakenPct: Long  = 150L
+
+    /** Его обычная атака бьёт по броне и HP РАЗДЕЛЬНО: 90% и 30% от урона. */
+    val ArmorHitPct: Long = 90L
+    val HpHitPct: Long    = 30L
+
+    // ── Способности (применяются по кругу) ──────────────────────────────────
+    /** Каменный всплеск: доля атаки в урон. */
+    val SplashDamageFactor: Double = 0.5
+    val SplashCostPerLvl: Long     = 7L
+
+    /** Каменный валун: сколько валунов копится до залпа и сколько стоит каждый. */
+    val BouldersToBurst: Int    = 3
+    val BoulderCostPerLvl: Long = 14L
+    /** Залп добавляет к двойной атаке по столько % от макс. HP и брони героя. */
+    val BurstHeroStatPct: Long = 5L
+    /** Шанс травмы, если залп дошёл до HP героя. */
+    val BurstTraumaChancePct: Long = 20L
+    /** Залп вдобавок срезает герою защиту и уклонение — на сколько % и надолго. */
+    val BurstDebuffPct: Long  = 25L
+    val BurstDebuffTurns: Int = 3
+
+    /** Восстановление камня: сколько % своих максимумов он себе возвращает. */
+    val RestoreArmorPct: Long   = 20L
+    val RestoreHpPct: Long      = 5L
+    val RestoreCostPerLvl: Long = 7L
+
+    /** Вязкая земля: на сколько % режет точность и уклонение героя и надолго. */
+    val GroundCutPct: Long     = 5L
+    val GroundTurns: Int       = 3
+    val GroundCostPerLvl: Long = 4L
+
+    // ── Горение ─────────────────────────────────────────────────────────────
+    /** Подожжённый камень бьёт слабее, теряет один валун и часть потолка брони.
+     *  Текущая броня при этом не срезается — она просто больше не восстановится
+     *  выше нового потолка. */
+    val BurnedDamageCutPct: Long = 20L
+    val BurnedTurns: Int         = 3
+    val BurnedMaxArmorCut: Long  = 100L
+
+    def stats(bossLvl: Long): FightStats = FightStats(
+      atk      = AtkPerLvl * bossLvl,
+      hp       = HpPerLvl * bossLvl,
+      armor    = ArmorPerLvl * bossLvl,
+      defence  = 0L,
+      evasion  = EvasionPerLvl * bossLvl,
+      accuracy = AccuracyPerLvl * bossLvl,
+      energy   = EnergyPerLvl * bossLvl
+    )
+
+    def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
+    def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    /** Огонь плавит камень, остальные стихии бьют как обычно. */
+    def damageTakenMult(e: Element): Double = e match {
+      case Element.Fire => FireDamageTakenPct / 100.0
+      case _            => 1.0
+    }
+
+    /** Камень горит — на том и держится вся тактика против него. */
+    def immuneToBurn: Boolean = false
+
+    /** Всплеск, валун, восстановление, вязкая земля и пропуск. */
+    def abilities: Int = 5
+
+    def plainDamageTakenMult: Double = PlainDamageTakenPct / 100.0
+
+    def heroHitSplit: Option[(Double, Double)] = Some((ArmorHitPct / 100.0, HpHitPct / 100.0))
+
+    def ingredient: MaterialKind = MaterialKind.MagicStone
+    def set: ItemSet             = ItemSet.StoneGuard
   }
 
   /** Вид по названию стихии — для восстановления из сохранённого боя. */

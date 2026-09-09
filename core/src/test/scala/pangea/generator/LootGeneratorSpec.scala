@@ -181,6 +181,18 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
     },
 
+    test("с каменного падают его магические камни и фиолетовый «Каменный страж»") {
+      val items = (1L to 300L).iterator
+        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Stone, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt).toList
+      val (materials, gear) = items.partition(_.itemType == ItemType.Material)
+      assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
+      assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.MagicStone))) &&
+      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      assertTrue(gear.forall(_.set.contains(pangea.model.item.ItemSet.StoneGuard))) &&
+      assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.StoneGuard.title)))
+    },
+
     test("уровень вещи не выходит за границы игры: ни нулевого, ни 151-го") {
       def gearAt(heroLvl: Long) = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, heroLvl, Rng(s))._1)

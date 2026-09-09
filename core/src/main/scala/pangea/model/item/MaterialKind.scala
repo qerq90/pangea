@@ -34,6 +34,17 @@ object MaterialKind extends Enum[MaterialKind] {
     override val doubloonPrice: Long = 5L
   }
 
+  /** Падает с каменного элементаля; в кубе переводит вещь в «Каменного стража». */
+  case object MagicStone extends MaterialKind("Магический камень") {
+    override val description: String =
+      "Этот камень собирает вокруг себя другие камни даже лёжа в сумке. Это доставляет " +
+      "хлопоты при его очистке, а также заинтересовывает алхимиков. Говорят, что внутри " +
+      "каждого такого куска заключён крошечный осколок души каменного элементаля."
+
+    /** Ришелье платит за него золотом, как и за железо огненного. */
+    override val doubloonPrice: Long = 5L
+  }
+
   implicit val encoder: Encoder[MaterialKind] = (k: MaterialKind) => k.entryName.asJson
   implicit val decoder: Decoder[MaterialKind] = (c: HCursor) => c.as[String].map(MaterialKind.withName)
 }

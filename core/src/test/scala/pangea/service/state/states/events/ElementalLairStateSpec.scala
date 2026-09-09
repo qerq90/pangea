@@ -11,6 +11,7 @@ import pangea.service.state.UserAction
 import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
 import zio.ZIO
 import zio.test._
+import zio.test.TestRandom
 
 object ElementalLairStateSpec extends ZIOSpecDefault {
 
@@ -27,6 +28,10 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
 
   private def battleOf(dao: TestHeroDao) =
     dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+
+  // Вид элементаля логово тянет случайным индексом по Elemental.values.
+  private val fireIdx  = Elemental.values.indexOf(Elemental.Fire)
+  private val stoneIdx = Elemental.values.indexOf(Elemental.Stone)
 
   override def spec = suite("ElementalLairState")(
 
@@ -82,11 +87,12 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(screens.last.choices.map(_.id).contains("AttackElemental"))
     },
 
-    test("напасть → бой с элементалем: раса, статы по BossLvL и вид записаны") {
+    test("напасть на огненного → бой: раса, статы по BossLvL и вид записаны") {
       // Уровень героя 15 → BossLvL = (15−1)/5 = 2.
       for {
         t <- makeState(heroLvl = 15L)
         (state, dao, renderer) = t
+        _      <- TestRandom.feedInts(fireIdx)
         _      <- state.action(testUser, tap("ApproachElemental"), renderer)
         result <- state.action(testUser, tap("AttackElemental"), renderer)
         battle <- battleOf(dao).map(_.get)
@@ -102,6 +108,34 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(battle.monsterStats.energy == 150L * 2L) &&
               assertTrue(battle.monsterStats.defence == 0L) &&
               assertTrue(scene.contains(Json.Null)) // сцену освободили для боя
+    },
+
+    test("напасть на каменного → его собственные статы по BossLvL") {
+      for {
+        t <- makeState(heroLvl = 15L)
+        (state, dao, renderer) = t
+        _      <- TestRandom.feedInts(stoneIdx)
+        _      <- state.action(testUser, tap("ApproachElemental"), renderer)
+        result <- state.action(testUser, tap("AttackElemental"), renderer)
+        battle <- battleOf(dao).map(_.get)
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(battle.elemental.contains(Elemental.Stone)) &&
+              assertTrue(battle.monsterStats.hp == 1250L * 2L) &&
+              assertTrue(battle.monsterStats.armor == 1500L * 2L) &&
+              assertTrue(battle.monsterStats.atk == 350L * 2L) &&
+              assertTrue(battle.monsterStats.accuracy == 200L * 2L) &&
+              assertTrue(battle.monsterStats.evasion == 50L * 2L) &&
+              assertTrue(battle.monsterStats.energy == 100L * 2L) &&
+              assertTrue(battle.monsterStats.defence == 0L) &&
+              // энергии он копит по 7 за уровень босса, как и огненный
+              assertTrue(Elemental.Stone.energyRegen(2L) == 14L) &&
+              assertTrue(Elemental.Stone.expReward(2L) == 400L)
+    },
+
+    test("в логове поровну шансов встретить огненного и каменного") {
+      // Вид тянется случайным индексом по всем видам — их ровно два, значит 50/50.
+      assertTrue(Elemental.values.size == 2) &&
+      assertTrue(Elemental.values.toSet[Elemental] == Set[Elemental](Elemental.Fire, Elemental.Stone))
     },
 
     test("уйти → возврат в лабиринт, сцена очищена") {

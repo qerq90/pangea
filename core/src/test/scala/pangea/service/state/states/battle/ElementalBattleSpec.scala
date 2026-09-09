@@ -39,7 +39,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
     SoloPveBattle.from(monster, hero()).copy(
       elementalKind        = Some(Elemental.Fire.entryName),
       elementalTurn        = turn,
-      fireOrbs             = orbs,
+      elementalCharges     = orbs,
       monsterCurrentEnergy = energy,
       monsterCurrentHp     = stats.hp * hpPct / 100L,
       monsterCurrentArmor  = stats.armor * armorPct / 100L
@@ -99,10 +99,10 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         _        <- s3.action(testUser, tap("Attack"), r3)
         third    <- battleAfter(dao3)
         screens3 <- r3.sentScreens
-      } yield assertTrue(first.fireOrbs == 1) &&
+      } yield assertTrue(first.elementalCharges == 1) &&
               assertTrue(screens1.map(_.text).mkString.contains("собралось в левитирующую сферу")) &&
               // третья сфера сразу бьёт и счётчик обнуляется
-              assertTrue(third.fireOrbs == 0) &&
+              assertTrue(third.elementalCharges == 0) &&
               assertTrue(screens3.map(_.text).mkString.contains("соединились в смерч"))
     },
 

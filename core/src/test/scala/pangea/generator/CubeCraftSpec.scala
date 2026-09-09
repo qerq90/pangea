@@ -106,6 +106,25 @@ object CubeCraftSpec extends ZIOSpecDefault {
       assertTrue(result.items.size == 1)
     },
 
+    test("вещь + магический камень → та же вещь набора «Каменный страж»") {
+      val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
+        attack = 42, accuracy = 7, energy = 3, armor = 0, defence = 2, evasion = 1)
+      val stone  = MaterialGenerator.item(MaterialKind.MagicStone).copy(id = 2L)
+      val result = CubeCraft.craft(List(axe, stone), charges = 50, rng)
+      val made   = result.items.find(_.set.contains(ItemSet.StoneGuard))
+      assertTrue(result.chargesUsed == 1) &&
+      assertTrue(made.isDefined) &&
+      // характеристики, уровень, редкость и слот сохранены полностью
+      assertTrue(made.exists(i => i.attack == 42 && i.accuracy == 7 && i.energy == 3 &&
+                                  i.defence == 2 && i.evasion == 1)) &&
+      assertTrue(made.exists(i => i.lvl == 30L && i.rarity == Rarity.Violet && i.itemType == ItemType.Weapon)) &&
+      // третье слово названия уступило место имени набора
+      assertTrue(made.exists(_.name.endsWith(ItemSet.StoneGuard.title))) &&
+      assertTrue(made.exists(!_.name.contains("Дворянина"))) &&
+      assertTrue(!result.items.exists(_.material.contains(MaterialKind.MagicStone))) &&
+      assertTrue(result.items.size == 1)
+    },
+
     test("без железа вещь в набор не переводится") {
       val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
         attack = 42, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
