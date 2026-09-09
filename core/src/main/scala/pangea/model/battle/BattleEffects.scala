@@ -72,6 +72,11 @@ object Burn {
   /** Свежий поджог. */
   def onIgnite: Burn = Burn(Initial)
 
+  /** Горение силы `pct`, либо None, если пламя выгорело (≤0). Через него лечение
+   *  тратит горение: `HealWeakenBase` процентных пунктов уходит на ослабление
+   *  самого лечения, а гореть остаётся излишек. */
+  def of(pct: Int): Option[Burn] = if (pct <= 0) None else Some(Burn(pct))
+
   implicit val encoder: Encoder[Burn] = deriveEncoder
   implicit val decoder: Decoder[Burn] = deriveDecoder
 }

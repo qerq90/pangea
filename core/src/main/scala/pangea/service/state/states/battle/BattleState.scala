@@ -645,16 +645,28 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       battle: SoloPveBattle,
       raw: Long,
       nowMs: Long
-  ): (Long, Long, Option[String]) = {
-    val maxHp  = hero.effectiveMaxHp(nowMs)
-    val burn   = battle.effects.heroBurn
-    val amount = burn.fold(raw)(b => (raw * (100 - b.healWeakenPct).max(0) / 100).max(0L))
-    val newHp  = (hero.fightStats.hp + amount).min(maxHp)
-    val line   = burn
-      .filter(_ => amount < raw)
-      .map(b => content.format("battle.burnEatsHeal", "pct" -> b.healWeakenPct.min(100).toString))
-    (newHp, newHp - hero.fightStats.hp, line)
-  }
+  ): (Long, Long, SoloPveBattle, Option[String]) =
+    battle.effects.heroBurn match {
+      case None =>
+        val newHp = (hero.fightStats.hp + raw).min(hero.effectiveMaxHp(nowMs))
+        (newHp, newHp - hero.fightStats.hp, battle, None)
+
+      case Some(burn) =>
+        // Ослабление = 50% базовых + текущий процент горения. Пламя при этом
+        // ТРАТИТСЯ: базовые 50 п.п. оно гасит собой, поэтому горение до 50%
+        // сгорает целиком, а сверх того остаётся гореть излишек (51% → 1%).
+        val cut     = burn.healWeakenPct.min(100)
+        val amount  = (raw * (100 - cut) / 100).max(0L)
+        val newHp   = (hero.fightStats.hp + amount).min(hero.effectiveMaxHp(nowMs))
+        val left    = Burn.of(burn.pct - Burn.HealWeakenBase)
+        val updated = battle.copy(effects = battle.effects.copy(heroBurn = left))
+        val line = left match {
+          case None    => Some(content.format("battle.burnEatsHealOut", "pct" -> cut.toString))
+          case Some(b) => Some(content.format("battle.burnEatsHeal",
+                                 "pct" -> cut.toString, "left" -> b.pct.toString))
+        }
+        (newHp, newHp - hero.fightStats.hp, updated, line)
+    }
 
   /** «Каменный страж» (порог 4): стихийный урон по герою слабее на 20%.
     * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
@@ -1194,10 +1206,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         case Skill.Effect.Heal =>
           // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
           val full = (raw * hero.passives.healMult).toLong.max(1L)
-          val (newHp, healed, cutLine) = activeHeal(hero, bumped, full, nowMs)
+          val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, bumped, full, nowMs)
           val healedHero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp))
           val lines      = Vector(tmpl.replace("{}", healed.toString)) ++ cutLine
-          playerStrike(healedHero, bumped, nowMs, lines, skip)
+          playerStrike(healedHero, healedBattle, nowMs, lines, skip)
 
         case Skill.Effect.RepairArmor =>
           val (newStats, gained) = repairArmor(hero, raw, nowMs)
@@ -1294,13 +1306,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       case f: ItemDetails.Flask =>
         quickHandsRoll(hero).map { case (consumed, qhLog) =>
           val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
-          val updatedBattle = battle.copy(consumableUsedThisRound = consumed)
+          val usedBattle    = battle.copy(consumableUsedThisRound = consumed)
           f.effect match {
             case FlaskEffect.HealPercent(pct) =>
               val maxHp    = hero.effectiveMaxHp(nowMs)
               // «Целитель» множит лечение фляги на 1.1, дальше — общий расчёт.
               val fullHeal = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
-              val (newHp, healed, cutLine) = activeHeal(hero, battle, fullHeal, nowMs)
+              val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, battle, fullHeal, nowMs)
               // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
               val maxEn      = hero.maxEnergy(nowMs)
               val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
@@ -1314,10 +1326,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 "energy" -> energyBack.toString
               )
               val lines = (Vector(msg) ++ cutLine) ++ qhLog
-              TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats), updatedBattle, lines, Outcome.Continue)
+              // Бой берём из расчёта лечения — в нём уже потраченное горение.
+              TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats),
+                healedBattle.copy(consumableUsedThisRound = consumed), lines, Outcome.Continue)
             case FlaskEffect.AddBuff(buff, rounds) =>
               val timedBuff = buff.copy(turnsLeft = Some(rounds))
-              val newBattle = updatedBattle.copy(heroBattleState = updatedBattle.heroBattleState.add(timedBuff))
+              val newBattle = usedBattle.copy(heroBattleState = usedBattle.heroBattleState.add(timedBuff))
               TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog, Outcome.Continue)
           }
         }
@@ -1363,10 +1377,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         val maxHp = hero.effectiveMaxHp(nowMs)
         // «Целитель» множит лечение зелья на 1.1, дальше — общий расчёт.
         val full  = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
-        val (newHp, healed, cutLine) = activeHeal(hero, battle, full, nowMs)
+        val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, battle, full, nowMs)
         val line  = content.format("battle.beltHeal",
                       "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString)
-        (hero.fightStats.copy(hp = newHp), battle, (line +: cutLine.toVector).mkString("\n"))
+        (hero.fightStats.copy(hp = newHp), healedBattle, (line +: cutLine.toVector).mkString("\n"))
 
       case PotionKind.Metal =>
         val maxArmor = hero.effectiveMaxArmor(nowMs)
