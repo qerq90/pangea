@@ -44,7 +44,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       azat <- AzatData.load(heroDao, user.userId, now)
-      _    <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now)))
+      _    <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now), azat.instantRests))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -55,7 +55,8 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       _    <- if (hero.upgradePoints <= 0)
-                renderer.show(user, Screen(content.text("heroStats.noPoints"), buildStatsScreen(hero, now, blessed = false).choices))
+                renderer.show(user, Screen(content.text("heroStats.noPoints"),
+                  buildStatsScreen(hero, now, blessed = false, instantRests = 0).choices))
               else {
                 val text = content.format("heroStats.upgradeScreen", "points" -> hero.upgradePoints.toString)
                 val choices = List(
@@ -113,7 +114,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     }
   }
 
-  private def buildStatsScreen(hero: Hero, nowMs: Long, blessed: Boolean): Screen = {
+  private def buildStatsScreen(hero: Hero, nowMs: Long, blessed: Boolean, instantRests: Int): Screen = {
     val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
       val names = hero.activeTraumas(nowMs).map(_.name)
       val namesStr = if (names.isEmpty) "Травмы" else names.mkString(", ")
@@ -131,7 +132,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
         content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
       Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
     ).flatten
-    Screen(hero.getInfo(nowMs, blessed) + traumaLine, choices)
+    Screen(hero.getInfo(nowMs, blessed, instantRests) + traumaLine, choices)
   }
 
   private def getHero(user: User): Task[Hero] =

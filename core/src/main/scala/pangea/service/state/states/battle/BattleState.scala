@@ -427,7 +427,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // Шипы — особенность огненного: о каменного руки не обжигают.
       case Some(MiniBoss.FireElemental) if armorBeforeHit > 0 && !battle.effects.chilled =>
         val thorns = bossDamageTaken(hero, battle, (damageDealt * MiniBoss.FireElemental.ThornsPct / 100L).max(1L))
-        val (hurt, _) = burnHero(hero, thorns)
+        val (hurt, _) = hurtHero(hero, thorns)
         val burned = battle.copy(effects = battle.effects.copy(heroBurn = Some(
           battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct)))))
         (hurt, burned, content.format("battle.elemental.thorns", "damage" -> thorns.toString))
@@ -471,7 +471,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
           val dmg     = bossDamageTaken(hero, battle, (atk * MiniBoss.FireElemental.SplashDamageFactor).toLong.max(1L))
-          val (h, l)  = burnHero(hero, dmg)
+          val (h, l)  = hurtHero(hero, dmg)
           val effects = next.effects.copy(heroBurn = Some(
             next.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.SplashBurnPct))))
           ZIO.succeed((spend(cost, next).copy(effects = effects), h,
@@ -608,7 +608,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         else {
           val dmg      = bossDamageTaken(hero, battle, (monsterAttack(battle) * joe.SweepDamageFactor).toLong.max(1L))
           val hpBefore = hero.fightStats.hp
-          val (hurt, dealt) = burnHero(hero, dmg)
+          val (hurt, dealt) = hurtHero(hero, dmg)
           val line     = content.format("battle.joe.sweep", "damage" -> dealt.toString)
           val spent    = spend(cost, next)
           if (hurt.fightStats.hp >= hpBefore || hurt.fightStats.hp <= 0)
@@ -658,7 +658,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
           val dmg    = bossDamageTaken(hero, battle, (atk * MiniBoss.StoneElemental.SplashDamageFactor).toLong.max(1L))
-          val (h, l) = burnHero(hero, dmg)
+          val (h, l) = hurtHero(hero, dmg)
           ZIO.succeed((spend(cost, next), h,
             content.format("battle.elemental.stoneSplash", "damage" -> l.toString)))
         }
@@ -781,10 +781,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     if (battle.boss.isEmpty || damage <= 0L) damage
     else (damage * hero.sets.elementalDamageTakenMult).toLong.max(1L)
 
-  /** Урон герою огнём: сперва броня, остаток в HP. Возвращает героя и сколько
-    * урона реально прошло (для строки лога). Расход брони режет порог 6
-    * «Каменного стража» — прикрывает она при этом всё так же. */
-  private def burnHero(hero: Hero, damage: Long): (Hero, Long) = {
+  /** Урон герою от способности минибосса: сперва броня, остаток в HP. Сам по
+    * себе НИЧЕГО не поджигает — пламя вешает тот, кто им владеет. Возвращает
+    * героя и сколько урона реально прошло (для строки лога). Расход брони режет
+    * порог 6 «Каменного стража» — прикрывает она при этом всё так же. */
+  private def hurtHero(hero: Hero, damage: Long): (Hero, Long) = {
     val toArmor = damage.min(hero.fightStats.armor)
     val toHp    = damage - toArmor
     (hero.copy(fightStats = hero.fightStats.copy(
@@ -984,19 +985,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               if (toughTriggered) (hero.effectiveMaxArmor(nowMs) * PassiveKind.Toughness.RestorePct / 100L).max(1L) else 0L
             // «Шипастый»: вернуть 5% полученного урона врагу (по HP моба, мимо брони).
             thorns = if (hero.passives.hasSpiky) (reducedDamage * PassiveKind.Spiky.ThornsPct / 100L).max(1L) else 0L
-            // Обычная атака огненного элементаля поджигает героя с шансом 50% —
-            // но не пока он скован холодом. Без элементаля бросок не тратится.
+            // Поджигает героя обычной атакой только тот, у кого огонь в природе
+            // (огненный элементаль), и только пока не скован холодом. У камня и
+            // гнили шанс нулевой, поэтому бросок у них не тратится.
+            igniteChance = ticked.boss.map(_.heroIgniteChancePct).getOrElse(0L)
             ignites <- chanceRoll(
-              ticked.boss.isDefined && !ticked.effects.chilled,
-              (MiniBoss.FireElemental.IgniteChancePct - hero.sets.igniteResistPct).max(0L)
+              igniteChance > 0L && !ticked.effects.chilled,
+              (igniteChance - hero.sets.igniteResistPct).max(0L)
             )
+            burnPct = ticked.boss.map(_.heroIgniteBurnPct).getOrElse(0)
             battleAfterAtk = ticked.copy(
               monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
               toughnessUsed    = ticked.toughnessUsed || toughTriggered,
               effects =
                 if (!ignites) ticked.effects
                 else ticked.effects.copy(heroBurn = Some(
-                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct))))
+                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
             )
             lines = List(
               Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> ticked.monsterName)),

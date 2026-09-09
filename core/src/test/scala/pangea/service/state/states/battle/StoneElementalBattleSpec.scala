@@ -114,7 +114,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       for {
         first  <- strike(h, lairBattle(h, turn = 1, charges = 0), seedTurn(100))
         second <- strike(h, lairBattle(h, turn = 1, charges = 1), seedTurn(100))
-        third  <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 100))
+        third  <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100))
       } yield assertTrue(first._2.bossCharges == 1) &&
               assertTrue(first._3.contains("груда камней соединилась в один Валун")) &&
               assertTrue(second._2.bossCharges == 2) &&
@@ -125,7 +125,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
     test("россыпь сбивает с ног: защита и уклонение героя срезаны на 3 раунда") {
       val h = hero()
       for {
-        r <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 100))
+        r <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100))
         (_, after, log) = r
       } yield assertTrue(after.effects.heroStunnedTurns == MiniBoss.StoneElemental.BurstDebuffTurns) &&
               assertTrue(after.effects.heroStunned) &&
@@ -135,10 +135,11 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
     test("россыпь с шансом 20% даёт травму, как при смерти") {
       val h = hero()
       for {
-        // 100 — прок стихий не выпал, 5 — бросок травмы прошёл (≤ 20)
-        withT <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 5))
+        // 5 — бросок травмы прошёл (≤ 20). Каменный героя не поджигает, значит
+        // бросок поджога в очереди не тратится и травме достаётся третье число.
+        withT <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(5))
         // 100 — бросок травмы не прошёл
-        noT   <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 100))
+        noT   <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100))
       } yield assertTrue(withT._3.contains("вы получили травму")) &&
               assertTrue(withT._1.traumaNames.nonEmpty) &&
               assertTrue(!noT._3.contains("вы получили травму")) &&
@@ -280,6 +281,22 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
     test("каменный горит: он не огонь, и поджог на нём держится") {
       assertTrue(!MiniBoss.StoneElemental.immuneToBurn) &&
       assertTrue(MiniBoss.FireElemental.immuneToBurn)
+    },
+
+    // Регрессия: условие поджога стояло на «есть минибосс», а не на «это огненный»,
+    // из-за чего обычные удары камня (и Джо) поджигали героя чужим огнём.
+    test("обычная атака камня НЕ поджигает героя — огонь только у огненного") {
+      val h = hero()
+      def burnedAfter(seed: Int) =
+        strike(h, lairBattle(h, turn = 4, armorPct = 0L), seedTurn(seed))
+          .map { case (_, after, log) => (after.effects.heroBurn, log) }
+      for {
+        low  <- burnedAfter(1)   // бросок, который у огненного поджёг бы наверняка
+        high <- burnedAfter(100)
+      } yield assertTrue(MiniBoss.StoneElemental.heroIgniteChancePct == 0L) &&
+              assertTrue(MiniBoss.FireElemental.heroIgniteChancePct == 50L) &&
+              assertTrue(low._1.isEmpty) && assertTrue(high._1.isEmpty) &&
+              assertTrue(!low._2.contains("Удар элементаля поджёг вас"))
     },
 
     test("шипов у камня нет: об него не обжигаются") {

@@ -56,6 +56,28 @@ object AzatBlessingSpec extends ZIOSpecDefault {
       assertTrue(extended.blessingActive(noon + 9 * day))
     },
 
+    test("сутки закрываются в 00:00 по Москве, а не по UTC") {
+      // 21:30 UTC — это уже 00:30 следующего дня в Москве.
+      val eveningUtc = 21L * 3600000L + 1800000L
+      val azat = AzatState(blessingUntil = Some(eveningUtc + 30 * day), restsGrantedAt = Some(eveningUtc - 3600000L))
+      assertTrue(AzatState.MoscowOffsetMs == 3L * 60L * 60L * 1000L) &&
+      // по UTC полночь ещё не наступила, по МСК — уже прошла
+      assertTrue(azat.withDailyRests(eveningUtc).instantRests == 50) &&
+      assertTrue(AzatState.midnightsBetween(eveningUtc - 3600000L, eveningUtc) == 1L)
+    },
+
+    test("в карточке персонажа виден остаток быстрых отдыхов") {
+      val hero = TestFixtures.hero(UserId(1L))
+      val card = hero.getInfo(0L, blessed = true, instantRests = 137)
+      // Отдыхи остаются и после конца благословения — показываем их и без него.
+      val expired = hero.getInfo(0L, blessed = false, instantRests = 5)
+      assertTrue(card.contains("⚡ Быстрых отдыхов: 137")) &&
+      assertTrue(expired.contains("⚡ Быстрых отдыхов: 5")) &&
+      assertTrue(!expired.contains("Благословение")) &&
+      // без зарядов строки нет вовсе
+      assertTrue(!hero.getInfo(0L).contains("Быстрых отдыхов"))
+    },
+
     test("в карточке персонажа строка про благословение стоит под опытом") {
       val hero    = TestFixtures.hero(UserId(1L))
       val blessed = hero.getInfo(0L, blessed = true)

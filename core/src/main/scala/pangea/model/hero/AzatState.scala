@@ -44,7 +44,7 @@ case class AzatState(
   /** Доначисляет мгновенные отдыхи за каждые прошедшие сутки благословения.
    *  Начисление ЛЕНИВОЕ: полуночи считаются от последней выдачи до «сейчас» (но
    *  не дальше конца благословения), поэтому отдыхи не теряются, даже если игрок
-   *  в полночь не заходил. Сутки считаются по UTC.
+   *  в полночь не заходил. Полночь — московская.
    *
    *  Возвращает состояние как есть, если благословения нет или новых суток не
    *  набралось — вызывающему достаточно сравнить с исходным. */
@@ -89,11 +89,15 @@ object AzatState {
   /** Шанс (в %) дополнительной добычи после боя при благословении. */
   val BlessingExtraDropPct: Long = 5L
 
-  /** Сколько полуночей (UTC) прошло между двумя моментами. */
+  /** Сколько московских полуночей прошло между двумя моментами. Часы игры идут
+   *  по МСК: сутки закрываются в 00:00 московского времени, а не UTC. */
   def midnightsBetween(fromMs: Long, toMs: Long): Long =
-    if (toMs <= fromMs) 0L else toMs / DayMs - fromMs / DayMs
+    if (toMs <= fromMs) 0L
+    else (toMs + MoscowOffsetMs) / DayMs - (fromMs + MoscowOffsetMs) / DayMs
 
   private val DayMs: Long = 24L * 60L * 60L * 1000L
+  /** Москва — UTC+3 круглый год (перевода часов нет с 2014-го). */
+  val MoscowOffsetMs: Long = 3L * 60L * 60L * 1000L
 
   implicit val encoder: Encoder[AzatState] = deriveEncoder[AzatState]
   implicit val decoder: Decoder[AzatState] = deriveDecoder[AzatState]
