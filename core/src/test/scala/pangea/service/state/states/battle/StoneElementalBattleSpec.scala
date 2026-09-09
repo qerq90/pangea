@@ -209,6 +209,21 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
               assertTrue(MiniBoss.StoneElemental.damageTakenMult(pangea.model.battle.Element.Fire) == 1.5)
     },
 
+    // Регрессия: в лог шёл СЫРОЙ урон, до сопротивления камня. Игрок читал
+    // «357 урона», а брони снималось 70 — и это выглядело как обман.
+    test("в логе стоит урон, который реально прошёл, а не заявленный") {
+      val h = hero()
+      for {
+        r <- strike(h, lairBattle(h, turn = 4), seedTurn(100))
+        (_, after, log) = r
+        dealtArmor = MiniBoss.StoneElemental.stats(bossLvl).armor - after.monsterCurrentArmor
+        dealtHp    = MiniBoss.StoneElemental.stats(bossLvl).hp - after.monsterCurrentHp
+        shown      = """Вы наносите (\d+) урона""".r.findFirstMatchIn(log).map(_.group(1).toLong)
+      } yield assertTrue(shown.contains(dealtArmor + dealtHp)) &&
+              // голую сталь камень берёт на 20% — заявленный удар был впятеро больше
+              assertTrue(shown.exists(_ < h.fightStats.atk))
+    },
+
     test("его удар бьёт раздельно: 90% в броню и 30% в HP — броня не спасает") {
       val h = hero(armor = 500000L)
       for {

@@ -239,16 +239,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             damage =
               (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult).toLong
                 .max(1L)
-            attackLine = content.format(
-              "battle.hit",
-              "damage"  -> damage.toString,
-              "monster" -> battle.monsterName
-            )
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
-            // Сопротивление элементаля стихии оружия — до разбивки по броне/HP.
+            // Сопротивление минибосса стихии оружия — до разбивки по броне/HP.
             resisted = (damage * bossResistance(hero, battle)).toLong.max(1L)
             (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
+            // В лог идёт то, что РЕАЛЬНО ушло в цель: сырое число сбивало с толку
+            // там, где сопротивление режет удар в разы (каменного элементаля голая
+            // сталь берёт на 20%, и «357 урона» превращались в 71 снятой брони).
+            attackLine = content.format(
+              "battle.hit",
+              "damage"  -> (armorDmg + hpDmg).toString,
+              "monster" -> battle.monsterName
+            )
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
             // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
@@ -1292,7 +1295,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       result <- slot.skill.effect match {
         case Skill.Effect.Damage(reducedByDefence) =>
           val value = if (reducedByDefence) reduced else raw
-          dealSkillDamage(hero, bumped, value, tmpl.replace("{}", value.toString), nowMs, skip)
+          dealSkillDamage(hero, bumped, value, dealt => tmpl.replace("{}", dealt.toString), nowMs, skip)
 
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
@@ -1300,8 +1303,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           val bled     = bumped.withEffects(bumped.effects.copy(monsterBleed = Some(stacked)))
           // Отдельное сообщение «истекает кровью» убрано — прок уже виден по
           // компактному индикатору (🔴 -N ❤), приписанному к строке атаки.
-          val bleedMsg = tmpl.replace("{}", raw.toString)
-          dealSkillDamage(hero, bled, raw, bleedMsg, nowMs, skip)
+          dealSkillDamage(hero, bled, raw, dealt => tmpl.replace("{}", dealt.toString), nowMs, skip)
 
         case Skill.Effect.WeakSpotStrike =>
           for {
@@ -1309,8 +1311,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             chance = (2L * hero.effectiveBaseStats(nowMs).int - battle.monsterLvl).max(0L).min(95L)
             doubled = roll <= chance
             value   = if (doubled) raw * 2L else raw
-            line    = tmpl.replace("{}", value.toString) +
-                      (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
+            line: (Long => String) = (dealt: Long) =>
+              tmpl.replace("{}", dealt.toString) +
+                (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
             r <- dealSkillDamage(hero, bumped, value, line, nowMs, skip)
           } yield r
 
@@ -1320,7 +1323,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           // во всех ветках победы — HP-цена не теряется при добивании базовой атакой.
           val hpLost      = (hero.fightStats.hp * Skill.BloodHarvestHpCostPct / 100L).max(0L)
           val woundedHero = hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - hpLost).max(1L)))
-          val line        = tmpl.replaceFirst("\\{\\}", raw.toString).replaceFirst("\\{\\}", hpLost.toString)
+          // Первый {} — урон по цели (пишем фактический), второй — цена крови героя.
+          val line: Long => String = dealt =>
+            tmpl.replaceFirst("\\{\\}", dealt.toString).replaceFirst("\\{\\}", hpLost.toString)
           dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
 
         case Skill.Effect.Heal =>
@@ -1348,11 +1353,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * без базовой атаки; иначе — базовая атака игрока тем же ходом. Никаких записей
     * в БД: итог (в т.ч. изменённые статы героя) уезжает в TurnResult и
     * персистится в commit. */
+  /** `line` — шаблон строки умения: получает урон, который РЕАЛЬНО прошёл по
+    * цели (после сопротивления минибосса и граней стихий), а не заявленный. */
   private def dealSkillDamage(
       hero: Hero,
       battle: SoloPveBattle,
       value: Long,
-      skillLine: String,
+      line: Long => String,
       nowMs: Long,
       skip: Set[Long]
   ): Task[TurnResult] = {
@@ -1363,6 +1370,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
     val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
+    val skillLine         = line(armorDmg + hpDmg)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
