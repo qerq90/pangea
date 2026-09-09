@@ -65,6 +65,12 @@ case class SoloPveBattle(
   def toMonster: Monster =
     Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
 
+  /** Имя моба для лога и экрана боя. У минибосса оно именное и приходит от вида
+   *  («Огненный Элементаль»); у обычных мобов — из таблицы раса × редкость.
+   *  Держим его ЗДЕСЬ, а не в [[Monster]]: тот читается из таблицы `monsters`
+   *  целиком (`select *`), и лишнее поле сломало бы чтение. */
+  def monsterName: String = elemental.map(_.monsterName).getOrElse(toMonster.name)
+
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
   /** Тик в конце хода игрока. `skipSlots` — itemId слотов, кулдауны которых не

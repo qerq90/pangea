@@ -181,7 +181,6 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val hero = if (isRepeat) hero0 else hero0.withCombatRegen(nowMs)
     for {
       buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
-      monster   = battle.toMonster
       hitRoll <- Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
       // Попадание считается как hitRoll(1..100) > dodge, т.е. фактический шанс =
@@ -203,7 +202,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             attackLine = content.format(
               "battle.hit",
               "damage"  -> damage.toString,
-              "monster" -> monster.name
+              "monster" -> battle.monsterName
             )
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
@@ -262,7 +261,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             (thornedHero, thornedBattle, thornsLine) = thornsResult
             log1 = log :+ (attackLine + dotIndicators(thornedBattle))
             log2 =
-              if (poisonsNow || gemPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> monster.name)
+              if (poisonsNow || gemPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
               else log1
             log3 =
               if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
@@ -686,10 +685,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                   ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct))))
             )
             lines = List(
-              Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> monster.name)),
+              Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> ticked.monsterName)),
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
-              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> monster.name)),
+              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> ticked.monsterName)),
               Option.when(ignites)(content.text("battle.elemental.ignites"))
             ).flatten.mkString("\n")
           } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
@@ -700,7 +699,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               hero.fightStats.armor,
               content.format(
                 "battle.mobMiss",
-                "monster" -> monster.name,
+                "monster" -> ticked.monsterName,
                 "chance"  -> mobHitPct.toString
               ),
               ticked
@@ -781,7 +780,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         case None => battleAfterHero
       }
       (tickedBattle, monsterEffectLine, bleedDealt) =
-        if (heroAlive) tickMonsterEffects(battleWithEnergy, monster.name, tickedHero.sets.burnGrowthMult)
+        if (heroAlive) tickMonsterEffects(battleWithEnergy, ticked.monsterName, tickedHero.sets.burnGrowthMult)
         else (battleWithEnergy, "", 0L)
       // «Упырь» (порог 10): чужая кровь идёт герою в лечение.
       heroFedByBleed =
@@ -1257,7 +1256,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             parting     = elementalTaken(hero, battle, reducedDamage)
             (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, parting)
             hero2       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
-            mobLine     = content.format("battle.mobHit", "damage" -> parting.toString, "monster" -> monster.name)
+            mobLine     = content.format("battle.mobHit", "damage" -> parting.toString, "monster" -> battle.monsterName)
           } yield
             if (newHp <= 0) TurnResult(hero2, battle, Vector(mobLine), Outcome.Death)
             else TurnResult(hero2, battle, Vector(mobLine), Outcome.Fled)
@@ -1353,7 +1352,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon)
       )
     } yield VictoryOutcome(
-      monsterName       = monster.name,
+      monsterName       = battle.monsterName,
       expGained         = expGained,
       newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
       unlocksDarkness   = unlocksDarkness,
@@ -1459,7 +1458,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val heroArmorRegen = if (armorRegen > 0) s" (+$armorRegen)" else ""
     val text = content.format(
       "battle.enter.text",
-      "monster"         -> battle.toMonster.name,
+      "monster"         -> battle.monsterName,
       "monsterRace"     -> battle.toMonster.race.toString,
       "monsterHp"       -> battle.monsterCurrentHp.toString,
       "monsterMax"      -> battle.monsterStats.hp.toString,

@@ -1,8 +1,8 @@
 package pangea.service.state.states.merchant
 
 import pangea.engine.SceneContent
-import pangea.generator.item.GemGenerator
-import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, Rarity, TrophyKind}
+import pangea.generator.item.{GemGenerator, MaterialGenerator}
+import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, MaterialKind, Rarity, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -298,6 +298,36 @@ object MerchantStateSpec extends ZIOSpecDefault {
         _ <- state.action(testUser, tap("SellJunk"), renderer)
       } yield assertTrue(invRepo.snapshot.map(_.id) == List(1L)) && // серый предмет уцелел
               assertTrue(MerchantState.isJunk(trophyItem(2L), s))   // а трофей — нет
+    },
+
+    test("материалы крафта не хлам: вечно огненное железо серое, но в скупку не идёт") {
+      val all = JunkRarityGroups.flatMap(_.rarities).toSet
+      val s   = JunkSaleSettings(rarities = all, passives = true, actives = true, trophies = true)
+      val iron = MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 2L)
+      for {
+        t <- makeState(richHero, items = List(gear(1L, Rarity.Gray), iron))
+        (state, _, invRepo, renderer) = t
+        _ <- state.action(testUser, tap("SellJunk"), renderer)
+      } yield assertTrue(!MerchantState.isJunk(iron, s)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(2L)) // серый предмет ушёл, железо осталось
+    },
+
+    test("вечно огненное железо Ришелье выкупает за 5 дублонов, а не за серебро") {
+      val iron = MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 2L)
+      for {
+        t <- makeState(richHero, items = List(iron))
+        (state, heroDao, invRepo, renderer) = t
+        _       <- state.action(testUser, tap("Sell"), renderer)
+        _       <- state.action(testUser, tap("SellItem_2"), renderer)
+        confirm <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tap("ConfirmSellItem"), renderer)
+        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+        screens <- renderer.sentScreens
+      } yield assertTrue(confirm.text.contains("🟡 Цена продажи: 5")) &&
+              assertTrue(hero.doubloons == 5L) &&
+              assertTrue(hero.silver == richHero.silver) && // серебро не тронуто
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(screens.map(_.text).mkString.contains("за 5 🟡"))
     },
 
     test("камни не продаются даже при включённых трофеях") {

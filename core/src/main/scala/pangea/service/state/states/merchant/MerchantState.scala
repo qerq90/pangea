@@ -162,8 +162,11 @@ case class MerchantState(
       _ <- items.find(_.id == itemId) match {
         case None => showSellList(user, renderer, 0).unit
         case Some(item) =>
-          val price = sellPrice(item)
-          val text  = s"${itemDesc(item)}\n🪙 Цена продажи: $price"
+          // Материалы Ришелье выкупает золотом — цену показываем в дублонах.
+          val gold = doubloonPrice(item)
+          val text =
+            if (gold > 0) s"${itemDesc(item)}\n🟡 Цена продажи: $gold"
+            else s"${itemDesc(item)}\n🪙 Цена продажи: ${sellPrice(item)}"
           val choices = List(
             content.choice("ConfirmSellItem", "merchant.sellItemLabel").copy(data = Map("id" -> itemId.toString), row = Some(0)),
             content.choice("CancelSellItem",  "merchant.sellBackLabel").copy(row = Some(1))
@@ -185,11 +188,16 @@ case class MerchantState(
       itemId  = scene.selectedId.getOrElse(-1L)
       _ <- items.find(_.id == itemId) match {
         case Some(item) =>
-          val price = sellPrice(item)
+          val gold  = doubloonPrice(item)
+          val price = if (gold > 0) gold else sellPrice(item)
+          val pay =
+            if (gold > 0) heroDao.updateDoubloons(user.userId, hero.doubloons + gold)
+            else heroDao.updateSilver(user.userId, hero.silver + price)
+          val line = if (gold > 0) "merchant.soldDoubloons" else "merchant.sold"
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            heroDao.updateSilver(user.userId, hero.silver + price) *>
+            pay *>
             renderer.show(user, Screen(
-              content.format("merchant.sold", "name" -> item.name, "price" -> price.toString), Nil))
+              content.format(line, "name" -> item.name, "price" -> price.toString), Nil))
         case None => ZIO.unit
       }
       _ <- showSellList(user, renderer, scene.page).unit
@@ -387,6 +395,11 @@ case class MerchantState(
   private def sellPrice(item: Item): Long =
     ((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L)
 
+  /** Сколько дублонов Ришелье платит за предмет; 0 — обычная продажа за серебро.
+    * Пока золотом он выкупает только материалы (см. [[MaterialKind.doubloonPrice]]). */
+  private def doubloonPrice(item: Item): Long =
+    item.material.map(_.doubloonPrice).getOrElse(0L)
+
   private def inventoryItems(hero: Hero): Task[List[Item]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data)
 
@@ -472,7 +485,10 @@ object MerchantState {
   def isJunk(item: Item, s: JunkSaleSettings): Boolean =
     if (item.itemType == ItemType.Trophy) s.trophies
     else
+      // Камни и материалы крафта не хлам никогда: их редкость ничего не говорит
+      // о ценности (вечно огненное железо — серое, а стоит дороже иной вещи).
       item.itemType != ItemType.Gem &&
+        item.itemType != ItemType.Material &&
         s.rarities.contains(item.rarity) &&
         (s.passives || item.passive.isEmpty) &&
         (s.actives || item.activeSkill.isEmpty)

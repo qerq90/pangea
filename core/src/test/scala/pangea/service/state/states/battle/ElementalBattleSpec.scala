@@ -230,6 +230,20 @@ object ElementalBattleSpec extends ZIOSpecDefault {
               assertTrue(cold > plain)         // ×1.5, холод бьёт сильнее
     },
 
+    test("зовётся Огненным Элементалем, а не «Легендарным»: имя даёт вид, не редкость") {
+      val battle = lairBattle(turn = 3)
+      for {
+        t <- makeState(hero(), battle)
+        (state, _, r) = t
+        _       <- seedTurn()
+        _       <- state.action(testUser, tap("Attack"), r)
+        screens <- r.sentScreens
+        log      = screens.map(_.text).mkString
+      } yield assertTrue(battle.monsterName == "Огненный Элементаль") &&
+              assertTrue(log.contains("Огненный Элементаль")) &&
+              assertTrue(!log.contains("Легендарный Элементаль"))
+    },
+
     test("огненного нельзя поджечь") {
       val battle = lairBattle(turn = 3)
       assertTrue(battle.withEffects(

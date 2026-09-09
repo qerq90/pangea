@@ -54,7 +54,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
                        bonusPct    = battle.heroBattleState.reductionBonusPct)
       val damage   = ((raw * (1.0 - reduct)).toLong).max(1L)
       val (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, damage)
-      val line     = template.replace("{name}", battle.toMonster.name).replace("{}", damage.toString)
+      val line     = template.replace("{name}", battle.monsterName).replace("{}", damage.toString)
       Cast(battle, newHp, newArmor, line)
     }
   }
@@ -69,7 +69,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
       // Игнорирует и damageReduction игрока, и его физическую броню — урон уходит сразу в HP.
       val damage = math.max(1L, (battle.monsterStats.atk * 0.3).toLong)
       val newHp  = (hero.fightStats.hp - damage).max(0L)
-      val line   = template.replace("{name}", battle.toMonster.name).replace("{}", damage.toString)
+      val line   = template.replace("{name}", battle.monsterName).replace("{}", damage.toString)
       Cast(battle, newHp, hero.fightStats.armor, line)
     }
   }
@@ -88,7 +88,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val heal   = (rawHeal * (100 - weakenPct) / 100).max(0L)
       val newHp  = (battle.monsterCurrentHp + heal).min(maxHp)
       val healed = newHp - battle.monsterCurrentHp
-      val line   = template.replace("{name}", battle.toMonster.name).replace("{}", healed.toString)
+      val line   = template.replace("{name}", battle.monsterName).replace("{}", healed.toString)
       // Лечение: яд ослабляется на HealCut п.п.; кровотечение и горение снимаются
       // ПОЛНОСТЬЮ (см. Poison.weakenedByHeal / Bleed / Burn).
       val healedEffects = battle.effects.copy(
@@ -111,7 +111,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val repair  = math.max(1L, (maxArm * 0.2).toLong)
       val newArm  = (battle.monsterCurrentArmor + repair).min(maxArm)
       val gained  = newArm - battle.monsterCurrentArmor
-      val line    = template.replace("{name}", battle.toMonster.name).replace("{}", gained.toString)
+      val line    = template.replace("{name}", battle.monsterName).replace("{}", gained.toString)
       Cast(battle.copy(monsterCurrentArmor = newArm), hero.fightStats.hp, hero.fightStats.armor, line)
     }
   }

@@ -10,6 +10,9 @@ import io.circe.{Decoder, Encoder, HCursor}
 sealed abstract class MaterialKind(val displayName: String) extends EnumEntry {
   /** Описание для инвентаря; по умолчанию его нет. */
   val description: String = ""
+
+  /** Сколько дублонов даёт за материал Ришелье. 0 — обычная продажа за серебро. */
+  val doubloonPrice: Long = 0L
 }
 
 object MaterialKind extends Enum[MaterialKind] {
@@ -25,7 +28,10 @@ object MaterialKind extends Enum[MaterialKind] {
   case object EverburningIron extends MaterialKind("Вечно огненное железо") {
     override val description: String =
       "Железо, которое отказалось остывать. Говорят, что внутри каждого такого куска " +
-      "заключён крошечный осколок ярости огненного элементаля. Возможно я найду этому применение."
+      "заключён крошечный осколок ярости огненного элементаля."
+
+    /** Ришелье такому куску рад и платит золотом, а не серебром. */
+    override val doubloonPrice: Long = 5L
   }
 
   implicit val encoder: Encoder[MaterialKind] = (k: MaterialKind) => k.entryName.asJson

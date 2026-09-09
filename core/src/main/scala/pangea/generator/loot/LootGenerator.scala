@@ -2,6 +2,7 @@ package pangea.generator.loot
 
 import pangea.domain.Rng
 import pangea.generator.item.{GemGenerator, ItemGenerator, ItemNameGenerator, MaterialGenerator, TreasureMapGenerator}
+import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.monster.{Elemental, Race, Rarity => MobRarity}
 import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
@@ -231,9 +232,10 @@ object LootGenerator {
       if (roll < ElementalIngredientChancePct)
         (acc :+ LootDrop.Gear(MaterialGenerator.item(elemental.ingredient)), r1)
       else {
-        // Уровень вещи: уровень героя ±1, но не ниже первого.
+        // Уровень вещи: уровень героя ±1, но строго в границах игры — на первом
+        // уровне героя разброс не уводит вещь в нулевой, на последнем — в 151-й.
         val (delta, r2) = r1.between(-1L, 2L)
-        val lvl         = (heroLvl + delta).max(1L)
+        val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
         val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, ItemRarity.Purple, r2)
         // Имя перекатываем как сетовое: имя набора встаёт вместо титула.
         val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, elemental.set, r3)

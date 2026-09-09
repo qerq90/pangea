@@ -502,6 +502,7 @@ merchant:
     label: "↩ Назад"
     color: "negative"
   sold: "Вы продали {name} за {price} серебра."
+  soldDoubloons: "Вы продали {name} за {price} 🟡."
 
 dungeon:
   enter:

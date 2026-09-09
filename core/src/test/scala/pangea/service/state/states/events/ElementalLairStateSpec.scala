@@ -83,7 +83,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
     },
 
     test("напасть → бой с элементалем: раса, статы по BossLvL и вид записаны") {
-      // Уровень героя 15 → BossLvL = (15−1)/7 = 2.
+      // Уровень героя 15 → BossLvL = (15−1)/5 = 2.
       for {
         t <- makeState(heroLvl = 15L)
         (state, dao, renderer) = t
@@ -115,8 +115,10 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
     },
 
     // ── Уровень босса ─────────────────────────────────────────────────────────
-    test("BossLvL = (уровень героя − 1) / 7 вниз, но не меньше 1") {
-      val cases = List(1L -> 1L, 7L -> 1L, 8L -> 1L, 14L -> 1L, 15L -> 2L, 21L -> 2L, 22L -> 3L, 71L -> 10L)
+    test("BossLvL = (уровень героя − 1) / 5 вниз, но не меньше 1") {
+      val cases = List(
+        1L -> 1L, 5L -> 1L, 6L -> 1L, 10L -> 1L, // до 10 уровня босс держится на первом
+        11L -> 2L, 15L -> 2L, 16L -> 3L, 51L -> 10L, 150L -> 29L)
       assertTrue(cases.forall { case (heroLvl, expected) => Elemental.bossLvl(heroLvl) == expected })
     }
   )
