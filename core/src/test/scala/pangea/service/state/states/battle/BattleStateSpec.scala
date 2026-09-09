@@ -302,23 +302,27 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(clean > 0L) && assertTrue(burned == clean * 30L / 100L)
     },
 
-    test("регенерация горящему герою тикает слабее — зелье не обходит горение") {
+    test("регенерация тикает в полную силу: горение режет только активное лечение") {
       def regenTick(burn: Option[Int]) = {
         val h = strongHero.copy(fightStats = strongHero.fightStats.copy(hp = 10L))
         val b = strongBattle.copy(effects = strongBattle.effects.copy(
           heroRegen = Some(Regen(20)), heroBurn = burn.map(Burn(_))))
         for {
           t <- makeState(h, b)
-          (state, heroDao, renderer) = t
-          _    <- TestRandom.feedInts(60, 1) *> TestRandom.feedLongs(100L, 100L)
-          _    <- state.action(testUser, tap("Attack"), renderer)
-          hero <- heroDao.getHeroByUserId(userId).map(_.get)
-        } yield hero.fightStats.hp
+          (state, _, renderer) = t
+          _       <- TestRandom.feedInts(60, 1) *> TestRandom.feedLongs(100L, 100L)
+          _       <- state.action(testUser, tap("Attack"), renderer)
+          screens <- renderer.sentScreens
+          // Итоговое HP сравнивать нельзя: у горящего его же и подъедает огонь.
+          // Смотрим на саму строку регенерации — сколько она вылечила.
+        } yield screens.map(_.text).mkString
+          .linesIterator.find(_.contains("Регенерация восстанавливает")).getOrElse("")
       }
       for {
         clean  <- regenTick(None)
         burned <- regenTick(Some(10))
-      } yield assertTrue(burned < clean) // горение съело часть регенерации
+      } yield assertTrue(clean.nonEmpty) &&
+              assertTrue(burned == clean) // тик регенерации горение не трогает
     },
 
     test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {

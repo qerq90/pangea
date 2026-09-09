@@ -627,25 +627,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       )
   }
 
-  /** Лечение горящего героя. Пока на нём огонь, любое исцеление слабее на
-    * 50% + текущий процент горения: при 50% горения от лечения не остаётся
-    * ничего. Само горение при этом НЕ гаснет — герой продолжает гореть на свои
-    * проценты (в отличие от мобов, которых лечение из горения выводит).
+  /** ЕДИНАЯ точка активного исцеления героя — всё, чем он лечит себя сам:
+    * любая фляга, зелье из пояса, активное умение. Механика висит на самом
+    * действии, а не на предмете, поэтому новая фляга или новое умение попадают
+    * под неё сами, без правок здесь.
     *
-    * Касается всего, чем герой лечится сам: фляги, зелья из пояса, активного
-    * умения и тика регенерации от выпитого зелья. */
-  private def weakenedHeal(battle: SoloPveBattle, amount: Long): Long =
-    battle.effects.heroBurn match {
-      case None       => amount
-      case Some(burn) => (amount * (100 - burn.healWeakenPct).max(0) / 100).max(0L)
-    }
-
-  /** Строка-пояснение, если горение действительно съело часть лечения. Без неё
-    * ослабленное зелье выглядело бы как поломка. */
-  private def healCutLine(battle: SoloPveBattle, before: Long, after: Long): Option[String] =
-    battle.effects.heroBurn
-      .filter(_ => after < before)
-      .map(burn => content.format("battle.burnEatsHeal", "pct" -> burn.healWeakenPct.min(100).toString))
+    * Пока герой горит, исцеление слабее на 50% + текущий процент горения: при
+    * 50% горения от него не остаётся ничего. Само горение при этом НЕ гаснет —
+    * герой продолжает гореть на свои проценты (в отличие от мобов, которых
+    * лечение из горения выводит). Тикающая регенерация сюда не входит: она не
+    * действие игрока, а эффект, который идёт своим чередом.
+    *
+    * Возвращает новое HP, сколько реально вылечено и строку-пояснение, если
+    * пламя часть лечения съело (без неё слабое зелье читалось бы как поломка). */
+  private def activeHeal(
+      hero: Hero,
+      battle: SoloPveBattle,
+      raw: Long,
+      nowMs: Long
+  ): (Long, Long, Option[String]) = {
+    val maxHp  = hero.effectiveMaxHp(nowMs)
+    val burn   = battle.effects.heroBurn
+    val amount = burn.fold(raw)(b => (raw * (100 - b.healWeakenPct).max(0) / 100).max(0L))
+    val newHp  = (hero.fightStats.hp + amount).min(maxHp)
+    val line   = burn
+      .filter(_ => amount < raw)
+      .map(b => content.format("battle.burnEatsHeal", "pct" -> b.healWeakenPct.min(100).toString))
+    (newHp, newHp - hero.fightStats.hp, line)
+  }
 
   /** «Каменный страж» (порог 4): стихийный урон по герою слабее на 20%.
     * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
@@ -1029,9 +1038,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val (finalHero, finalBattle, regenLine) = burnedBattle.effects.heroRegen match {
       case Some(regen) =>
         val maxHp  = burnedHero.effectiveMaxHp(nowMs)
-        // Регенерация — то же лечение, только растянутое: горение режет и её,
-        // иначе зелье регенерации обходило бы механику целиком.
-        val heal   = weakenedHeal(burnedBattle, regen.healOn(maxHp))
+        // Регенерация горением НЕ режется: это не действие игрока, а эффект,
+        // который тикает сам по себе (см. activeHeal).
+        val heal   = regen.healOn(maxHp)
         val newHp  = (burnedHero.fightStats.hp + heal).min(maxHp)
         val healed = newHp - burnedHero.fightStats.hp
         (
@@ -1183,15 +1192,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
 
         case Skill.Effect.Heal =>
-          // «Целитель» множит активное лечение на 1.1, а горение — режет его.
-          val full     = (raw * hero.passives.healMult).toLong.max(1L)
-          val amount   = weakenedHeal(bumped, full)
-          val maxHp    = hero.effectiveMaxHp(nowMs)
-          val newHp    = (hero.fightStats.hp + amount).min(maxHp)
-          val healed     = newHp - hero.fightStats.hp
+          // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
+          val full = (raw * hero.passives.healMult).toLong.max(1L)
+          val (newHp, healed, cutLine) = activeHeal(hero, bumped, full, nowMs)
           val healedHero = hero.copy(fightStats = hero.fightStats.copy(hp = newHp))
-          val lines      = Vector(tmpl.replace("{}", healed.toString)) ++
-                           healCutLine(bumped, full, amount)
+          val lines      = Vector(tmpl.replace("{}", healed.toString)) ++ cutLine
           playerStrike(healedHero, bumped, nowMs, lines, skip)
 
         case Skill.Effect.RepairArmor =>
@@ -1293,11 +1298,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           f.effect match {
             case FlaskEffect.HealPercent(pct) =>
               val maxHp    = hero.effectiveMaxHp(nowMs)
-              // «Целитель» множит лечение фляги на 1.1, а горение — режет его.
+              // «Целитель» множит лечение фляги на 1.1, дальше — общий расчёт.
               val fullHeal = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
-              val healAmt  = weakenedHeal(battle, fullHeal)
-              val newHp    = (hero.fightStats.hp + healAmt).min(maxHp)
-              val healed   = newHp - hero.fightStats.hp
+              val (newHp, healed, cutLine) = activeHeal(hero, battle, fullHeal, nowMs)
               // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
               val maxEn      = hero.maxEnergy(nowMs)
               val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
@@ -1310,7 +1313,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 "max"    -> maxHp.toString,
                 "energy" -> energyBack.toString
               )
-              val lines = (Vector(msg) ++ healCutLine(battle, fullHeal, healAmt)) ++ qhLog
+              val lines = (Vector(msg) ++ cutLine) ++ qhLog
               TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats), updatedBattle, lines, Outcome.Continue)
             case FlaskEffect.AddBuff(buff, rounds) =>
               val timedBuff = buff.copy(turnsLeft = Some(rounds))
@@ -1357,16 +1360,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
     potion match {
       case PotionKind.Healing =>
-        val maxHp  = hero.effectiveMaxHp(nowMs)
-        // «Целитель» множит лечение зелья на 1.1, а горение — режет его.
-        val full   = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
-        val heal   = weakenedHeal(battle, full)
-        val newHp  = (hero.fightStats.hp + heal).min(maxHp)
-        val healed = newHp - hero.fightStats.hp
-        val line   = content.format("battle.beltHeal",
-                       "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString)
-        (hero.fightStats.copy(hp = newHp), battle,
-          (line +: healCutLine(battle, full, heal).toVector).mkString("\n"))
+        val maxHp = hero.effectiveMaxHp(nowMs)
+        // «Целитель» множит лечение зелья на 1.1, дальше — общий расчёт.
+        val full  = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
+        val (newHp, healed, cutLine) = activeHeal(hero, battle, full, nowMs)
+        val line  = content.format("battle.beltHeal",
+                      "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString)
+        (hero.fightStats.copy(hp = newHp), battle, (line +: cutLine.toVector).mkString("\n"))
 
       case PotionKind.Metal =>
         val maxArmor = hero.effectiveMaxArmor(nowMs)
