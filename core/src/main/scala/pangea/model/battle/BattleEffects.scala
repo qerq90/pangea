@@ -131,11 +131,29 @@ case class BattleEffects(
   doubleSpent:          Boolean                    = false,
   // Сколько ходов элементаль ещё скован холодом: шипы молчат, его атаки не
   // поджигают, точность срезана (см. Elemental.Fire.ChilledTurns).
-  chilledTurns:         Int                        = 0
+  chilledTurns:         Int                        = 0,
+  // ── Дебафы каменного элементаля на ГЕРОЕ ──────────────────────────────────
+  // Залп валунов срезает защиту и уклонение, вязкая земля — точность и уклонение.
+  heroStunnedTurns:     Int                        = 0,
+  heroGroundedTurns:    Int                        = 0,
+  // Подожжённый каменный бьёт слабее, пока горит отсчёт.
+  monsterWeakenedTurns: Int                        = 0,
+  // Насколько поджоги уже срезали ПОТОЛОК брони моба. Текущая броня при этом не
+  // трогается: она может остаться выше потолка, но выше него уже не чинится.
+  monsterMaxArmorCut:   Long                       = 0L
 ) {
 
   /** Скован ли сейчас элементаль холодом. */
   def chilled: Boolean = chilledTurns > 0
+
+  /** Сбита ли герою защита с уклонением залпом валунов. */
+  def heroStunned: Boolean = heroStunnedTurns > 0
+
+  /** Держит ли героя вязкая земля (точность и уклонение). */
+  def heroGrounded: Boolean = heroGroundedTurns > 0
+
+  /** Ослаблен ли урон моба горением. */
+  def monsterWeakened: Boolean = monsterWeakenedTurns > 0
 }
 
 object BattleEffects {

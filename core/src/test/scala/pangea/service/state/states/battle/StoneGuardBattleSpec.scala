@@ -51,7 +51,7 @@ object StoneGuardBattleSpec extends ZIOSpecDefault {
     SoloPveBattle.from(monster, h).copy(
       elementalKind        = Some(Elemental.Fire.entryName),
       elementalTurn        = turn,
-      fireOrbs             = orbs,
+      elementalCharges     = orbs,
       monsterCurrentEnergy = 300L,
       monsterCurrentArmor  = stats.armor * armorPct / 100L
     )

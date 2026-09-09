@@ -40,9 +40,10 @@ case class SoloPveBattle(
   // обычных мобов пусто — по нему бой и отличает босса от рядового врага.
   elementalKind:       Option[String] = None,
   // Какую способность элементаль применит следующей (он ходит строго по кругу),
-  // и сколько сфер огня он уже собрал рядом с собой.
+  // и сколько зарядов он уже собрал рядом с собой: у огненного это сферы огня,
+  // у каменного — валуны. Механика у них одна, поэтому счётчик общий.
   elementalTurn:       Int = 0,
-  fireOrbs:            Int = 0,
+  elementalCharges:    Int = 0,
   // Текущая энергия моба. У рядовых мобов не расходуется (их скиллы бесплатны),
   // а элементаль тратит её на способности и восстанавливает по столько-то за раунд.
   monsterCurrentEnergy: Long = 0L
@@ -89,6 +90,10 @@ case class SoloPveBattle(
       airBoostTurns        = (effects.airBoostTurns - 1).max(0),
       // Оцепенение элементаля от холода тикает вместе с прочими временными эффектами.
       chilledTurns         = (effects.chilledTurns - 1).max(0),
+      // Дебафы каменного элементаля живут теми же ходами.
+      heroStunnedTurns     = (effects.heroStunnedTurns - 1).max(0),
+      heroGroundedTurns    = (effects.heroGroundedTurns - 1).max(0),
+      monsterWeakenedTurns = (effects.monsterWeakenedTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
@@ -133,9 +138,9 @@ object SoloPveBattle {
       toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
       elementalKind       <- c.getOrElse[Option[String]]("elementalKind")(None)
       elementalTurn       <- c.getOrElse[Int]("elementalTurn")(0)
-      fireOrbs            <- c.getOrElse[Int]("fireOrbs")(0)
+      charges             <- c.getOrElse[Int]("elementalCharges")(0)
       monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, elementalKind, elementalTurn, fireOrbs, monsterEnergy)
+                         skillSlots, effects, toughnessUsed, elementalKind, elementalTurn, charges, monsterEnergy)
 }
