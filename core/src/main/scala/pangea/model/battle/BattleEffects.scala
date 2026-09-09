@@ -123,6 +123,12 @@ case class BattleEffects(
   monsterBleed:         Option[Bleed]              = None,
   monsterBurn:          Option[Burn]               = None,
   monsterColdDefenceCut: Int                       = 0,
+  // Зеркало предыдущего в сторону ГЕРОЯ: морозные удары моба (после «Порошка!»)
+  // срезают его итоговое снижение урона на столько же п.п. и не затухают.
+  heroColdDefenceCut:   Int                        = 0,
+  // Сколько ходов моб ещё бодрее обычного от прока Воздуха: точность и уклонение
+  // подняты. Зеркало `airBoostTurns`, только в его сторону.
+  mobAirBoostTurns:     Int                        = 0,
   monsterDefenceDebuff: Option[TimedDefenceDebuff] = None,
   airBoostTurns:        Int                        = 0,
   heroRegen:            Option[Regen]              = None,
@@ -141,8 +147,15 @@ case class BattleEffects(
   // Залп валунов срезает защиту и уклонение, вязкая земля — точность и уклонение.
   heroStunnedTurns:     Int                        = 0,
   heroGroundedTurns:    Int                        = 0,
-  // Яд НА ГЕРОЕ — им травит Гнилой Джо своим смрадом.
+  // Яд НА ГЕРОЕ — им травит Гнилой Джо своим смрадом и мобы, посыпавшие оружие
+  // порошком.
   heroPoison:           Option[Poison]             = None,
+  // «Порошок!» — расовое умение на один раз за бой. Флаг помнит, что он уже
+  // высыпан (второй раз моб его не применит), а два следующих поля — что именно
+  // он дал: ядовитые атаки либо стихию, которой теперь бьёт моб.
+  monsterPowderUsed:    Boolean                    = false,
+  monsterPoisonsOnHit:  Boolean                    = false,
+  monsterAttackElement: Option[String]             = None,
   // Моб бьёт слабее: подожжённый камень, поднявшийся Джо. Проценты у каждого
   // свои, поэтому храним и срок, и силу.
   monsterWeakenedTurns: Int                        = 0,

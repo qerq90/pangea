@@ -4,7 +4,7 @@ import io.circe.{Decoder, Encoder, HCursor}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import pangea.model.hero.Hero
 import pangea.model.monster.{Monster, Race, Rarity}
-import pangea.model.skill.Skill
+import pangea.model.skill.{MonsterEnergy, Skill}
 import pangea.model.stats.FightStats
 
 /** Состояние активного навыка в рамках конкретного боя. Ключ — `itemId` предмета,
@@ -90,6 +90,8 @@ case class SoloPveBattle(
     // защиты цели (комбо Молния+Холод) живут ограниченное число ходов.
     effects = effects.copy(
       airBoostTurns        = (effects.airBoostTurns - 1).max(0),
+      // Буст Воздуха на самом мобе тикает вместе с остальным временным.
+      mobAirBoostTurns     = (effects.mobAirBoostTurns - 1).max(0),
       // Оцепенение элементаля от холода тикает вместе с прочими временными эффектами.
       chilledTurns         = (effects.chilledTurns - 1).max(0),
       // Дебафы каменного элементаля живут теми же ходами.
@@ -104,6 +106,14 @@ case class SoloPveBattle(
 
   def updateSlot(itemId: Long)(f: SkillSlotState => SkillSlotState): SoloPveBattle =
     copy(skillSlots = skillSlots.map(s => if (s.itemId == itemId) f(s) else s))
+
+  /** Стартовый запас энергии обычного моба: `pctRoll`% (5–30) от его потолка,
+   *  умноженные на редкость. Копить с нуля мобу некогда — короткий бой кончится
+   *  раньше, чем он покажет хоть одно умение. Минибоссов это не касается: они
+   *  входят в бой с полным запасом. */
+  def withStartEnergy(pctRoll: Long): SoloPveBattle =
+    if (bossKind.isDefined) this
+    else copy(monsterCurrentEnergy = MonsterEnergy.startEnergy(monsterLvl, rarity, pctRoll))
 }
 
 object SoloPveBattle {

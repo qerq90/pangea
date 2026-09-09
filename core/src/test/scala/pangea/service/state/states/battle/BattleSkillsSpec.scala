@@ -246,13 +246,6 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(after.slotByItem(101L).exists(s => s.cooldown == 0 && s.uses == 0))
     },
 
-    test("monsterSkillHitChance зависит только от редкости и клампится в [5;95]") {
-      val cappedHi = BattleState.monsterSkillHitChance(rarityFactor = 10.0)
-      val cappedLo = BattleState.monsterSkillHitChance(rarityFactor = 0.1)
-      val mid      = BattleState.monsterSkillHitChance(rarityFactor = 1.0)
-      assertTrue(cappedHi == 95.0) && assertTrue(cappedLo == 5.0) && assertTrue(mid == 20.0)
-    },
-
     test("parseSkillAction распознаёт Skill_<id>, иначе None") {
       val ok  = BattleState.parseSkillAction(tap("Skill_42"))
       val bad = BattleState.parseSkillAction(tap("Attack"))

@@ -1,16 +1,18 @@
 package pangea.model.skill
 
 import enumeratum._
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
+import pangea.model.monster.Race
 import pangea.service.state.states.battle.BattleState
 
 /**
- * Активные навыки мобов. На данный момент у всех рас одинаковый пул из 4 умений;
- * в будущем планируется развести по расам. Кулдаунов нет: моб каждый ход роллит
- * шанс «кастануть скилл» (см. [[BattleState.monsterSkillHitChance]]); если шанс
- * прокнул — равновероятно выбирается одно из применимых умений и применяется
- * ПОВЕРХ обычной атаки.
+ * Активные навыки мобов. Кулдаунов нет — есть ЭНЕРГИЯ: каждое умение стоит своих
+ * очков (см. [[MonsterEnergy]]), моб копит их по столько-то за раунд и применяет
+ * самое дорогое из того, что сейчас по карману, ПОВЕРХ обычной атаки.
+ *
+ * Четыре первых умения — базовые: они есть у любой расы и стоят 0.8 обычной цены.
+ * Остальные раздаются по расам через [[races]] — у мурлока свои, у демона свои.
  *
  * `template` — описание эффекта с двумя плейсхолдерами: `{name}` — имя моба,
  * `{}` — числовая величина (урон/исцеление/починка).
@@ -18,6 +20,18 @@ import pangea.service.state.states.battle.BattleState
 sealed abstract class MonsterSkill(val label: String, val template: String) extends EnumEntry {
   /** Может ли моб сейчас полезно применить скилл (например, heal только если hp < max). */
   def applicable(battle: SoloPveBattle): Boolean
+
+  /** Расы, которым доступно умение. Пусто — базовое умение, доступное всем. */
+  def races: Set[Race] = Set.empty
+
+  /** Доля от базовой цены умения на этом уровне (см. [[MonsterEnergy]]). */
+  def costFactor: Double = MonsterEnergy.BasicCostFactor
+
+  /** Цена в энергии на уровне моба. */
+  def cost(lvl: Long): Long = MonsterEnergy.cost(lvl, costFactor)
+
+  /** Доступно ли умение этой расе. */
+  def availableTo(race: Race): Boolean = races.isEmpty || races.contains(race)
 
   /** Применяет скилл, возвращает обновлённое состояние боя, новые статы героя и
    *  готовую текстовую строку. Реализации не делают никаких рандомов — рандом
@@ -113,6 +127,74 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val gained  = newArm - battle.monsterCurrentArmor
       val line    = template.replace("{name}", battle.monsterName).replace("{}", gained.toString)
       Cast(battle.copy(monsterCurrentArmor = newArm), hero.fightStats.hp, hero.fightStats.armor, line)
+    }
+  }
+
+  /** «Порошок!» — одноразовая заготовка: моб посыпает оружие и до конца боя бьёт
+   *  иначе. Что именно даёт порошок, решает раса: у мурлока и эльфа — яд на
+   *  атаках, у демона, гнома и каджита — стихия. Текст у всех один: игрок видит
+   *  только, что моб что-то высыпал, и должен насторожиться сам. */
+  sealed abstract class Powder(race: Race) extends MonsterSkill(
+    label    = "Порошок!",
+    template = "{name} достал странную пыль и высыпал на своё оружие. Надо быть осторожнее."
+  ) {
+    /** Чем порошок меняет бой — накладывается один раз, при высыпании. */
+    protected def enchant(effects: pangea.model.battle.BattleEffects): pangea.model.battle.BattleEffects
+
+    override val races: Set[Race]   = Set(race)
+    override val costFactor: Double = MonsterEnergy.RacialCostFactor
+
+    /** Ровно один раз за бой: высыпать дважды нечего. */
+    def applicable(battle: SoloPveBattle): Boolean = !battle.effects.monsterPowderUsed
+
+    def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
+      val enchanted = enchant(battle.effects).copy(monsterPowderUsed = true)
+      Cast(battle.copy(effects = enchanted), hero.fightStats.hp, hero.fightStats.armor,
+        template.replace("{name}", battle.monsterName))
+    }
+  }
+
+  /** Порошок, от которого удары начинают травить. */
+  sealed trait PoisonPowder { self: Powder =>
+    protected def enchant(e: pangea.model.battle.BattleEffects) = e.copy(monsterPoisonsOnHit = true)
+  }
+
+  /** Порошок, переводящий удары в стихию. */
+  sealed abstract class ElementPowder(race: Race, element: Element) extends Powder(race) {
+    protected def enchant(e: pangea.model.battle.BattleEffects) =
+      e.copy(monsterAttackElement = Some(element.entryName))
+  }
+
+  case object MurlocPowder  extends Powder(Race.Murloc) with PoisonPowder
+  case object ElfPowder     extends Powder(Race.Elf)    with PoisonPowder
+  case object DemonPowder   extends ElementPowder(Race.Demon,   Element.Fire)
+  case object GnomePowder   extends ElementPowder(Race.Gnome,   Element.Cold)
+  case object KhajiitPowder extends ElementPowder(Race.Khajiit, Element.Air)
+
+  /** Мурлочий «Грязный удар»: бьёт слабее обычного, зато всегда травит. Защита
+   *  героя срезает урон процентно, как и у прочих ударов. */
+  case object DirtyStrike extends MonsterSkill(
+    label    = "Грязный удар",
+    template = "{name} делает грязную атаку на {} урона! Вы чувствуете как по вашему телу медленно растекается яд."
+  ) {
+    val DamageFactor: Double = 0.6
+    val PoisonPct: Int       = Poison.OnHit
+
+    override val races: Set[Race]   = Set(Race.Murloc)
+    override val costFactor: Double = MonsterEnergy.RacialCostFactor
+
+    def applicable(battle: SoloPveBattle): Boolean = true
+
+    def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
+      val raw     = math.max(1L, (battle.monsterStats.atk * DamageFactor).toLong)
+      val defence = hero.effectiveFightStats(nowMs).defence.max(0L)
+      // «−% защиты игрока»: защита режет удар процентно, но не в ноль.
+      val damage  = (raw * (100L - defence.min(90L)) / 100L).max(1L)
+      val (newHp, newArmor) = applyPhysicalDamage(battle, hero, damage)
+      val poisoned = battle.effects.copy(heroPoison = Some(
+        battle.effects.heroPoison.map(p => Poison(p.pct + PoisonPct)).getOrElse(Poison(PoisonPct))))
+      Cast(battle.copy(effects = poisoned), newHp, newArmor,
+        template.replace("{name}", battle.monsterName).replace("{}", damage.toString))
     }
   }
 

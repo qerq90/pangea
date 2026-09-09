@@ -3,6 +3,7 @@ package pangea.generator.monster
 import pangea.domain.Rng
 import pangea.model.monster.Rarity._
 import pangea.model.monster.{Monster, MonsterRaceFactor, Race, Rarity}
+import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 
 object MonsterGenerator {
@@ -73,7 +74,8 @@ object MonsterGenerator {
       defence = (s.defence * factor).toLong,
       evasion = (s.evasion * factor).toLong,
       accuracy = (s.accuracy * factor).toLong,
-      energy = 0L
+      // Энергию «отмеченность» не трогает: цены умений от неё не зависят.
+      energy = s.energy
     )
 
   private def buildStats(level: Int, rarity: Rarity, race: Race): FightStats = {
@@ -86,7 +88,8 @@ object MonsterGenerator {
       defence = 0L,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
-      energy = 0L
+      // Потолок энергии — из него моб платит за свои умения (см. MonsterEnergy).
+      energy = MonsterEnergy.maxEnergy(level.toLong)
     )
   }
 }

@@ -10,6 +10,7 @@ import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.schedule.TaskKind
+import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
@@ -144,7 +145,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     for {
       seed         <- Random.nextLong
       (monster, _)  = MonsterGenerator.generate(hero.dungeonLevel, Rng(seed))
-      battle        = SoloPveBattle.from(monster, hero)
+      startPct     <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+      battle        = SoloPveBattle.from(monster, hero).withStartEnergy(startPct)
       _            <- heroDao.writeActiveBattle(user.userId, battle.asJson)
       // Обычный бой: после добычи возврат в лабиринт — чистим routing в scene_data,
       // чтобы victory не подхватил чужой «куда вернуться» от прошлого события.
@@ -218,7 +220,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       seed          <- Random.nextLong
       targetLevel    = math.min(150, hero.dungeonLevel + 1)
       (monster, _)   = MonsterGenerator.generateMarked(targetLevel, Rng(seed))
-      battle         = SoloPveBattle.from(monster, hero)
+      startPct      <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+      battle         = SoloPveBattle.from(monster, hero).withStartEnergy(startPct)
       _ <- renderer.show(user, Screen(content.text("dungeon.trackingFound"), Nil))
       _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
       _ <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
