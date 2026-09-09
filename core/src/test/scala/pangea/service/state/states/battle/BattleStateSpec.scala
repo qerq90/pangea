@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{SoloPveBattle, Buff, HeroBattleState}
+import pangea.model.battle.{Buff, Burn, HeroBattleState, Regen, SoloPveBattle}
 import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
@@ -242,6 +242,87 @@ object BattleStateSpec extends ZIOSpecDefault {
         updatedHero          <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(!screens.exists(_.text.contains("Путь вглубь"))) &&
               assertTrue(updatedHero.exists(_.maxDungeonLevel == 5))
+    },
+
+    // ── Горение съедает лечение ───────────────────────────────────────────────
+    test("горящий герой лечится флягой слабее: −(50% + процент горения)") {
+      val heroWithFlask = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+      def healedWith(burn: Option[Int]) = {
+        val b = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = burn.map(Burn(_))))
+        for {
+          t <- makeState(heroWithFlask, b)
+          (state, heroDao, renderer) = t
+          _    <- state.action(testUser, tap("UseFlask"), renderer)
+          hero <- heroDao.getHeroByUserId(userId).map(_.get)
+        } yield hero.fightStats.hp - 10L
+      }
+      for {
+        clean  <- healedWith(None)
+        burned <- healedWith(Some(10)) // 50 + 10 = 60% лечения долой
+      } yield assertTrue(clean > 0L) &&
+              assertTrue(burned == clean * 40L / 100L)
+    },
+
+    test("при 50% горения лечение обнуляется, но герой продолжает гореть") {
+      val heroWithFlask = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+      val burning = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(60))))
+      for {
+        t <- makeState(heroWithFlask, burning)
+        (state, heroDao, renderer) = t
+        _       <- state.action(testUser, tap("UseFlask"), renderer)
+        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+        after   <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        screens <- renderer.sentScreens
+      } yield assertTrue(hero.fightStats.hp == 10L) && // лечение съедено целиком
+              // горение никуда не делось — оно тикает дальше и даже растёт
+              assertTrue(after.effects.heroBurn.exists(_.pct >= 60)) &&
+              assertTrue(screens.map(_.text).mkString.contains("Пламя пожирает лечение"))
+    },
+
+    test("зелье лечения из пояса горящему герою тоже помогает хуже") {
+      def healedWith(burn: Option[Int]) = {
+        val h = strongHero.copy(
+          fightStats = strongHero.fightStats.copy(hp = 10L),
+          equipment  = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 1, 1)))
+        val b = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = burn.map(Burn(_))))
+        for {
+          t <- makeState(h, b)
+          (state, heroDao, renderer) = t
+          _    <- state.action(testUser, tap("UseBelt"), renderer)
+          hero <- heroDao.getHeroByUserId(userId).map(_.get)
+        } yield hero.fightStats.hp - 10L
+      }
+      for {
+        clean  <- healedWith(None)
+        burned <- healedWith(Some(20)) // 50 + 20 = 70% долой
+      } yield assertTrue(clean > 0L) && assertTrue(burned == clean * 30L / 100L)
+    },
+
+    test("регенерация тикает в полную силу: горение режет только активное лечение") {
+      def regenTick(burn: Option[Int]) = {
+        val h = strongHero.copy(fightStats = strongHero.fightStats.copy(hp = 10L))
+        val b = strongBattle.copy(effects = strongBattle.effects.copy(
+          heroRegen = Some(Regen(20)), heroBurn = burn.map(Burn(_))))
+        for {
+          t <- makeState(h, b)
+          (state, _, renderer) = t
+          _       <- TestRandom.feedInts(60, 1) *> TestRandom.feedLongs(100L, 100L)
+          _       <- state.action(testUser, tap("Attack"), renderer)
+          screens <- renderer.sentScreens
+          // Итоговое HP сравнивать нельзя: у горящего его же и подъедает огонь.
+          // Смотрим на саму строку регенерации — сколько она вылечила.
+        } yield screens.map(_.text).mkString
+          .linesIterator.find(_.contains("Регенерация восстанавливает")).getOrElse("")
+      }
+      for {
+        clean  <- regenTick(None)
+        burned <- regenTick(Some(10))
+      } yield assertTrue(clean.nonEmpty) &&
+              assertTrue(burned == clean) // тик регенерации горение не трогает
     },
 
     test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {
