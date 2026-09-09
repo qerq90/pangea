@@ -35,7 +35,7 @@ case class DeathState(
       battleJson   <- heroDao.readActiveBattle(user.userId)
       monsterName   = battleJson
                         .flatMap(_.as[SoloPveBattle].toOption)
-                        .map(_.toMonster.name)
+                        .map(_.monsterName)
                         .getOrElse("Монстр")
       expLost       = (hero.exp * 0.1).toLong.max(0L)
       newExp        = (hero.exp - expLost).max(0L)

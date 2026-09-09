@@ -181,6 +181,17 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
     },
 
+    test("уровень вещи не выходит за границы игры: ни нулевого, ни 151-го") {
+      def gearAt(heroLvl: Long) = (1L to 300L).iterator
+        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, heroLvl, Rng(s))._1)
+        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+      val lowest  = gearAt(1L)   // разброс −1 увёл бы вещь в нулевой уровень
+      val highest = gearAt(150L) // разброс +1 увёл бы её в 151-й
+      assertTrue(lowest.nonEmpty) && assertTrue(highest.nonEmpty) &&
+      assertTrue(lowest.forall(i => i.lvl >= 1L && i.lvl <= 2L)) &&
+      assertTrue(highest.forall(i => i.lvl >= 149L && i.lvl <= 150L))
+    },
+
     test("ингредиент и вещь выпадают примерно поровну") {
       val items = (1L to 600L).iterator
         .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)

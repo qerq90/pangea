@@ -38,14 +38,18 @@ sealed abstract class Elemental(
 
   /** Набор, вещи которого он роняет и в который переводит куб через ингредиент. */
   def set: ItemSet
+
+  /** Имя в бою и в логе: «Огненный Элементаль». Редкость в него не входит —
+   *  минибосс не «легендарный моб», он именной. */
+  def monsterName: String = s"$label ${Race.Elemental}"
 }
 
 object Elemental extends Enum[Elemental] {
 
   val values: IndexedSeq[Elemental] = findValues
 
-  /** Уровень босса: `(уровень героя − 1) / 7`, округление вниз, минимум 1. */
-  def bossLvl(heroLvl: Long): Long = ((heroLvl - 1L) / 7L).max(1L)
+  /** Уровень босса: `(уровень героя − 1) / 5`, округление вниз, минимум 1. */
+  def bossLvl(heroLvl: Long): Long = ((heroLvl - 1L) / 5L).max(1L)
 
   // ── Огненный ────────────────────────────────────────────────────────────────
   case object Fire extends Elemental("Огненный", "Огненного", Element.Fire) {
