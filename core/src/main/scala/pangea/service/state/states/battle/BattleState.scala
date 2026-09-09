@@ -791,6 +791,26 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         (newHp, newHp - hero.fightStats.hp, updated, line)
     }
 
+  /** Итоговое снижение урона у героя: его защита против атаки моба, плюс бонус
+    * «Заслона», минус то, что обгрызли морозные удары моба (Холод режет снижение
+    * в п.п. и не затухает — так же, как прок Холода у героя режет снижение моба). */
+  private def heroDamageReduction(
+      hero: Hero,
+      battle: SoloPveBattle,
+      buffed: FightStats,
+      monsterAtk: Long,
+      nowMs: Long
+  ): Double = {
+    val base = BattleState.damageReduction(
+      protection  = buffed.defence,
+      defenderInt = hero.effectiveBaseStats(nowMs).int,
+      // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
+      attackerInt = monsterAtk,
+      bonusPct    = battle.heroBattleState.reductionBonusPct
+    )
+    (base - battle.effects.heroColdDefenceCut / 100.0).max(0.0)
+  }
+
   /** Стихия, которой моб бьёт после «Порошка!» (если он его высыпал). */
   private def powderElement(battle: SoloPveBattle): Option[Element] =
     battle.effects.monsterAttackElement.flatMap(Element.withNameOption)
@@ -1002,13 +1022,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
             rawDamage = (monsterAttack(ticked) * spread / 100L).max(1L)
-            reduction = BattleState.damageReduction(
-              protection = buffedEff.defence,
-              defenderInt = hero.effectiveBaseStats(nowMs).int,
-              // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
-              attackerInt = monster.fightStats.atk,
-              bonusPct = ticked.heroBattleState.reductionBonusPct
-            )
+            reduction = heroDamageReduction(hero, ticked, buffedEff, monster.fightStats.atk, nowMs)
             baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
@@ -1039,6 +1053,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               (igniteChance - hero.sets.igniteResistPct).max(0L)
             )
             burnPct = ticked.boss.map(_.heroIgniteBurnPct).getOrElse(Burn.Initial)
+            // Прок стихии порошка — тот же 30%-й бросок, что и у стихий оружия.
+            // Огонь уже отыгран поджогом выше, здесь остаются холод и воздух.
+            procElement = powderElement(ticked).filter(e => e == Element.Cold || e == Element.Air)
+            mobProc <- chanceRoll(procElement.isDefined, Element.ProcChancePct)
             // Порошок мурлока и эльфа: удар, дошедший до HP, всегда травит.
             poisons = ticked.effects.monsterPoisonsOnHit && newHp < hero.fightStats.hp
             effectsAfterHit = {
@@ -1046,9 +1064,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 if (!ignites) ticked.effects
                 else ticked.effects.copy(heroBurn = Some(
                   ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
-              if (!poisons) burned
-              else burned.copy(heroPoison = Some(
-                burned.heroPoison.map(p => Poison(p.pct + Poison.OnHit)).getOrElse(Poison.onHit)))
+              val poisonedE =
+                if (!poisons) burned
+                else burned.copy(heroPoison = Some(
+                  burned.heroPoison.map(p => Poison(p.pct + Poison.OnHit)).getOrElse(Poison.onHit)))
+              // Холод обгрызает защиту героя (накопительно, не затухает), воздух
+              // поднимает мобу точность и уклонение на несколько ходов.
+              (if (mobProc) procElement else None) match {
+                case Some(Element.Cold) =>
+                  poisonedE.copy(heroColdDefenceCut =
+                    poisonedE.heroColdDefenceCut + Element.Cold.DefenceReductionCut)
+                case Some(Element.Air) =>
+                  poisonedE.copy(mobAirBoostTurns = Element.Air.ProcTurns)
+                case _ => poisonedE
+              }
             }
             battleAfterAtk = ticked.copy(
               monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
@@ -1061,7 +1090,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
               Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> ticked.monsterName)),
               Option.when(ignites)(content.text("battle.elemental.ignites")),
-              Option.when(poisons)(content.text("battle.mobPoisons"))
+              Option.when(poisons)(content.text("battle.mobPoisons")),
+              Option.when(mobProc && procElement.contains(Element.Cold))(content.text("battle.mobColdBite")),
+              Option.when(mobProc && procElement.contains(Element.Air))(content.text("battle.mobAirBoost"))
             ).flatten.mkString("\n")
           } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
         } else
@@ -1632,12 +1663,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
             rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
-            reduction = BattleState.damageReduction(
-              protection = buffedEff.defence,
-              defenderInt = hero.effectiveBaseStats(nowMs).int,
-              attackerInt = monster.fightStats.atk,
-              bonusPct = battle.heroBattleState.reductionBonusPct
-            )
+            reduction = heroDamageReduction(hero, battle, buffedEff, monster.fightStats.atk, nowMs)
             baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             // «Непробиваемый»: 20% шанс срезать урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
@@ -1964,22 +1990,25 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val burnCut         =
       if (battle.effects.monsterBurn.isEmpty) 0L
       else battle.boss.map(_.burnAccuracyCutPct).getOrElse(0L)
+    // Прок Воздуха у самого моба поднимает ему точность на те же 10%.
+    val airBoost = if (battle.effects.mobAirBoostTurns > 0) Element.Air.ProcBonusPct else 0L
     val monsterAccuracy =
       (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult *
-        (100L - chillCut - burnCut).max(0L) / 100.0).toLong
+        (100L + airBoost - chillCut - burnCut).max(0L) / 100.0).toLong
     (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, monsterAccuracy)
       + battle.heroBattleState.dodgeBonus + passiveBonus).min(95.0).max(5.0)
   }
 
   // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
   // в знаменателе его защита (с учётом %-дебафа комбо) и точность игрока ×1.5.
-  private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double =
-    BattleState.dodgeChance(
-      0L,
-      battle.monsterStats.evasion,
-      effectiveMonsterDefence(battle),
-      heroAccuracy
-    )
+  private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double = {
+    // Тот же прок Воздуха добавляет мобу и уклонения.
+    val evasion =
+      if (battle.effects.mobAirBoostTurns > 0)
+        battle.monsterStats.evasion * (100L + Element.Air.ProcBonusPct) / 100L
+      else battle.monsterStats.evasion
+    BattleState.dodgeChance(0L, evasion, effectiveMonsterDefence(battle), heroAccuracy)
+  }
 }
 
 object BattleState {

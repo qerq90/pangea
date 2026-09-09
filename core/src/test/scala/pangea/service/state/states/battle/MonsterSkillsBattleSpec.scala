@@ -29,7 +29,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
   )
 
   // Слабый монстр с большим запасом hp (не умрёт от удара героя).
-  // Уровень 1: обычное умение стоит ceil(0.8 × (20 + 2)) = 18 энергии.
+  // Уровень 1: обычное умение стоит ceil(0.8 × (30 + 2)) = 26 энергии.
   private val lvl1SkillCost = MonsterEnergy.cost(1L, MonsterEnergy.BasicCostFactor)
 
   private def battle(

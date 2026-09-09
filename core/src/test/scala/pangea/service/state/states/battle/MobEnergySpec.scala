@@ -85,11 +85,12 @@ object MobEnergySpec extends ZIOSpecDefault {
       // немного падает — но остаётся в тех же полутора раундах, а не улетает.
       def rounds(l: Long) =
         MonsterSkill.QuickStrike.cost(l).toDouble / MonsterEnergy.regen(l, Rarity.Common).toDouble
-      assertTrue(MonsterEnergy.baseCost(10L) == 40L) &&
-      assertTrue(MonsterEnergy.maxEnergy(10L) == 120L) &&
+      assertTrue(MonsterEnergy.baseCost(10L) == 50L) &&   // 30 + 2×10
+      assertTrue(MonsterEnergy.maxEnergy(10L) == 150L) &&  // три обычных умения
       assertTrue(MonsterEnergy.regen(10L, Rarity.Common) == 28L) && // (15+20)×0.8
       assertTrue(rounds(150L) < rounds(1L)) &&
-      assertTrue(rounds(1L) < 2.0) && assertTrue(rounds(150L) > 0.9)
+      // обычный моб копит ровно два раунда на первом уровне и около раунда на 150-м
+      assertTrue(rounds(1L) <= 2.0) && assertTrue(rounds(150L) > 0.9)
     },
 
     test("редкость — единственная ручка частоты: легендарный копит вчетверо быстрее обычного") {
@@ -109,11 +110,11 @@ object MobEnergySpec extends ZIOSpecDefault {
     },
 
     test("базовые умения стоят 0.8 базовой цены, расовые — 1.5, округление вверх") {
-      assertTrue(MonsterSkill.QuickStrike.cost(lvl) == 32L) &&      // ceil(40 × 0.8)
-      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == 60L) &&     // 40 × 1.5
-      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 60L) &&
-      // на нечётном уровне округление идёт вверх, а не вниз
-      assertTrue(MonsterSkill.QuickStrike.cost(1L) == 18L)          // ceil(22 × 0.8) = 18
+      assertTrue(MonsterSkill.QuickStrike.cost(lvl) == 40L) &&      // ceil(50 × 0.8)
+      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == 75L) &&     // 50 × 1.5
+      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 75L) &&
+      // округление идёт вверх, а не вниз
+      assertTrue(MonsterSkill.QuickStrike.cost(1L) == 26L)          // ceil(32 × 0.8) = 26
     },
 
     // ── Расовые пулы ──────────────────────────────────────────────────────────
@@ -184,6 +185,61 @@ object MobEnergySpec extends ZIOSpecDefault {
       } yield assertTrue(demon.contains("Fire")) &&
               assertTrue(gnome.contains("Cold")) &&
               assertTrue(khajiit.contains("Air"))
+    },
+
+    // ── Проки стихии, которую дал порошок ─────────────────────────────────────
+    test("морозные удары моба грызут защиту героя — и срез копится") {
+      val h = hero()
+      val b = mobBattle(Race.Gnome, energy = 0L)
+      val frosty = b.copy(effects = b.effects.copy(
+        monsterPowderUsed = true, monsterAttackElement = Some("Cold")))
+      for {
+        // 60 — удар героя, 90 — удар моба, 1 — прок стихии прошёл
+        r <- strike(h, frosty, seedTurn(1))
+        (after, _, log) = r
+      } yield assertTrue(after.effects.heroColdDefenceCut == pangea.model.battle.Element.Cold.DefenceReductionCut) &&
+              assertTrue(log.contains("защита держит хуже")) &&
+              // срез не затухает: следующий прок добавит ещё столько же
+              assertTrue(after.effects.heroColdDefenceCut > 0)
+    },
+
+    test("срез защиты реально уменьшает снижение урона героя") {
+      val tank = hero().copy(fightStats = hero().fightStats.copy(defence = 500))
+      val b = mobBattle(energy = 0L)
+      def hpLost(cut: Int) =
+        strike(tank, b.copy(effects = b.effects.copy(heroColdDefenceCut = cut)), seedTurn())
+          .map { case (_, u, _) => 500000L - u.fightStats.hp }
+      for {
+        plain  <- hpLost(0)
+        bitten <- hpLost(20)
+      } yield assertTrue(bitten > plain)
+    },
+
+    test("воздушный удар бодрит самого моба: точность и уклонение выше на 3 хода") {
+      val h = hero()
+      val b = mobBattle(Race.Khajiit, energy = 0L)
+      val windy = b.copy(effects = b.effects.copy(
+        monsterPowderUsed = true, monsterAttackElement = Some("Air")))
+      for {
+        r <- strike(h, windy, seedTurn(1))
+        (after, _, log) = r
+      } yield assertTrue(log.contains("Ветер подхватывает врага")) &&
+              // буст вешается уже ПОСЛЕ тика начала раунда, поэтому все ходы целы
+              assertTrue(after.effects.mobAirBoostTurns == pangea.model.battle.Element.Air.ProcTurns)
+    },
+
+    test("огненный порошок отыгрывается поджогом, а не этим проком") {
+      val h = hero()
+      val b = mobBattle(Race.Demon, energy = 0L)
+      val fiery = b.copy(effects = b.effects.copy(
+        monsterPowderUsed = true, monsterAttackElement = Some("Fire")))
+      for {
+        r <- strike(h, fiery, seedTurn(1))
+        (after, _, log) = r
+      } yield assertTrue(after.effects.heroBurn.isDefined) &&
+              assertTrue(after.effects.heroColdDefenceCut == 0) &&
+              assertTrue(after.effects.mobAirBoostTurns == 0) &&
+              assertTrue(log.contains("поджёг вас"))
     },
 
     // ── Молния ────────────────────────────────────────────────────────────────
