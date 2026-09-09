@@ -57,7 +57,7 @@ case class ElementalSearchState(
           for {
             hero  <- getHero(user)
             bonus <- Random.nextLongBetween(1L, 3L) // 1 или 2 сверх BossLvL
-            tries  = bonus + pangea.model.monster.Elemental.bossLvl(hero.lvl)
+            tries  = bonus + pangea.model.monster.MiniBoss.bossLvl(hero.lvl)
             _     <- writeScene(user, SearchScene(tries.toInt))
             _     <- scheduleNext(user)
             _     <- showSearch(user, renderer)

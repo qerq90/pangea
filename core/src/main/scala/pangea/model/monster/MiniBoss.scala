@@ -5,17 +5,18 @@ import pangea.model.battle.Element
 import pangea.model.item.{ItemSet, MaterialKind}
 import pangea.model.stats.FightStats
 
-/** Вид элементаля-минибосса. Все элементали — раса [[Race.Elemental]] и потому
- *  не подвержены яду и кровотечению; каждый вид дополнительно завязан на свою
- *  стихию и получает от неё свои иммунитеты и уязвимости. Стихия вида — это не
- *  [[Element]] оружия: земли среди камней в игре нет, а уязвимости задаёт сам
- *  вариант через [[damageTakenMult]].
+/** Минибосс — особый моб, который встречается редко и живёт по своим правилам:
+ *  сила зависит от уровня ГЕРОЯ, а не от глубины лабиринта, статы фиксированы (а
+ *  не роллятся), способности идут строго по кругу и оплачиваются энергией, а
+ *  добыча своя.
  *
- *  Статы считаются от `BossLvL` (см. [[Elemental.bossLvl]]) — базовые числа
- *  живут ЗДЕСЬ, на варианте, как у [[pangea.model.item.PassiveKind]]. */
-sealed abstract class Elemental(
+ *  Статы считаются от `BossLvL` (см. [[MiniBoss.bossLvl]]) — базовые числа живут
+ *  ЗДЕСЬ, на варианте, как у [[pangea.model.item.PassiveKind]]. Уязвимости к
+ *  стихиям оружия задаёт сам вариант через [[damageTakenMult]]. */
+sealed abstract class MiniBoss(
   val label:    String,
-  val genitive: String
+  val genitive: String,
+  val race:     Race
 ) extends EnumEntry {
 
   /** Боевые статы элементаля на данном уровне босса. */
@@ -41,6 +42,13 @@ sealed abstract class Elemental(
    *  берёт; огненному всё равно. */
   def plainDamageTakenMult: Double
 
+  /** Сколько раз он поднимается после обнуления HP и на сколько % своего
+   *  максимума лечится каждый раз. Пустой список — умирает с первого раза. */
+  def revives: List[Long] = Nil
+
+  /** Насколько (в п.п.) горение срезает ЕГО точность. 0 — пламя точности не мешает. */
+  def burnAccuracyCutPct: Long = 0L
+
   /** Как его обычная атака делится по герою: доли (по броне, по HP) от урона.
    *  None — обычный порядок «сперва броня, остаток в HP». Каменный бьёт иначе:
    *  90% урона уходит в броню и одновременно 30% — в HP. Что броня не покрыла,
@@ -53,20 +61,20 @@ sealed abstract class Elemental(
   /** Набор, вещи которого он роняет и в который переводит куб через ингредиент. */
   def set: ItemSet
 
-  /** Имя в бою и в логе: «Огненный Элементаль». Редкость в него не входит —
-   *  минибосс не «легендарный моб», он именной. */
-  def monsterName: String = s"$label ${Race.Elemental}"
+  /** Имя в бою и в логе: «Огненный Элементаль», «Гнилой Джо». Редкость в него не
+   *  входит — минибосс не «легендарный моб», он именной. */
+  def monsterName: String
 }
 
-object Elemental extends Enum[Elemental] {
+object MiniBoss extends Enum[MiniBoss] {
 
-  val values: IndexedSeq[Elemental] = findValues
+  val values: IndexedSeq[MiniBoss] = findValues
 
   /** Уровень босса: `(уровень героя − 1) / 5`, округление вниз, минимум 1. */
   def bossLvl(heroLvl: Long): Long = ((heroLvl - 1L) / 5L).max(1L)
 
-  // ── Огненный ────────────────────────────────────────────────────────────────
-  case object Fire extends Elemental("Огненный", "Огненного") {
+  // ── Огненный элементаль ────────────────────────────────────────────────────────────────
+  case object FireElemental extends MiniBoss("Огненный", "Огненного", Race.Elemental) {
 
     val HpPerLvl: Long       = 1500L
     val ArmorPerLvl: Long    = 750L
@@ -134,6 +142,8 @@ object Elemental extends Enum[Elemental] {
       case _            => 1.0
     }
 
+    def monsterName: String = s"$label ${Race.Elemental}"
+
     /** Огненного нельзя поджечь — он и так пламя. */
     def immuneToBurn: Boolean = true
 
@@ -157,8 +167,8 @@ object Elemental extends Enum[Elemental] {
     val ChilledAccuracyCutPct: Long = 5L
   }
 
-  // ── Каменный ────────────────────────────────────────────────────────────────
-  case object Stone extends Elemental("Каменный", "Каменного") {
+  // ── Каменный элементаль ────────────────────────────────────────────────────────────────
+  case object StoneElemental extends MiniBoss("Каменный", "Каменного", Race.Elemental) {
 
     val HpPerLvl: Long          = 1250L
     val ArmorPerLvl: Long       = 1500L
@@ -230,6 +240,8 @@ object Elemental extends Enum[Elemental] {
       case _            => 1.0
     }
 
+    def monsterName: String = s"$label ${Race.Elemental}"
+
     /** Камень горит — на том и держится вся тактика против него. */
     def immuneToBurn: Boolean = false
 
@@ -244,6 +256,89 @@ object Elemental extends Enum[Elemental] {
     def set: ItemSet             = ItemSet.StoneGuard
   }
 
-  /** Вид по названию стихии — для восстановления из сохранённого боя. */
-  def byName(name: String): Option[Elemental] = values.find(_.entryName == name)
+  // ── Гнилой Джо ──────────────────────────────────────────────────────────────
+  case object RottenJoe extends MiniBoss("Гнилой", "Гнилого", Race.Undead) {
+
+    val HpPerLvl: Long          = 2200L
+    val AtkPerLvl: Long         = 200L
+    val EnergyPerLvl: Long      = 100L
+    val AccuracyPerLvl: Long    = 350L
+    val EvasionPerLvl: Long     = 100L
+    val EnergyRegenPerLvl: Long = 5L
+    val ExpPerLvl: Long         = 175L
+
+    /** Огонь — единственное, чего гниль по-настоящему боится. */
+    val FireDamageTakenPct: Long = 150L
+
+    // ── Способности (применяются по кругу) ──────────────────────────────────
+    /** Ядовитый смрад: на сколько % травит героя и сколько стоит. */
+    val StenchPoisonPct: Int    = 10
+    val StenchCostPerLvl: Long  = 10L
+
+    /** Широкий удар: доля атаки в урон, цена и шанс травмы при уроне по HP. */
+    val SweepDamageFactor: Double   = 0.75
+    val SweepCostPerLvl: Long       = 10L
+    val SweepTraumaChancePct: Long  = 5L
+
+    /** Гнилое восстановление: сколько % своего максимума HP он себе возвращает. */
+    val RegrowHpPct: Long      = 10L
+    val RegrowCostPerLvl: Long = 10L
+
+    // ── «Отказывается умирать» ──────────────────────────────────────────────
+    /** Сколько % HP он возвращает себе на первом, втором и третьем подъёме. */
+    val ReviveHpPct: List[Long] = List(75L, 50L, 25L)
+    /** Каждый подъём стоит ему сил: −25% к атаке на 4 хода. */
+    val ReviveAtkCutPct: Long = 25L
+    val ReviveAtkCutTurns: Int = 4
+    /** С какого по счёту падения пламя упокаивает его насовсем. */
+    val FireEndsFromDeath: Int = 2
+
+    def stats(bossLvl: Long): FightStats = FightStats(
+      atk      = AtkPerLvl * bossLvl,
+      hp       = HpPerLvl * bossLvl,
+      armor    = 0L,
+      defence  = 0L,
+      evasion  = EvasionPerLvl * bossLvl,
+      accuracy = AccuracyPerLvl * bossLvl,
+      energy   = EnergyPerLvl * bossLvl
+    )
+
+    def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
+    def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    def damageTakenMult(e: Element): Double = e match {
+      case Element.Fire => FireDamageTakenPct / 100.0
+      case _            => 1.0
+    }
+
+    /** Гниль отлично горит. */
+    def immuneToBurn: Boolean = false
+
+    /** Горящий Джо хуже видит, куда бьёт. */
+    override val burnAccuracyCutPct: Long = 20L
+
+    /** Смрад, широкий удар, восстановление и пропуск. */
+    def abilities: Int = 4
+
+    def plainDamageTakenMult: Double = 1.0
+
+    def heroHitSplit: Option[(Double, Double)] = None
+
+    /** Трижды поднимается: сперва на три четверти, потом на половину, потом на
+     *  четверть своего максимума. */
+    override def revives: List[Long] = ReviveHpPct
+
+    /** Имя у него собственное — раса в него не входит. */
+    def monsterName: String = "Гнилой Джо"
+
+    def ingredient: MaterialKind = MaterialKind.GhoulSkin
+    def set: ItemSet             = ItemSet.Ghoul
+  }
+
+  /** Минибосс по имени варианта — для восстановления из сохранённого боя. */
+  def byName(name: String): Option[MiniBoss] = values.find(_.entryName == name)
+
+  /** Элементали — те минибоссы, что водятся в «Логове элементаля». Гнилой Джо
+   *  туда не ходит: его встречают на раскопках схрона. */
+  val elementals: IndexedSeq[MiniBoss] = values.filter(_.race == Race.Elemental)
 }

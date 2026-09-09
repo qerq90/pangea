@@ -8,7 +8,7 @@ import pangea.generator.loot.LootGenerator
 import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
-import pangea.model.monster.Elemental
+import pangea.model.monster.MiniBoss
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
 import pangea.model.skill.{MonsterSkill, Skill}
@@ -78,8 +78,48 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
       // именно источник добил героя до полоски, а что за этот ход он её перешёл.
       guarded = stoneGuardRescue(hero, result, now)
-      state  <- commit(user, guarded, now, renderer)
+      // Гнилой Джо поднимается после обнуления HP — победу над ним ещё рано
+      // засчитывать. Ловим здесь, где сходятся ВСЕ пути урона: удар, навык,
+      // шипы, яд. Иначе каждый из них пришлось бы проверять отдельно.
+      risen   = joeRises(guarded)
+      state  <- commit(user, risen, now, renderer)
     } yield state
+
+  /** «Отказывается умирать»: пока у минибосса остались подъёмы, обнуление HP не
+    * заканчивает бой — он встаёт с частью здоровья и слабеет в атаке. Пламя всё
+    * меняет: начиная со второго падения горящий Джо упокаивается насовсем.
+    *
+    * Возвращает исход как есть, если это не он, подъёмы кончились или победы в
+    * этом ходу вовсе не было. */
+  private def joeRises(res: TurnResult): TurnResult = {
+    val battle = res.battle
+    val revives = battle.boss.map(_.revives).getOrElse(Nil)
+    if (res.outcome != Outcome.Victory || revives.isEmpty) res
+    else {
+      val deathNo = battle.bossRevives + 1 // какое это по счёту падение
+      val burning = battle.effects.monsterBurn.isDefined
+      if (deathNo > revives.size) res // подъёмы кончились — смерть окончательная
+      else if (burning && deathNo >= MiniBoss.RottenJoe.FireEndsFromDeath)
+        res.copy(log = res.log :+ content.text("battle.joe.burnedOut"))
+      else {
+        val maxHp  = battle.monsterStats.hp
+        val newHp  = (maxHp * revives(deathNo - 1) / 100L).max(1L)
+        val risen  = battle.copy(
+          monsterCurrentHp = newHp,
+          bossRevives      = deathNo,
+          effects = battle.effects.copy(
+            monsterWeakenedTurns = MiniBoss.RottenJoe.ReviveAtkCutTurns,
+            monsterWeakenedPct   = MiniBoss.RottenJoe.ReviveAtkCutPct))
+        val key = if (deathNo == 1) "battle.joe.risesFirst" else "battle.joe.risesAgain"
+        res.copy(
+          battle  = risen,
+          outcome = Outcome.Continue,
+          log     = (res.log :+ content.text(key)) :+ content.format("battle.joe.riseWeakness",
+                      "pct" -> MiniBoss.RottenJoe.ReviveAtkCutPct.toString,
+                      "turns" -> MiniBoss.RottenJoe.ReviveAtkCutTurns.toString))
+      }
+    }
+  }
 
   /** «Каменный страж» (порог 12): ход, за который HP героя провалилось ниже
     * порога, поднимает ему броню. Срабатывает именно НА ПЕРЕСЕЧЕНИИ — пока герой
@@ -207,7 +247,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
             // Сопротивление элементаля стихии оружия — до разбивки по броне/HP.
-            resisted = (damage * elementalResistance(hero, battle)).toLong.max(1L)
+            resisted = (damage * bossResistance(hero, battle)).toLong.max(1L)
             (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
@@ -257,7 +297,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             (updated, elemLog) = elemResult
             // Шипы огненного элементаля: пока цела броня, он возвращает часть
             // урона и поджигает бьющего. Скованный холодом молчит.
-            thornsResult = elementalThorns(healedHero, updated, battle.monsterCurrentArmor, resisted)
+            thornsResult = bossThorns(healedHero, updated, battle.monsterCurrentArmor, resisted)
             (thornedHero, thornedBattle, thornsLine) = thornsResult
             log1 = log :+ (attackLine + dotIndicators(thornedBattle))
             log2 =
@@ -311,8 +351,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       }
     // Каменный элементаль: россыпь валунов сбивает защиту и уклонение, вязкая
     // земля — точность и уклонение. Уклонению может достаться от обоих сразу.
-    val stunned  = if (battle.effects.heroStunned) Elemental.Stone.BurstDebuffPct else 0L
-    val grounded = if (battle.effects.heroGrounded) Elemental.Stone.GroundCutPct else 0L
+    val stunned  = if (battle.effects.heroStunned) MiniBoss.StoneElemental.BurstDebuffPct else 0L
+    val grounded = if (battle.effects.heroGrounded) MiniBoss.StoneElemental.GroundCutPct else 0L
     if (stunned == 0L && grounded == 0L) fs
     else fs.copy(
       defence  = fs.defence * (100L - stunned) / 100L,
@@ -346,8 +386,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * стихия почти не вредит (огонь по огненному — 20%), противоположная бьёт
     * сильнее (холод — 150%). Оружие сразу с двумя стихиями перемножает их
     * множители. Для обычных мобов всегда 1.0. */
-  private def elementalResistance(hero: Hero, battle: SoloPveBattle): Double =
-    battle.elemental.fold(1.0) { e =>
+  private def bossResistance(hero: Hero, battle: SoloPveBattle): Double =
+    battle.boss.fold(1.0) { e =>
       // Оружие без единой стихии — «голая сталь»: каменного она почти не берёт.
       if (hero.gems.weaponElements.isEmpty) e.plainDamageTakenMult
       else hero.gems.weaponElements.foldLeft(1.0)((m, el) => m * e.damageTakenMult(el))
@@ -361,8 +401,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * Чего броня не покрыла — уходит в HP: у героя без брони удар целиком ложится
     * на здоровье, а по мере её истощения доля HP плавно растёт от 30% до 100%.
     * Возвращает новые hp и armor героя. */
-  private def elementalHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
-    battle.elemental.flatMap(_.heroHitSplit) match {
+  private def bossHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
+    battle.boss.flatMap(_.heroHitSplit) match {
       case None => MonsterSkill.applyPhysicalDamage(battle, hero, damage)
       case Some((armorPart, hpPart)) =>
         val curArmor = hero.fightStats.armor.max(0L)
@@ -377,19 +417,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     *
     * Возвращает героя после отдачи, бой с наложенным горением и строку лога
     * (пустую, если шипов не было). */
-  private def elementalThorns(
+  private def bossThorns(
       hero: Hero,
       battle: SoloPveBattle,
       armorBeforeHit: Long,
       damageDealt: Long
   ): (Hero, SoloPveBattle, String) =
-    battle.elemental match {
+    battle.boss match {
       // Шипы — особенность огненного: о каменного руки не обжигают.
-      case Some(Elemental.Fire) if armorBeforeHit > 0 && !battle.effects.chilled =>
-        val thorns = elementalTaken(hero, battle, (damageDealt * Elemental.Fire.ThornsPct / 100L).max(1L))
+      case Some(MiniBoss.FireElemental) if armorBeforeHit > 0 && !battle.effects.chilled =>
+        val thorns = bossDamageTaken(hero, battle, (damageDealt * MiniBoss.FireElemental.ThornsPct / 100L).max(1L))
         val (hurt, _) = burnHero(hero, thorns)
         val burned = battle.copy(effects = battle.effects.copy(heroBurn = Some(
-          battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct)))))
+          battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct)))))
         (hurt, burned, content.format("battle.elemental.thorns", "damage" -> thorns.toString))
       case _ => (hero, battle, "")
     }
@@ -400,14 +440,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * равно сдвигается: иначе он навсегда застрял бы на дорогом умении.
     *
     * Возвращает то же, что обычный каст: обновлённый бой, героя и строку лога. */
-  private def elementalTurnCast(
+  private def bossTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
       nowMs: Long
   ): Task[(SoloPveBattle, Hero, String)] =
-    battle.elemental match {
-      case Some(Elemental.Stone) => stoneTurnCast(hero, battle, nowMs)
-      case _                     => fireTurnCast(hero, battle, nowMs)
+    battle.boss match {
+      case Some(MiniBoss.StoneElemental) => stoneTurnCast(hero, battle, nowMs)
+      case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs)
+      case _                             => fireTurnCast(hero, battle, nowMs)
     }
 
   /** Круг огненного: всплеск → сфера → щит → пропуск. */
@@ -419,46 +460,46 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val lvl      = battle.monsterLvl
     val atk      = battle.monsterStats.atk
     val energy   = battle.monsterCurrentEnergy
-    val next     = nextTurn(battle, Elemental.Fire)
+    val next     = nextTurn(battle, MiniBoss.FireElemental)
 
     def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
 
-    battle.elementalTurn match {
+    battle.bossTurn match {
       // 1) Огненный всплеск: урон огнём + поджог героя на 1%.
       case 0 =>
-        val cost = Elemental.Fire.SplashCostPerLvl * lvl
+        val cost = MiniBoss.FireElemental.SplashCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg     = elementalTaken(hero, battle, (atk * Elemental.Fire.SplashDamageFactor).toLong.max(1L))
+          val dmg     = bossDamageTaken(hero, battle, (atk * MiniBoss.FireElemental.SplashDamageFactor).toLong.max(1L))
           val (h, l)  = burnHero(hero, dmg)
           val effects = next.effects.copy(heroBurn = Some(
-            next.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.SplashBurnPct))))
+            next.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.SplashBurnPct))))
           ZIO.succeed((spend(cost, next).copy(effects = effects), h,
             content.format("battle.elemental.fireSplash", "damage" -> l.toString)))
         }
 
       // 2) Сфера огня: копится до трёх, третья сразу срывается в смерч.
       case 1 =>
-        val cost = Elemental.Fire.OrbCostPerLvl * lvl
+        val cost = MiniBoss.FireElemental.OrbCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val orbs = battle.elementalCharges + 1
-          if (orbs < Elemental.Fire.OrbsToBurst)
-            ZIO.succeed((spend(cost, next).copy(elementalCharges = orbs), hero,
+          val orbs = battle.bossCharges + 1
+          if (orbs < MiniBoss.FireElemental.OrbsToBurst)
+            ZIO.succeed((spend(cost, next).copy(bossCharges = orbs), hero,
               content.text("battle.elemental.orbCreated")))
-          else chargeBurst(hero, spend(cost, next).copy(elementalCharges = 0), atk, nowMs, Elemental.Fire)
+          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.FireElemental)
         }
 
       // 3) Огненный щит: чинит броню и HP, но только если есть что чинить.
       case 2 =>
-        val cost     = Elemental.Fire.ShieldCostPerLvl * lvl
+        val cost     = MiniBoss.FireElemental.ShieldCostPerLvl * lvl
         val maxHp    = battle.monsterStats.hp
         val maxArmor = battle.monsterStats.armor
         val hurt     = battle.monsterCurrentHp < maxHp || battle.monsterCurrentArmor < maxArmor
         if (energy < cost || !hurt) ZIO.succeed((next, hero, ""))
         else {
-          val newHp    = (battle.monsterCurrentHp + maxHp * Elemental.Fire.ShieldHpPct / 100L).min(maxHp)
-          val newArmor = (battle.monsterCurrentArmor + maxArmor * Elemental.Fire.ShieldArmorPct / 100L).min(maxArmor)
+          val newHp    = (battle.monsterCurrentHp + maxHp * MiniBoss.FireElemental.ShieldHpPct / 100L).min(maxHp)
+          val newArmor = (battle.monsterCurrentArmor + maxArmor * MiniBoss.FireElemental.ShieldArmorPct / 100L).min(maxArmor)
           val healed   = newHp - battle.monsterCurrentHp
           val repaired = newArmor - battle.monsterCurrentArmor
           ZIO.succeed((
@@ -483,16 +524,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       battle: SoloPveBattle,
       atk: Long,
       nowMs: Long,
-      kind: Elemental
+      kind: MiniBoss
   ): Task[(SoloPveBattle, Hero, String)] = {
-    val stone    = kind == Elemental.Stone
-    val statPct  = if (stone) Elemental.Stone.BurstHeroStatPct else Elemental.Fire.BurstHeroStatPct
-    val traumaAt = if (stone) Elemental.Stone.BurstTraumaChancePct else Elemental.Fire.BurstTraumaChancePct
+    val stone    = kind == MiniBoss.StoneElemental
+    val statPct  = if (stone) MiniBoss.StoneElemental.BurstHeroStatPct else MiniBoss.FireElemental.BurstHeroStatPct
+    val traumaAt = if (stone) MiniBoss.StoneElemental.BurstTraumaChancePct else MiniBoss.FireElemental.BurstTraumaChancePct
     val textKey  = if (stone) "battle.elemental.boulderBurst" else "battle.elemental.orbBurst"
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val maxArmor = hero.effectiveMaxArmor(nowMs)
     val raw      = atk * 2L + (maxHp * statPct / 100L) + (maxArmor * statPct / 100L)
-    val damage   = elementalTaken(hero, battle, raw)
+    val damage   = bossDamageTaken(hero, battle, raw)
     // Залп бьёт как обычная атака: сперва броня, остаток — в HP.
     val toArmor  = damage.min(hero.fightStats.armor)
     val toHp     = damage - toArmor
@@ -502,13 +543,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     // Каменная россыпь сбивает с ног: защита и уклонение героя срезаны на 3 хода.
     val after =
       if (!stone) battle
-      else battle.copy(effects = battle.effects.copy(heroStunnedTurns = Elemental.Stone.BurstDebuffTurns))
+      else battle.copy(effects = battle.effects.copy(heroStunnedTurns = MiniBoss.StoneElemental.BurstDebuffTurns))
     val burstLine = content.format(textKey, "damage" -> damage.toString)
     val line =
       if (!stone) burstLine
       else burstLine + "\n" + content.format("battle.elemental.boulderStun",
-             "pct" -> Elemental.Stone.BurstDebuffPct.toString,
-             "turns" -> Elemental.Stone.BurstDebuffTurns.toString)
+             "pct" -> MiniBoss.StoneElemental.BurstDebuffPct.toString,
+             "turns" -> MiniBoss.StoneElemental.BurstDebuffTurns.toString)
     if (toHp <= 0 || hit.fightStats.hp <= 0) ZIO.succeed((after, hit, line))
     else
       for {
@@ -519,19 +560,83 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   }
 
   /** Сдвиг очереди способностей: круг у каждого вида своей длины. */
-  private def nextTurn(battle: SoloPveBattle, kind: Elemental): SoloPveBattle =
-    battle.copy(elementalTurn = (battle.elementalTurn + 1) % kind.abilities)
+  private def nextTurn(battle: SoloPveBattle, kind: MiniBoss): SoloPveBattle =
+    battle.copy(bossTurn = (battle.bossTurn + 1) % kind.abilities)
 
-  /** Атака моба с учётом того, что подожжённый каменный бьёт слабее. */
+  /** Атака моба с учётом временного ослабления: подожжённый камень бьёт слабее,
+    * поднявшийся из мёртвых Джо — тоже. Процент приходит вместе со сроком. */
   private def monsterAttack(battle: SoloPveBattle): Long =
     if (battle.effects.monsterWeakened)
-      (battle.monsterStats.atk * (100L - Elemental.Stone.BurnedDamageCutPct) / 100L).max(1L)
+      (battle.monsterStats.atk * (100L - battle.effects.monsterWeakenedPct).max(0L) / 100L).max(1L)
     else battle.monsterStats.atk
 
   /** Потолок брони моба с учётом того, сколько его срезали поджоги. Текущая броня
     * может остаться ВЫШЕ потолка — её поджог не трогает, но чинить выше уже нельзя. */
   private def monsterArmorCap(battle: SoloPveBattle): Long =
     (battle.monsterStats.armor - battle.effects.monsterMaxArmorCut).max(0L)
+
+  /** Круг Гнилого Джо: смрад → широкий удар → гнилое восстановление → пропуск. */
+  private def joeTurnCast(
+      hero: Hero,
+      battle: SoloPveBattle,
+      nowMs: Long
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val joe    = MiniBoss.RottenJoe
+    val lvl    = battle.monsterLvl
+    val energy = battle.monsterCurrentEnergy
+    val next   = nextTurn(battle, joe)
+
+    def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
+
+    battle.bossTurn match {
+      // 1) Ядовитый смрад: травит героя. Повторный смрад стакает яд, как и у мобов.
+      case 0 =>
+        val cost = joe.StenchCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else {
+          val poison = next.effects.heroPoison
+            .map(p => Poison(p.pct + joe.StenchPoisonPct))
+            .getOrElse(Poison(joe.StenchPoisonPct))
+          ZIO.succeed((spend(cost, next).copy(effects = next.effects.copy(heroPoison = Some(poison))),
+            hero, content.text("battle.joe.stench")))
+        }
+
+      // 2) Широкий удар: три четверти атаки, и с шансом 5% — травма, если дошло до HP.
+      case 1 =>
+        val cost = joe.SweepCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else {
+          val dmg      = bossDamageTaken(hero, battle, (monsterAttack(battle) * joe.SweepDamageFactor).toLong.max(1L))
+          val hpBefore = hero.fightStats.hp
+          val (hurt, dealt) = burnHero(hero, dmg)
+          val line     = content.format("battle.joe.sweep", "damage" -> dealt.toString)
+          val spent    = spend(cost, next)
+          if (hurt.fightStats.hp >= hpBefore || hurt.fightStats.hp <= 0)
+            ZIO.succeed((spent, hurt, line))
+          else
+            for {
+              roll   <- Random.nextIntBetween(1, 101)
+              result <- if (roll > joe.SweepTraumaChancePct) ZIO.succeed((spent, hurt, line))
+                        else giveTrauma(hurt, nowMs).map { case (h, tl) => (spent, h, line + "\n" + tl) }
+            } yield result
+        }
+
+      // 3) Гнилое восстановление: черви латают своё жилище.
+      case 2 =>
+        val cost  = joe.RegrowCostPerLvl * lvl
+        val maxHp = battle.monsterStats.hp
+        if (energy < cost || battle.monsterCurrentHp >= maxHp) ZIO.succeed((next, hero, ""))
+        else {
+          val newHp  = (battle.monsterCurrentHp + maxHp * joe.RegrowHpPct / 100L).min(maxHp)
+          val healed = newHp - battle.monsterCurrentHp
+          ZIO.succeed((spend(cost, next).copy(monsterCurrentHp = newHp), hero,
+            content.format("battle.joe.regrow", "hp" -> healed.toString)))
+        }
+
+      // 4) Пропуск хода.
+      case _ => ZIO.succeed((next, hero, ""))
+    }
+  }
 
   /** Круг каменного: всплеск → валун → восстановление → вязкая земля → пропуск. */
   private def stoneTurnCast(
@@ -542,17 +647,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val lvl    = battle.monsterLvl
     val atk    = monsterAttack(battle)
     val energy = battle.monsterCurrentEnergy
-    val next   = nextTurn(battle, Elemental.Stone)
+    val next   = nextTurn(battle, MiniBoss.StoneElemental)
 
     def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
 
-    battle.elementalTurn match {
+    battle.bossTurn match {
       // 1) Каменный всплеск: осколок в упор, половина атаки.
       case 0 =>
-        val cost = Elemental.Stone.SplashCostPerLvl * lvl
+        val cost = MiniBoss.StoneElemental.SplashCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg    = elementalTaken(hero, battle, (atk * Elemental.Stone.SplashDamageFactor).toLong.max(1L))
+          val dmg    = bossDamageTaken(hero, battle, (atk * MiniBoss.StoneElemental.SplashDamageFactor).toLong.max(1L))
           val (h, l) = burnHero(hero, dmg)
           ZIO.succeed((spend(cost, next), h,
             content.format("battle.elemental.stoneSplash", "damage" -> l.toString)))
@@ -560,26 +665,26 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
       // 2) Каменный валун: копится до трёх, третий сразу уходит в россыпь.
       case 1 =>
-        val cost = Elemental.Stone.BoulderCostPerLvl * lvl
+        val cost = MiniBoss.StoneElemental.BoulderCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val boulders = battle.elementalCharges + 1
-          if (boulders < Elemental.Stone.BouldersToBurst)
-            ZIO.succeed((spend(cost, next).copy(elementalCharges = boulders), hero,
+          val boulders = battle.bossCharges + 1
+          if (boulders < MiniBoss.StoneElemental.BouldersToBurst)
+            ZIO.succeed((spend(cost, next).copy(bossCharges = boulders), hero,
               content.text("battle.elemental.boulderCreated")))
-          else chargeBurst(hero, spend(cost, next).copy(elementalCharges = 0), atk, nowMs, Elemental.Stone)
+          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.StoneElemental)
         }
 
       // 3) Восстановление камня: чинит броню и HP, но только если есть что чинить.
       case 2 =>
-        val cost     = Elemental.Stone.RestoreCostPerLvl * lvl
+        val cost     = MiniBoss.StoneElemental.RestoreCostPerLvl * lvl
         val maxHp    = battle.monsterStats.hp
         val cap      = monsterArmorCap(battle)
         val hurt     = battle.monsterCurrentHp < maxHp || battle.monsterCurrentArmor < cap
         if (energy < cost || !hurt) ZIO.succeed((next, hero, ""))
         else {
-          val newHp    = (battle.monsterCurrentHp + maxHp * Elemental.Stone.RestoreHpPct / 100L).min(maxHp)
-          val newArmor = (battle.monsterCurrentArmor + battle.monsterStats.armor * Elemental.Stone.RestoreArmorPct / 100L)
+          val newHp    = (battle.monsterCurrentHp + maxHp * MiniBoss.StoneElemental.RestoreHpPct / 100L).min(maxHp)
+          val newArmor = (battle.monsterCurrentArmor + battle.monsterStats.armor * MiniBoss.StoneElemental.RestoreArmorPct / 100L)
                            .min(cap.max(battle.monsterCurrentArmor))
           val healed   = newHp - battle.monsterCurrentHp
           val repaired = newArmor - battle.monsterCurrentArmor
@@ -592,15 +697,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
       // 4) Вязкая земля: режет герою точность и уклонение.
       case 3 =>
-        val cost = Elemental.Stone.GroundCostPerLvl * lvl
+        val cost = MiniBoss.StoneElemental.GroundCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else
           ZIO.succeed((
-            spend(cost, next).copy(effects = next.effects.copy(heroGroundedTurns = Elemental.Stone.GroundTurns)),
+            spend(cost, next).copy(effects = next.effects.copy(heroGroundedTurns = MiniBoss.StoneElemental.GroundTurns)),
             hero,
             content.format("battle.elemental.stickyGround",
-              "pct" -> Elemental.Stone.GroundCutPct.toString,
-              "turns" -> Elemental.Stone.GroundTurns.toString)))
+              "pct" -> MiniBoss.StoneElemental.GroundCutPct.toString,
+              "turns" -> MiniBoss.StoneElemental.GroundTurns.toString)))
 
       // 5) Пропуск хода.
       case _ => ZIO.succeed((next, hero, ""))
@@ -672,8 +777,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
     * и есть огонь: и удар, и всплеск, и смерч, и шипы, и горение. У прочих мобов
     * стихийного урона нет, поэтому им порог ничего не режет. */
-  private def elementalTaken(hero: Hero, battle: SoloPveBattle, damage: Long): Long =
-    if (battle.elemental.isEmpty || damage <= 0L) damage
+  private def bossDamageTaken(hero: Hero, battle: SoloPveBattle, damage: Long): Long =
+    if (battle.boss.isEmpty || damage <= 0L) damage
     else (damage * hero.sets.elementalDamageTakenMult).toLong.max(1L)
 
   /** Урон герою огнём: сперва броня, остаток в HP. Возвращает героя и сколько
@@ -763,13 +868,13 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           // Огненного элементаля прок Холода вдобавок сковывает: шипы молчат,
           // его атаки перестают поджигать, точность срезана, и одна собранная
           // сфера гаснет. Каменному холод ничего сверх обычного не делает.
-          if (b.elemental.contains(Elemental.Fire)) {
-            val orbsLeft = (b.elementalCharges - 1).max(0)
-            if (b.elementalCharges > 0)
+          if (b.boss.contains(MiniBoss.FireElemental)) {
+            val orbsLeft = (b.bossCharges - 1).max(0)
+            if (b.bossCharges > 0)
               log = log :+ content.format("battle.elemental.orbDestroyed", "orbs" -> orbsLeft.toString)
             b = b.copy(
-              elementalCharges = orbsLeft,
-              effects          = b.effects.copy(chilledTurns = Elemental.Fire.ChilledTurns))
+              bossCharges = orbsLeft,
+              effects          = b.effects.copy(chilledTurns = MiniBoss.FireElemental.ChilledTurns))
           }
         }
         if (fired(Element.Fire) && !fireAir) {
@@ -778,19 +883,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           log = log :+ Element.Fire.procText
           // Каменный элементаль от пламени плывёт: бьёт слабее, теряет валун и
           // часть ПОТОЛКА брони (текущая при этом остаётся какая была).
-          if (b.elemental.contains(Elemental.Stone)) {
-            val left = (b.elementalCharges - 1).max(0)
-            if (b.elementalCharges > 0)
+          if (b.boss.contains(MiniBoss.StoneElemental)) {
+            val left = (b.bossCharges - 1).max(0)
+            if (b.bossCharges > 0)
               log = log :+ content.format("battle.elemental.boulderMelted", "boulders" -> left.toString)
             b = b.copy(
-              elementalCharges = left,
+              bossCharges = left,
               effects = b.effects.copy(
-                monsterWeakenedTurns = Elemental.Stone.BurnedTurns,
-                monsterMaxArmorCut   = b.effects.monsterMaxArmorCut + Elemental.Stone.BurnedMaxArmorCut))
+                monsterWeakenedTurns = MiniBoss.StoneElemental.BurnedTurns,
+                monsterWeakenedPct   = MiniBoss.StoneElemental.BurnedDamageCutPct,
+                monsterMaxArmorCut   = b.effects.monsterMaxArmorCut + MiniBoss.StoneElemental.BurnedMaxArmorCut))
             log = log :+ content.format("battle.elemental.stoneMelts",
-                    "pct" -> Elemental.Stone.BurnedDamageCutPct.toString,
-                    "turns" -> Elemental.Stone.BurnedTurns.toString,
-                    "armor" -> Elemental.Stone.BurnedMaxArmorCut.toString)
+                    "pct" -> MiniBoss.StoneElemental.BurnedDamageCutPct.toString,
+                    "turns" -> MiniBoss.StoneElemental.BurnedTurns.toString,
+                    "armor" -> MiniBoss.StoneElemental.BurnedMaxArmorCut.toString)
           }
         }
         if (fired(Element.Air) && !fireAir) {
@@ -866,8 +972,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
               else baseReduced
             // Удар элементаля — это стихия, а не сталь: «Каменный страж» его режет.
-            reducedDamage = elementalTaken(hero, ticked, impenDamage)
-            (newHp, newArmor) = elementalHit(ticked, hero, reducedDamage)
+            reducedDamage = bossDamageTaken(hero, ticked, impenDamage)
+            (newHp, newArmor) = bossHit(ticked, hero, reducedDamage)
             // «Крепкость»: при обнулении брони 25% шанс одноразово восстановить 10% макс.брони.
             armorEmptied = hero.fightStats.armor > 0 && newArmor <= 0
             toughTriggered <- chanceRoll(
@@ -881,8 +987,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // Обычная атака огненного элементаля поджигает героя с шансом 50% —
             // но не пока он скован холодом. Без элементаля бросок не тратится.
             ignites <- chanceRoll(
-              ticked.elemental.isDefined && !ticked.effects.chilled,
-              (Elemental.Fire.IgniteChancePct - hero.sets.igniteResistPct).max(0L)
+              ticked.boss.isDefined && !ticked.effects.chilled,
+              (MiniBoss.FireElemental.IgniteChancePct - hero.sets.igniteResistPct).max(0L)
             )
             battleAfterAtk = ticked.copy(
               monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
@@ -890,7 +996,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               effects =
                 if (!ignites) ticked.effects
                 else ticked.effects.copy(heroBurn = Some(
-                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(Elemental.Fire.ThornsBurnPct))))
+                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct))))
             )
             lines = List(
               Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> ticked.monsterName)),
@@ -928,8 +1034,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         if (heroAfterAtk.fightStats.hp <= 0 || battleAfterAtk.monsterCurrentHp <= 0)
           ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
         // Элементаль не катает случайный скилл: он идёт строго по своему кругу.
-        else if (battleAfterAtk.elemental.isDefined)
-          elementalTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
+        else if (battleAfterAtk.boss.isDefined)
+          bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
         else
           for {
             skillRoll <- Random.nextIntBetween(1, 101)
@@ -980,7 +1086,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         else (finalHero, finalBattle, "")
       // Элементаль восстанавливает свою энергию в конце раунда — из неё он
       // платит за способности следующего круга.
-      battleWithEnergy = battleAfterHero.elemental match {
+      battleWithEnergy = battleAfterHero.boss match {
         case Some(e) =>
           val maxEn = battleAfterHero.monsterStats.energy
           battleAfterHero.copy(monsterCurrentEnergy =
@@ -1041,29 +1147,39 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val (burnedHero, burnedBattle, burnLine) = battle.effects.heroBurn match {
       case Some(burn) =>
         val maxHp = hero.effectiveMaxHp(nowMs)
-        val dmg   = elementalTaken(hero, battle, burn.damageOn(maxHp))
+        val dmg   = bossDamageTaken(hero, battle, burn.damageOn(maxHp))
         (hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - dmg).max(0L))),
          battle.copy(effects = battle.effects.copy(heroBurn = Some(burn.grown))),
          content.format("battle.elemental.burnTick", "damage" -> dmg.toString))
       case None => (hero, battle, "")
     }
-    val (finalHero, finalBattle, regenLine) = burnedBattle.effects.heroRegen match {
+    // Яд Гнилого Джо: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
+    val (poisonedHero, poisonedBattle, poisonLine) = burnedBattle.effects.heroPoison match {
+      case Some(poison) =>
+        val dmg = poison.damageOn(burnedHero.effectiveMaxHp(nowMs))
+        (burnedHero.copy(fightStats = burnedHero.fightStats.copy(
+           hp = (burnedHero.fightStats.hp - dmg).max(0L))),
+         burnedBattle.copy(effects = burnedBattle.effects.copy(heroPoison = poison.decayed)),
+         content.format("battle.joe.poisonTick", "damage" -> dmg.toString))
+      case None => (burnedHero, burnedBattle, "")
+    }
+    val (finalHero, finalBattle, regenLine) = poisonedBattle.effects.heroRegen match {
       case Some(regen) =>
-        val maxHp  = burnedHero.effectiveMaxHp(nowMs)
+        val maxHp  = poisonedHero.effectiveMaxHp(nowMs)
         // Регенерация горением НЕ режется: это не действие игрока, а эффект,
         // который тикает сам по себе (см. activeHeal).
         val heal   = regen.healOn(maxHp)
-        val newHp  = (burnedHero.fightStats.hp + heal).min(maxHp)
-        val healed = newHp - burnedHero.fightStats.hp
+        val newHp  = (poisonedHero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - poisonedHero.fightStats.hp
         (
-          burnedHero.copy(fightStats = burnedHero.fightStats.copy(hp = newHp)),
-          burnedBattle.copy(effects = burnedBattle.effects.copy(heroRegen = regen.decayed)),
+          poisonedHero.copy(fightStats = poisonedHero.fightStats.copy(hp = newHp)),
+          poisonedBattle.copy(effects = poisonedBattle.effects.copy(heroRegen = regen.decayed)),
           content.format("battle.regenTick", "healed" -> healed.toString)
         )
-      case None => (burnedHero, burnedBattle, "")
+      case None => (poisonedHero, poisonedBattle, "")
     }
-    // Обе строки непустые бывают одновременно (горим и регенерируем) — склеиваем.
-    (finalHero, finalBattle, List(burnLine, regenLine).filter(_.nonEmpty).mkString("\n"))
+    // Строки бывают непустыми одновременно (горим, травимся и регенерируем) — склеиваем.
+    (finalHero, finalBattle, List(burnLine, poisonLine, regenLine).filter(_.nonEmpty).mkString("\n"))
   }
 
   /** Тик DoT-эффектов МОНСТРА в конце раунда (каждый снимает `pct`% макс.HP мимо
@@ -1241,7 +1357,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val raw     = if (doubles) value.max(1L) * 2L else value.max(1L)
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
-    val resisted          = (raw * elementalResistance(hero, battle)).toLong.max(1L)
+    val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
     val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
@@ -1463,7 +1579,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               else baseReduced
             // Удар в спину при бегстве разбирается тем же расчётом, что и обычная
             // атака в бою: та же баффовая броня, тот же порог 6 «Каменного стража».
-            parting     = elementalTaken(hero, battle, reducedDamage)
+            parting     = bossDamageTaken(hero, battle, reducedDamage)
             (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, parting)
             hero2       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
             mobLine     = content.format("battle.mobHit", "damage" -> parting.toString, "monster" -> battle.monsterName)
@@ -1491,7 +1607,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // Недельное благословение Азата: +10% опыта/серебра, +10% редкости, +5% доп. дроп.
       blessed = azat.blessingActive(now)
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
-      baseExp = battle.elemental
+      baseExp = battle.boss
                   .map(_.expReward(battle.monsterLvl))
                   .getOrElse((hero.dungeonLevel.toLong * battle.rarity.factor).toLong)
                   .max(1L)
@@ -1500,9 +1616,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
       monster = battle.toMonster
-      // У элементаля дроп свой и всегда есть; обычная таблица лута не катается.
-      (baseDrops, rngAfter) = battle.elemental match {
-        case Some(e) => LootGenerator.rollElemental(e, battle.monsterLvl, hero.lvl, Rng(seed))
+      // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
+      (baseDrops, rngAfter) = battle.boss match {
+        case Some(e) => LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed))
         case None    => LootGenerator.roll(
           battle.rarity,
           monster.race,
@@ -1533,12 +1649,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
       silverScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
-      // После добычи с элементаля игрок идёт осматривать логово, а не в лабиринт.
-      lootReturn = if (battle.elemental.isDefined) Some(StateType.ElementalSearch)
+      // После добычи с элементаля игрок идёт осматривать ЕГО логово. Гнилого Джо
+      // это не касается — осматривать после него нечего.
+      lootReturn = if (battle.boss.exists(_.race == pangea.model.monster.Race.Elemental))
+                     Some(StateType.ElementalSearch)
                    else prev.flatMap(_.returnState)
       lootData = LootState.LootData(
         items = drops.flatMap(_.itemOpt) ++ blessingGear.toList,
         silvers = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct / 100L },
+        doubloons = drops.collect { case LootGenerator.LootDrop.Doubloons(a) => a }.sum,
         returnState = lootReturn,
         eventData = prev.flatMap(_.eventData)
       )
@@ -1567,7 +1686,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
       unlocksDarkness   = unlocksDarkness,
       cubeDropped       = cubeDropped,
-      elementalDefeated = battle.elemental.isDefined
+      elementalDefeated = battle.boss.isDefined
     )
 
   /** Показ итогов победы — вызывается ПОСЛЕ того, как [[applyVictory]] всё
@@ -1767,9 +1886,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val agi             = hero.effectiveBaseStats(nowMs).agi
     val passiveBonus    = hero.passives.dodgeBonusPct + (if (fleeing) hero.passives.fleeDodgeBonusPct else 0L)
     // Скованный холодом элементаль бьёт менее точно — срез в п.п. от его точности.
-    val chillCut        = if (battle.effects.chilled) Elemental.Fire.ChilledAccuracyCutPct else 0L
+    val chillCut        = if (battle.effects.chilled) MiniBoss.FireElemental.ChilledAccuracyCutPct else 0L
+    // Горящему Джо тоже не до прицеливания (у кого пламя точность не сбивает —
+    // срез нулевой, см. MiniBoss.burnAccuracyCutPct).
+    val burnCut         =
+      if (battle.effects.monsterBurn.isEmpty) 0L
+      else battle.boss.map(_.burnAccuracyCutPct).getOrElse(0L)
     val monsterAccuracy =
-      (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult * (100L - chillCut) / 100.0).toLong
+      (battle.monsterStats.accuracy * hero.passives.enemyAccuracyMult *
+        (100L - chillCut - burnCut).max(0L) / 100.0).toLong
     (BattleState.dodgeChance(agi, buffed.evasion, buffed.defence, monsterAccuracy)
       + battle.heroBattleState.dodgeBonus + passiveBonus).min(95.0).max(5.0)
   }

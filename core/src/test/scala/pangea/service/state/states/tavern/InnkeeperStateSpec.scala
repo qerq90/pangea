@@ -174,6 +174,51 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
               assertTrue(!after.contains("ElementalLore"))
     },
 
+    // ── Рассказ о Гнилом Джо ──────────────────────────────────────────────────
+    test("кнопки про Джо нет, пока герой его не встречал") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData.empty, 5000L)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+      } yield assertTrue(!screens.last.choices.map(_.id).contains("JoeLore"))
+    },
+
+    test("встретил Джо → кнопка появилась, рассказ стоит 1000 серебра") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metJoe = true), 5000L)
+        (state, dao, _, renderer) = t
+        _      <- state.enter(testUser, renderer)
+        before <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        _      <- state.action(testUser, tap("JoeLore"), renderer)
+        offer  <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("PayJoeLore"), renderer)
+        lore   <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+        told   <- renderer.sentScreens.map(_.last)
+        _      <- state.enter(testUser, renderer)
+        after  <- renderer.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(before.contains("JoeLore")) &&
+              assertTrue(offer.text.contains("1000 серебра")) &&
+              assertTrue(lore.joeLore) &&
+              assertTrue(silver == 4000L) &&
+              assertTrue(told.text.contains("Джо Галтон")) &&
+              assertTrue(told.text.contains("яд и кровь против него бесполезны")) &&
+              assertTrue(told.choices.map(_.label).contains("Надеюсь это стоило моего серебра.")) &&
+              // после оплаты кнопка исчезает
+              assertTrue(!after.contains("JoeLore"))
+    },
+
+    test("на рассказ о Джо не хватает серебра → деньги не списаны") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metJoe = true), 100L)
+        (state, dao, _, renderer) = t
+        _      <- state.action(testUser, tap("PayJoeLore"), renderer)
+        lore   <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+      } yield assertTrue(!lore.joeLore) && assertTrue(silver == 100L)
+    },
+
     test("не хватает серебра → рассказа нет и деньги не списаны") {
       for {
         t <- makeStateWith(Nil, None, LoreData(metElemental = true), 100L)

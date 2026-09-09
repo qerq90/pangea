@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.{Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
-import pangea.model.monster.Elemental
+import pangea.model.monster.MiniBoss
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
  *  длинного к самому короткому; каждый рецепт применяется повторно, пока в пуле есть
@@ -92,7 +92,7 @@ object CubeCraft {
 
     /** Ингредиент → набор, в который он переводит вещь. */
     private def setOf(i: Item): Option[ItemSet] =
-      i.material.flatMap(m => Elemental.values.find(_.ingredient == m).map(_.set))
+      i.material.flatMap(m => MiniBoss.values.find(_.ingredient == m).map(_.set))
 
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
       for {

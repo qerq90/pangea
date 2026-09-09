@@ -38,20 +38,22 @@ case class SoloPveBattle(
   toughnessUsed:       Boolean = false, // пассивка «Крепкость» срабатывает один раз за бой
   // Вид элементаля, если это бой с минибоссом (имя варианта Elemental). У
   // обычных мобов пусто — по нему бой и отличает босса от рядового врага.
-  elementalKind:       Option[String] = None,
+  bossKind:       Option[String] = None,
   // Какую способность элементаль применит следующей (он ходит строго по кругу),
   // и сколько зарядов он уже собрал рядом с собой: у огненного это сферы огня,
   // у каменного — валуны. Механика у них одна, поэтому счётчик общий.
-  elementalTurn:       Int = 0,
-  elementalCharges:    Int = 0,
+  bossTurn:       Int = 0,
+  bossCharges:    Int = 0,
+  // Сколько раз минибосс уже поднимался после обнуления HP (Гнилой Джо).
+  bossRevives:    Int = 0,
   // Текущая энергия моба. У рядовых мобов не расходуется (их скиллы бесплатны),
   // а элементаль тратит её на способности и восстанавливает по столько-то за раунд.
   monsterCurrentEnergy: Long = 0L
 ) {
 
   /** Элементаль этого боя, если сражаемся с минибоссом. */
-  def elemental: Option[pangea.model.monster.Elemental] =
-    elementalKind.flatMap(pangea.model.monster.Elemental.byName)
+  def boss: Option[pangea.model.monster.MiniBoss] =
+    bossKind.flatMap(pangea.model.monster.MiniBoss.byName)
 
   /** Обновляет эффекты боя, уважая иммунитеты расы моба: элементалю нельзя
    *  навесить яд или кровотечение — ему нечему течь и нечего травить. Все точки,
@@ -60,7 +62,7 @@ case class SoloPveBattle(
   def withEffects(e: BattleEffects): SoloPveBattle = {
     val noDots  = if (Race.immuneToDots(Race.withName(monsterRace))) e.copy(monsterPoison = None, monsterBleed = None) else e
     // Огненного элементаля вдобавок нельзя поджечь — он и так пламя.
-    val noBurn  = if (elemental.exists(_.immuneToBurn)) noDots.copy(monsterBurn = None) else noDots
+    val noBurn  = if (boss.exists(_.immuneToBurn)) noDots.copy(monsterBurn = None) else noDots
     copy(effects = noBurn)
   }
   def toMonster: Monster =
@@ -70,7 +72,7 @@ case class SoloPveBattle(
    *  («Огненный Элементаль»); у обычных мобов — из таблицы раса × редкость.
    *  Держим его ЗДЕСЬ, а не в [[Monster]]: тот читается из таблицы `monsters`
    *  целиком (`select *`), и лишнее поле сломало бы чтение. */
-  def monsterName: String = elemental.map(_.monsterName).getOrElse(toMonster.name)
+  def monsterName: String = boss.map(_.monsterName).getOrElse(toMonster.name)
 
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
@@ -136,11 +138,12 @@ object SoloPveBattle {
       skillSlots          <- c.getOrElse[List[SkillSlotState]]("skillSlots")(Nil)
       effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
-      elementalKind       <- c.getOrElse[Option[String]]("elementalKind")(None)
-      elementalTurn       <- c.getOrElse[Int]("elementalTurn")(0)
-      charges             <- c.getOrElse[Int]("elementalCharges")(0)
+      bossKind       <- c.getOrElse[Option[String]]("bossKind")(None)
+      bossTurn       <- c.getOrElse[Int]("bossTurn")(0)
+      charges             <- c.getOrElse[Int]("bossCharges")(0)
+      revives             <- c.getOrElse[Int]("bossRevives")(0)
       monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, elementalKind, elementalTurn, charges, monsterEnergy)
+                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy)
 }

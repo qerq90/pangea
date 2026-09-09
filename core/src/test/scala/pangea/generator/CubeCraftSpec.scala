@@ -125,6 +125,22 @@ object CubeCraftSpec extends ZIOSpecDefault {
       assertTrue(result.items.size == 1)
     },
 
+    test("вещь + кожа упыря → та же вещь набора «Упырь»") {
+      val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
+        attack = 42, accuracy = 7, energy = 3, armor = 0, defence = 2, evasion = 1)
+      val skin   = MaterialGenerator.item(MaterialKind.GhoulSkin).copy(id = 2L)
+      val result = CubeCraft.craft(List(axe, skin), charges = 50, rng)
+      val made   = result.items.find(_.set.contains(ItemSet.Ghoul))
+      assertTrue(result.chargesUsed == 1) &&
+      assertTrue(made.isDefined) &&
+      assertTrue(made.exists(i => i.attack == 42 && i.accuracy == 7 && i.energy == 3 &&
+                                  i.defence == 2 && i.evasion == 1)) &&
+      assertTrue(made.exists(i => i.lvl == 30L && i.rarity == Rarity.Violet && i.itemType == ItemType.Weapon)) &&
+      assertTrue(made.exists(_.name.endsWith(ItemSet.Ghoul.title))) &&
+      assertTrue(made.exists(!_.name.contains("Дворянина"))) &&
+      assertTrue(!result.items.exists(_.material.contains(MaterialKind.GhoulSkin)))
+    },
+
     test("без железа вещь в набор не переводится") {
       val axe = Item(1L, "🟣 Выдающийся Топор Дворянина", 30L, Rarity.Violet, ItemType.Weapon,
         attack = 42, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)

@@ -4,7 +4,7 @@ import pangea.domain.Rng
 import pangea.generator.item.{GemGenerator, ItemGenerator, ItemNameGenerator, MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
-import pangea.model.monster.{Elemental, Race, Rarity => MobRarity}
+import pangea.model.monster.{MiniBoss, Race, Rarity => MobRarity}
 import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
@@ -37,6 +37,7 @@ object LootGenerator {
       case LootDrop.MapHalf(i)   => Some(i)
       case LootDrop.Gem(i)       => Some(i)
       case LootDrop.Silver(_, _) => None
+      case LootDrop.Doubloons(_) => None
     }
   }
   object LootDrop {
@@ -45,6 +46,7 @@ object LootGenerator {
     final case class MapHalf(item: Item)                 extends LootDrop
     final case class Gem(item: Item)                     extends LootDrop
     final case class Silver(amount: Long, pile: Boolean) extends LootDrop
+    final case class Doubloons(amount: Long)             extends LootDrop
   }
 
   sealed trait Category
@@ -219,8 +221,8 @@ object LootGenerator {
     *
     * Уровень вещи берётся от уровня ГЕРОЯ с разбросом ±1: у босса свой BossLvL
     * (1..10), и вещь по нему была бы мусором. */
-  def rollElemental(
-      elemental: Elemental,
+  def rollMiniBoss(
+      boss: MiniBoss,
       bossLvl: Long,
       heroLvl: Long,
       rng: Rng
@@ -229,23 +231,51 @@ object LootGenerator {
     val count       = (extra + bossLvl).toInt.max(1)
     (0 until count).foldLeft((List.empty[LootDrop], r0)) { case ((acc, r), _) =>
       val (roll, r1) = r.between(0L, 100L)
-      if (roll < ElementalIngredientChancePct)
-        (acc :+ LootDrop.Gear(MaterialGenerator.item(elemental.ingredient)), r1)
-      else {
-        // Уровень вещи: уровень героя ±1, но строго в границах игры — на первом
-        // уровне героя разброс не уводит вещь в нулевой, на последнем — в 151-й.
-        val (delta, r2) = r1.between(-1L, 2L)
-        val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
-        val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, ItemRarity.Purple, r2)
-        // Имя перекатываем как сетовое: имя набора встаёт вместо титула.
-        val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, elemental.set, r3)
-        (acc :+ LootDrop.Gear(item.copy(name = name, set = Some(elemental.set))), r4)
-      }
+      val (drop, r2) =
+        if (boss == MiniBoss.RottenJoe) joeDrop(boss, roll, bossLvl, heroLvl, r1)
+        else elementalDrop(boss, roll, heroLvl, r1)
+      (acc :+ drop, r2)
     }
+  }
+
+  /** С элементаля поровну падают его ингредиент и фиолетовая вещь его набора. */
+  private def elementalDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
+    if (roll < ElementalIngredientChancePct) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
+    else setGear(boss, heroLvl, rng)
+
+  /** С Гнилого Джо падает поровну четыре вещи: кожа упыря, расколотый усилитель,
+    * горсть дублонов и фиолетовая вещь «Упыря». */
+  private def joeDrop(boss: MiniBoss, roll: Long, bossLvl: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
+    if (roll < 25L) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
+    else if (roll < 50L) {
+      // Усилитель — любой камень или череп, но всегда самого низкого качества
+      // («расколотый»), тем же роллом, что и обычный дроп камня.
+      val (gem, r1) = GemGenerator.randomGem(GemModel.MinGrade, rng)
+      (LootDrop.Gem(gem), r1)
+    } else if (roll < 75L) {
+      // Дублоны: 2 × BossLvL с разбросом ±20%, но не меньше одного.
+      val base       = JoeDoubloonsPerLvl * bossLvl
+      val (pct, r1)  = rng.between(100L - JoeDoubloonSpreadPct, 100L + JoeDoubloonSpreadPct + 1L)
+      (LootDrop.Doubloons((base * pct / 100L).max(1L)), r1)
+    } else setGear(boss, heroLvl, rng)
+
+  /** Фиолетовая вещь набора этого босса: уровень героя ±1, но строго в границах
+    * игры — на первом уровне разброс не уводит вещь в нулевой, на последнем в 151-й.
+    * Имя перекатываем как сетовое: имя набора встаёт вместо титула. */
+  private def setGear(boss: MiniBoss, heroLvl: Long, rng: Rng): (LootDrop, Rng) = {
+    val (delta, r2) = rng.between(-1L, 2L)
+    val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
+    val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, ItemRarity.Purple, r2)
+    val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, boss.set, r3)
+    (LootDrop.Gear(item.copy(name = name, set = Some(boss.set))), r4)
   }
 
   /** Шанс (в %), что предмет с элементаля окажется ингредиентом, а не вещью набора. */
   val ElementalIngredientChancePct: Long = 50L
+
+  /** Сколько дублонов за уровень босса роняет Джо и с каким разбросом (в %). */
+  val JoeDoubloonsPerLvl: Long   = 2L
+  val JoeDoubloonSpreadPct: Long = 20L
 
   /** Доп. дропы от пассивок героя, независимые от основного ролла [[roll]] (каждый
     * со своим шансом): «Таксидермист» — 10% на лишний трофей, «Ювелир» — 10% на

@@ -21,6 +21,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     case LootDrop.Gem(_)          => "gem"
     case LootDrop.Silver(_, true) => "silverPile"
     case LootDrop.Silver(_, _)    => "silverSmall"
+    case LootDrop.Doubloons(_)    => "doubloons"
   }
 
   // Доля боёв (в %), в которых выпала категория `cat`, по выборке сидов.
@@ -155,7 +156,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     // ── Дроп с элементаля ─────────────────────────────────────────────────────
     test("дроп с элементаля есть всегда: 0..1 + BossLvL предметов") {
       val counts = (1L to 300L).map { s =>
-        LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, bossLvl = 3L, heroLvl = 40L, Rng(s))._1.size
+        LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, bossLvl = 3L, heroLvl = 40L, Rng(s))._1.size
       }
       assertTrue(counts.forall(n => n == 3 || n == 4)) && // BossLvL 3 плюс 0 или 1
       assertTrue(counts.contains(3)) && assertTrue(counts.contains(4))
@@ -163,7 +164,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("с элементаля падают только его ингредиент и фиолетовые вещи его набора") {
       val items = (1L to 300L).iterator
-        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val (materials, gear) = items.partition(_.itemType == ItemType.Material)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
@@ -176,14 +177,14 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("уровень сетовой вещи — уровень героя ±1, а не уровень босса") {
       val gear = (1L to 300L).iterator
-        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
     },
 
     test("с каменного падают его магические камни и фиолетовый «Каменный страж»") {
       val items = (1L to 300L).iterator
-        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Stone, 2L, 40L, Rng(s))._1)
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.StoneElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val (materials, gear) = items.partition(_.itemType == ItemType.Material)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
@@ -195,7 +196,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("уровень вещи не выходит за границы игры: ни нулевого, ни 151-го") {
       def gearAt(heroLvl: Long) = (1L to 300L).iterator
-        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, heroLvl, Rng(s))._1)
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, heroLvl, Rng(s))._1)
         .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
       val lowest  = gearAt(1L)   // разброс −1 увёл бы вещь в нулевой уровень
       val highest = gearAt(150L) // разброс +1 увёл бы её в 151-й
@@ -206,7 +207,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("ингредиент и вещь выпадают примерно поровну") {
       val items = (1L to 600L).iterator
-        .flatMap(s => LootGenerator.rollElemental(pangea.model.monster.Elemental.Fire, 2L, 40L, Rng(s))._1)
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val materialShare = items.count(_.itemType == ItemType.Material).toDouble / items.size
       assertTrue(materialShare > 0.4 && materialShare < 0.6)

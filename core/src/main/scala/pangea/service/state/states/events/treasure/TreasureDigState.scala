@@ -24,7 +24,8 @@ import java.util.concurrent.TimeUnit
  * Событие «прикопанный схрон» (5%). Игрок начинает раскопки (~10 минут): state
  * хранит `startedAt` в `scene_data`, поллер по таймеру (`SchronDig`) сам доводит
  * до развязки и возвращает в игру. Кнопка «Уйти» — с подтверждением (как добыча
- * руды). По завершении: 80% — схрон (1–2 дублона), 20% — «свежая могила».
+ * руды). По завершении: 75% — схрон (1–2 дублона), 5% — Гнилой Джо, 20% —
+ * «свежая могила». Проценты Джо взяты у схрона, могила осталась прежней.
  */
 case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
   import TreasureDigState._
@@ -92,8 +93,9 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       hero <- getHero(user)
       _    <- scheduler.cancel(user.userId, TaskKind.SchronDig)
       roll <- Random.nextIntBetween(1, 101)
-      result <- if (roll <= 80) digSuccess(user, hero, renderer)
-                else            digGrave(user, hero, renderer)
+      result <- if (roll <= SchronPct)             digSuccess(user, hero, renderer)
+                else if (roll <= SchronPct + JoePct) ZIO.succeed(StateType.RottenJoe)
+                else                                digGrave(user, hero, renderer)
     } yield result
 
   private def digSuccess(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
@@ -177,6 +179,11 @@ object TreasureDigState {
   val DoubloonMin: Int    = 1
   val DoubloonMax: Int    = 2
   val SkullDropChancePct: Int = 40 // шанс найти череп при раскопке трупа/могилы
+
+  /** Развязка раскопок в процентах: схрон, встреча с Гнилым Джо, могила. Джо
+   *  забрал свои проценты у схрона — могила осталась прежней. */
+  val SchronPct: Int = 75
+  val JoePct: Int    = 5
 
   private val DigAction = """{"action":"DigDone"}"""
 }
