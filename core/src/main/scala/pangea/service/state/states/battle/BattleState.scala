@@ -82,8 +82,22 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // засчитывать. Ловим здесь, где сходятся ВСЕ пути урона: удар, навык,
       // шипы, яд. Иначе каждый из них пришлось бы проверять отдельно.
       risen   = joeRises(guarded)
-      state  <- commit(user, risen, now, renderer)
+      // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
+      // всего, что в нём случилось.
+      hinted  = plainSteelHint(hero, risen)
+      state  <- commit(user, hinted, now, renderer)
     } yield state
+
+  /** Напоминание, что голое железо против этого врага почти бесполезно: без
+    * такой строки игрок видит только маленькие числа и решает, что игра его
+    * обманывает. Висит, пока бой идёт и оружие без стихий; на победе и смерти
+    * не нужна. Сейчас единственный, кто так держит сталь, — каменный элементаль,
+    * поэтому и текст про камень. */
+  private def plainSteelHint(hero: Hero, res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue) res
+    else if (!res.battle.boss.exists(_.plainDamageTakenMult < 1.0)) res
+    else if (hero.gems.weaponElements.nonEmpty) res
+    else res.copy(log = res.log :+ content.text("battle.elemental.stoneAbsorbs"))
 
   /** «Отказывается умирать»: пока у минибосса остались подъёмы, обнуление HP не
     * заканчивает бой — он встаёт с частью здоровья и слабеет в атаке. Пламя всё

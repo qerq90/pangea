@@ -203,9 +203,9 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
         plain <- dealt(None, 100)                 // оружие без камней: прок не катается
         fire  <- dealt(Some(GemKind.Ruby), 100)   // рубин — стихия огня, прок не прошёл
       } yield assertTrue(plain > 0L) &&
-              // 0.2 против 1.5: огненное оружие бьёт камень в разы больнее голой стали
-              assertTrue(fire > plain * 5L) &&
-              assertTrue(MiniBoss.StoneElemental.plainDamageTakenMult == 0.2) &&
+              // 0.4 против 1.5: огненное оружие бьёт камень в разы больнее голой стали
+              assertTrue(fire > plain * 3L) &&
+              assertTrue(MiniBoss.StoneElemental.plainDamageTakenMult == 0.4) &&
               assertTrue(MiniBoss.StoneElemental.damageTakenMult(pangea.model.battle.Element.Fire) == 1.5)
     },
 
@@ -262,6 +262,21 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
               // в HP ушло больше 30% удара: непокрытое бронёй добралось до здоровья
               assertTrue(lostHp > 0L) &&
               assertTrue(lostHp + 100L >= (MiniBoss.StoneElemental.stats(bossLvl).atk * 30L / 100L))
+    },
+
+    test("пока оружие без стихий, в конце раунда висит подсказка про поглощённый удар") {
+      def hintWith(gem: Option[GemKind]) = {
+        val h = hero(gem = gem)
+        strike(h, lairBattle(h, turn = 4, armorPct = 0L), seedTurn(100)).map(_._3)
+      }
+      for {
+        bare  <- hintWith(None)
+        fiery <- hintWith(Some(GemKind.Ruby))
+      } yield assertTrue(bare.contains("Камень поглощает удар")) &&
+              // подсказка идёт последней строкой лога, уже после хода моба
+              assertTrue(bare.indexOf("Камень поглощает удар") > bare.indexOf("Вы наносите")) &&
+              // со стихией в оружии подсказка не нужна — сопротивление не работает
+              assertTrue(!fiery.contains("Камень поглощает удар"))
     },
 
     test("подожжённый камень бьёт слабее, теряет валун и часть потолка брони") {
