@@ -15,7 +15,8 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.temple.CubeState._
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, State, UserAction}
+import java.util.concurrent.TimeUnit
 import zio.{Random, Task, ZIO}
 
 /** Крафт в кубе Азата: по образцу «Неприметной бочки» игрок кладёт в куб до
@@ -217,7 +218,8 @@ case class CubeState(
     }
 
   private def loadAzat(user: User): Task[AzatState] =
-    heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+    ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      .flatMap(now => AzatData.load(heroDao, user.userId, now))
 
   private def saveAzat(user: User, azat: AzatState): Task[Unit] =
     heroDao.writeAzatData(user.userId, azat.asJson)

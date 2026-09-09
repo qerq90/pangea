@@ -9,7 +9,8 @@ import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, InstantRest, State, UserAction}
+import java.util.concurrent.TimeUnit
 import zio.{Task, ZIO}
 
 case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
@@ -78,35 +79,18 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
                    }
     } yield result
 
-  // Мгновенный отдых (благословение Азата): восстанавливает ресурсы как обычный
-  // отдых, но сразу, тратя один заряд из azat.instantRests.
+  // Мгновенный отдых (благословение Азата) — общий с лабиринтом расчёт, см.
+  // [[InstantRest]]. Сюда игрок попадает, только если отдых уже начался: сам
+  // вход в лабиринте тратит заряд, не заводя привал.
   private def instantRest(user: User, nowMs: Long, renderer: Renderer): Task[StateType] =
-    for {
-      azat <- loadAzat(user)
-      res <- if (azat.instantRests <= 0)
-               renderer.show(user, Screen(content.text("rest.noInstant"), Nil)).as(StateType.Rest)
-             else
-               heroDao.getHeroByUserId(user.userId)
-                 .flatMap(ZIO.fromOption(_))
-                 .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
-                 .flatMap { hero =>
-                   val maxHp    = hero.effectiveMaxHp(nowMs)
-                   val maxArmor = hero.effectiveMaxArmor(nowMs)
-                   val maxEn    = hero.maxEnergy(nowMs)
-                   heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn)) *>
-                     saveAzat(user, azat.copy(instantRests = azat.instantRests - 1)) *>
-                     scheduler.cancel(user.userId, TaskKind.Revive) *>
-                     heroDao.writeSceneData(user.userId, Json.Null) *>
-                     renderer.show(user, Screen(content.format("rest.instantDone", "n" -> (azat.instantRests - 1).toString), Nil))
-                       .as(StateType.Dungeon)
-                 }
-    } yield res
+    InstantRest.use(heroDao, scheduler, content, user, nowMs, renderer).flatMap {
+      case Some(_) => ZIO.succeed(StateType.Dungeon)
+      case None    => renderer.show(user, Screen(content.text("rest.noInstant"), Nil)).as(StateType.Rest)
+    }
 
   private def loadAzat(user: User): Task[AzatState] =
-    heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
-
-  private def saveAzat(user: User, azat: AzatState): Task[Unit] =
-    heroDao.writeAzatData(user.userId, azat.asJson)
+    ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      .flatMap(now => AzatData.load(heroDao, user.userId, now))
 
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))

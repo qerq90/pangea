@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.guild.TrophyExchangeState._
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{AzatData, ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -163,7 +163,7 @@ case class TrophyExchangeState(
   private def blessedReputation(user: User, base: Long): Task[Long] =
     for {
       now  <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
-      azat <- heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+      azat <- AzatData.load(heroDao, user.userId, now)
     } yield if (azat.blessingActive(now)) base * (100L + AzatState.BlessingBonusPct) / 100L else base
 }
 

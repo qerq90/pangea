@@ -1,6 +1,8 @@
 package pangea.service.state.states
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
+import pangea.model.hero.AzatState
 import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -31,6 +33,24 @@ object DeathStateSpec extends ZIOSpecDefault {
   private val richHero = TestFixtures.hero(userId).copy(exp = 80L, silver = 500L)
 
   override def spec = suite("DeathState")(
+
+    test("с благословением опыта теряется на 10% меньше") {
+      val hero = TestFixtures.hero(userId).copy(exp = 1000L, silver = 500L)
+      def lostWith(azat: Option[AzatState]) =
+        for {
+          t <- makeState(hero)
+          (state, heroDao, _, renderer) = t
+          _   <- ZIO.foreachDiscard(azat)(a => heroDao.writeAzatData(userId, a.asJson))
+          _   <- state.enter(testUser, renderer)
+          upd <- heroDao.getHeroByUserId(userId).map(_.get)
+        } yield 1000L - upd.exp
+      for {
+        plain   <- lostWith(None)
+        // Благословение на неделю вперёд: TestClock стоит на нуле.
+        blessed <- lostWith(Some(AzatState(blessingUntil = Some(AzatState.BlessingDurationMs))))
+      } yield assertTrue(plain == 100L) &&          // обычные 10% от 1000
+              assertTrue(blessed == 90L)            // на 10% меньше самой потери
+    },
 
     test("enter → показывает экран потерь и авто-переходит в Rest") {
       for {

@@ -1,5 +1,6 @@
 package pangea.service.state.states.dungeon
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
@@ -39,6 +40,39 @@ object DungeonStateSpec extends ZIOSpecDefault {
     s.choices.find(_.id == id).map(_.color)
 
   override def spec = suite("DungeonState")(
+
+    // ── Отдых ─────────────────────────────────────────────────────────────────
+    test("«Отдых» с быстрым отдыхом тратит его сразу, не заводя привал") {
+      for {
+        q <- makeState()
+        (state, heroDao, renderer, scheduler) = q
+        // Раненый герой с двумя быстрыми отдыхами от благословения.
+        hero0 <- heroDao.getHeroByUserId(userId).map(_.get)
+        _     <- heroDao.updateFightStats(userId, hero0.fightStats.copy(hp = 1L, energy = 0L))
+        _     <- heroDao.writeAzatData(userId,
+                   pangea.model.hero.AzatState(instantRests = 2).asJson)
+        res     <- state.action(testUser, UserAction("", Some("""{"action":"Rest"}""")), renderer)
+        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+        azat    <- heroDao.readAzatData(userId).map(_.flatMap(_.as[pangea.model.hero.AzatState].toOption).get)
+        scene   <- heroDao.readSceneData(userId)
+        tasks   <- scheduler.scheduled
+        screens <- renderer.sentScreens
+      } yield assertTrue(res == StateType.Dungeon) &&      // остались в лабиринте
+              assertTrue(hero.fightStats.hp == hero.effectiveMaxHp(0L)) &&
+              assertTrue(azat.instantRests == 1) &&        // потрачен ровно один заряд
+              assertTrue(scene.contains(io.circe.Json.Null)) &&
+              assertTrue(!tasks.exists(_.kind == pangea.model.schedule.TaskKind.Revive)) &&
+              assertTrue(screens.map(_.text).mkString.contains("Осталось"))
+    },
+
+    test("без быстрых отдыхов «Отдых» по-прежнему уводит к костру") {
+      for {
+        q <- makeState()
+        (state, _, renderer, _) = q
+        res <- state.action(testUser, UserAction("", Some("""{"action":"Rest"}""")), renderer)
+      } yield assertTrue(res == StateType.Rest)
+    },
+
 
     test("enter → показывает экран с уровнем лабиринта") {
       for {

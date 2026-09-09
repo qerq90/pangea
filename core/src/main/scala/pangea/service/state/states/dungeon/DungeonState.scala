@@ -13,13 +13,27 @@ import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{CharacterMenu, State, UserAction}
+import pangea.service.state.{CharacterMenu, InstantRest, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
 case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inventory.InventoryRepository, scheduler: Scheduler, content: SceneContent) extends State {
 
   import DungeonState.{MinTrackMs, MaxTrackMs, TrackAction, TrackingData}
+
+  /** «Отдых»: если благословение оставило быстрые отдыхи — тратим один прямо тут
+    * и остаёмся в лабиринте. Ждать у костра, когда в кармане есть мгновенный
+    * отдых, смысла нет, и лишний клик по кнопке тоже. Зарядов нет — обычный
+    * привал, как и раньше. */
+  private def rest(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      used <- InstantRest.use(heroDao, scheduler, content, user, now, renderer)
+      res  <- used match {
+        case Some(_) => enter(user, renderer).as(StateType.Dungeon)
+        case None    => ZIO.succeed(StateType.Rest)
+      }
+    } yield res
 
   private val branch = new Branch(
     routes = Map(
@@ -29,7 +43,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       "GoLighter"     -> Target.Run { (user, _, renderer) => goLighter(user, renderer) },
       "GoToCity"       -> Target.Goto(StateType.GlobalMap),
       "OpenCharacter"  -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Dungeon) },
-      "Rest"           -> Target.Goto(StateType.Rest)
+      "Rest"           -> Target.Run { (user, _, renderer) => rest(user, renderer) }
     ),
     fallback = Target.Goto(StateType.Dungeon)
   )

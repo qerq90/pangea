@@ -6,7 +6,7 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, State, UserAction}
 import zio.{Task, ZIO}
 
 case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State {
@@ -43,7 +43,8 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     for {
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
-      _    <- renderer.show(user, buildStatsScreen(hero, now))
+      azat <- AzatData.load(heroDao, user.userId, now)
+      _    <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now)))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -54,7 +55,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero <- getHero(user)
       _    <- if (hero.upgradePoints <= 0)
-                renderer.show(user, Screen(content.text("heroStats.noPoints"), buildStatsScreen(hero, now).choices))
+                renderer.show(user, Screen(content.text("heroStats.noPoints"), buildStatsScreen(hero, now, blessed = false).choices))
               else {
                 val text = content.format("heroStats.upgradeScreen", "points" -> hero.upgradePoints.toString)
                 val choices = List(
@@ -112,7 +113,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     }
   }
 
-  private def buildStatsScreen(hero: Hero, nowMs: Long): Screen = {
+  private def buildStatsScreen(hero: Hero, nowMs: Long, blessed: Boolean): Screen = {
     val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
       val names = hero.activeTraumas(nowMs).map(_.name)
       val namesStr = if (names.isEmpty) "Травмы" else names.mkString(", ")
@@ -130,7 +131,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
         content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
       Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
     ).flatten
-    Screen(hero.getInfo(nowMs) + traumaLine, choices)
+    Screen(hero.getInfo(nowMs, blessed) + traumaLine, choices)
   }
 
   private def getHero(user: User): Task[Hero] =
