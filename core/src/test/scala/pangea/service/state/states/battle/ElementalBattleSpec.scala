@@ -3,7 +3,7 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
-import pangea.model.monster.{Elemental, Monster, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -34,12 +34,12 @@ object ElementalBattleSpec extends ZIOSpecDefault {
   // «побольше» здесь задать нельзя — по умолчанию берём полный запас.
   private def lairBattle(turn: Int, orbs: Int = 0, energy: Long = 300L,
                          hpPct: Long = 100L, armorPct: Long = 100L): SoloPveBattle = {
-    val stats   = Elemental.Fire.stats(bossLvl)
+    val stats   = MiniBoss.FireElemental.stats(bossLvl)
     val monster = Monster(0L, bossLvl, Race.Elemental, Rarity.Legendary, stats)
     SoloPveBattle.from(monster, hero()).copy(
-      elementalKind        = Some(Elemental.Fire.entryName),
-      elementalTurn        = turn,
-      elementalCharges     = orbs,
+      bossKind        = Some(MiniBoss.FireElemental.entryName),
+      bossTurn        = turn,
+      bossCharges     = orbs,
       monsterCurrentEnergy = energy,
       monsterCurrentHp     = stats.hp * hpPct / 100L,
       monsterCurrentArmor  = stats.armor * armorPct / 100L
@@ -99,10 +99,10 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         _        <- s3.action(testUser, tap("Attack"), r3)
         third    <- battleAfter(dao3)
         screens3 <- r3.sentScreens
-      } yield assertTrue(first.elementalCharges == 1) &&
+      } yield assertTrue(first.bossCharges == 1) &&
               assertTrue(screens1.map(_.text).mkString.contains("собралось в левитирующую сферу")) &&
               // третья сфера сразу бьёт и счётчик обнуляется
-              assertTrue(third.elementalCharges == 0) &&
+              assertTrue(third.bossCharges == 0) &&
               assertTrue(screens3.map(_.text).mkString.contains("соединились в смерч"))
     },
 
@@ -116,7 +116,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         updated <- dao.getHeroByUserId(userId).map(_.get)
         maxHp    = h.effectiveMaxHp(0L)
         maxArmor = h.effectiveMaxArmor(0L)
-        expected = Elemental.Fire.stats(bossLvl).atk * 2L + maxHp * 5L / 100L + maxArmor * 5L / 100L
+        expected = MiniBoss.FireElemental.stats(bossLvl).atk * 2L + maxHp * 5L / 100L + maxArmor * 5L / 100L
       } yield assertTrue(h.fightStats.hp - updated.fightStats.hp == expected)
     },
 
@@ -151,8 +151,8 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         _       <- s2.action(testUser, tap("Attack"), r2)
         intact  <- battleAfter(dao2)
       } yield assertTrue(screens.map(_.text).mkString.contains("Пламя элементаля стало горячее")) &&
-              assertTrue(hurt.monsterCurrentArmor > Elemental.Fire.stats(bossLvl).armor * 50L / 100L) &&
-              assertTrue(intact.elementalTurn == 3) && // очередь сдвинулась
+              assertTrue(hurt.monsterCurrentArmor > MiniBoss.FireElemental.stats(bossLvl).armor * 50L / 100L) &&
+              assertTrue(intact.bossTurn == 3) && // очередь сдвинулась
               assertTrue(intact.monsterCurrentEnergy == 300L) // энергия не потрачена
     },
 
@@ -164,7 +164,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
           _     <- seedTurn(90) // на случай броска травмы смерча
           _     <- state.action(testUser, tap("Attack"), r)
           after <- battleAfter(dao)
-        } yield after.elementalTurn
+        } yield after.bossTurn
       for {
         a <- turnAfter(0)
         b <- turnAfter(1)
@@ -182,7 +182,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
         after   <- battleAfter(dao)
         screens <- r.sentScreens
       } yield assertTrue(after.effects.heroBurn.isEmpty) && // всплеска не было
-              assertTrue(after.elementalTurn == 1) &&
+              assertTrue(after.bossTurn == 1) &&
               assertTrue(!screens.map(_.text).mkString.contains("Огонь вырывается"))
     },
 
@@ -220,7 +220,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
           _     <- seedTurn(90, 90) // возможные проки стихии оружия — мимо
           _     <- state.action(testUser, tap("Attack"), r)
           after <- battleAfter(dao)
-        } yield Elemental.Fire.stats(bossLvl).hp - after.monsterCurrentHp
+        } yield MiniBoss.FireElemental.stats(bossLvl).hp - after.monsterCurrentHp
       }
       for {
         plain <- damageWith(weapon(None))

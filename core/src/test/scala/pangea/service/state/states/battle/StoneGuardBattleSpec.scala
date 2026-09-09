@@ -5,7 +5,7 @@ import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.item.ItemSet
-import pangea.model.monster.{Elemental, Monster, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -46,12 +46,12 @@ object StoneGuardBattleSpec extends ZIOSpecDefault {
 
   /** Бой с огненным элементалем; `turn` — какая способность применится следующей. */
   private def lairBattle(h: Hero, turn: Int, orbs: Int = 0, armorPct: Long): SoloPveBattle = {
-    val stats   = Elemental.Fire.stats(bossLvl)
+    val stats   = MiniBoss.FireElemental.stats(bossLvl)
     val monster = Monster(0L, bossLvl, Race.Elemental, Rarity.Legendary, stats)
     SoloPveBattle.from(monster, h).copy(
-      elementalKind        = Some(Elemental.Fire.entryName),
-      elementalTurn        = turn,
-      elementalCharges     = orbs,
+      bossKind        = Some(MiniBoss.FireElemental.entryName),
+      bossTurn        = turn,
+      bossCharges     = orbs,
       monsterCurrentEnergy = 300L,
       monsterCurrentArmor  = stats.armor * armorPct / 100L
     )

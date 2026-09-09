@@ -4,7 +4,7 @@ import io.circe.Json
 import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.LoreData
-import pangea.model.monster.{Elemental, Race}
+import pangea.model.monster.{MiniBoss, Race}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -29,9 +29,9 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
   private def battleOf(dao: TestHeroDao) =
     dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
 
-  // Вид элементаля логово тянет случайным индексом по Elemental.values.
-  private val fireIdx  = Elemental.values.indexOf(Elemental.Fire)
-  private val stoneIdx = Elemental.values.indexOf(Elemental.Stone)
+  // Вид элементаля логово тянет случайным индексом по MiniBoss.values.
+  private val fireIdx  = MiniBoss.elementals.indexOf(MiniBoss.FireElemental)
+  private val stoneIdx = MiniBoss.elementals.indexOf(MiniBoss.StoneElemental)
 
   override def spec = suite("ElementalLairState")(
 
@@ -116,7 +116,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
         scene  <- dao.readSceneData(userId)
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(battle.monsterRace == Race.Elemental.entryName) &&
-              assertTrue(battle.elemental.contains(Elemental.Fire)) &&
+              assertTrue(battle.boss.contains(MiniBoss.FireElemental)) &&
               assertTrue(battle.monsterStats.hp == 1500L * 2L) &&
               assertTrue(battle.monsterStats.armor == 750L * 2L) &&
               assertTrue(battle.monsterStats.atk == 250L * 2L) &&
@@ -136,7 +136,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
         result <- state.action(testUser, tap("AttackElemental"), renderer)
         battle <- battleOf(dao).map(_.get)
       } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(battle.elemental.contains(Elemental.Stone)) &&
+              assertTrue(battle.boss.contains(MiniBoss.StoneElemental)) &&
               assertTrue(battle.monsterStats.hp == 1250L * 2L) &&
               assertTrue(battle.monsterStats.armor == 1500L * 2L) &&
               assertTrue(battle.monsterStats.atk == 350L * 2L) &&
@@ -145,14 +145,16 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(battle.monsterStats.energy == 100L * 2L) &&
               assertTrue(battle.monsterStats.defence == 0L) &&
               // энергии он копит по 7 за уровень босса, как и огненный
-              assertTrue(Elemental.Stone.energyRegen(2L) == 14L) &&
-              assertTrue(Elemental.Stone.expReward(2L) == 400L)
+              assertTrue(MiniBoss.StoneElemental.energyRegen(2L) == 14L) &&
+              assertTrue(MiniBoss.StoneElemental.expReward(2L) == 400L)
     },
 
     test("в логове поровну шансов встретить огненного и каменного") {
-      // Вид тянется случайным индексом по всем видам — их ровно два, значит 50/50.
-      assertTrue(Elemental.values.size == 2) &&
-      assertTrue(Elemental.values.toSet[Elemental] == Set[Elemental](Elemental.Fire, Elemental.Stone))
+      // Вид тянется случайным индексом по элементалям — их ровно два, значит 50/50.
+      assertTrue(MiniBoss.elementals.size == 2) &&
+      assertTrue(MiniBoss.elementals.toSet[MiniBoss] == Set[MiniBoss](MiniBoss.FireElemental, MiniBoss.StoneElemental)) &&
+      // Гнилой Джо — тоже минибосс, но в логове не водится
+      assertTrue(!MiniBoss.elementals.contains(MiniBoss.RottenJoe))
     },
 
     test("уйти → возврат в лабиринт, сцена очищена") {
@@ -170,7 +172,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
       val cases = List(
         1L -> 1L, 5L -> 1L, 6L -> 1L, 10L -> 1L, // до 10 уровня босс держится на первом
         11L -> 2L, 15L -> 2L, 16L -> 3L, 51L -> 10L, 150L -> 29L)
-      assertTrue(cases.forall { case (heroLvl, expected) => Elemental.bossLvl(heroLvl) == expected })
+      assertTrue(cases.forall { case (heroLvl, expected) => MiniBoss.bossLvl(heroLvl) == expected })
     }
   )
 }

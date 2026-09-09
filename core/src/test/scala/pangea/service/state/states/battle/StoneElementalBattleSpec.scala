@@ -5,7 +5,7 @@ import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.item.{Gem, GemKind, Item, ItemType, Rarity}
-import pangea.model.monster.{Elemental, Monster, Race, Rarity => MobRarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -55,12 +55,12 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       hpPct: Long = 100L,
       armorPct: Long = 100L
   ): SoloPveBattle = {
-    val stats   = Elemental.Stone.stats(bossLvl)
+    val stats   = MiniBoss.StoneElemental.stats(bossLvl)
     val monster = Monster(0L, bossLvl, Race.Elemental, MobRarity.Legendary, stats)
     SoloPveBattle.from(monster, h).copy(
-      elementalKind        = Some(Elemental.Stone.entryName),
-      elementalTurn        = turn,
-      elementalCharges     = charges,
+      bossKind        = Some(MiniBoss.StoneElemental.entryName),
+      bossTurn        = turn,
+      bossCharges     = charges,
       monsterCurrentEnergy = energy,
       monsterCurrentHp     = stats.hp * hpPct / 100L,
       monsterCurrentArmor  = stats.armor * armorPct / 100L
@@ -106,7 +106,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(log.contains("Резко вылетевший из элементаля камень")) &&
               assertTrue(u.fightStats.hp < 500000L) &&
               // 7 × BossLvL = 14 энергии за всплеск, остаток дособерёт реген раунда
-              assertTrue(after.monsterCurrentEnergy == 20L - 14L + Elemental.Stone.energyRegen(bossLvl))
+              assertTrue(after.monsterCurrentEnergy == 20L - 14L + MiniBoss.StoneElemental.energyRegen(bossLvl))
     },
 
     test("валун: первые два копятся, третий сразу уходит в россыпь") {
@@ -115,10 +115,10 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
         first  <- strike(h, lairBattle(h, turn = 1, charges = 0), seedTurn(100))
         second <- strike(h, lairBattle(h, turn = 1, charges = 1), seedTurn(100))
         third  <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 100))
-      } yield assertTrue(first._2.elementalCharges == 1) &&
+      } yield assertTrue(first._2.bossCharges == 1) &&
               assertTrue(first._3.contains("груда камней соединилась в один Валун")) &&
-              assertTrue(second._2.elementalCharges == 2) &&
-              assertTrue(third._2.elementalCharges == 0) &&
+              assertTrue(second._2.bossCharges == 2) &&
+              assertTrue(third._2.bossCharges == 0) &&
               assertTrue(third._3.contains("россыпью мелких камней"))
     },
 
@@ -127,7 +127,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       for {
         r <- strike(h, lairBattle(h, turn = 1, charges = 2), seedTurn(100, 100))
         (_, after, log) = r
-      } yield assertTrue(after.effects.heroStunnedTurns == Elemental.Stone.BurstDebuffTurns) &&
+      } yield assertTrue(after.effects.heroStunnedTurns == MiniBoss.StoneElemental.BurstDebuffTurns) &&
               assertTrue(after.effects.heroStunned) &&
               assertTrue(log.contains("сбивает Вас с ног"))
     },
@@ -153,13 +153,13 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
         idle  <- strike(h, lairBattle(h, turn = 4, hpPct = 50L, armorPct = 50L), seedTurn(100))
         // Целый камень: герой мажет, значит ни HP, ни броня не тронуты.
         whole <- strike(clumsyHero, lairBattle(clumsyHero, turn = 2), seedTurn(100))
-        stats  = Elemental.Stone.stats(bossLvl)
+        stats  = MiniBoss.StoneElemental.stats(bossLvl)
       } yield assertTrue(hurt._3.contains("возвращаются на своё законное место")) &&
               assertTrue(hurt._2.monsterCurrentArmor - idle._2.monsterCurrentArmor == stats.armor * 20L / 100L) &&
               assertTrue(hurt._2.monsterCurrentHp - idle._2.monsterCurrentHp == stats.hp * 5L / 100L) &&
               // целому чинить нечего — умение молчит, но очередь всё равно едет
               assertTrue(!whole._3.contains("возвращаются на своё законное место")) &&
-              assertTrue(whole._2.elementalTurn == 3)
+              assertTrue(whole._2.bossTurn == 3)
     },
 
     test("вязкая земля: точность и уклонение героя срезаны на 3 раунда") {
@@ -167,7 +167,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       for {
         r <- strike(h, lairBattle(h, turn = 3), seedTurn(100))
         (_, after, log) = r
-      } yield assertTrue(after.effects.heroGroundedTurns == Elemental.Stone.GroundTurns) &&
+      } yield assertTrue(after.effects.heroGroundedTurns == MiniBoss.StoneElemental.GroundTurns) &&
               assertTrue(log.contains("Земля под Вашими ногами служит не Вам"))
     },
 
@@ -175,8 +175,8 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       val h = hero()
       for {
         last <- strike(h, lairBattle(h, turn = 4), seedTurn(100))
-      } yield assertTrue(Elemental.Stone.abilities == 5) &&
-              assertTrue(last._2.elementalTurn == 0) // после пропуска круг начинается заново
+      } yield assertTrue(MiniBoss.StoneElemental.abilities == 5) &&
+              assertTrue(last._2.bossTurn == 0) // после пропуска круг начинается заново
     },
 
     test("без энергии способность не применяется, но очередь едет дальше") {
@@ -184,9 +184,9 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       for {
         r <- strike(h, lairBattle(h, turn = 1, energy = 0L), seedTurn(100))
         (_, after, log) = r
-      } yield assertTrue(after.elementalCharges == 0) &&
+      } yield assertTrue(after.bossCharges == 0) &&
               assertTrue(!log.contains("груда камней")) &&
-              assertTrue(after.elementalTurn == 2)
+              assertTrue(after.bossTurn == 2)
     },
 
     // ── Особенности камня ─────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       def dealt(gem: Option[GemKind], procRoll: Int) = {
         val h = hero(gem = gem)
         strike(h, lairBattle(h, turn = 4, armorPct = 0L), seedTurn(procRoll)).map { case (_, after, _) =>
-          Elemental.Stone.stats(bossLvl).hp - after.monsterCurrentHp
+          MiniBoss.StoneElemental.stats(bossLvl).hp - after.monsterCurrentHp
         }
       }
       for {
@@ -204,8 +204,8 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(plain > 0L) &&
               // 0.2 против 1.5: огненное оружие бьёт камень в разы больнее голой стали
               assertTrue(fire > plain * 5L) &&
-              assertTrue(Elemental.Stone.plainDamageTakenMult == 0.2) &&
-              assertTrue(Elemental.Stone.damageTakenMult(pangea.model.battle.Element.Fire) == 1.5)
+              assertTrue(MiniBoss.StoneElemental.plainDamageTakenMult == 0.2) &&
+              assertTrue(MiniBoss.StoneElemental.damageTakenMult(pangea.model.battle.Element.Fire) == 1.5)
     },
 
     test("его удар бьёт раздельно: 90% в броню и 30% в HP — броня не спасает") {
@@ -245,7 +245,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(u.fightStats.armor == 0L) && // тонкая броня снялась вся
               // в HP ушло больше 30% удара: непокрытое бронёй добралось до здоровья
               assertTrue(lostHp > 0L) &&
-              assertTrue(lostHp + 100L >= (Elemental.Stone.stats(bossLvl).atk * 30L / 100L))
+              assertTrue(lostHp + 100L >= (MiniBoss.StoneElemental.stats(bossLvl).atk * 30L / 100L))
     },
 
     test("подожжённый камень бьёт слабее, теряет валун и часть потолка брони") {
@@ -258,16 +258,16 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
         (_, after, log) = r
       } yield assertTrue(after.effects.monsterBurn.isDefined) &&
               // Поджог случается в фазу игрока, а конец раунда сразу тикает счётчик.
-              assertTrue(after.effects.monsterWeakenedTurns == Elemental.Stone.BurnedTurns - 1) &&
-              assertTrue(after.effects.monsterMaxArmorCut == Elemental.Stone.BurnedMaxArmorCut) &&
-              assertTrue(after.elementalCharges == 1) && // один валун расплавился
+              assertTrue(after.effects.monsterWeakenedTurns == MiniBoss.StoneElemental.BurnedTurns - 1) &&
+              assertTrue(after.effects.monsterMaxArmorCut == MiniBoss.StoneElemental.BurnedMaxArmorCut) &&
+              assertTrue(after.bossCharges == 1) && // один валун расплавился
               assertTrue(log.contains("расплавило один из Каменных Валунов")) &&
               assertTrue(log.contains("Камень плывёт от жара"))
     },
 
     test("выше просевшего потолка броня уже не чинится") {
       val h = hero()
-      val stats = Elemental.Stone.stats(bossLvl)
+      val stats = MiniBoss.StoneElemental.stats(bossLvl)
       // Потолок срезан поджогами на 1000, брони выбито ровно столько же.
       val battle = lairBattle(h, turn = 2, armorPct = 50L)
         .pipe(b => b.copy(effects = b.effects.copy(monsterMaxArmorCut = 1000L)))
@@ -278,8 +278,8 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
     },
 
     test("каменный горит: он не огонь, и поджог на нём держится") {
-      assertTrue(!Elemental.Stone.immuneToBurn) &&
-      assertTrue(Elemental.Fire.immuneToBurn)
+      assertTrue(!MiniBoss.StoneElemental.immuneToBurn) &&
+      assertTrue(MiniBoss.FireElemental.immuneToBurn)
     },
 
     test("шипов у камня нет: об него не обжигаются") {
@@ -292,8 +292,8 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
     },
 
     test("дроп: его ингредиент — магический камень, а вещи из «Каменного стража»") {
-      assertTrue(Elemental.Stone.ingredient == pangea.model.item.MaterialKind.MagicStone) &&
-      assertTrue(Elemental.Stone.set == pangea.model.item.ItemSet.StoneGuard)
+      assertTrue(MiniBoss.StoneElemental.ingredient == pangea.model.item.MaterialKind.MagicStone) &&
+      assertTrue(MiniBoss.StoneElemental.set == pangea.model.item.ItemSet.StoneGuard)
     }
   )
 

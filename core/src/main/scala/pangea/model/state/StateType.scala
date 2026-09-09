@@ -53,6 +53,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Skills     extends StateType // список активных умений/пассивок героя
   case object Socketing  extends StateType // вставка камня-усилителя в гнездо снаряжения
   case object Loot       extends StateType
+  case object RottenJoe  extends StateType // встреча с Гнилым Джо на раскопках
   case object ElementalLair extends StateType // логово элементаля: подход к минибоссу
   case object ElementalSearch extends StateType // осмотр логова после победы (афк-поиск камней)
   case object Merchant   extends StateType

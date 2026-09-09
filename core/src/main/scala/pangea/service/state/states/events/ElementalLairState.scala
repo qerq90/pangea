@@ -7,7 +7,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.{Hero, LoreData}
-import pangea.model.monster.{Elemental, Monster, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.{CharacterMenu, State, UserAction}
@@ -67,7 +67,7 @@ case class ElementalLairState(heroDao: HeroDao, content: SceneContent) extends S
     } yield res
 
   private def showElemental(user: User, kind: String, firstMeeting: Boolean, renderer: Renderer): Task[StateType] = {
-    val elemental = Elemental.byName(kind).getOrElse(Elemental.Fire)
+    val elemental = MiniBoss.byName(kind).getOrElse(MiniBoss.FireElemental)
     val text =
       // Родительный падеж: «заметили огненного элементаля», а не «огненный элементаля».
       content.format("elementalLair.approach", "elemental" -> elemental.genitive.toLowerCase) +
@@ -86,10 +86,10 @@ case class ElementalLairState(heroDao: HeroDao, content: SceneContent) extends S
       res <- scene match {
         case None => showCurrent(user, renderer)
         case Some(s) =>
-          val elemental = Elemental.byName(s.kind).getOrElse(Elemental.Fire)
-          val lvl       = Elemental.bossLvl(hero.lvl)
+          val elemental = MiniBoss.byName(s.kind).getOrElse(MiniBoss.FireElemental)
+          val lvl       = MiniBoss.bossLvl(hero.lvl)
           val monster   = Monster(0L, lvl, Race.Elemental, Rarity.Legendary, elemental.stats(lvl))
-          val battle    = SoloPveBattle.from(monster, hero).copy(elementalKind = Some(s.kind))
+          val battle    = SoloPveBattle.from(monster, hero).copy(bossKind = Some(s.kind))
           heroDao.writeActiveBattle(user.userId, battle.asJson) *>
             // scene_data освобождаем: дальше им распоряжается бой и экран добычи.
             heroDao.writeSceneData(user.userId, Json.Null).as(StateType.Battle)
@@ -100,8 +100,9 @@ case class ElementalLairState(heroDao: HeroDao, content: SceneContent) extends S
     heroDao.writeSceneData(user.userId, Json.Null) *>
       renderer.show(user, Screen(content.text("elementalLair.left"), Nil)).as(StateType.Dungeon)
 
+  /** В логове водятся только элементали — Гнилой Джо сюда не заходит. */
   private def randomElemental: Task[String] =
-    Random.nextIntBounded(Elemental.values.size).map(Elemental.values(_).entryName)
+    Random.nextIntBounded(MiniBoss.elementals.size).map(MiniBoss.elementals(_).entryName)
 
   private def readScene(user: User): Task[Option[LairScene]] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LairScene].toOption))

@@ -36,6 +36,8 @@ case class InnkeeperState(
       },
       "ElementalLore"     -> Target.Run { (user, _, renderer) => offerLore(user, renderer) },
       "PayElementalLore"  -> Target.Run { (user, _, renderer) => payLore(user, renderer) },
+      "JoeLore"           -> Target.Run { (user, _, renderer) => offerJoeLore(user, renderer) },
+      "PayJoeLore"        -> Target.Run { (user, _, renderer) => payJoeLore(user, renderer) },
       "BackFromInnkeeper" -> Target.Goto(StateType.Tavern)
     ),
     fallback = Target.Run { (user, _, renderer) =>
@@ -61,6 +63,9 @@ case class InnkeeperState(
       // висит, пока он не заплатит за рассказ.
       val loreBtn = Option.when(lore.metElemental && !lore.elementalLore)(
         content.choice("ElementalLore", "innkeeper.elementalLoreLabel"))
+      // То же и про Гнилого Джо: кнопка висит, пока рассказ не куплен.
+      val joeBtn = Option.when(lore.metJoe && !lore.joeLore)(
+        content.choice("JoeLore", "innkeeper.joeLoreLabel"))
       renderer.show(
         user,
         Screen(
@@ -68,6 +73,7 @@ case class InnkeeperState(
           List(
             Some(content.choice("TurnInQuest", "innkeeper.turnInLabel")),
             loreBtn,
+            joeBtn,
             Some(content.choice("OpenCharacter", "common.character")),
             Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel"))
           ).flatten
@@ -99,6 +105,31 @@ case class InnkeeperState(
                renderer.show(user, Screen(
                  content.text("innkeeper.elementalLoreText"),
                  List(content.choice("BackFromLore", "innkeeper.elementalLoreDone")))) 
+    } yield StateType.Innkeeper
+
+  /** Предложение рассказа про Гнилого Джо: цена и две кнопки. */
+  private def offerJoeLore(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(
+      content.format("innkeeper.joeLoreOffer", "price" -> InnkeeperState.JoeLorePrice.toString),
+      List(
+        content.choice("PayJoeLore", "innkeeper.joeLorePay"),
+        content.choice("BackFromLore", "innkeeper.joeLoreDecline")
+      ))).as(StateType.Innkeeper)
+
+  private def payJoeLore(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      lore <- readLore(user)
+      _ <- if (lore.joeLore) showMenu(user, renderer)
+           else if (hero.silver < InnkeeperState.JoeLorePrice)
+             renderer.show(user, Screen(content.text("innkeeper.joeLoreNoSilver"), Nil)) *>
+               showMenu(user, renderer)
+           else
+             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.JoeLorePrice) *>
+               heroDao.writeLoreData(user.userId, lore.copy(joeLore = true).asJson) *>
+               renderer.show(user, Screen(
+                 content.text("innkeeper.joeLoreText"),
+                 List(content.choice("BackFromLore", "innkeeper.joeLoreDone"))))
     } yield StateType.Innkeeper
 
   private def readLore(user: User): Task[LoreData] =
@@ -198,6 +229,9 @@ object InnkeeperState {
 
   /** Сколько трактирщик просит за рассказ об элементалях. */
   val LorePrice: Long = 2000L
+
+  /** Цена рассказа про Гнилого Джо — он попроще элементалей. */
+  val JoeLorePrice: Long = 1000L
 
   /** Трофей, который уйдёт в счёт задания по расе `raceName`: из подходящих
     * берём с наибольшим коэффициентом вида, при равных — старший по уровню
