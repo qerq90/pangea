@@ -89,8 +89,8 @@ object MobEnergySpec extends ZIOSpecDefault {
       assertTrue(MonsterEnergy.maxEnergy(10L) == 150L) &&  // три обычных умения
       assertTrue(MonsterEnergy.regen(10L, Rarity.Common) == 28L) && // (15+20)×0.8
       assertTrue(rounds(150L) < rounds(1L)) &&
-      // обычный моб копит ровно два раунда на первом уровне и около раунда на 150-м
-      assertTrue(rounds(1L) <= 2.0) && assertTrue(rounds(150L) > 0.9)
+      // обычный моб копит четыре раунда на первом уровне и около двух на 150-м
+      assertTrue(rounds(1L) <= 4.0) && assertTrue(rounds(150L) > 2.0)
     },
 
     test("редкость — единственная ручка частоты: легендарный копит вчетверо быстрее обычного") {
@@ -109,12 +109,14 @@ object MobEnergySpec extends ZIOSpecDefault {
                  MonsterEnergy.startEnergy(lvl, Rarity.Common, 20L))
     },
 
-    test("базовые умения стоят 0.8 базовой цены, расовые — 1.5, округление вверх") {
-      assertTrue(MonsterSkill.QuickStrike.cost(lvl) == 40L) &&      // ceil(50 × 0.8)
-      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == 75L) &&     // 50 × 1.5
-      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 75L) &&
+    test("базовые умения стоят 1.6 базовой цены, расовые — 3.0, округление вверх") {
+      assertTrue(MonsterSkill.QuickStrike.cost(lvl) == 80L) &&      // 50 × 1.6
+      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == 150L) &&    // 50 × 3.0
+      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 150L) &&
       // округление идёт вверх, а не вниз
-      assertTrue(MonsterSkill.QuickStrike.cost(1L) == 26L)          // ceil(32 × 0.8) = 26
+      assertTrue(MonsterSkill.QuickStrike.cost(1L) == 52L) &&       // ceil(32 × 1.6) = 52
+      // расовое умение ровно втискивается в потолок запаса
+      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == MonsterEnergy.maxEnergy(lvl))
     },
 
     // ── Расовые пулы ──────────────────────────────────────────────────────────
