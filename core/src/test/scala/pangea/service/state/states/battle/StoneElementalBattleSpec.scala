@@ -221,6 +221,33 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
               assertTrue(lostArmor == lostHp * 3L)
     },
 
+    test("без брони его удар целиком уходит в HP") {
+      val bare  = hero(armor = 0L)
+      val armed = hero(armor = 500000L)
+      for {
+        naked  <- strike(bare, lairBattle(bare, turn = 4), seedTurn(100))
+        heavy  <- strike(armed, lairBattle(armed, turn = 4), seedTurn(100))
+        bareHp  = 500000L - naked._1.fightStats.hp
+        heavyHp = 500000L - heavy._1.fightStats.hp
+      } yield assertTrue(bareHp > 0L) &&
+              // голому достаётся весь удар, а не 30% от него
+              assertTrue(bareHp > heavyHp * 3L) &&
+              assertTrue(naked._1.fightStats.armor == 0L)
+    },
+
+    test("на остатках брони доля HP растёт: что броня не покрыла, добирает здоровье") {
+      // Брони меньше, чем её 90%-ная доля удара, — часть перетекает в HP.
+      val thin = hero(armor = 100L)
+      for {
+        r <- strike(thin, lairBattle(thin, turn = 4), seedTurn(100))
+        (u, _, _) = r
+        lostHp    = 500000L - u.fightStats.hp
+      } yield assertTrue(u.fightStats.armor == 0L) && // тонкая броня снялась вся
+              // в HP ушло больше 30% удара: непокрытое бронёй добралось до здоровья
+              assertTrue(lostHp > 0L) &&
+              assertTrue(lostHp + 100L >= (Elemental.Stone.stats(bossLvl).atk * 30L / 100L))
+    },
+
     test("подожжённый камень бьёт слабее, теряет валун и часть потолка брони") {
       val h = hero(gem = Some(GemKind.Ruby))
       for {

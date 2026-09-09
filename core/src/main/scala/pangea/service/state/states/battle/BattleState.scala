@@ -354,17 +354,21 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     }
 
   /** Как удар элементаля ложится на героя. У огненного — обычным порядком (сперва
-    * броня, остаток в HP), у каменного грани РАЗДЕЛЬНЫ: 90% урона снимает броню и
-    * одновременно 30% уходит в HP, так что броня от него не спасает.
+    * броня, остаток в HP), у каменного грани РАЗДЕЛЬНЫ: пока броня цела, 90%
+    * урона снимает её и одновременно 30% уходит в HP, так что броня от него не
+    * спасает.
+    *
+    * Чего броня не покрыла — уходит в HP: у героя без брони удар целиком ложится
+    * на здоровье, а по мере её истощения доля HP плавно растёт от 30% до 100%.
     * Возвращает новые hp и armor героя. */
   private def elementalHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
     battle.elemental.flatMap(_.heroHitSplit) match {
       case None => MonsterSkill.applyPhysicalDamage(battle, hero, damage)
       case Some((armorPart, hpPart)) =>
         val curArmor = hero.fightStats.armor.max(0L)
-        val toArmor  = (damage * armorPart).toLong.min(curArmor)
-        val toHp     = (damage * hpPart).toLong
-        ((hero.fightStats.hp - toHp).max(0L), curArmor - hero.sets.armorSpent(toArmor))
+        val absorbed = (damage * armorPart).toLong.min(curArmor)
+        val toHp     = (damage - absorbed).max((damage * hpPart).toLong)
+        ((hero.fightStats.hp - toHp).max(0L), curArmor - hero.sets.armorSpent(absorbed))
     }
 
   /** Шипы огненного элементаля. Пока у него ЦЕЛА БРОНЯ (проверяется её запас до
