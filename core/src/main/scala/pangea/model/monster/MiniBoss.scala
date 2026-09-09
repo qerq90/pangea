@@ -189,7 +189,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ExpPerLvl: Long         = 200L
 
     /** Голую сталь камень почти не чувствует, а вот огонь плавит его сильнее. */
-    val PlainDamageTakenPct: Long = 20L
+    val PlainDamageTakenPct: Long = 40L
     val FireDamageTakenPct: Long  = 150L
 
     /** Его обычная атака бьёт по броне и HP РАЗДЕЛЬНО: 90% и 30% от урона. */
