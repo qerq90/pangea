@@ -56,6 +56,23 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(ids == List("AttackElemental", "OpenCharacter", "LeaveLair"))
     },
 
+    test("вид подставляется в родительном падеже — «огненного», а не «огненный»") {
+      def approachText(idx: Int) =
+        for {
+          t <- makeState()
+          (state, _, renderer) = t
+          _    <- TestRandom.feedInts(idx)
+          _    <- state.action(testUser, tap("ApproachElemental"), renderer)
+          text <- renderer.sentScreens.map(_.last.text)
+        } yield text
+      for {
+        fire  <- approachText(fireIdx)
+        stone <- approachText(stoneIdx)
+      } yield assertTrue(fire.contains("огненного элементаля")) &&
+              assertTrue(stone.contains("каменного элементаля")) &&
+              assertTrue(!fire.contains("огненный элементаля"))
+    },
+
     test("первая встреча даёт особую реплику, вторая — уже нет") {
       for {
         t <- makeState()

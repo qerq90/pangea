@@ -69,7 +69,8 @@ case class ElementalLairState(heroDao: HeroDao, content: SceneContent) extends S
   private def showElemental(user: User, kind: String, firstMeeting: Boolean, renderer: Renderer): Task[StateType] = {
     val elemental = Elemental.byName(kind).getOrElse(Elemental.Fire)
     val text =
-      content.format("elementalLair.approach", "elemental" -> elemental.label.toLowerCase) +
+      // Родительный падеж: «заметили огненного элементаля», а не «огненный элементаля».
+      content.format("elementalLair.approach", "elemental" -> elemental.genitive.toLowerCase) +
         (if (firstMeeting) "\n\n" + content.text("elementalLair.firstMeeting") else "")
     renderer.show(user, Screen(text, List(
       content.choice("AttackElemental", "elementalLair.attack").copy(row = Some(0)),
