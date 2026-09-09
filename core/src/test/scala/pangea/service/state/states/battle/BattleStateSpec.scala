@@ -265,22 +265,46 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(burned == clean * 40L / 100L)
     },
 
-    test("при 50% горения лечение обнуляется, но герой продолжает гореть") {
+    test("лечение тратит горение: 50% гасит его целиком, 51% оставляет 1%") {
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
-      val burning = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(60))))
+      def afterHeal(pct: Int) =
+        for {
+          t <- makeState(heroWithFlask,
+                 strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(pct)))))
+          (state, heroDao, renderer) = t
+          _       <- state.action(testUser, tap("UseFlask"), renderer)
+          hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+          after   <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+          screens <- renderer.sentScreens
+        } yield (hero.fightStats.hp, after.effects.heroBurn.map(_.pct), screens.map(_.text).mkString)
       for {
-        t <- makeState(heroWithFlask, burning)
+        exactly <- afterHeal(50) // 50 + 50 = ровно 100% ослабления
+        over    <- afterHeal(51) // 101%: излишек продолжает гореть
+        (hpAt50, burnAt50, logAt50) = exactly
+        (hpAt51, burnAt51, _)       = over
+      } yield assertTrue(hpAt50 == 10L) && // лечения не осталось
+              assertTrue(burnAt50.isEmpty) && // пламя выгорело целиком
+              assertTrue(logAt50.contains("огонь на вас погас")) &&
+              assertTrue(hpAt51 == 10L) &&
+              // 51 − 50 = 1%, и в конце раунда этот остаток ещё тикнет и подрастёт
+              assertTrue(burnAt51.exists(_ >= 1))
+    },
+
+    test("слабое горение лечение переживает, но само гаснет без остатка") {
+      val heroWithFlask = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+      for {
+        t <- makeState(heroWithFlask,
+               strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(10)))))
         (state, heroDao, renderer) = t
-        _       <- state.action(testUser, tap("UseFlask"), renderer)
-        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
-        after   <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        screens <- renderer.sentScreens
-      } yield assertTrue(hero.fightStats.hp == 10L) && // лечение съедено целиком
-              // горение никуда не делось — оно тикает дальше и даже растёт
-              assertTrue(after.effects.heroBurn.exists(_.pct >= 60)) &&
-              assertTrue(screens.map(_.text).mkString.contains("Пламя пожирает лечение"))
+        _     <- state.action(testUser, tap("UseFlask"), renderer)
+        hero  <- heroDao.getHeroByUserId(userId).map(_.get)
+        after <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(hero.fightStats.hp > 10L) && // 40% лечения дошло
+              assertTrue(after.effects.heroBurn.isEmpty) // 10% < 50% — сгорело целиком
     },
 
     test("зелье лечения из пояса горящему герою тоже помогает хуже") {
