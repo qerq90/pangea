@@ -123,6 +123,16 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
               assertTrue(calm._3.nonEmpty) && assertTrue(hot._3.nonEmpty)
     },
 
+    test("обычная атака Джо героя не поджигает — гниль огнём не бьёт") {
+      val h = hero()
+      for {
+        r <- strike(h, joeBattle(h, turn = 3), seedTurn(1)) // бросок, поджёгший бы у огненного
+        (_, after, log, _) = r
+      } yield assertTrue(joe.heroIgniteChancePct == 0L) &&
+              assertTrue(after.get.effects.heroBurn.isEmpty) &&
+              assertTrue(!log.contains("поджёг вас"))
+    },
+
     // ── Способности по кругу ──────────────────────────────────────────────────
     test("смрад травит героя, и яд тикает в конце раунда") {
       val h = hero()

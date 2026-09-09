@@ -207,9 +207,11 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
-  /** Карточка персонажа. `blessed` — активно ли благословение Азата: оно живёт в
-   *  `azat_data`, а не в самом герое, поэтому приходит параметром. */
-  def getInfo(nowMs: Long, blessed: Boolean = false): String = {
+  /** Карточка персонажа. `blessed` (активно ли благословение Азата) и
+   *  `instantRests` (сколько быстрых отдыхов в запасе) живут в `azat_data`, а не
+   *  в самом герое, поэтому приходят параметрами. Отдыхи показываем и без
+   *  благословения: заряды остаются, даже когда оно кончилось. */
+  def getInfo(nowMs: Long, blessed: Boolean = false, instantRests: Int = 0): String = {
     val effB     = effectiveBaseStats(nowMs)
     val eff      = effectiveFightStats(nowMs)
     val maxHp    = effectiveMaxHp(nowMs)
@@ -218,8 +220,9 @@ case class Hero(
     val maxEn    = maxEnergy(nowMs)
     val curEn    = fightStats.energy.min(maxEn)
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
+    val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
     s"""${race.toString}, Уровень $lvl
-       | $getLvlExp/$getNeededExp опыта$blessingLine
+       | $getLvlExp/$getNeededExp опыта$blessingLine$restsLine
        |
        | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
        | 🏃 ЛОВ ${effB.agi}  ИНТ ${effB.int}
