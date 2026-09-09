@@ -6,7 +6,8 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, State, UserAction}
+import java.util.concurrent.TimeUnit
 import zio.{Task, ZIO}
 
 /** Зал Азата: лор про кубы, подход к кубу (покупка/активация/открытие крафта) и
@@ -119,7 +120,8 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
     } yield StateType.HallAzat
 
   private def loadAzat(user: User): Task[AzatState] =
-    heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+    ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      .flatMap(now => AzatData.load(heroDao, user.userId, now))
 
   private def saveAzat(user: User, azat: AzatState): Task[Unit] =
     heroDao.writeAzatData(user.userId, azat.asJson)

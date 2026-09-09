@@ -207,7 +207,9 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
-  def getInfo(nowMs: Long): String = {
+  /** Карточка персонажа. `blessed` — активно ли благословение Азата: оно живёт в
+   *  `azat_data`, а не в самом герое, поэтому приходит параметром. */
+  def getInfo(nowMs: Long, blessed: Boolean = false): String = {
     val effB     = effectiveBaseStats(nowMs)
     val eff      = effectiveFightStats(nowMs)
     val maxHp    = effectiveMaxHp(nowMs)
@@ -215,8 +217,9 @@ case class Hero(
     val curArm   = fightStats.armor.min(maxArm)
     val maxEn    = maxEnergy(nowMs)
     val curEn    = fightStats.energy.min(maxEn)
+    val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
     s"""${race.toString}, Уровень $lvl
-       | $getLvlExp/$getNeededExp опыта
+       | $getLvlExp/$getNeededExp опыта$blessingLine
        |
        | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
        | 🏃 ЛОВ ${effB.agi}  ИНТ ${effB.int}

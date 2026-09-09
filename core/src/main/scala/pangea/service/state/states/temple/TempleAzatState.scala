@@ -6,7 +6,7 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.{AzatState, Hero}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -92,7 +92,8 @@ case class TempleAzatState(heroDao: HeroDao, content: SceneContent) extends Stat
     } yield StateType.TempleAzat
 
   private def loadAzat(user: User): Task[AzatState] =
-    heroDao.readAzatData(user.userId).map(_.flatMap(_.as[AzatState].toOption).getOrElse(AzatState.empty))
+    ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      .flatMap(now => AzatData.load(heroDao, user.userId, now))
 
   private def saveAzat(user: User, azat: AzatState): Task[Unit] =
     heroDao.writeAzatData(user.userId, azat.asJson)

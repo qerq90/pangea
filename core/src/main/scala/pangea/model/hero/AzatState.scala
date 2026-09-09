@@ -30,13 +30,36 @@ case class AzatState(
   cubeCharges:   Int          = 0,
   cubeItems:     List[Item]   = Nil,
   blessingUntil: Option[Long] = scala.None,
-  instantRests:  Int          = 0
+  instantRests:  Int          = 0,
+  // Когда благословение в последний раз выдало суточную порцию отдыхов. Ставится
+  // при покупке, чтобы за прошедшие до неё сутки ничего не начислилось.
+  restsGrantedAt: Option[Long] = scala.None
 ) {
   def hasCube: Boolean    = cube == CubeStatus.Active
   def cubeFound: Boolean  = cube == CubeStatus.FoundInactive
   def cubeAbsent: Boolean = cube == CubeStatus.None
 
   def blessingActive(nowMs: Long): Boolean = blessingUntil.exists(_ > nowMs)
+
+  /** Доначисляет мгновенные отдыхи за каждые прошедшие сутки благословения.
+   *  Начисление ЛЕНИВОЕ: полуночи считаются от последней выдачи до «сейчас» (но
+   *  не дальше конца благословения), поэтому отдыхи не теряются, даже если игрок
+   *  в полночь не заходил. Сутки считаются по UTC.
+   *
+   *  Возвращает состояние как есть, если благословения нет или новых суток не
+   *  набралось — вызывающему достаточно сравнить с исходным. */
+  def withDailyRests(nowMs: Long): AzatState = blessingUntil match {
+    case Some(until) =>
+      val from = restsGrantedAt.getOrElse(nowMs)
+      val to   = nowMs.min(until)
+      val days = AzatState.midnightsBetween(from, to)
+      if (days <= 0L) this
+      else copy(
+        instantRests   = instantRests + (days * AzatState.BlessingDailyRests).toInt,
+        restsGrantedAt = Some(to)
+      )
+    case scala.None => this
+  }
 
   /** Осталось времени благословения в человекочитаемом виде (или None, если нет). */
   def blessingRemaining(nowMs: Long): Option[String] =
@@ -57,12 +80,20 @@ object AzatState {
   val MaxCharges: Int = 50
   /** Длительность благословения (7 суток) в миллисекундах. */
   val BlessingDurationMs: Long = 7L * 24L * 60L * 60L * 1000L
-  /** Сколько мгновенных отдыхов даёт благословение. */
+  /** Сколько мгновенных отдыхов даёт благословение сразу при покупке. */
   val BlessingInstantRests: Int = 250
+  /** Сколько мгновенных отдыхов оно доначисляет каждые сутки в 00:00. */
+  val BlessingDailyRests: Int = 50
   /** Бонус благословения (в %): к опыту, репутации, серебру и редкости добычи. */
   val BlessingBonusPct: Long = 10L
   /** Шанс (в %) дополнительной добычи после боя при благословении. */
   val BlessingExtraDropPct: Long = 5L
+
+  /** Сколько полуночей (UTC) прошло между двумя моментами. */
+  def midnightsBetween(fromMs: Long, toMs: Long): Long =
+    if (toMs <= fromMs) 0L else toMs / DayMs - fromMs / DayMs
+
+  private val DayMs: Long = 24L * 60L * 60L * 1000L
 
   implicit val encoder: Encoder[AzatState] = deriveEncoder[AzatState]
   implicit val decoder: Decoder[AzatState] = deriveDecoder[AzatState]

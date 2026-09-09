@@ -5,11 +5,12 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Renderer, SceneContent, Screen}
 import pangea.model.battle.SoloPveBattle
+import pangea.model.hero.AzatState
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.model.trauma.{Trauma, TraumaRoll}
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{AzatData, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -37,7 +38,11 @@ case class DeathState(
                         .flatMap(_.as[SoloPveBattle].toOption)
                         .map(_.monsterName)
                         .getOrElse("Монстр")
-      expLost       = (hero.exp * 0.1).toLong.max(0L)
+      // Благословение Азата смягчает штраф: теряется на BlessingBonusPct% меньше.
+      azat         <- AzatData.load(heroDao, user.userId, now)
+      blessed       = azat.blessingActive(now)
+      expPenalty    = (hero.exp * DeathState.ExpLossPct / 100L).max(0L)
+      expLost       = if (blessed) expPenalty * (100L - AzatState.BlessingBonusPct) / 100L else expPenalty
       newExp        = (hero.exp - expLost).max(0L)
       silverLost    = hero.silver / 2
       newSilver     = hero.silver - silverLost
@@ -126,4 +131,7 @@ case class DeathState(
 object DeathState {
   // Коэффициент роста времени мёртвого режима по уровню героя (см. формулу в enter).
   val RestGrowthK: Double = 0.01
+
+  /** Сколько процентов опыта сгорает при смерти (до скидки благословения). */
+  val ExpLossPct: Long = 10L
 }
