@@ -11,7 +11,7 @@ import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.MiniBoss
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
-import pangea.model.skill.{MonsterSkill, Skill}
+import pangea.model.skill.{MonsterEnergy, MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState
@@ -410,16 +410,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       else hero.gems.weaponElements.foldLeft(1.0)((m, el) => m * e.damageTakenMult(el))
     }
 
-  /** Как удар элементаля ложится на героя. У огненного — обычным порядком (сперва
-    * броня, остаток в HP), у каменного грани РАЗДЕЛЬНЫ: пока броня цела, 90%
+  /** Как удар моба ложится на героя. Обычно — привычным порядком (сперва броня,
+    * остаток в HP). У каменного элементаля грани РАЗДЕЛЬНЫ: пока броня цела, 90%
     * урона снимает её и одновременно 30% уходит в HP, так что броня от него не
-    * спасает.
+    * спасает; чего броня не покрыла — уходит в HP, и у героя без брони удар
+    * целиком приходится на здоровье.
     *
-    * Чего броня не покрыла — уходит в HP: у героя без брони удар целиком ложится
-    * на здоровье, а по мере её истощения доля HP плавно растёт от 30% до 100%.
+    * Моб, посыпавший оружие порошком, бьёт стихией: её грани двигают доли урона
+    * по броне и HP так же, как стихии оружия двигают урон героя по мобу.
     * Возвращает новые hp и armor героя. */
   private def bossHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
-    battle.boss.flatMap(_.heroHitSplit) match {
+    battle.boss.flatMap(_.heroHitSplit).orElse(powderSplit(battle)) match {
       case None => MonsterSkill.applyPhysicalDamage(battle, hero, damage)
       case Some((armorPart, hpPart)) =>
         val curArmor = hero.fightStats.armor.max(0L)
@@ -790,6 +791,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         (newHp, newHp - hero.fightStats.hp, updated, line)
     }
 
+  /** Стихия, которой моб бьёт после «Порошка!» (если он его высыпал). */
+  private def powderElement(battle: SoloPveBattle): Option[Element] =
+    battle.effects.monsterAttackElement.flatMap(Element.withNameOption)
+
+  /** Доли урона по броне и HP от стихии порошка. У каменного элементаля свой
+    * раскол, он важнее — там это природа удара, а не наведённая стихия. */
+  private def powderSplit(battle: SoloPveBattle): Option[(Double, Double)] =
+    powderElement(battle).map(e => (e.armorMult, e.hpMult))
+
   /** «Каменный страж» (порог 4): стихийный урон по герою слабее на 20%.
     * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
     * и есть огонь: и удар, и всплеск, и смерч, и шипы, и горение. У прочих мобов
@@ -922,11 +932,27 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           log = log :+ Element.Air.procText
         }
         if (fired(Element.Lightning) && !lightCold) {
-          // Выжиг энергии моба — флейвор (у мобов нет рабочего пула энергии).
+          // Выжиг энергии: снимаем долю от ПОТОЛКА, поэтому эффект не зависит от
+          // того, сколько моб успел накопить, и одинаково чувствуется на любом
+          // уровне. Умение, на которое он копил, откладывается.
+          val burned = (b.monsterStats.energy * Element.LightningEnergyBurnPct / 100L).max(1L)
+          val left   = (b.monsterCurrentEnergy - burned).max(0L)
+          val lost   = b.monsterCurrentEnergy - left
+          b = b.copy(monsterCurrentEnergy = left)
           log = log :+ Element.Lightning.procText
+          if (lost > 0) log = log :+ content.format("battle.lightningBurn", "energy" -> lost.toString)
         }
         (b, log)
       }
+  }
+
+  /** Умения, которые моб может применить прямо сейчас: доступные его расе,
+    * полезные в этой ситуации и оплатимые текущей энергией. */
+  private def affordableSkills(battle: SoloPveBattle): Seq[MonsterSkill] = {
+    val race = pangea.model.monster.Race.withName(battle.monsterRace)
+    MonsterSkill.values.filter { s =>
+      s.availableTo(race) && s.applicable(battle) && s.cost(battle.monsterLvl) <= battle.monsterCurrentEnergy
+    }
   }
 
   /** Итоговая защита моба с учётом временного %-дебафа (комбо Молния+Холод). */
@@ -1005,26 +1031,37 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // Поджигает героя обычной атакой только тот, у кого огонь в природе
             // (огненный элементаль), и только пока не скован холодом. У камня и
             // гнили шанс нулевой, поэтому бросок у них не тратится.
-            igniteChance = ticked.boss.map(_.heroIgniteChancePct).getOrElse(0L)
+            // Огненный порошок даёт мобу тот же шанс поджечь, что и обычный прок Огня.
+            igniteChance = ticked.boss.map(_.heroIgniteChancePct)
+                             .getOrElse(if (powderElement(ticked).contains(Element.Fire)) Element.ProcChancePct else 0L)
             ignites <- chanceRoll(
               igniteChance > 0L && !ticked.effects.chilled,
               (igniteChance - hero.sets.igniteResistPct).max(0L)
             )
-            burnPct = ticked.boss.map(_.heroIgniteBurnPct).getOrElse(0)
-            battleAfterAtk = ticked.copy(
-              monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
-              toughnessUsed    = ticked.toughnessUsed || toughTriggered,
-              effects =
+            burnPct = ticked.boss.map(_.heroIgniteBurnPct).getOrElse(Burn.Initial)
+            // Порошок мурлока и эльфа: удар, дошедший до HP, всегда травит.
+            poisons = ticked.effects.monsterPoisonsOnHit && newHp < hero.fightStats.hp
+            effectsAfterHit = {
+              val burned =
                 if (!ignites) ticked.effects
                 else ticked.effects.copy(heroBurn = Some(
                   ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
+              if (!poisons) burned
+              else burned.copy(heroPoison = Some(
+                burned.heroPoison.map(p => Poison(p.pct + Poison.OnHit)).getOrElse(Poison.onHit)))
+            }
+            battleAfterAtk = ticked.copy(
+              monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
+              toughnessUsed    = ticked.toughnessUsed || toughTriggered,
+              effects          = effectsAfterHit
             )
             lines = List(
               Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> ticked.monsterName)),
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
               Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> ticked.monsterName)),
-              Option.when(ignites)(content.text("battle.elemental.ignites"))
+              Option.when(ignites)(content.text("battle.elemental.ignites")),
+              Option.when(poisons)(content.text("battle.mobPoisons"))
             ).flatten.mkString("\n")
           } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
         } else
@@ -1045,31 +1082,34 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk)
       )
 
-      // 2) Каст скилла моба — независимый бросок шанса применения умения. Шанс
-      // зависит ТОЛЬКО от редкости моба (см. monsterSkillHitChance). Если прокнул —
-      // равновероятно выбираем applicable скилл из 4. Скилл применяется ПОВЕРХ
-      // обычной атаки и может быть как уроном (CrushingStrike — мимо брони и
-      // damageReduction), так и хилом/починкой моба.
+      // 2) Умение моба оплачивается ЭНЕРГИЕЙ, а не броском кубика: моб берёт самое
+      // дорогое из того, что сейчас по карману, применимо и доступно его расе, и
+      // списывает цену. Не хватило — бьёт только обычной атакой и копит дальше.
+      // Умение идёт ПОВЕРХ обычной атаки и может быть как уроном (CrushingStrike —
+      // мимо брони и damageReduction), так и хилом/починкой моба.
       castResult <-
         // Моб не кастует, если герой мёртв или моб добит Шипастым (battleAfterAtk).
         if (heroAfterAtk.fightStats.hp <= 0 || battleAfterAtk.monsterCurrentHp <= 0)
           ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
-        // Элементаль не катает случайный скилл: он идёт строго по своему кругу.
+        // Минибосс не выбирает умение: он идёт строго по своему кругу.
         else if (battleAfterAtk.boss.isDefined)
           bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
         else
           for {
-            skillRoll <- Random.nextIntBetween(1, 101)
-            skillChance = BattleState.monsterSkillHitChance(battleAfterAtk.rarity.factor)
-            applicable = MonsterSkill.values
-              .filter(_.applicable(battleAfterAtk))
-              .toVector
+            affordable <- ZIO.succeed(affordableSkills(battleAfterAtk).toVector)
             out <-
-              if (skillRoll <= skillChance && applicable.nonEmpty)
+              if (affordable.nonEmpty)
                 for {
-                  idx <- Random.nextIntBetween(0, applicable.size)
-                  ms   = applicable(idx)
-                  cast = ms.cast(battleAfterAtk, heroAfterAtk, nowMs)
+                  // Самое дорогое по карману; при равной цене — любое из них.
+                  best <- ZIO.succeed {
+                            val top = affordable.map(_.cost(battleAfterAtk.monsterLvl)).max
+                            affordable.filter(_.cost(battleAfterAtk.monsterLvl) == top)
+                          }
+                  idx <- Random.nextIntBetween(0, best.size)
+                  ms   = best(idx)
+                  paid = battleAfterAtk.copy(monsterCurrentEnergy =
+                           (battleAfterAtk.monsterCurrentEnergy - ms.cost(battleAfterAtk.monsterLvl)).max(0L))
+                  cast = ms.cast(paid, heroAfterAtk, nowMs)
                   // «Охотник» (порог 10): первая за бой вражеская способность,
                   // которая реально снимает HP или броню, гасится целиком. Хилы и
                   // починку моба не трогаем — отмена тратится только на уроне.
@@ -1105,14 +1145,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       (tickedHero, battleAfterHero, heroEffectLine) =
         if (heroAlive) tickHeroEffects(finalHero, finalBattle, nowMs)
         else (finalHero, finalBattle, "")
-      // Элементаль восстанавливает свою энергию в конце раунда — из неё он
-      // платит за способности следующего круга.
-      battleWithEnergy = battleAfterHero.boss match {
-        case Some(e) =>
-          val maxEn = battleAfterHero.monsterStats.energy
-          battleAfterHero.copy(monsterCurrentEnergy =
-            (battleAfterHero.monsterCurrentEnergy + e.energyRegen(battleAfterHero.monsterLvl)).min(maxEn))
-        case None => battleAfterHero
+      // Энергия копится в конце раунда — из неё оплачивается следующее умение.
+      // У минибосса свой реген от BossLvL, у обычного моба — от уровня и редкости.
+      battleWithEnergy = {
+        val maxEn = battleAfterHero.monsterStats.energy
+        val gain  = battleAfterHero.boss match {
+          case Some(e) => e.energyRegen(battleAfterHero.monsterLvl)
+          case None    => MonsterEnergy.regen(battleAfterHero.monsterLvl, battleAfterHero.rarity)
+        }
+        battleAfterHero.copy(monsterCurrentEnergy = (battleAfterHero.monsterCurrentEnergy + gain).min(maxEn))
       }
       (tickedBattle, monsterEffectLine, bleedDealt) =
         if (heroAlive) tickMonsterEffects(battleWithEnergy, ticked.monsterName, tickedHero.sets.burnGrowthMult)
@@ -1789,7 +1830,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       attackerInt = battle.monsterStats.atk,
       bonusPct = battle.heroBattleState.reductionBonusPct
     ) * 100.0).toInt
-    val mobSkillHitPct = BattleState.monsterSkillHitChance(battle.rarity.factor).toInt
+    // Энергия моба видна игроку: по ней читается, когда прилетит умение, и по ней
+    // же видно работу Молнии. Шанс каста больше не показываем — его нет.
+    val mobEnergy    = battle.monsterCurrentEnergy.max(0L)
+    val mobMaxEnergy = battle.monsterStats.energy.max(0L)
     val maxEnergy     = hero.maxEnergy(nowMs)
     // Статус-эффекты рядом со статами своей сущности: яд у HP моба (-урон/ход),
     // реген у HP/брони героя (+восстановление/ход). Реген HP = зелье регенерации
@@ -1836,7 +1880,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "heroReduction"  -> s"$reductionPct%",
       "heroEnergy"     -> hero.fightStats.energy.min(maxEnergy).toString,
       "heroMaxEnergy"  -> maxEnergy.toString,
-      "mobSkillHit"    -> s"$mobSkillHitPct%",
+      "monsterEnergy"    -> mobEnergy.toString,
+      "monsterMaxEnergy" -> mobMaxEnergy.toString,
       "flaskCharges"   -> BattleState.flaskCharges(hero).toString
     )
     // Готовый навык синий, если хватает энергии на каст, и красный — если нет.
@@ -1985,16 +2030,6 @@ object BattleState {
   val BlessingBonusPct: Long = AzatState.BlessingBonusPct
   /** Шанс (в %) дополнительной экипировки после боя при благословении. */
   val BlessingExtraDropPct: Long = AzatState.BlessingExtraDropPct
-
-  /** ЗАГЛУШКА множителя шанса каста моба от редкости. Позже может стать формулой. */
-  val MonsterSkillChancePerRarity: Double = 20.0
-
-  /** Шанс моба применить активный навык — зависит ТОЛЬКО от редкости моба:
-    * `rarity.factor · MonsterSkillChancePerRarity`, в процентах [5; 95].
-    * Обычный моб (factor 0.8) ≈ 16%, легендарный (factor 3) = 60%.
-    */
-  def monsterSkillHitChance(rarityFactor: Double): Double =
-    (rarityFactor * MonsterSkillChancePerRarity).max(5.0).min(95.0)
 
   /** Из payload UserAction достаём itemId, если action имеет вид `Skill_<id>`.
     */

@@ -6,6 +6,7 @@ import pangea.model.battle.{Buff, Burn, HeroBattleState, Regen, SoloPveBattle}
 import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
+import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -176,6 +177,13 @@ object BattleStateSpec extends ZIOSpecDefault {
                                      evasion = 0, accuracy = 9999, energy = 0),
     monsterCurrentHp    = 9999L,
     monsterCurrentArmor = 0L
+  )
+
+  /** Тот же моб, но с полным запасом энергии: применяет умение каждый раунд.
+   *  Нужен там, где проверяется именно ответ на вражеское умение. */
+  private val castingBattle = strongBattle.copy(
+    monsterStats         = strongBattle.monsterStats.copy(energy = MonsterEnergy.maxEnergy(1L)),
+    monsterCurrentEnergy = MonsterEnergy.maxEnergy(1L)
   )
 
   private def makeState(hero: pangea.model.hero.Hero, battle: SoloPveBattle) =
@@ -854,10 +862,10 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("«Охотник» 10: первая вредящая способность моба гасится, вторая уже проходит") {
       val hero = hunterHero(10).copy(fightStats = strongHero.fightStats.copy(hp = 500, armor = 0))
       for {
-        t             <- makeState(hero, strongBattle)
+        t             <- makeState(hero, castingBattle)
         (state, dao, r) = t
-        // Броски раунда: удар героя, удар моба, каст моба (1 ≤ шанс — кастует), выбор скилла.
-        _             <- TestRandom.feedInts(60, 3, 1, 0)
+        // Броски раунда: удар героя, удар моба, выбор умения среди равных по цене.
+        _             <- TestRandom.feedInts(60, 3, 0)
         _             <- TestRandom.feedLongs(100L)
         _             <- state.action(testUser, tap("Attack"), r)
         afterFirst    <- dao.getHeroByUserId(userId).map(_.get)

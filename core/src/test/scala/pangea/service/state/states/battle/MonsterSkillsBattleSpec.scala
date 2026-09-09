@@ -4,6 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.monster.{Race, Rarity}
+import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -28,21 +29,26 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
   )
 
   // Слабый монстр с большим запасом hp (не умрёт от удара героя).
+  // Уровень 1: обычное умение стоит ceil(0.8 × (20 + 2)) = 18 энергии.
+  private val lvl1SkillCost = MonsterEnergy.cost(1L, MonsterEnergy.BasicCostFactor)
+
   private def battle(
     mobAtk:     Long = 10,
     mobArmor:   Long = 0,
     mobDefence: Long = 0,
     curHp:      Long = 100,
     maxHp:      Long = 100,
-    curArmor:   Long = 0
+    curArmor:   Long = 0,
+    energy:     Long = 100  // по умолчанию хватает на любое умение
   ): SoloPveBattle = SoloPveBattle(
     monsterLvl          = 1L,
     monsterRace         = Race.Human.entryName,
     monsterRarity       = Rarity.Common.entryName,
     monsterStats        = FightStats(atk = mobAtk, hp = maxHp, armor = mobArmor, defence = mobDefence,
-                                     evasion = 0, accuracy = 1, energy = 0),
+                                     evasion = 0, accuracy = 1, energy = MonsterEnergy.maxEnergy(1L)),
     monsterCurrentHp    = curHp,
-    monsterCurrentArmor = curArmor
+    monsterCurrentArmor = curArmor,
+    monsterCurrentEnergy = energy
   )
 
   private def makeState(hero: pangea.model.hero.Hero, b: SoloPveBattle) =
@@ -55,14 +61,14 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
 
   override def spec = suite("MonsterSkillsBattleSpec")(
 
-    test("При прокшем skillRoll моб дополнительно кастует и сообщение содержит шаблон скилла") {
-      // heroHitRoll=50 (попал в моба), mobHitRoll=50 (моб попал), skillRoll=1 (каст прокнул),
-      // skillIdx=0 (первый applicable). У полной hp/armor моба applicable = [QuickStrike, CrushingStrike].
+    test("Хватило энергии — моб дополнительно кастует, и в логе шаблон умения") {
+      // heroHitRoll=50 (попал в моба), mobHitRoll=50 (моб попал), skillIdx=0 (первое из
+      // равных по цене). У полной hp/armor моба по карману [QuickStrike, CrushingStrike].
       val b = battle(curHp = 100, maxHp = 100, mobArmor = 0, curArmor = 0)
       for {
         triple                       <- makeState(baseHero, b)
         (state, _, renderer)          = triple
-        _                            <- TestRandom.feedInts(50, 50, 1, 0)
+        _                            <- TestRandom.feedInts(50, 50, 0)
         _                            <- state.action(testUser, tap("Attack"), renderer)
         screens                      <- renderer.sentScreens
         joined                        = screens.map(_.text).mkString("\n")
@@ -71,7 +77,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
 
     test("CrushingStrike моба бьёт мимо большой брони игрока — hp падает") {
       // У героя огромная armor — обычная атака моба её слегка ест.
-      // skillIdx=1 в applicable [QuickStrike, CrushingStrike] → CrushingStrike (мимо брони).
+      // skillIdx=1 среди [QuickStrike, CrushingStrike] → CrushingStrike (мимо брони).
       val tankHero = baseHero.copy(
         fightStats = baseHero.fightStats.copy(hp = 500L, armor = 999_999L, defence = 0)
       )
@@ -79,7 +85,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
       for {
         triple                       <- makeState(tankHero, b)
         (state, heroDao, renderer)    = triple
-        _                            <- TestRandom.feedInts(50, 50, 1, 1)
+        _                            <- TestRandom.feedInts(50, 50, 1)
         _                            <- state.action(testUser, tap("Attack"), renderer)
         updated                      <- heroDao.getHeroByUserId(userId).map(_.get)
         screens                      <- renderer.sentScreens
@@ -96,13 +102,53 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
       for {
         triple                       <- makeState(baseHero, b)
         (state, heroDao, renderer)    = triple
-        _                            <- TestRandom.feedInts(50, 50, 1, 0)
+        _                            <- TestRandom.feedInts(50, 50, 0)
         _                            <- state.action(testUser, tap("Attack"), renderer)
         afterBattle                  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield
         // hp и armor моба не выросли (нет хила/ремонта); максимум — упали от обычной атаки героя.
         assertTrue(afterBattle.monsterCurrentHp <= 100L) &&
         assertTrue(afterBattle.monsterCurrentArmor <= 20L)
+    },
+
+    test("Без энергии умения нет — моб бьёт только обычной атакой и копит") {
+      val b = battle(energy = 0L)
+      for {
+        triple <- makeState(baseHero, b)
+        (state, heroDao, renderer) = triple
+        _      <- TestRandom.feedInts(50, 50, 0)
+        _      <- state.action(testUser, tap("Attack"), renderer)
+        after  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        joined <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(!joined.contains("делает быстрые атаки")) &&
+              assertTrue(!joined.contains("бьёт плашмя")) &&
+              // зато в конце раунда энергия накопилась: обычный моб 1 уровня даёт 13
+              assertTrue(after.monsterCurrentEnergy == MonsterEnergy.regen(1L, Rarity.Common))
+    },
+
+    test("Умение списывает свою цену из запаса") {
+      val b = battle(energy = lvl1SkillCost)
+      for {
+        triple <- makeState(baseHero, b)
+        (state, heroDao, renderer) = triple
+        _      <- TestRandom.feedInts(50, 50, 0)
+        _      <- state.action(testUser, tap("Attack"), renderer)
+        after  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        joined <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(joined.contains("делает быстрые атаки")) &&
+              // потратил всё, что было, и тут же накопил реген раунда
+              assertTrue(after.monsterCurrentEnergy == MonsterEnergy.regen(1L, Rarity.Common))
+    },
+
+    test("Запас не растёт выше потолка") {
+      val b = battle(energy = MonsterEnergy.maxEnergy(1L))
+      for {
+        triple <- makeState(baseHero, b)
+        (state, heroDao, renderer) = triple
+        _      <- TestRandom.feedInts(50, 50, 0)
+        _      <- state.action(testUser, tap("Attack"), renderer)
+        after  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(after.monsterCurrentEnergy <= MonsterEnergy.maxEnergy(1L))
     },
 
     test("Скилл моба не кастуется, если игрок умер от обычной атаки") {
@@ -118,8 +164,8 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
       for {
         triple                       <- makeState(dying, mob)
         (state, _, renderer)          = triple
-        // skillRoll=1 (если бы дошло — каст бы прокнул), но из-за смерти каста не должно быть.
-        _                            <- TestRandom.feedInts(50, 50, 1, 0)
+        // Энергии хватает с запасом, но из-за смерти героя каста быть не должно.
+        _                            <- TestRandom.feedInts(50, 50, 0)
         result                       <- state.action(testUser, tap("Attack"), renderer)
         screens                      <- renderer.sentScreens
         joined                        = screens.map(_.text).mkString("\n")

@@ -635,7 +635,7 @@ heroStats:
 
 battle:
   enter:
-    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  🌀 {mobSkillHit}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}{heroArmorRegen}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
+    text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🎯 {mobHit}\n💨 {monsterDodge}  ⚡ {monsterEnergy}/{monsterMaxEnergy}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}{heroArmorRegen}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -712,6 +712,8 @@ battle:
 
 
 
+  mobPoisons: "🟢 Отравленное оружие оставило яд в вашей ране."
+  lightningBurn: "⚡ Разряд выжигает {energy} энергии врага."
   hunterRepeat: "🏹 Промах не в счёт — вы тут же бьёте снова."
   hunterCancel: "🏹 Вы читаете движение врага и срываете его приём — урона нет."
   regenTick: "💚 Регенерация восстанавливает {healed} HP."

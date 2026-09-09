@@ -8,6 +8,7 @@ import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.monster.Race
+import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState.LootData
@@ -43,7 +44,9 @@ case class TreasureMobsFightState(heroDao: HeroDao, content: SceneContent) exten
                        silvers     = Nil,
                        returnState = Some(returnTarget),
                        eventData   = Some(chain.copy(remaining = afterThis).asJson))
-      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.from(monster, hero).asJson)
+      startPct <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+      _ <- heroDao.writeActiveBattle(user.userId,
+             SoloPveBattle.from(monster, hero).withStartEnergy(startPct).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text("treasureMobs.nextFight"), Nil))
     } yield ()
