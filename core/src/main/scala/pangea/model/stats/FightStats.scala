@@ -15,7 +15,10 @@ case class FightStats(
   // Текущий запас энергии (пул героя, как hp/armor). Тратится на активные умения
   // и события лабиринта, восстанавливается в бою и на отдыхе. Максимум считается
   // формулой в Hero.maxEnergy. У мобов не используется (0).
-  energy:   Long
+  energy:   Long,
+  // Пробитие защиты с предметов. Слагаемое в BattleState.pierce; предметы его
+  // пока не дают, поэтому у всех ноль — поле заведено под будущие вещи.
+  pierce:   Long = 0L
 )
 
 object FightStats {
@@ -30,7 +33,8 @@ object FightStats {
       evasion  <- c.getOrElse[Long]("evasion")(0L)
       accuracy <- c.getOrElse[Long]("accuracy")(0L)
       energy   <- c.getOrElse[Long]("energy")(0L)
-    } yield FightStats(atk, hp, armor, defence, evasion, accuracy, energy)
+      pierce   <- c.getOrElse[Long]("pierce")(0L)
+    } yield FightStats(atk, hp, armor, defence, evasion, accuracy, energy, pierce)
 
   implicit val meta: Meta[FightStats] = new Meta(pgDecoderGet, pgEncoderPut)
 }
