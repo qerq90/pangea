@@ -7,6 +7,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.model.battle.Element
 import pangea.model.hero.{Equipment, Hero}
+import pangea.generator.item.MaterialGenerator
 import pangea.model.item.{Gem, Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -121,11 +122,7 @@ case class SocketingState(
             // ПРОТИВОПОЛОЖНЫЙ ему обращаются в пыль. Одинаковые стихии при этом
             // спокойно стакаются — два рубина усиливают друг друга по грейдам.
             case Some(item) if isWeapon(item) && hasOpposite(item, g) =>
-              val cleaned = removeOpposite(item, g)
-              heroDao.updateEquipmentAndFightStats(user.userId, hero.equipment.replacing(cleaned), hero.fightStats) *>
-                inventoryRepo.removeItem(scene.gemId, hero.id).mapError(e => new Throwable(e.toString)) *>
-                renderer.show(user, Screen(content.text("socketing.annihilate"), Nil)) *>
-                heroDao.writeSceneData(user.userId, io.circe.Json.Null).as(StateType.Inventory)
+              annihilate(user, hero, item, g, scene.gemId, renderer)
             case _ =>
               socketInto(hero.equipment, targetId, g) match {
                 case None => showTargets(user, renderer)
@@ -139,6 +136,41 @@ case class SocketingState(
           }
       }
     } yield res
+
+  /** Огонь и Холод в одном оружии не уживаются: оба камня рассыпаются. От каждого
+    * остаётся РОВНО одна горсть своей пыли — вспышка съедает камни целиком, грейд
+    * тут ничего не добавляет (в отличие от спокойной ломки, см. `GemBreaking`).
+    *
+    * Пыли нужно две ячейки. Считаем их уже после того, как вставляемый камень ушёл
+    * из сумки: он сам освобождает одну. Не хватило — камни всё равно потеряны, но
+    * пыль высыпается мимо сумки, и об этом честно сообщаем. */
+  private def annihilate(
+      user:     User,
+      hero:     Hero,
+      item:     Item,
+      inserted: Gem,
+      gemId:    Long,
+      renderer: Renderer
+  ): Task[StateType] = {
+    val cleaned = removeOpposite(item, inserted)
+    val lost    = item.socketedGems.find(isOpposite(_, inserted))
+    val dusts   = (inserted :: lost.toList).map(_.dust)
+    for {
+      _   <- heroDao.updateEquipmentAndFightStats(
+               user.userId, hero.equipment.replacing(cleaned), hero.fightStats)
+      _   <- inventoryRepo.removeItem(gemId, hero.id).mapError(e => new Throwable(e.toString))
+      inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      room = inv.maxItems - inv.items.data.length >= dusts.size
+      _   <- ZIO.when(room)(ZIO.foreachDiscard(dusts)(kind =>
+               inventoryRepo.addItem(hero.id, MaterialGenerator.item(kind))
+                 .mapError(e => new Throwable(e.toString))))
+      line = if (room)
+               content.format("socketing.annihilate", "dust" -> dusts.map(_.displayName).mkString(", "))
+             else content.text("socketing.annihilateNoRoom")
+      _   <- renderer.show(user, Screen(line, Nil))
+      _   <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+    } yield StateType.Inventory
+  }
 
   private def isWeapon(item: Item): Boolean =
     item.itemType == ItemType.Weapon || item.itemType == ItemType.AdditionalWeapon
