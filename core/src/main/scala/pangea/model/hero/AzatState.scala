@@ -1,7 +1,7 @@
 package pangea.model.hero
 
 import enumeratum._
-import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.generic.semiauto.deriveEncoder
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.model.item.Item
@@ -100,5 +100,18 @@ object AzatState {
   val MoscowOffsetMs: Long = 3L * 60L * 60L * 1000L
 
   implicit val encoder: Encoder[AzatState] = deriveEncoder[AzatState]
-  implicit val decoder: Decoder[AzatState] = deriveDecoder[AzatState]
+
+  /** Декодер рукописный, каждое поле — с запасным значением. Производный требует
+    * в записи все поля разом, поэтому добавление нового (так было с
+    * `restsGrantedAt`) роняет разбор старых записей целиком — и герой теряет
+    * купленное: куб, его заряды и содержимое, срок благословения, отдыхи. */
+  implicit val decoder: Decoder[AzatState] = (c: HCursor) =>
+    for {
+      cube           <- c.getOrElse[CubeStatus]("cube")(CubeStatus.None)
+      cubeCharges    <- c.getOrElse[Int]("cubeCharges")(0)
+      cubeItems      <- c.getOrElse[List[Item]]("cubeItems")(Nil)
+      blessingUntil  <- c.getOrElse[Option[Long]]("blessingUntil")(scala.None)
+      instantRests   <- c.getOrElse[Int]("instantRests")(0)
+      restsGrantedAt <- c.getOrElse[Option[Long]]("restsGrantedAt")(scala.None)
+    } yield AzatState(cube, cubeCharges, cubeItems, blessingUntil, instantRests, restsGrantedAt)
 }
