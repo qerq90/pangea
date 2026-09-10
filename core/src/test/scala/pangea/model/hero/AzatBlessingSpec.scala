@@ -12,6 +12,24 @@ object AzatBlessingSpec extends ZIOSpecDefault {
 
   override def spec = suite("Благословение Азата")(
 
+    test("старая запись храма без новых полей читается, а не обнуляет купленное") {
+      // Так выглядел azat_data до появления суточных отдыхов: поля
+      // restsGrantedAt в записи нет. Производный декодер требовал его и ронял
+      // разбор целиком — герой терял куб, заряды, благословение и отдыхи.
+      val old = io.circe.parser.parse(
+        """{"cube":"Active","cubeCharges":3,"cubeItems":[],"blessingUntil":123,"instantRests":7}"""
+      ).toOption.get
+      val parsed = old.as[AzatState].toOption.get
+      assertTrue(parsed.cube == CubeStatus.Active) &&
+      assertTrue(parsed.cubeCharges == 3) &&
+      assertTrue(parsed.blessingUntil.contains(123L)) &&
+      assertTrue(parsed.instantRests == 7) &&
+      // отсутствующее поле берётся по умолчанию, остальное остаётся при герое
+      assertTrue(parsed.restsGrantedAt.isEmpty) &&
+      // и совсем пустой объект тоже читается — это чистое состояние храма
+      assertTrue(io.circe.Json.obj().as[AzatState].toOption.contains(AzatState.empty))
+    },
+
     test("каждые сутки в 00:00 добавляется 50 быстрых отдыхов") {
       val azat = AzatState(blessingUntil = Some(noon + 10 * day), restsGrantedAt = Some(noon))
       val next = azat.withDailyRests(noon + day)      // прошла одна полночь

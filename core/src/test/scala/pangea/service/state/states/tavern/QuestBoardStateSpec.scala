@@ -45,6 +45,23 @@ object QuestBoardStateSpec extends ZIOSpecDefault {
               assertTrue(ids.toSet == Set("TakeQuest", "AbandonQuest", "BackFromQuest"))
     },
 
+    test("старая запись доски без новых полей читается, а не теряет активное задание") {
+      // Производный декодер требует все поля разом: добавь в QuestData поле — и
+      // у всех, кто взял задание, доска обнулилась бы вместе с ним.
+      val stored = io.circe.parser.parse(
+        """{"remaining":2,"current":"Orc","refreshAt":555,"active":"Elf"}"""
+      ).toOption.get
+      val parsed = stored.as[QuestData].toOption.get
+      assertTrue(parsed.remaining == 2) &&
+      assertTrue(parsed.current.contains("Orc")) &&
+      assertTrue(parsed.refreshAt == 555L) &&
+      assertTrue(parsed.active.contains("Elf")) &&
+      // запись без части полей читается с дефолтами, а не разваливается
+      assertTrue(io.circe.parser.parse("""{"remaining":1}""").toOption
+        .flatMap(_.as[QuestData].toOption)
+        .contains(QuestData(1, None, 0L, None)))
+    },
+
     test("TakeQuest → списывает слот, делает задание активным, роллит следующее") {
       for {
         t <- makeState
