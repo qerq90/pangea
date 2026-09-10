@@ -1,5 +1,6 @@
 package pangea.service.state.states.tavern
 
+import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
@@ -172,6 +173,45 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
               assertTrue(told.choices.map(_.label).contains("Надеюсь это стоило моего серебра.")) &&
               // после оплаты кнопка исчезает
               assertTrue(!after.contains("ElementalLore"))
+    },
+
+    test("легенду об элементалях продают строго один раз — старая запись знаний её не сбрасывает") {
+      // До Гнилого Джо в lore_data лежали только два поля. Производный декодер
+      // требовал все четыре и ронял разбор целиком, знания подменялись пустыми —
+      // и трактирщик предлагал уже купленную легенду по второму кругу.
+      val oldRecord = Json.obj(
+        "metElemental"  -> Json.True,
+        "elementalLore" -> Json.True
+      )
+      for {
+        t <- makeStateWith(Nil, None, LoreData.empty, 5000L)
+        (state, dao, _, renderer) = t
+        _      <- dao.writeLoreData(userId, oldRecord)
+        _      <- state.enter(testUser, renderer)
+        ids    <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        parsed  = oldRecord.as[LoreData].toOption.get
+      } yield assertTrue(parsed == LoreData(metElemental = true, elementalLore = true)) &&
+              assertTrue(!ids.contains("ElementalLore"))
+    },
+
+    test("встреча с любым элементалем открывает один и тот же рассказ") {
+      // Вид элементаля в знаниях не хранится: и огненный, и каменный ставят один
+      // флаг metElemental, поэтому легенда одна на двоих и покупается однажды.
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metElemental = true), 5000L)
+        (state, dao, _, renderer) = t
+        _     <- state.action(testUser, tap("ElementalLore"), renderer)
+        _     <- state.action(testUser, tap("PayElementalLore"), renderer)
+        // «встретил ещё одного» — флаг встречи уже стоит, знание не сбрасывается
+        lore  <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        _     <- dao.writeLoreData(userId, lore.copy(metElemental = true).asJson)
+        _     <- state.enter(testUser, renderer)
+        ids   <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+      } yield assertTrue(lore.elementalLore) &&
+              assertTrue(!ids.contains("ElementalLore")) &&
+              // серебро списано ровно один раз
+              assertTrue(silver == 3000L)
     },
 
     // ── Рассказ о Гнилом Джо ──────────────────────────────────────────────────

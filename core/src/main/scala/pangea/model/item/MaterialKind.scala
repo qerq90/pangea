@@ -50,7 +50,7 @@ object MaterialKind extends Enum[MaterialKind] {
     override val description: String =
       "Представляет собой куски бледной, эластичной и противоестественно живучей " +
       "плоти. Ткани сохраняют остаточную регенеративную силу монстра даже после его " +
-      "гибели. Возможно я найду этому применение."
+      "гибели."
   }
 
   implicit val encoder: Encoder[MaterialKind] = (k: MaterialKind) => k.entryName.asJson
