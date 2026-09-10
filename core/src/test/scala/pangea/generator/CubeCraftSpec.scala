@@ -20,6 +20,10 @@ object CubeCraftSpec extends ZIOSpecDefault {
 
   private def mithril(id: Long): Item = MaterialGenerator.mithril.copy(id = id)
 
+  private def setItem(id: Long, itemType: ItemType, rarity: Rarity, set: ItemSet): Item =
+    Item(id, "Вещь", 10L, rarity, itemType, attack = 1, accuracy = 0, energy = 0,
+      armor = 0, defence = 0, evasion = 0, set = Some(set))
+
   private def dust(kind: MaterialKind, id: Long): Item =
     MaterialGenerator.item(kind).copy(id = id)
 
@@ -77,6 +81,38 @@ object CubeCraftSpec extends ZIOSpecDefault {
       val result = CubeCraft.craft((1 to 2).map(i => dust(MaterialKind.TopazDust, i.toLong)).toList,
         charges = 50, rng)
       assertTrue(result.chargesUsed == 0) && assertTrue(result.items.size == 2)
+    },
+
+    test("3 вещи набора «Упырь» → кожа упыря, редкость вещей не важна") {
+      val items = List(
+        setItem(1L, ItemType.Helmet, Rarity.Blue,   ItemSet.Ghoul),
+        setItem(2L, ItemType.Boots,  Rarity.Purple, ItemSet.Ghoul),
+        setItem(3L, ItemType.Gloves, Rarity.Gray,   ItemSet.Ghoul))
+      val result = CubeCraft.craft(items, charges = 50, rng)
+      assertTrue(result.chargesUsed == 1) &&
+        assertTrue(result.items.size == 1) &&
+        assertTrue(result.items.head.material.contains(MaterialKind.GhoulSkin))
+    },
+
+    test("каждый набор переплавляется в свой материал") {
+      def salvage(set: ItemSet) = CubeCraft.craft(
+        (1 to 3).map(i => setItem(i.toLong, ItemType.Helmet, Rarity.Blue, set)).toList,
+        charges = 50, rng).items.headOption.flatMap(_.material)
+      assertTrue(salvage(ItemSet.WildFlame).contains(MaterialKind.EverburningIron)) &&
+        assertTrue(salvage(ItemSet.StoneGuard).contains(MaterialKind.MagicStone)) &&
+        // у «Охотника» материала нет — переплавлять его не во что
+        assertTrue(salvage(ItemSet.Hunter).isEmpty)
+    },
+
+    test("двух вещей набора мало, а вещи разных наборов не смешиваются") {
+      val two = CubeCraft.craft(
+        (1 to 2).map(i => setItem(i.toLong, ItemType.Helmet, Rarity.Blue, ItemSet.Ghoul)).toList,
+        charges = 50, rng)
+      val mixed = CubeCraft.craft(List(
+        setItem(1L, ItemType.Helmet, Rarity.Blue, ItemSet.Ghoul),
+        setItem(2L, ItemType.Boots,  Rarity.Blue, ItemSet.WildFlame),
+        setItem(3L, ItemType.Gloves, Rarity.Blue, ItemSet.StoneGuard)), charges = 50, rng)
+      assertTrue(two.chargesUsed == 0) && assertTrue(mixed.chargesUsed == 0)
     },
 
     test("нет подходящего рецепта — куб «гудит», ничего не меняется") {

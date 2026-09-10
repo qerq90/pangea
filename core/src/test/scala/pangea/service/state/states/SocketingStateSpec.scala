@@ -1,5 +1,6 @@
 package pangea.service.state.states
 
+import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.GemGenerator
@@ -7,7 +8,7 @@ import pangea.model.hero.Equipment
 import pangea.model.item.{Gem, GemKind, Item, ItemType, MaterialKind, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.{ItemMenu, UserAction}
+import pangea.service.state.{ItemMenu, UiScene, UserAction}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
@@ -41,7 +42,7 @@ object SocketingStateSpec extends ZIOSpecDefault {
       dao      <- TestHeroDao.withHero(userId,
                     TestFixtures.hero(userId).copy(
                       equipment = TestFixtures.emptyEquipment.copy(weapon = w)))
-      _        <- dao.writeSceneData(userId, SocketingState.Scene(gemItem.id).asJson)
+      _        <- dao.writeSceneData(userId, Json.obj(UiScene.Socketing -> SocketingState.Scene(gemItem.id).asJson))
       invRepo   = TestInventoryRepository.withItems(List(gemItem))
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
@@ -56,7 +57,7 @@ object SocketingStateSpec extends ZIOSpecDefault {
       dao      <- TestHeroDao.withHero(userId,
                     TestFixtures.hero(userId).copy(
                       equipment = TestFixtures.emptyEquipment.copy(weapon = w)))
-      _        <- dao.writeSceneData(userId, SocketingState.Scene(gemItem.id).asJson)
+      _        <- dao.writeSceneData(userId, Json.obj(UiScene.Socketing -> SocketingState.Scene(gemItem.id).asJson))
       invRepo   = TestInventoryRepository.withItems(gemItem :: filler)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
@@ -68,7 +69,7 @@ object SocketingStateSpec extends ZIOSpecDefault {
     val gemItem = GemGenerator.item(gemKind, 1).copy(id = 77L)
     for {
       dao      <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(equipment = eq))
-      _        <- dao.writeSceneData(userId, SocketingState.Scene(gemItem.id).asJson)
+      _        <- dao.writeSceneData(userId, Json.obj(UiScene.Socketing -> SocketingState.Scene(gemItem.id).asJson))
       invRepo   = TestInventoryRepository.withItems(List(gemItem))
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())

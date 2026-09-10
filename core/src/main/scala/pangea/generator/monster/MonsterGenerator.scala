@@ -88,7 +88,7 @@ object MonsterGenerator {
       // Защита — процентное снижение урона, третий слой поверх брони и HP.
       // Растёт линейно по уровню, как и пробитие героя, — поэтому доля
       // срезанного держится ровной всю игру (см. BattleState.pierce).
-      defence = (4.0 * base * f.defenceFactor).toLong,
+      defence = (5.0 * base * f.defenceFactor).toLong,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
       // Потолок энергии — из него моб платит за свои умения (см. MonsterEnergy).

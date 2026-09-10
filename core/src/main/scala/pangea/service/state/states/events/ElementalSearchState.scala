@@ -14,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -83,9 +83,15 @@ case class ElementalSearchState(
             gem       <- randomGem
             persisted <- itemRepo.persist(hero.id, gem)
             // Сумка переполнена — камень просто теряется, как и прочая добыча.
-            _         <- inventoryRepo.addItem(hero.id, persisted).ignore
+            added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
+            // Осмотр идёт долго и без участия игрока, поэтому каждый камень
+            // сопровождаем остатком мест: сумка молча переполняется, и находки
+            // начинают пропадать — лучше увидеть это сразу.
+            slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
+            lost       = if (added) "" else "\n" + content.text("common.inventoryFull")
             _         <- renderer.show(user, Screen(
-                           content.format("elementalSearch.found", "gem" -> gem.displayTitle), Nil))
+                           content.format("elementalSearch.found", "gem" -> gem.displayTitle) +
+                             lost + "\n" + slots, Nil))
             left       = s.triesLeft - 1
             out <- if (left <= 0)
                      heroDao.writeSceneData(user.userId, Json.Null) *>

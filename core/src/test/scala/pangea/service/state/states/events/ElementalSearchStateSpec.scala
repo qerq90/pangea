@@ -20,10 +20,10 @@ object ElementalSearchStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  private def makeState(heroLvl: Long = 15L) = // BossLvL = 2
+  private def makeState(heroLvl: Long = 15L, bagFull: Boolean = false) = // BossLvL = 2
     for {
       dao       <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(lvl = heroLvl))
-      invRepo    = TestInventoryRepository.accepting
+      invRepo    = if (bagFull) TestInventoryRepository.full else TestInventoryRepository.accepting
       itemRepo   = TestItemRepository.make
       scheduler <- TestScheduler.make
       renderer  <- TestRenderer.make
@@ -68,6 +68,38 @@ object ElementalSearchStateSpec extends ZIOSpecDefault {
               assertTrue(invRepo.snapshot.size == 1) &&
               assertTrue(scene.exists(_.triesLeft == 2)) &&
               assertTrue(screens.map(_.text).mkString.contains("Вы нашли"))
+    },
+
+    test("к каждой находке приписан остаток мест в сумке") {
+      for {
+        t <- makeState()
+        (state, _, _, _, renderer) = t
+        _       <- TestRandom.feedLongs(1L, 0L)
+        _       <- state.enter(testUser, renderer)
+        _       <- TestRandom.feedInts(0, 50)
+        _       <- TestRandom.feedLongs(0L)
+        _       <- state.action(testUser, tap("ElementalFind"), renderer)
+        screens <- renderer.sentScreens
+        found    = screens.map(_.text).find(_.contains("Вы нашли")).getOrElse("")
+      } yield assertTrue(found.contains("Свободных слотов")) &&
+              // сумка не переполнена — жалобы нет
+              assertTrue(!found.contains("переполнена"))
+    },
+
+    test("сумка переполнена — говорим об этом прямо в строке находки") {
+      // Вместимость тестовой сумки 20; забиваем её под завязку.
+      for {
+        t <- makeState(bagFull = true)
+        (state, _, _, _, renderer) = t
+        _       <- TestRandom.feedLongs(1L, 0L)
+        _       <- state.enter(testUser, renderer)
+        _       <- TestRandom.feedInts(0, 50)
+        _       <- TestRandom.feedLongs(0L)
+        _       <- state.action(testUser, tap("ElementalFind"), renderer)
+        screens <- renderer.sentScreens
+        found    = screens.map(_.text).find(_.contains("Вы нашли")).getOrElse("")
+      } yield assertTrue(found.contains("Свободных слотов")) &&
+              assertTrue(found.contains("переполнена"))
     },
 
     test("на последней попытке поиск заканчивается и уводит в лабиринт") {

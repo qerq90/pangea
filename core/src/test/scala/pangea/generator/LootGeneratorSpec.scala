@@ -162,17 +162,41 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(counts.contains(3)) && assertTrue(counts.contains(4))
     },
 
-    test("с элементаля падают только его ингредиент и фиолетовые вещи его набора") {
+    test("с элементаля падают его ингредиент и вещи набора — фиолетовые и синие") {
       val items = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val (materials, gear) = items.partition(_.itemType == ItemType.Material)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
       assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.EverburningIron))) &&
-      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      // половина роллов — ингредиент, оставшуюся делят пополам фиолет и синь
+      assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
+                                  g.rarity == pangea.model.item.Rarity.Blue)) &&
+      assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Blue)) &&
       assertTrue(gear.forall(_.set.contains(pangea.model.item.ItemSet.WildFlame))) &&
       // имя сетовое: набор встал вместо титула
       assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.WildFlame.title)))
+    },
+
+    test("фиолетовых и синих вещей с элементаля примерно поровну — по 25% роллов") {
+      val gear = (1L to 600L).iterator
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+      val purple = gear.count(_.rarity == pangea.model.item.Rarity.Purple).toDouble
+      val blue   = gear.count(_.rarity == pangea.model.item.Rarity.Blue).toDouble
+      assertTrue(LootGenerator.ElementalPurpleChancePct == 25L) &&
+      // доли равные, отклонение на выборке в сотни роллов невелико
+      assertTrue(math.abs(purple - blue) / (purple + blue) < 0.15)
+    },
+
+    test("у Гнилого Джо вещь набора осталась фиолетовой") {
+      val gear = (1L to 300L).iterator
+        .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.RottenJoe, 2L, 40L, Rng(s))._1)
+        .flatMap(_.itemOpt)
+        .filter(i => i.set.contains(pangea.model.item.ItemSet.Ghoul)).toList
+      assertTrue(gear.nonEmpty) &&
+      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple))
     },
 
     test("уровень сетовой вещи — уровень героя ±1, а не уровень босса") {
@@ -182,14 +206,15 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
     },
 
-    test("с каменного падают его магические камни и фиолетовый «Каменный страж»") {
+    test("с каменного падают его магические камни и вещи «Каменного стража»") {
       val items = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.StoneElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val (materials, gear) = items.partition(_.itemType == ItemType.Material)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
       assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.MagicStone))) &&
-      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
+                                  g.rarity == pangea.model.item.Rarity.Blue)) &&
       assertTrue(gear.forall(_.set.contains(pangea.model.item.ItemSet.StoneGuard))) &&
       assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.StoneGuard.title)))
     },
