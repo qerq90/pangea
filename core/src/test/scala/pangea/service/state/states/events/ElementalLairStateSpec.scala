@@ -157,6 +157,30 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
       assertTrue(!MiniBoss.elementals.contains(MiniBoss.RottenJoe))
     },
 
+    test("розыгрыш логова равномерен: каждый элементаль выпадает ровно с одного броска") {
+      // Логово тянет вид через Random.nextIntBounded(elementals.size) — бросок
+      // равномерный, поэтому равенство шансов сводится к биекции «индекс → вид».
+      // Гоняем весь диапазон бросков: если в игру добавят третьего элементаля, он
+      // обязан занять свой отдельный индекс, иначе тест упадёт. Так любой новый вид
+      // автоматически входит в розыгрыш с той же долей, что и остальные.
+      ZIO.foreach(MiniBoss.elementals.indices.toList) { idx =>
+        for {
+          t <- makeState()
+          (state, dao, renderer) = t
+          _      <- TestRandom.feedInts(idx)
+          _      <- state.action(testUser, tap("ApproachElemental"), renderer)
+          _      <- state.action(testUser, tap("AttackElemental"), renderer)
+          battle <- battleOf(dao).map(_.get)
+          boss   <- ZIO.fromOption(battle.boss).orElseFail(new Throwable("в бою нет минибосса"))
+        } yield boss
+      }.map { drawn =>
+        // каждый бросок дал свой вид, и вместе они покрывают всех элементалей игры
+        assertTrue(drawn.distinct.size == drawn.size) &&
+        assertTrue(drawn == MiniBoss.elementals.toList) &&
+        assertTrue(drawn.toSet == MiniBoss.values.filter(_.race == Race.Elemental).toSet)
+      }
+    },
+
     test("уйти → возврат в лабиринт, сцена очищена") {
       for {
         t <- makeState()
