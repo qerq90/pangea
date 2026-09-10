@@ -1,7 +1,7 @@
 package pangea.model.item
 
 import pangea.domain.Rng
-import pangea.generator.item.{GemGenerator, ItemGenerator}
+import pangea.generator.item.{GemGenerator, ItemGenerator, MaterialGenerator}
 import zio.test._
 
 /** Единый заголовок предмета для всех списков и экранов:
@@ -15,6 +15,20 @@ object ItemDisplayTitleSpec extends ZIOSpecDefault {
       details = details)
 
   override def spec = suite("Item.displayTitle")(
+
+    test("у пыли в описании только сам текст — без «Материал:» и повтора имени") {
+      val dust  = MaterialGenerator.item(MaterialKind.TopazDust)
+      val lines = dust.statsLines
+      assertTrue(dust.displayTitle == "Топазная пыль") &&
+      assertTrue(lines == List(MaterialKind.TopazDust.description)) &&
+      assertTrue(!lines.exists(_.contains("Материал"))) &&
+      assertTrue(!lines.exists(_.contains("Топазная пыль")))
+    },
+
+    test("материалу без описания строка «Материал: …» остаётся — иначе экран пуст") {
+      assertTrue(MaterialKind.Mithril.description.isEmpty) &&
+      assertTrue(MaterialGenerator.mithril.statsLines == List("Материал: Мифрил"))
+    },
 
     test("снаряжение: кружок редкости, затем [Ур.N], затем имя без кружка") {
       val helmet = item("🔵 Хороший Шлем Рыцаря", 12L, Rarity.Blue, ItemType.Helmet)

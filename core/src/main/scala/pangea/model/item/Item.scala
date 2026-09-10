@@ -141,8 +141,11 @@ case class Item(
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
+      // Название материала уже стоит заголовком предмета, повторять его строкой
+      // «Материал: …» незачем — она остаётся только у тех, кому нечего сказать о
+      // себе, чтобы экран не выглядел пустым.
       case ItemDetails.Material(k)       =>
-        s"Материал: ${k.displayName}" :: (if (k.description.isEmpty) Nil else List(k.description))
+        if (k.description.isEmpty) List(s"Материал: ${k.displayName}") else List(k.description)
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines
