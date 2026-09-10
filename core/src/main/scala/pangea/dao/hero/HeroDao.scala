@@ -25,6 +25,8 @@ trait HeroDao {
   def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]
   def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Task[Unit]
+  /** Пыль на оружии: живёт один бой, поэтому пишется отдельно от прочих статов. */
+  def updateWeaponDust(userId: UserId, dust: pangea.model.hero.WeaponDust): Task[Unit]
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit]
   def updateEquipment(userId: UserId, eq: Equipment): Task[Unit]
   def updateEquipmentAndFightStats(userId: UserId, eq: Equipment, stats: FightStats): Task[Unit]

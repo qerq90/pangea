@@ -600,6 +600,16 @@ elementalSearch:
 equipment:
   header: "Снаряжение"
   empty: "Пусто"
+  breakGem:
+    label: "💥 Сломать камень"
+    color: "negative"
+  breakGemWhich: "💥 В {item} несколько камней. Какой ломать?"
+  breakGemOption: "💥 {gem}"
+  breakGemConfirm: "Сломать {gem}? Камень рассыплется навсегда, останется {count} × {dust}."
+  breakGemYes: "💥 Ломать"
+  breakGemNo: "↩ Передумал"
+  breakGemDone: "{gem} рассыпался. Вы собрали {count} × {dust}."
+  breakGemNoRoom: "❌ В сумке нет места: нужно {count} свободных ячеек под пыль."
   unequipBtn: "🔓 Снять"
   back:
     label: "↩ Назад"
@@ -881,6 +891,27 @@ inventory:
   socket:
     label: "💎 Вставить в предмет"
     color: "positive"
+  breakGem:
+    label: "💥 Сломать камень"
+    color: "negative"
+  crushGem:
+    label: "💥 Расколоть камень"
+    color: "negative"
+  dustWeapon:
+    label: "🪄 Применить на оружие"
+    color: "positive"
+  dustNoWeapon: "Сыпать не на что: оружие не надето."
+  dustApplied: "🪄 {dust} осела на {weapon}. Покрытие держится до конца следующего боя ({layers} из {max})."
+  dustClash: "🪄 {dust} покрыла ваше оружие, однако произошёл всполох магии и кажется эффект не сработал... В следующем бою урон меньше на {pct}%."
+  dustOverload: "🪄 Четвёртая горсть оказалась лишней: покрытие осыпалось всё разом. В следующем бою урон меньше на {pct}%."
+  breakGemWhich: "💥 В {item} несколько камней. Какой ломать?"
+  breakGemOption: "💥 {gem}"
+  breakGemConfirm: "Сломать {gem}? Камень рассыплется навсегда, останется {count} × {dust}."
+  crushGemConfirm: "Растолочь {gem}? Камня больше не будет, останется {count} × {dust}."
+  breakGemYes: "💥 Ломать"
+  breakGemNo: "↩ Передумал"
+  breakGemDone: "{gem} рассыпался. Вы собрали {count} × {dust}."
+  breakGemNoRoom: "❌ В сумке нет места: нужно {count} свободных ячеек под пыль."
   combined: "Вы сложили две половинки в {name}!"
   combineNeedSecond: "Нужна вторая половина карты клада «{name}»."
   exit:

@@ -50,6 +50,28 @@ case class Equipment(
     firstRing, secondRing, belt, flask, weapon, additionalWeapon
   )
 
+  /** Ставит предмет в его же слот вместо прежнего: вещь та же самая, но
+    * изменилась — например из её гнезда выломали камень. Кольца различаются по
+    * id; надеванием это НЕ является — статы пересчитывает вызывающий. */
+  def replacing(item: pangea.model.item.Item): Equipment = item.itemType match {
+    case pangea.model.item.ItemType.Helmet           => copy(helmet = item)
+    case pangea.model.item.ItemType.ShoulderPads     => copy(shoulderPads = item)
+    case pangea.model.item.ItemType.ChestPlate       => copy(chestPlate = item)
+    case pangea.model.item.ItemType.Bracelets        => copy(bracelets = item)
+    case pangea.model.item.ItemType.Gloves           => copy(gloves = item)
+    case pangea.model.item.ItemType.Pants            => copy(pants = item)
+    case pangea.model.item.ItemType.Leggings         => copy(pants = item)
+    case pangea.model.item.ItemType.Boots            => copy(boots = item)
+    case pangea.model.item.ItemType.Amulet           => copy(amulet = item)
+    case pangea.model.item.ItemType.Ring             =>
+      if (firstRing.id == item.id) copy(firstRing = item) else copy(secondRing = item)
+    case pangea.model.item.ItemType.Belt             => copy(belt = item)
+    case pangea.model.item.ItemType.Flask            => copy(flask = item)
+    case pangea.model.item.ItemType.Weapon           => copy(weapon = item)
+    case pangea.model.item.ItemType.AdditionalWeapon => copy(additionalWeapon = item)
+    case _                                           => this
+  }
+
   /** Набор пассивок с надетых предметов. Множество само схлопывает дубли —
    *  «работает только одна» (см. [[pangea.model.item.PassiveKind]]). */
   def passiveKinds: Set[pangea.model.item.PassiveKind] =

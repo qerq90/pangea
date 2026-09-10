@@ -3,7 +3,9 @@ package pangea.service.state.states
 import pangea.engine.SceneContent
 import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType, MapZone, Rarity}
+import pangea.engine.ChoiceColor
+import pangea.generator.item.{GemGenerator, MaterialGenerator}
+import pangea.model.item.{Gem, GemKind, Item, ItemType, MapZone, MaterialKind, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -36,6 +38,17 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
   private val baseHero = TestFixtures.hero(userId)
 
+  // Меч с двумя занятыми гнёздами — на нём проверяется ломка камней.
+  private val socketedSword = Item(50L, "Меч с камнями", 1L, Rarity.Blue, ItemType.Weapon,
+    attack = 5, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+    sockets = List(Some(Gem(GemKind.Ruby, 3)), Some(Gem(GemKind.Topaz, 1))))
+
+  private def dustItem(kind: MaterialKind, id: Long): Item =
+    MaterialGenerator.item(kind).copy(id = id)
+
+  private def breakSlot(slot: Int): UserAction =
+    UserAction("", Some(s"""{"action":"BreakGemDo","slot":"$slot"}"""))
+
   private def ring(id: Long, name: String, evasion: Long) =
     Item(id, name, 1L, Rarity.Blue, ItemType.Ring,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = evasion)
@@ -63,6 +76,111 @@ object InventoryStateSpec extends ZIOSpecDefault {
     } yield (InventoryState(heroDao, invRepo, itemRepo, content), heroDao, invRepo, renderer)
 
   override def spec = suite("InventoryState")(
+
+    // ── Ломка камней ─────────────────────────────────────────────────────────
+    test("у вещи с камнями есть красная кнопка ломки, у пустой — нет") {
+      for {
+        quad                    <- makeState(baseHero, List(socketedSword, sword))
+        (state, _, _, renderer)  = quad
+        _        <- state.action(testUser, selectItem(socketedSword.id), renderer)
+        withGems <- renderer.sentScreens.map(_.last.choices)
+        _        <- state.action(testUser, selectItem(sword.id), renderer)
+        without  <- renderer.sentScreens.map(_.last.choices)
+      } yield assertTrue(withGems.exists(c => c.id == "BreakGem" && c.color == ChoiceColor.Negative)) &&
+              assertTrue(!without.exists(_.id == "BreakGem"))
+    },
+
+    test("камней несколько → сначала спрашиваем какой, потом подтверждение") {
+      for {
+        quad                    <- makeState(baseHero, List(socketedSword))
+        (state, _, _, renderer)  = quad
+        _      <- state.action(testUser, selectItem(socketedSword.id), renderer)
+        _      <- state.action(testUser, tap("BreakGem"), renderer)
+        which  <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(which.text.contains("несколько камней")) &&
+              assertTrue(which.choices.count(_.id == "BreakGemPick") == 2) &&
+              // в подписях — имена камней с грейдом
+              assertTrue(which.choices.exists(_.label.contains("Рубин"))) &&
+              assertTrue(which.choices.exists(_.label.contains("Надколотый топаз")))
+    },
+
+    test("ломка камня из вещи: гнездо пустеет, в сумке появляется пыль по грейду") {
+      for {
+        quad                       <- makeState(baseHero, List(socketedSword))
+        (state, _, invRepo, renderer) = quad
+        _     <- state.action(testUser, selectItem(socketedSword.id), renderer)
+        _     <- state.action(testUser, breakSlot(0), renderer)   // рубин грейда 3
+        inv   <- invRepo.get(baseHero.id)
+        blade  = inv.items.data.find(_.id == socketedSword.id).get
+        dusts  = inv.items.data.filter(_.material.contains(MaterialKind.RubyDust))
+        log   <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(blade.sockets == List(None, Some(Gem(GemKind.Topaz, 1)))) &&
+              assertTrue(dusts.size == 3) &&
+              assertTrue(log.contains("рассыпался"))
+    },
+
+    test("камень в сумке крошится целиком: сам пропадает, остаётся его пыль") {
+      val stone = GemGenerator.item(GemKind.Sapphire, 2).copy(id = 77L)
+      for {
+        quad                       <- makeState(baseHero, List(stone))
+        (state, _, invRepo, renderer) = quad
+        _     <- state.action(testUser, selectItem(stone.id), renderer)
+        _     <- state.action(testUser, tap("CrushGem"), renderer)
+        offer <- renderer.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CrushGemDo"), renderer)
+        inv   <- invRepo.get(baseHero.id)
+      } yield assertTrue(offer.text.contains("Растолочь")) &&
+              assertTrue(!inv.items.data.exists(_.id == stone.id)) &&
+              assertTrue(inv.items.data.count(_.material.contains(MaterialKind.SapphireDust)) == 2)
+    },
+
+    // ── Пыль на оружие ───────────────────────────────────────────────────────
+    test("у пыли есть кнопка «Применить на оружие», покрытие ложится слоем") {
+      val hero = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = sword))
+      for {
+        quad                      <- makeState(hero, List(dustItem(MaterialKind.TopazDust, 60L)))
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectItem(60L), renderer)
+        choices <- renderer.sentScreens.map(_.last.choices)
+        _       <- state.action(testUser, tap("DustWeapon"), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+        inv     <- invRepo.get(hero.id)
+        log     <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(choices.exists(_.id == "DustWeapon")) &&
+              assertTrue(updated.weaponDust.layers == List(MaterialKind.TopazDust)) &&
+              // горсть потрачена
+              assertTrue(inv.items.data.isEmpty) &&
+              assertTrue(log.contains("осела"))
+    },
+
+    test("сапфировая пыль на оружие с рубином → всполох и штраф вместо эффекта") {
+      val rubySword = sword.copy(sockets = List(Some(Gem(GemKind.Ruby, 2))))
+      val hero = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = rubySword))
+      for {
+        quad                      <- makeState(hero, List(dustItem(MaterialKind.SapphireDust, 61L)))
+        (state, heroDao, _, renderer) = quad
+        _       <- state.action(testUser, selectItem(61L), renderer)
+        _       <- state.action(testUser, tap("DustWeapon"), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+        log     <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(log.contains("всполох магии")) &&
+              assertTrue(updated.weaponDust.layers.isEmpty) &&
+              assertTrue(updated.weaponDust.penalty)
+    },
+
+    test("без надетого оружия сыпать некуда — пыль остаётся в сумке") {
+      for {
+        quad                      <- makeState(baseHero, List(dustItem(MaterialKind.RubyDust, 62L)))
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectItem(62L), renderer)
+        _       <- state.action(testUser, tap("DustWeapon"), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+        inv     <- invRepo.get(baseHero.id)
+        log     <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(log.contains("оружие не надето")) &&
+              assertTrue(updated.weaponDust.isEmpty) &&
+              assertTrue(inv.items.data.size == 1)
+    },
 
     test("enter с пустым инвентарём → показывает 'пуст'") {
       for {

@@ -10,6 +10,9 @@ trait InventoryRepository {
   def get(heroId: HeroId): IO[InventoryRepoError, Inventory]
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit]
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit]
+  /** Заменяет предмет с тем же id: нужен там, где вещь меняется, но остаётся
+    * той же самой, — например когда из её гнезда выламывают камень. */
+  def updateItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit]
   def removeItems(itemIds: Set[Long], heroId: HeroId): IO[InventoryRepoError, Unit]
   def refillFlasks(heroId: HeroId): IO[InventoryRepoError, Unit]
   def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit]

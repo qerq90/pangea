@@ -12,28 +12,32 @@ import pangea.model.item.{Gem, GemKind}
  *  снаряжении — «броневую» (см. [[Equipment.weaponGems]]/[[Equipment.armorGems]]).
  *  Стихийные грани (сапфир/рубин/бриллиант/топаз в оружии, сапфир в снаряжении)
  *  ОТЛОЖЕНЫ — здесь не учитываются. */
-final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
+final case class HeroGems(weapon: List[Gem], armor: List[Gem], dust: List[Gem] = Nil) {
+
+  /** Всё, что сейчас на оружии: камни в гнёздах и слои пыли. Пыль считается
+   *  камнем грейда 1 — везде, кроме [[elementalBoost]]. */
+  private def weaponAll: List[Gem] = weapon ++ dust
 
   private def gradeSum(gems: List[Gem], kind: GemKind): Long =
     gems.collect { case g if g.kind == kind => g.grade.toLong }.sum
 
   // ── Оружейные грани ──────────────────────────────────────────────────────────
   /** Вампиризм: % нанесённого по HP урона, возвращаемого героем в лечение (череп). */
-  def vampirismPct: Long = gradeSum(weapon, GemKind.Skull) * GemKind.Skull.WeaponVampPctPerGrade
+  def vampirismPct: Long = gradeSum(weaponAll, GemKind.Skull) * GemKind.Skull.WeaponVampPctPerGrade
 
   /** +% к восстановлению энергии в бою от черепов в оружии. */
-  def energyRegenBonusPct: Long = gradeSum(weapon, GemKind.Skull) * GemKind.Skull.WeaponEnergyRegenPctPerGrade
+  def energyRegenBonusPct: Long = gradeSum(weaponAll, GemKind.Skull) * GemKind.Skull.WeaponEnergyRegenPctPerGrade
 
   /** Итоговый множитель регена энергии от камней (≥1.0). */
   def energyRegenMult: Double = 1.0 + energyRegenBonusPct / 100.0
 
   /** +% к итоговой точности от аметистов в оружии. */
-  def accuracyBonusPct: Long = gradeSum(weapon, GemKind.Amethyst) * GemKind.Amethyst.WeaponAccuracyPctPerGrade
+  def accuracyBonusPct: Long = gradeSum(weaponAll, GemKind.Amethyst) * GemKind.Amethyst.WeaponAccuracyPctPerGrade
 
   /** Яд, накладываемый при уроне по HP (изумруд в оружии), в % макс.HP моба.
    *  1.5% за грейд, округляется к целому %. 0 — если изумрудов в оружии нет. */
   def weaponPoisonPct: Int = {
-    val tenths = gradeSum(weapon, GemKind.Emerald) * GemKind.Emerald.WeaponPoisonTenthPctPerGrade
+    val tenths = gradeSum(weaponAll, GemKind.Emerald) * GemKind.Emerald.WeaponPoisonTenthPctPerGrade
     ((tenths + 5) / 10).toInt
   }
 
@@ -62,7 +66,7 @@ final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
   // ── Стихии оружия ────────────────────────────────────────────────────────────
   /** Стихии камней в оружии (без повторов — модификаторы урона стихии не стакают
    *  между одинаковыми камнями, но грейды суммируются в [[elementalDamageMult]]). */
-  def weaponElements: Set[Element] = weapon.flatMap(g => Element.of(g.kind)).toSet
+  def weaponElements: Set[Element] = weaponAll.flatMap(g => Element.of(g.kind)).toSet
 
   def hasElement(e: Element): Boolean = weaponElements.contains(e)
 
@@ -74,6 +78,7 @@ final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
    *  множителю урона по HP. Огонь (−20% по броне, +10% по HP) с усилением 5%
    *  бьёт на −15% по броне и +15% по HP. */
   def elementalBoost: Double =
+    // Считается ТОЛЬКО по камням в гнёздах: пыль даёт стихию, но не усиливает её.
     0.02 * weapon.collect { case g if Element.of(g.kind).isDefined => g.grade.toLong }.sum
 
   /** Множитель урона по броне цели: 1 плюс сдвиги всех стихий оружия и усиление,
@@ -97,5 +102,5 @@ final case class HeroGems(weapon: List[Gem], armor: List[Gem]) {
 }
 
 object HeroGems {
-  val empty: HeroGems = HeroGems(Nil, Nil)
+  val empty: HeroGems = HeroGems(Nil, Nil, Nil)
 }

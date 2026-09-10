@@ -6,7 +6,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
-import pangea.model.hero.{AzatState, CubeStatus, Hero}
+import pangea.model.hero.{AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.MiniBoss
 import pangea.model.stats.FightStats
@@ -180,6 +180,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val res     = ghoulFeast(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+    // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
+    val clearDust =
+      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     res.outcome match {
@@ -191,15 +194,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             .as(StateType.Battle)
       case Outcome.Victory =>
         for {
-          outcome <- (persistHero *> applyVictory(user, res.hero, res.battle)).uninterruptible
+          outcome <- (persistHero *> clearDust *> applyVictory(user, res.hero, res.battle)).uninterruptible
           _       <- showLog
           _       <- showVictory(user, outcome, renderer)
         } yield StateType.Loot
       case Outcome.Death =>
-        persistHero.uninterruptible *> showLog *>
+        (persistHero *> clearDust).uninterruptible *> showLog *>
           renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
       case Outcome.Fled =>
-        (persistHero *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
+        (persistHero *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
           showLog *>
           renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
     }
@@ -250,8 +253,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
             // «Разбойник» (+5%) множит итоговый урон. Усиление стихии сюда НЕ
             // входит: оно сдвигает грани урона по броне/HP в splitElementalDamage.
+            // Пыль, севшая неудачно (всполох магии или четвёртая горсть), режет
+            // весь урон героя на четверть — ровно этот бой (см. WeaponDust).
             damage =
-              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) * weaponMod * hero.passives.finalDamageMult).toLong
+              (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) *
+                weaponMod * hero.passives.finalDamageMult * hero.weaponDust.damageMult).toLong
                 .max(1L)
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
@@ -1385,7 +1391,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   ): Task[TurnResult] =
     for {
       spread <- Random.nextLongBetween(80L, 121L)
-      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0).toLong.max(1L)
+      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult).toLong.max(1L)
       bumped = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
       skip = Set(slot.itemId)
       tmpl = slot.skill.hitTemplate
