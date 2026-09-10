@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.CubeCraft
 import pangea.model.hero.{AzatState, Hero}
-import pangea.model.item.Item
+import pangea.model.item.{Item, ItemStack}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -84,10 +84,10 @@ case class CubeState(
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("cube.emptyInventory"), backRow))
            else {
-             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.depositPage.getOrElse(0))
+             val (pageItems, totalPages, page) = ItemMenu.page(ItemStack.grouped(items), scene.depositPage.getOrElse(0))
              val header  = content.format("cube.depositHeader", "free" -> free.toString) +
                            (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
-             val btns    = ItemMenu.itemButtons(pageItems, DepositPrefix)
+             val btns    = ItemMenu.stackButtons(pageItems, DepositPrefix)
              val nav     = navRow("CubeMenu",
                              Option.when(page > 0)(Choice("CubeDepositPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
                              Option.when(page < totalPages - 1)(Choice("CubeDepositNext", content.text("common.next"), row = Some(ItemMenu.NavRow))))
@@ -105,10 +105,10 @@ case class CubeState(
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("cube.emptyCube"), backRow))
            else {
-             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.withdrawPage.getOrElse(0))
+             val (pageItems, totalPages, page) = ItemMenu.page(ItemStack.grouped(items), scene.withdrawPage.getOrElse(0))
              val header  = content.format("cube.withdrawHeader", "free" -> inv.freeSlots.toString) +
                            (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
-             val btns    = ItemMenu.itemButtons(pageItems, WithdrawPrefix)
+             val btns    = ItemMenu.stackButtons(pageItems, WithdrawPrefix)
              val nav     = navRow("CubeMenu",
                              Option.when(page > 0)(Choice("CubeWithdrawPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
                              Option.when(page < totalPages - 1)(Choice("CubeWithdrawNext", content.text("common.next"), row = Some(ItemMenu.NavRow))))

@@ -9,6 +9,7 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
+import zio.test.TestRandom
 
 // Death — узел-эффект (§18): вся логика смерти отыгрывается в `enter`, а переход
 // в Rest идёт через `autoAdvance` без действия игрока. Поэтому тесты дёргают `enter`.
@@ -33,6 +34,25 @@ object DeathStateSpec extends ZIOSpecDefault {
   private val richHero = TestFixtures.hero(userId).copy(exp = 80L, silver = 500L)
 
   override def spec = suite("DeathState")(
+
+    test("камни из стопки теряются поштучно: бросок на каждый, а не на всю пачку") {
+      // Пять одинаковых камней. Складываются они только на экране, поэтому
+      // бросок идёт на каждый: два ролла из пяти «сгорают» (0 = потеря).
+      val stones = (1 to 5).map(i =>
+        pangea.generator.item.GemGenerator.item(pangea.model.item.GemKind.Amethyst, 1)
+          .copy(id = 300L + i)).toList
+      for {
+        t <- makeState(richHero, stones)
+        (state, _, invRepo, renderer) = t
+        // Первый бросок съедает выбор травмы, дальше — по одному на камень.
+        _    <- TestRandom.feedInts(1, 0, 1, 0, 2, 3)
+        _    <- state.enter(testUser, renderer)
+        left  = invRepo.snapshot
+        log  <- renderer.sentScreens.map(_.map(_.text).mkString)
+      } yield assertTrue(left.size == 3) &&
+              // одно сообщение на всё потерянное, с количеством
+              assertTrue(log.contains("×2"))
+    },
 
     test("с благословением опыта теряется на 10% меньше") {
       val hero = TestFixtures.hero(userId).copy(exp = 1000L, silver = 500L)

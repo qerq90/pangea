@@ -7,6 +7,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.barrel.Barrel
 import pangea.model.hero.Hero
+import pangea.model.item.ItemStack
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}
@@ -85,12 +86,14 @@ case class UnassumingBarrelState(
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("barrel.emptyInventory"), backRow))
            else {
-             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.depositPage.getOrElse(0))
+             // Одинаковые вещи — одной кнопкой; слот в бочке каждая занимает свой.
+             val (pageItems, totalPages, page) =
+               ItemMenu.page(ItemStack.grouped(items), scene.depositPage.getOrElse(0))
              val header     = content.format("barrel.depositItemsHeader",
                                 "free"  -> barrel.freeSlots.toString,
                                 "page"  -> (page + 1).toString,
                                 "total" -> totalPages.toString)
-             val itemBtns   = ItemMenu.itemButtons(pageItems, DepositItemPrefix)
+             val itemBtns   = ItemMenu.stackButtons(pageItems, DepositItemPrefix)
              val nav        = navRow(
                                 back  = Some(Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(ItemMenu.NavRow))),
                                 prev  = Option.when(page > 0)(Choice("DepositItemsPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
@@ -104,7 +107,7 @@ case class UnassumingBarrelState(
       scene  <- readScene(user)
       hero   <- getHero(user)
       inv    <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      (_, totalPages, _) = ItemMenu.page(inv.items.data, 0)
+      (_, totalPages, _) = ItemMenu.page(ItemStack.grouped(inv.items.data), 0)
       curPage    = scene.depositPage.getOrElse(0)
       newPage    = (curPage + delta).max(0).min(totalPages - 1)
       _      <- writeScene(user, scene.copy(depositPage = Some(newPage)))
@@ -121,10 +124,11 @@ case class UnassumingBarrelState(
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("barrel.emptyBarrel"), backRow))
            else {
-             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.withdrawPage.getOrElse(0))
+             val (pageItems, totalPages, page) =
+               ItemMenu.page(ItemStack.grouped(items), scene.withdrawPage.getOrElse(0))
              val header  = content.format("barrel.withdrawItemsHeader", "free" -> inv.freeSlots.toString) +
                            (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
-             val buttons = ItemMenu.itemButtons(pageItems, WithdrawItemPrefix)
+             val buttons = ItemMenu.stackButtons(pageItems, WithdrawItemPrefix)
              val nav     = navRow(
                              back = Some(Choice("BarrelMenu", content.text("barrel.back"), color = ChoiceColor.Negative, row = Some(ItemMenu.NavRow))),
                              prev = Option.when(page > 0)(Choice("WithdrawItemsPrev", content.text("common.prev"), row = Some(ItemMenu.NavRow))),
@@ -138,7 +142,7 @@ case class UnassumingBarrelState(
       scene  <- readScene(user)
       hero   <- getHero(user)
       barrel <- barrelRepo.get(hero.id).mapError(asThrowable)
-      (_, totalPages, _) = ItemMenu.page(barrel.items.data, 0)
+      (_, totalPages, _) = ItemMenu.page(ItemStack.grouped(barrel.items.data), 0)
       curPage = scene.withdrawPage.getOrElse(0)
       newPage = (curPage + delta).max(0).min(totalPages - 1)
       _      <- writeScene(user, scene.copy(withdrawPage = Some(newPage)))

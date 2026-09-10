@@ -92,6 +92,7 @@ case class SoloPveBattle(
       airBoostTurns        = (effects.airBoostTurns - 1).max(0),
       // Буст Воздуха на самом мобе тикает вместе с остальным временным.
       mobAirBoostTurns     = (effects.mobAirBoostTurns - 1).max(0),
+      monsterSkillBlockedTurns = (effects.monsterSkillBlockedTurns - 1).max(0),
       // Оцепенение элементаля от холода тикает вместе с прочими временными эффектами.
       chilledTurns         = (effects.chilledTurns - 1).max(0),
       // Дебафы каменного элементаля живут теми же ходами.
