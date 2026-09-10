@@ -4,6 +4,7 @@ import doobie.util.transactor.Transactor
 import doobie.implicits._
 import doobie.postgres.circe.json.implicits._
 import io.circe.Json
+import io.circe.syntax.EncoderOps
 import pangea.dao.hero.TraumaInstances._
 import pangea.model.hero.{Equipment, MasterHornBoosts}
 import pangea.model.stats.FightStats
@@ -89,6 +90,9 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
 
   override def updateStatBoosts(userId: UserId, boosts: pangea.model.stats.StatBoosts): Task[Unit] =
     Queries.updateStatBoosts(userId, boosts).update.run.transact(xa).unit
+
+  override def updateWeaponDust(userId: UserId, dust: pangea.model.hero.WeaponDust): Task[Unit] =
+    Queries.updateWeaponDust(userId, dust.asJson).update.run.transact(xa).unit
 
   override def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     Queries.updateBaseStats(userId, stats).update.run.transact(xa).unit

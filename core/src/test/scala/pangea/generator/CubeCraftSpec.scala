@@ -20,6 +20,9 @@ object CubeCraftSpec extends ZIOSpecDefault {
 
   private def mithril(id: Long): Item = MaterialGenerator.mithril.copy(id = id)
 
+  private def dust(kind: MaterialKind, id: Long): Item =
+    MaterialGenerator.item(kind).copy(id = id)
+
   private val rng = Rng(42L)
 
   override def spec = suite("CubeCraft")(
@@ -48,6 +51,32 @@ object CubeCraftSpec extends ZIOSpecDefault {
       assertTrue(result.chargesUsed == 1) &&
         assertTrue(result.items.size == 1) &&
         assertTrue(result.items.head.material.contains(MaterialKind.LevitatingMonsterHead))
+    },
+
+    test("3 рубиновые пыли → надколотый рубин") {
+      val items  = (1 to 3).map(i => dust(MaterialKind.RubyDust, i.toLong)).toList
+      val result = CubeCraft.craft(items, charges = 50, rng)
+      assertTrue(result.chargesUsed == 1) &&
+        assertTrue(result.items.size == 1) &&
+        assertTrue(result.items.head.gem.contains(Gem(GemKind.Ruby, Gem.MinGrade)))
+    },
+
+    test("чёрный порошок собирается в надколотый череп, пыль разных видов — нет") {
+      val powder = CubeCraft.craft((1 to 3).map(i => dust(MaterialKind.BlackPowder, i.toLong)).toList,
+        charges = 50, rng)
+      val mixed  = CubeCraft.craft(
+        List(dust(MaterialKind.RubyDust, 1L), dust(MaterialKind.TopazDust, 2L), dust(MaterialKind.EmeraldDust, 3L)),
+        charges = 50, rng)
+      assertTrue(powder.items.head.gem.contains(Gem(GemKind.Skull, Gem.MinGrade))) &&
+        // на три разные пыли рецепта нет — куб просто гудит
+        assertTrue(mixed.chargesUsed == 0) &&
+        assertTrue(mixed.items.size == 3)
+    },
+
+    test("двух пылей не хватает — нужен ровно комплект из трёх") {
+      val result = CubeCraft.craft((1 to 2).map(i => dust(MaterialKind.TopazDust, i.toLong)).toList,
+        charges = 50, rng)
+      assertTrue(result.chargesUsed == 0) && assertTrue(result.items.size == 2)
     },
 
     test("нет подходящего рецепта — куб «гудит», ничего не меняется") {

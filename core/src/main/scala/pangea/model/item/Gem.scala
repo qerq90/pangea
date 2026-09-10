@@ -96,6 +96,13 @@ case class Gem(kind: GemKind, grade: Int) {
   /** Имя с учётом грейда: «Надколотый череп», «Череп», «Идеальный череп». */
   def displayName: String = Gem.gradeName(kind, grade)
 
+  /** Сколько пыли останется, если камень сломать: надколотый даёт единицу,
+    * каждый следующий грейд — на одну больше. */
+  def dustYield: Int = grade.max(Gem.MinGrade).min(Gem.MaxGrade)
+
+  /** Вид пыли, в которую крошится этот камень. */
+  def dust: MaterialKind = MaterialKind.dustOf(kind)
+
   /** Строка эффекта для гнезда в оружии/снаряжении. */
   def weaponEffectText: String = kind.weaponEffectText(grade)
   def armorEffectText: String  = kind.armorEffectText(grade)

@@ -122,7 +122,7 @@ case class SocketingState(
             // спокойно стакаются — два рубина усиливают друг друга по грейдам.
             case Some(item) if isWeapon(item) && hasOpposite(item, g) =>
               val cleaned = removeOpposite(item, g)
-              heroDao.updateEquipmentAndFightStats(user.userId, withUpdatedItem(hero.equipment, cleaned), hero.fightStats) *>
+              heroDao.updateEquipmentAndFightStats(user.userId, hero.equipment.replacing(cleaned), hero.fightStats) *>
                 inventoryRepo.removeItem(scene.gemId, hero.id).mapError(e => new Throwable(e.toString)) *>
                 renderer.show(user, Screen(content.text("socketing.annihilate"), Nil)) *>
                 heroDao.writeSceneData(user.userId, io.circe.Json.Null).as(StateType.Inventory)
@@ -174,33 +174,8 @@ case class SocketingState(
   private def socketInto(eq: Equipment, targetId: Long, gem: Gem): Option[(Equipment, Item)] =
     eq.allItems.find(i => i.id == targetId && i.itemType != ItemType.NoItem && i.hasFreeSocket).map { item =>
       val updated = item.socketGem(gem)
-      (withUpdatedItem(eq, updated), updated)
+      (eq.replacing(updated), updated)
     }
-
-  // Замена предмета в его слоте (кольца различаем по id).
-  private def withUpdatedItem(eq: Equipment, item: Item): Equipment = item.itemType match {
-    case ItemType.Helmet           => eq.copy(helmet = item)
-    case ItemType.ShoulderPads     => eq.copy(shoulderPads = item)
-    case ItemType.ChestPlate       => eq.copy(chestPlate = item)
-    case ItemType.Bracelets        => eq.copy(bracelets = item)
-    case ItemType.Gloves           => eq.copy(gloves = item)
-    case ItemType.Pants            => eq.copy(pants = item)
-    case ItemType.Leggings         => eq.copy(pants = item)
-    case ItemType.Boots            => eq.copy(boots = item)
-    case ItemType.Amulet           => eq.copy(amulet = item)
-    case ItemType.Ring             =>
-      if (eq.firstRing.id == item.id) eq.copy(firstRing = item) else eq.copy(secondRing = item)
-    case ItemType.Belt             => eq.copy(belt = item)
-    case ItemType.Flask            => eq.copy(flask = item)
-    case ItemType.Weapon           => eq.copy(weapon = item)
-    case ItemType.AdditionalWeapon => eq.copy(additionalWeapon = item)
-    case ItemType.Trophy           => eq
-    case ItemType.TreasureMap      => eq
-    case ItemType.TreasureMapHalf  => eq
-    case ItemType.Gem              => eq
-    case ItemType.Material         => eq
-    case ItemType.NoItem           => eq
-  }
 
   /** Сцена экрана и сам камень, если он ещё в инвентаре. */
   private def gemContext(user: User, hero: Hero): Task[Option[(Scene, Gem)]] =

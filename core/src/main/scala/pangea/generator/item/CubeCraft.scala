@@ -56,6 +56,20 @@ object CubeCraft {
     }
   }
 
+  // 3 одинаковые пыли → надколотый камень того же вида (обратный ход ломке).
+  private object DustAssembly extends Recipe {
+    val size = 3
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
+      val byKind = pool.flatMap(i => i.material.flatMap(m => m.gem.map(_ -> i)))
+        .groupBy(_._1).view.mapValues(_.map(_._2)).toMap
+      byKind.filter(_._2.sizeIs >= 3).keys.toList
+        .sortBy(_.entryName)
+        .headOption.map { kind =>
+          (byKind(kind).take(3), GemGenerator.item(kind, Gem.MinGrade), rng)
+        }
+    }
+  }
+
   // 9 голов существ → «Левитирующая голова монстра».
   private object NineHeads extends Recipe {
     val size = 9
@@ -113,6 +127,7 @@ object CubeCraft {
     NineHeads,                                             // 9
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
+    DustAssembly,                                          // 3
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     SetInfusion                                            // 2
   )

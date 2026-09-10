@@ -4,9 +4,10 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
-import pangea.model.item.Item
+import pangea.generator.item.MaterialGenerator
+import pangea.model.item.{GemBreaking, Item}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -26,6 +27,9 @@ case class EquipmentState(
       "EquipmentPrev" -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "EquipmentNext" -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Unequip"       -> Target.Run { (u, _, r) => unequipSelected(u, r) },
+      "BreakWorn"     -> Target.Run { (u, _,  r) => offerBreak(u, r) },
+      "BreakWornPick" -> Target.Run { (u, ua, r) => confirmBreak(u, ua, r) },
+      "BreakWornDo"   -> Target.Run { (u, ua, r) => doBreak(u, ua, r) },
       "BackFromEquip" -> Target.Goto(StateType.HeroStats)
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
@@ -83,6 +87,9 @@ case class EquipmentState(
       text   = s"🎽 ${slot.name}\n$itemLine"
       choices = List(
         Option.when(!isEmpty)(content.choice("Unequip", "equipment.unequipBtn").copy(row = Some(0))),
+        // Камни ломаются прямо на надетой вещи — снимать её для этого не нужно.
+        Option.when(GemBreaking.hasGems(item))(
+          content.choice("BreakWorn", "equipment.breakGem").copy(color = ChoiceColor.Negative, row = Some(0))),
         Some(content.choice("EquipmentList", "equipment.back").copy(row = Some(1)))
       ).flatten
       _ <- writeScene(user, scene.copy(selectedSlot = Some(slotIdx)))
@@ -132,6 +139,96 @@ case class EquipmentState(
              )
       res <- showList(user, renderer)
     } yield res
+
+  // ── Ломка камней в надетом ─────────────────────────────────────────────────
+
+  /** Один камень — сразу подтверждение, несколько — сначала выбор. */
+  private def offerBreak(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, _) =>
+      GemBreaking.socketed(item) match {
+        case Nil             => showList(user, renderer)
+        case (idx, _) :: Nil => breakConfirmScreen(user, item, idx, renderer)
+        case gems =>
+          val choices = gems.map { case (idx, gem) =>
+            Choice(
+              "BreakWornPick",
+              content.format("equipment.breakGemOption", "gem" -> gem.displayName),
+              data  = Map("slot" -> idx.toString),
+              color = ChoiceColor.Negative,
+              row   = Some(0))
+          } :+ content.choice("EquipmentList", "equipment.back").copy(row = Some(1))
+          renderer.show(user, Screen(
+            content.format("equipment.breakGemWhich", "item" -> item.name), choices)).as(StateType.Equipment)
+      }
+    }
+
+  private def confirmBreak(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    payloadField(ua, "slot").flatMap(_.toIntOption) match {
+      case None      => showList(user, renderer)
+      case Some(idx) => withSelected(user, renderer)((item, _) => breakConfirmScreen(user, item, idx, renderer))
+    }
+
+  private def breakConfirmScreen(user: User, item: Item, idx: Int, renderer: Renderer): Task[StateType] =
+    item.sockets.lift(idx).flatten match {
+      case None => showList(user, renderer)
+      case Some(gem) =>
+        renderer.show(user, Screen(
+          content.format("equipment.breakGemConfirm",
+            "gem"   -> gem.displayName,
+            "dust"  -> gem.dust.displayName,
+            "count" -> gem.dustYield.toString),
+          List(
+            Choice("BreakWornDo", content.text("equipment.breakGemYes"),
+              data = Map("slot" -> idx.toString), color = ChoiceColor.Negative, row = Some(0)),
+            Choice("EquipmentList", content.text("equipment.breakGemNo"), row = Some(1))
+          ))).as(StateType.Equipment)
+    }
+
+  private def doBreak(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    payloadField(ua, "slot").flatMap(_.toIntOption) match {
+      case None => showList(user, renderer)
+      case Some(idx) =>
+        withSelected(user, renderer) { (item, hero) =>
+          GemBreaking.breakSocket(item, idx) match {
+            case None => showList(user, renderer)
+            case Some((emptied, gem)) =>
+              for {
+                inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+                count  = gem.dustYield
+                free   = inv.maxItems - inv.items.data.length
+                res <-
+                  if (free < count)
+                    renderer.show(user, Screen(
+                      content.format("equipment.breakGemNoRoom", "count" -> count.toString), Nil)) *>
+                      showList(user, renderer)
+                  else
+                    heroDao.updateEquipmentAndFightStats(
+                      user.userId, hero.equipment.replacing(emptied), hero.fightStats) *>
+                      ZIO.foreachDiscard(1 to count)(_ =>
+                        inventoryRepo.addItem(hero.id, MaterialGenerator.item(gem.dust))
+                          .mapError(e => new Throwable(e.toString))) *>
+                      renderer.show(user, Screen(content.format("equipment.breakGemDone",
+                        "gem" -> gem.displayName, "count" -> count.toString, "dust" -> gem.dust.displayName), Nil)) *>
+                      showList(user, renderer)
+              } yield res
+          }
+        }
+    }
+
+  /** Предмет выбранного в сцене слота вместе с героем. */
+  private def withSelected(user: User, renderer: Renderer)(
+      f: (Item, Hero) => Task[StateType]): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      hero  <- getHero(user)
+      res <- scene.selectedSlot.filter(i => i >= 0 && i < slots.size).map(i => slots(i).get(hero.equipment)) match {
+        case Some(item) if item.itemType != pangea.model.item.ItemType.NoItem => f(item, hero)
+        case _                                                                => showList(user, renderer)
+      }
+    } yield res
+
+  private def payloadField(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
 
   // ── Fallback: динамические id EquipSlot_<idx> ──────────────────────────────
 

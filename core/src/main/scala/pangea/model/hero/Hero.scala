@@ -27,7 +27,9 @@ case class Hero(
   guildReputation: Long,
   masterHornBoosts: MasterHornBoosts,
   doubloons: Long,
-  statBoosts: StatBoosts
+  statBoosts: StatBoosts,
+  // Пыль, которой посыпано оружие: держится один бой (см. WeaponDust).
+  weaponDust: WeaponDust = WeaponDust.empty
 ) {
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда
@@ -38,8 +40,10 @@ case class Hero(
    *  для боя/лута/подземелья/инвентаря. */
   def passives: HeroPassives = HeroPassives(equipment.passiveKinds)
 
-  /** Камни-усилители в гнёздах снаряжения — типизированный фасад для боя/лута. */
-  def gems: HeroGems = HeroGems(equipment.weaponGems, equipment.armorGems)
+  /** Камни-усилители в гнёздах снаряжения — типизированный фасад для боя/лута.
+   *  Пыль на оружии идёт сюда же отдельным списком: она работает как камни, но
+   *  не даёт прибавки к эффективности стихии (см. [[HeroGems]]). */
+  def gems: HeroGems = HeroGems(equipment.weaponGems, equipment.armorGems, weaponDust.gems)
 
   /** Наборы надетого снаряжения и открытые их бонусы. */
   def sets: HeroSets = HeroSets(equipment.setCounts)

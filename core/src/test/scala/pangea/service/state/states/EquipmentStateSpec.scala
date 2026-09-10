@@ -1,7 +1,7 @@
 package pangea.service.state.states
 
 import pangea.engine.SceneContent
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Gem, GemKind, Item, ItemType, MaterialKind, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -33,6 +33,10 @@ object EquipmentStateSpec extends ZIOSpecDefault {
                            attack = 0, accuracy = 0, energy = 0,
                            armor = 0, defence = 2, evasion = 0)
 
+  private def heroWith(weapon: Item) =
+    TestFixtures.hero(userId).copy(
+      equipment = TestFixtures.emptyEquipment.copy(weapon = weapon))
+
   private def makeState(hero: pangea.model.hero.Hero, invItems: List[Item] = Nil) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
@@ -42,6 +46,40 @@ object EquipmentStateSpec extends ZIOSpecDefault {
     } yield (EquipmentState(heroDao, invRepo, content), heroDao, invRepo, renderer)
 
   override def spec = suite("EquipmentState")(
+
+    // ── Ломка камней прямо на надетом ────────────────────────────────────────
+    test("надетая вещь с камнем даёт красную кнопку ломки, без камней — нет") {
+      val gemSword = sword.copy(sockets = List(Some(Gem(GemKind.Emerald, 4))))
+      for {
+        quad                    <- makeState(heroWith(gemSword))
+        (state, _, _, renderer)  = quad
+        _        <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        withGem  <- renderer.sentScreens.map(_.last.choices)
+        quad2                   <- makeState(heroWith(sword))
+        (state2, _, _, r2)       = quad2
+        _        <- state2.action(testUser, selectSlot(WeaponSlotIdx), r2)
+        without  <- r2.sentScreens.map(_.last.choices)
+      } yield assertTrue(withGem.exists(_.id == "BreakWorn")) &&
+              assertTrue(!without.exists(_.id == "BreakWorn"))
+    },
+
+    test("ломка на надетом: гнездо пустеет, пыль падает в сумку, вещь остаётся надетой") {
+      val gemSword = sword.copy(sockets = List(Some(Gem(GemKind.Emerald, 4))))
+      for {
+        quad                          <- makeState(heroWith(gemSword))
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        _       <- state.action(testUser, tap("BreakWorn"), renderer)
+        confirm <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, UserAction("", Some("""{"action":"BreakWornDo","slot":"0"}""")), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+        inv     <- invRepo.get(updated.id)
+      } yield assertTrue(confirm.text.contains("Сломать")) &&
+              assertTrue(updated.equipment.weapon.id == gemSword.id) &&
+              assertTrue(updated.equipment.weapon.sockets == List(None)) &&
+              // безупречный изумруд — грейд 4, значит четыре горсти пыли
+              assertTrue(inv.items.data.count(_.material.contains(MaterialKind.EmeraldDust)) == 4)
+    },
 
     test("enter → показывает список слотов кнопками") {
       for {

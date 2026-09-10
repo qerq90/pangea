@@ -5,10 +5,10 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
-import pangea.generator.item.TreasureMapGenerator
-import pangea.model.hero.{Equipment, Hero}
+import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
+import pangea.model.hero.{Equipment, Hero, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Item, ItemDetails, ItemType}
+import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
@@ -35,7 +35,13 @@ case class InventoryState(
       "EquipRing"         -> Target.Run { (u, ua, r) => equipChosenRing(u, ua, r) },
       "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
-      "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) }
+      "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) },
+      "BreakGem"          -> Target.Run { (u, _,  r) => offerBreak(u, r) },
+      "BreakGemPick"      -> Target.Run { (u, ua, r) => confirmBreak(u, ua, r) },
+      "BreakGemDo"        -> Target.Run { (u, ua, r) => doBreak(u, ua, r) },
+      "CrushGem"          -> Target.Run { (u, _,  r) => offerCrush(u, r) },
+      "CrushGemDo"        -> Target.Run { (u, _,  r) => doCrush(u, r) },
+      "DustWeapon"        -> Target.Run { (u, _,  r) => sprinkleDust(u, r) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -92,10 +98,17 @@ case class InventoryState(
           val canEquip = ItemType.equippable.contains(item.itemType)
           val canCombine = item.itemType == ItemType.TreasureMapHalf
           val canSocket  = item.gem.isDefined
+          // Ломать можно и камни в гнёздах вещи, и сам камень, лежащий в сумке.
+          val canBreak   = GemBreaking.hasGems(item)
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
             Option.when(canCombine)(content.choice("CombineMap", "inventory.combineMap").copy(color = ChoiceColor.Positive, row = Some(0))),
             Option.when(canSocket)(content.choice("SocketInsert", "inventory.socket").copy(color = ChoiceColor.Positive, row = Some(0))),
+            Option.when(canBreak)(content.choice("BreakGem", "inventory.breakGem").copy(color = ChoiceColor.Negative, row = Some(0))),
+            Option.when(canSocket)(content.choice("CrushGem", "inventory.crushGem").copy(color = ChoiceColor.Negative, row = Some(0))),
+            // Пыль сыплется на оружие: разовое покрытие на один бой.
+            Option.when(item.material.exists(_.gem.isDefined))(
+              content.choice("DustWeapon", "inventory.dustWeapon").copy(color = ChoiceColor.Positive, row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
             Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
           ).flatten
@@ -246,6 +259,160 @@ case class InventoryState(
         case _ => showList(user, renderer)
       }
     } yield res
+
+  // ── Ломка камней ───────────────────────────────────────────────────────────
+
+  /** Первый шаг: если камень в вещи один — сразу спрашиваем подтверждение, если
+    * несколько — сначала даём выбрать, какой именно ломать. */
+  private def offerBreak(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, _) =>
+      GemBreaking.socketed(item) match {
+        case Nil             => showList(user, renderer)
+        case (idx, _) :: Nil => breakConfirmScreen(user, item, idx, renderer)
+        case gems =>
+          val choices = gems.map { case (idx, gem) =>
+            Choice(
+              "BreakGemPick",
+              content.format("inventory.breakGemOption", "gem" -> gem.displayName),
+              data  = Map("slot" -> idx.toString),
+              color = ChoiceColor.Negative,
+              row   = Some(0))
+          } :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(1))
+          renderer.show(user, Screen(
+            content.format("inventory.breakGemWhich", "item" -> item.name), choices)).as(StateType.Inventory)
+      }
+    }
+
+  private def confirmBreak(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    payloadField(ua, "slot").flatMap(_.toIntOption) match {
+      case None      => showList(user, renderer)
+      case Some(idx) => withSelected(user, renderer)((item, _) => breakConfirmScreen(user, item, idx, renderer))
+    }
+
+  /** Красное подтверждение: сколько пыли выйдет и что камень пропадёт навсегда. */
+  private def breakConfirmScreen(user: User, item: Item, idx: Int, renderer: Renderer): Task[StateType] =
+    item.sockets.lift(idx).flatten match {
+      case None => showList(user, renderer)
+      case Some(gem) =>
+        renderer.show(user, Screen(
+          content.format("inventory.breakGemConfirm",
+            "gem"   -> gem.displayName,
+            "dust"  -> gem.dust.displayName,
+            "count" -> gem.dustYield.toString),
+          List(
+            Choice("BreakGemDo", content.text("inventory.breakGemYes"),
+              data = Map("slot" -> idx.toString), color = ChoiceColor.Negative, row = Some(0)),
+            Choice("InventoryList", content.text("inventory.breakGemNo"), row = Some(1))
+          ))).as(StateType.Inventory)
+    }
+
+  private def doBreak(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    payloadField(ua, "slot").flatMap(_.toIntOption) match {
+      case None => showList(user, renderer)
+      case Some(idx) =>
+        withSelected(user, renderer) { (item, hero) =>
+          GemBreaking.breakSocket(item, idx) match {
+            case None => showList(user, renderer)
+            case Some((emptied, gem)) =>
+              inventoryRepo.updateItem(hero.id, emptied).mapError(e => new Throwable(e.toString)) *>
+                grantDust(user, hero, gem, renderer)
+          }
+        }
+    }
+
+  /** Камень, лежащий в сумке отдельным предметом: крошим его целиком. */
+  private def offerCrush(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, _) =>
+      item.gem match {
+        case None => showList(user, renderer)
+        case Some(gem) =>
+          renderer.show(user, Screen(
+            content.format("inventory.crushGemConfirm",
+              "gem"   -> gem.displayName,
+              "dust"  -> gem.dust.displayName,
+              "count" -> gem.dustYield.toString),
+            List(
+              Choice("CrushGemDo", content.text("inventory.breakGemYes"), color = ChoiceColor.Negative, row = Some(0)),
+              Choice("InventoryList", content.text("inventory.breakGemNo"), row = Some(1))
+            ))).as(StateType.Inventory)
+      }
+    }
+
+  private def doCrush(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      item.gem match {
+        case None => showList(user, renderer)
+        case Some(gem) =>
+          inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+            grantDust(user, hero, gem, renderer)
+      }
+    }
+
+  /** Выдаёт пыль за сломанный камень. Пыль кладётся отдельными предметами, поэтому
+    * место в сумке проверяем заранее: лучше отказать, чем потерять часть пыли. */
+  private def grantDust(user: User, hero: Hero, gem: Gem, renderer: Renderer): Task[StateType] =
+    for {
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      count  = gem.dustYield
+      free   = inv.maxItems - inv.items.data.length
+      res <-
+        if (free < count)
+          renderer.show(user, Screen(content.format("inventory.breakGemNoRoom", "count" -> count.toString), Nil)) *>
+            showList(user, renderer)
+        else
+          ZIO.foreachDiscard(1 to count) { _ =>
+            itemRepository.persist(hero.id, MaterialGenerator.item(gem.dust))
+              .flatMap(persisted => inventoryRepo.addItem(hero.id, persisted).mapError(e => new Throwable(e.toString)))
+          } *>
+            renderer.show(user, Screen(content.format("inventory.breakGemDone",
+              "gem" -> gem.displayName, "count" -> count.toString, "dust" -> gem.dust.displayName), Nil)) *>
+            showList(user, renderer)
+    } yield res
+
+  /** Общая обвязка «взять выбранный в сцене предмет и героя». */
+  private def withSelected(user: User, renderer: Renderer)(
+      f: (Item, Hero) => Task[StateType]): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      res <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)) match {
+        case None       => showList(user, renderer)
+        case Some(item) => f(item, hero)
+      }
+    } yield res
+
+  // ── Пыль на оружие ─────────────────────────────────────────────────────────
+
+  /** Посыпает надетое оружие выбранной пылью. Горсть тратится в любом случае —
+    * даже когда магия даёт всполох или покрытие идёт четвёртым слоем. */
+  private def sprinkleDust(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      item.material.filter(_.gem.isDefined) match {
+        case None => showList(user, renderer)
+        case Some(_) if hero.equipment.weapon.itemType == ItemType.NoItem =>
+          renderer.show(user, Screen(content.text("inventory.dustNoWeapon"), Nil)) *> showList(user, renderer)
+        case Some(dust) =>
+          val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
+          val line = outcome match {
+            case WeaponDust.Outcome.Applied(next) =>
+              content.format("inventory.dustApplied",
+                "dust"   -> dust.displayName,
+                "weapon" -> hero.equipment.weapon.name,
+                "layers" -> next.layers.size.toString,
+                "max"    -> WeaponDust.MaxLayers.toString)
+            case WeaponDust.Outcome.Clash(_) =>
+              content.format("inventory.dustClash", "dust" -> dust.displayName,
+                "pct" -> WeaponDust.PenaltyPct.toString)
+            case WeaponDust.Outcome.Overload(_) =>
+              content.format("inventory.dustOverload", "pct" -> WeaponDust.PenaltyPct.toString)
+          }
+          inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+            heroDao.updateWeaponDust(user.userId, outcome.next) *>
+            renderer.show(user, Screen(line, Nil)) *>
+            showList(user, renderer)
+      }
+    }
 
   // ── Вставка камня: уходим на экран Socketing с id выбранного камня ─────────
 

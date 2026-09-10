@@ -11,6 +11,9 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
 
   private var capacity: Long = 20L
 
+  def updateItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
+    ZIO.succeed { items = items.map(i => if (i.id == item.id) item else i) }
+
   def get(heroId: HeroId): IO[InventoryRepoError, Inventory] =
     ZIO.succeed(Inventory(1L, heroId, capacity, Inventory.Items(items)))
 

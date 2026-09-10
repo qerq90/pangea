@@ -29,6 +29,17 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
     } yield ())
       .tapError(err => ZIO.logError(s"Error occurred: $err"))
 
+  def updateItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
+    for {
+      inventory <- inventoryDao
+        .get(heroId)
+        .orElseFail(InventoryRepoError.CantFindInventory)
+      replaced = inventory.items.data.map(i => if (i.id == item.id) item else i)
+      _ <- inventoryDao
+        .update(inventory.withItems(replaced))
+        .orElseFail(InventoryRepoError.CantUpdateInventory)
+    } yield ()
+
   def removeItems(itemIds: Set[Long], heroId: HeroId): IO[InventoryRepoError, Unit] =
     if (itemIds.isEmpty) ZIO.unit
     else
