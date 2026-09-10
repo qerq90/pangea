@@ -687,7 +687,8 @@ battle:
   bleedTick: "🔴 -{damage}"
   burnTick: "🔥 Пламя сжигает {damage} HP у {monster}."
   comboFireAir: "🔥💨 Огонь и воздух, объединив усилия, наносят чудовищный урон… (-{damage})"
-  comboLightningCold: "⚡❄️ Лёд и Молния, объединив усилия, сковали и душу, и тело вашего врага."
+  comboLightningCold: "⚡❄️ Лёд и Молния, объединив усилия, сковали и душу, и тело вашего врага. Броня трещит, а умение застревает в горле."
+  skillBlocked: "🧊 Скованный враг не смог применить умение."
   vampirism: "🩸 Вампиризм: восстановлено {healed} HP."
   ghoulFeast: "🧛 Вы устраиваете жуткий пир и восстановили {hp} HP и {armor} брони."
   elemental:
@@ -726,7 +727,7 @@ battle:
   mobColdBite: "❄️ Морозный удар сковывает вас: ваша защита держит хуже."
   mobAirBoost: "💨 Ветер подхватывает врага — он бьёт точнее и уворачивается лучше."
   mobPoisons: "🟢 Отравленное оружие оставило яд в вашей ране."
-  lightningBurn: "⚡ Разряд выжигает {energy} энергии врага."
+  lightningBurn: "⚡ Молния, прошедшая по телу, выжгла {energy} энергии врага."
   hunterRepeat: "🏹 Промах не в счёт — вы тут же бьёте снова."
   hunterCancel: "🏹 Вы читаете движение врага и срываете его приём — урона нет."
   regenTick: "💚 Регенерация восстанавливает {healed} HP."
@@ -756,7 +757,7 @@ rest:
 
 death:
   penalty: "Потери: -{expLost} опыта, -{silverLost} серебра."
-  itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
+  itemDropped: "{monsterName} забрал(а) себе в качестве трофея: {itemName}."
   trauma: "⚠ Новая травма: «{traumaName}». {description}"
   traumaMax: "На вас не осталось живого места.."
 
@@ -920,6 +921,7 @@ inventory:
   equipped: "{name} надет! Прежний: {old}."
   ringChoice: "Оба слота колец заняты. Какое кольцо снять, чтобы надеть {name}?"
   ringSlot: "Снять из слота {slot}: {name}"
+  stackCount: "🧮 В сумке таких: {count} шт."
   dropped: "{name} выброшен."
   tooHighLevel: "❌ Недостаточный уровень! Требуется {required}, ваш уровень {current}."
   notEquippable: "❌ Этот предмет нельзя надеть."

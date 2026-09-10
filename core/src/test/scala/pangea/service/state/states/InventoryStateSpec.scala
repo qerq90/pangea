@@ -77,6 +77,53 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("InventoryState")(
 
+    // ── Складывание одинаковых вещей ─────────────────────────────────────────
+    test("три одинаковых камня — одна кнопка с количеством") {
+      val stones = (1 to 3).map(i =>
+        GemGenerator.item(GemKind.Amethyst, 1).copy(id = 200L + i)).toList
+      for {
+        quad                    <- makeState(baseHero, stones :+ sword)
+        (state, _, _, renderer)  = quad
+        _       <- state.enter(testUser, renderer)
+        choices <- renderer.sentScreens.map(_.last.choices)
+        labels   = choices.map(_.label)
+      } yield assertTrue(labels.exists(_.contains("(3 шт)"))) &&
+              // камень + меч = две кнопки предметов, а не четыре
+              assertTrue(choices.count(_.id.startsWith(InventoryState.ItemActionPrefix)) == 2)
+    },
+
+    test("разные грейды одного камня стоят порознь") {
+      val stones = List(
+        GemGenerator.item(GemKind.Ruby, 1).copy(id = 210L),
+        GemGenerator.item(GemKind.Ruby, 1).copy(id = 211L),
+        GemGenerator.item(GemKind.Ruby, 3).copy(id = 212L))
+      for {
+        quad                    <- makeState(baseHero, stones)
+        (state, _, _, renderer)  = quad
+        _       <- state.enter(testUser, renderer)
+        choices <- renderer.sentScreens.map(_.last.choices)
+        labels   = choices.filter(_.id.startsWith(InventoryState.ItemActionPrefix)).map(_.label)
+      } yield assertTrue(labels.size == 2) &&
+              assertTrue(labels.exists(l => l.contains("Надколотый рубин") && l.contains("(2 шт)"))) &&
+              assertTrue(labels.exists(l => l.contains("Рубин") && !l.contains("шт")))
+    },
+
+    test("экран стопки говорит, сколько таких в сумке, а выбрасывается один") {
+      val stones = (1 to 3).map(i =>
+        GemGenerator.item(GemKind.Emerald, 2).copy(id = 220L + i)).toList
+      for {
+        quad                          <- makeState(baseHero, stones)
+        (state, _, invRepo, renderer)  = quad
+        _      <- state.action(testUser, selectItem(221L), renderer)
+        screen <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("Drop"), renderer)
+        left    = invRepo.snapshot
+      } yield assertTrue(screen.text.contains("В сумке таких: 3")) &&
+              // ушёл ровно один камень из стопки
+              assertTrue(left.size == 2) &&
+              assertTrue(!left.exists(_.id == 221L))
+    },
+
     // ── Ломка камней ─────────────────────────────────────────────────────────
     test("у вещи с камнями есть красная кнопка ломки, у пустой — нет") {
       for {

@@ -38,6 +38,16 @@ object ItemMenu {
       Choice(s"$prefix${it.id}", itemButtonLabel(it), row = Some(baseRow + idx))
     }
 
+  /** То же, но одинаковые вещи стоят одной кнопкой с приписью «(3 шт)». Кнопка
+   *  ведёт на первый предмет группы: действие всегда идёт над ОДНИМ предметом,
+   *  сколько бы их ни лежало рядом. */
+  def stackButtons(items: List[(Item, Int)], prefix: String, baseRow: Int = 0): List[Choice] =
+    items.zipWithIndex.map { case ((it, count), idx) =>
+      Choice(s"$prefix${it.id}",
+        truncate(it.displayTitle + pangea.model.item.ItemStack.countSuffix(count)),
+        row = Some(baseRow + idx))
+    }
+
   /** Срез страницы + итоговое число страниц. Page нормализуется в [0, total-1]. */
   def page[T](items: List[T], page: Int, pageSize: Int = DefaultPageSize): (List[T], Int, Int) = {
     val totalPages = ((items.size + pageSize - 1) / pageSize).max(1)

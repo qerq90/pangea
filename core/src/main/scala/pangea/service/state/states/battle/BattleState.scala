@@ -5,7 +5,7 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
-import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState}
 import pangea.model.hero.{AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.MiniBoss
@@ -927,18 +927,20 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           log = log :+ content.format("battle.comboFireAir", "damage" -> dmg.toString)
         }
 
-        // Комбо Молния+Холод: -40% макс.брони (не переходит в HP), -20% защиты (3 хода), выжиг энергии (флейвор).
+        // Комбо Молния+Холод: -10% макс.брони (не переходит в HP) и застрявшее
+        // умение — ближайший каст моб пропускает целиком. Одиночные проки обеих
+        // стихий при этом ОСТАЮТСЯ: комбо идёт им в довесок, а не вместо них.
         if (lightCold) {
-          val armorCut = (maxArmor.toDouble * 0.40).toLong.max(0L)
+          val armorCut = (maxArmor.toDouble * BattleState.ComboArmorCutPct / 100.0).toLong.max(0L)
           b = b.copy(
             monsterCurrentArmor = (b.monsterCurrentArmor - armorCut).max(0L),
-            effects = b.effects.copy(monsterDefenceDebuff = Some(TimedDefenceDebuff(20, 3)))
+            effects = b.effects.copy(monsterSkillBlockedTurns = BattleState.ComboSkillBlockTurns)
           )
           log = log :+ content.text("battle.comboLightningCold")
         }
 
-        // Одиночные проки для стихий, не поглощённых комбо.
-        if (fired(Element.Cold) && !lightCold) {
+        // Одиночные проки стихий — идут своим чередом, в том числе после комбо.
+        if (fired(Element.Cold)) {
           b = b.copy(effects = b.effects.copy(
             monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
           log = log :+ Element.Cold.procText
@@ -980,16 +982,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           b = b.copy(effects = b.effects.copy(airBoostTurns = Element.Air.ProcTurns))
           log = log :+ Element.Air.procText
         }
-        if (fired(Element.Lightning) && !lightCold) {
+        if (fired(Element.Lightning)) {
           // Выжиг энергии: снимаем долю от ПОТОЛКА, поэтому эффект не зависит от
           // того, сколько моб успел накопить, и одинаково чувствуется на любом
-          // уровне. Умение, на которое он копил, откладывается.
+          // уровне. Умение, на которое он копил, откладывается. Строка одна: и
+          // про сам разряд, и про сожжённую энергию.
           val burned = (b.monsterStats.energy * Element.LightningEnergyBurnPct / 100L).max(1L)
           val left   = (b.monsterCurrentEnergy - burned).max(0L)
           val lost   = b.monsterCurrentEnergy - left
           b = b.copy(monsterCurrentEnergy = left)
-          log = log :+ Element.Lightning.procText
-          if (lost > 0) log = log :+ content.format("battle.lightningBurn", "energy" -> lost.toString)
+          log = log :+ content.format("battle.lightningBurn", "energy" -> lost.toString)
         }
         (b, log)
       }
@@ -1151,6 +1153,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         // Моб не кастует, если герой мёртв или моб добит Шипастым (battleAfterAtk).
         if (heroAfterAtk.fightStats.hp <= 0 || battleAfterAtk.monsterCurrentHp <= 0)
           ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
+        // Скован комбо Молния+Холод: умение застряло, и круг минибосса тоже стоит.
+        else if (battleAfterAtk.effects.monsterSkillBlockedTurns > 0)
+          ZIO.succeed((battleAfterAtk, heroAfterAtk, content.text("battle.skillBlocked")))
         // Минибосс не выбирает умение: он идёт строго по своему кругу.
         else if (battleAfterAtk.boss.isDefined)
           bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
@@ -2158,6 +2163,14 @@ object BattleState {
       attackerInt = attackerPower,
       bonusPct    = 0L
     )
+
+  /** Сколько процентов ПОТОЛКА брони срезает комбо Молния+Холод. */
+  val ComboArmorCutPct: Long = 10L
+
+  /** На сколько тиков комбо запирает умение моба. Гаснет один каст — тот, что был
+    * бы ответом на комбо. Двойка, а не единица, потому что тик буфов идёт в начале
+    * хода моба и сразу съедает один заряд. */
+  val ComboSkillBlockTurns: Int = 2
 
   def dodgeChance(
       agi: Long,

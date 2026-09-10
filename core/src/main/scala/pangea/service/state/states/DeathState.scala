@@ -6,6 +6,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Renderer, SceneContent, Screen}
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.AzatState
+import pangea.model.item.ItemStack
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -114,16 +115,27 @@ case class DeathState(
                      pangea.model.inventory.Inventory(0L, heroId, 0L,
                        pangea.model.inventory.Inventory.Items(Nil))))
       realItems  = inventory.items.data.filter(_.id != 0L)
-      _         <- ZIO.foreachDiscard(realItems) { item =>
+      // Бросок идёт на КАЖДЫЙ предмет отдельно, в том числе на каждый камень и
+      // каждую горсть пыли: сложенные в одну строку на экране, в сумке они
+      // остаются разными вещами, и уносят их поштучно, а не стопкой.
+      lost      <- ZIO.foreach(realItems) { item =>
                      Random.nextIntBetween(0, 4).flatMap { roll =>
-                       ZIO.when(roll == 0) {
-                         inventoryRepo.removeItem(item.id, heroId).orElse(ZIO.unit) *>
-                           renderer.show(user, Screen(
-                             content.format("death.itemDropped",
-                               "monsterName" -> monsterName,
-                               "itemName"    -> item.name), Nil))
-                       }
+                       if (roll != 0) ZIO.none
+                       else inventoryRepo.removeItem(item.id, heroId).orElse(ZIO.unit).as(Some(item))
                      }
+                   }.map(_.flatten)
+      // Одно сообщение на всё потерянное: одинаковые вещи схлопнуты в «имя ×N».
+      _         <- ZIO.when(lost.nonEmpty) {
+                     val names = lost
+                       .groupBy(i => ItemStack.key(i).getOrElse(i.id.toString))
+                       .values.toList
+                       .sortBy(_.head.name)
+                       .map(group =>
+                         if (group.sizeIs > 1) s"${group.head.name} ×${group.size}" else group.head.name)
+                     renderer.show(user, Screen(
+                       content.format("death.itemDropped",
+                         "monsterName" -> monsterName,
+                         "itemName"    -> names.mkString(", ")), Nil))
                    }
     } yield ()
 }
