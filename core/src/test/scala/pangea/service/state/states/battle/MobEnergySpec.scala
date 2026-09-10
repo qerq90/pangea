@@ -268,7 +268,9 @@ object MobEnergySpec extends ZIOSpecDefault {
                TestRandom.feedInts(60, 1, 90, 0) *> TestRandom.feedLongs(100L, 100L))
         (after, _, log) = r
         burned = full * pangea.model.battle.Element.LightningEnergyBurnPct / 100L
-      } yield assertTrue(log.contains("выжигает")) &&
+      } yield assertTrue(log.contains("выжгла")) &&
+              // строка одна: и про разряд, и про сожжённую энергию
+              assertTrue(log.linesIterator.count(_.contains("Молния")) == 1) &&
               // сожгли 30% потолка, потом моб потратил на умение и добрал реген
               assertTrue(after.monsterCurrentEnergy < full) &&
               assertTrue(burned > 0L)
