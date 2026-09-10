@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.GemGenerator
 import pangea.model.hero.Equipment
-import pangea.model.item.{Gem, GemKind, Item, ItemType, Rarity}
+import pangea.model.item.{Gem, GemKind, Item, ItemType, MaterialKind, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.{ItemMenu, UserAction}
@@ -33,6 +33,35 @@ object SocketingStateSpec extends ZIOSpecDefault {
   /** Герой с этим оружием и камнем `gemKind` в сумке; сцена уже указывает на камень. */
   private def makeState(w: Item, gemKind: GemKind) =
     withEquipment(TestFixtures.emptyEquipment.copy(weapon = w), gemKind)
+
+  /** Аннигиляция камнем заданного грейда. */
+  private def makeStateWithGrade(w: Item, gemKind: GemKind, grade: Int) = {
+    val gemItem = GemGenerator.item(gemKind, grade).copy(id = 77L)
+    for {
+      dao      <- TestHeroDao.withHero(userId,
+                    TestFixtures.hero(userId).copy(
+                      equipment = TestFixtures.emptyEquipment.copy(weapon = w)))
+      _        <- dao.writeSceneData(userId, SocketingState.Scene(gemItem.id).asJson)
+      invRepo   = TestInventoryRepository.withItems(List(gemItem))
+      renderer <- TestRenderer.make
+      content  <- ZIO.attempt(SceneContent.load())
+    } yield (SocketingState(dao, invRepo, content), dao, invRepo, renderer)
+  }
+
+  /** Сумка забита: вместимость ровно равна числу лежащих в ней предметов. */
+  private def fullBagState(w: Item, gemKind: GemKind) = {
+    val gemItem = GemGenerator.item(gemKind, 1).copy(id = 77L)
+    val filler  = (1 to 19).map(i => GemGenerator.item(GemKind.Amethyst, 1).copy(id = 100L + i)).toList
+    for {
+      dao      <- TestHeroDao.withHero(userId,
+                    TestFixtures.hero(userId).copy(
+                      equipment = TestFixtures.emptyEquipment.copy(weapon = w)))
+      _        <- dao.writeSceneData(userId, SocketingState.Scene(gemItem.id).asJson)
+      invRepo   = TestInventoryRepository.withItems(gemItem :: filler)
+      renderer <- TestRenderer.make
+      content  <- ZIO.attempt(SceneContent.load())
+    } yield (SocketingState(dao, invRepo, content), dao, invRepo, renderer)
+  }
 
   /** То же, но со всей экипировкой сразу — для проверки страниц. */
   private def withEquipment(eq: Equipment, gemKind: GemKind) = {
@@ -88,9 +117,48 @@ object SocketingStateSpec extends ZIOSpecDefault {
         _       <- state.action(testUser, pickTarget(50L), renderer)
         w       <- weaponOf(dao)
         screens <- renderer.sentScreens
-      } yield assertTrue(w.socketedGems.isEmpty) &&      // сапфира не стало
-              assertTrue(invRepo.snapshot.isEmpty) &&    // рубин тоже израсходован
+        left     = invRepo.snapshot
+      } yield assertTrue(w.socketedGems.isEmpty) &&           // сапфира не стало
+              assertTrue(!left.exists(_.gem.isDefined)) &&    // рубин тоже израсходован
               assertTrue(screens.map(_.text).mkString.nonEmpty)
+    },
+
+    test("от вспышки остаётся ровно две горсти пыли — по одной за каждый камень") {
+      for {
+        t <- makeState(weapon(List(Some(Gem(GemKind.Sapphire, 1)), None)), GemKind.Ruby)
+        (state, _, invRepo, renderer) = t
+        _       <- state.action(testUser, pickTarget(50L), renderer)
+        dusts    = invRepo.snapshot.flatMap(_.material)
+        screens <- renderer.sentScreens
+      } yield assertTrue(dusts.size == 2) &&
+              assertTrue(dusts.toSet == Set[MaterialKind](MaterialKind.RubyDust, MaterialKind.SapphireDust)) &&
+              assertTrue(screens.last.text.contains("Рубиновая пыль")) &&
+              assertTrue(screens.last.text.contains("Сапфировая пыль"))
+    },
+
+    test("грейд на вспышку не влияет: идеальный камень даёт ту же одну горсть") {
+      for {
+        t <- makeStateWithGrade(weapon(List(Some(Gem(GemKind.Sapphire, 5)), None)), GemKind.Ruby, grade = 5)
+        (state, _, invRepo, renderer) = t
+        _     <- state.action(testUser, pickTarget(50L), renderer)
+        dusts  = invRepo.snapshot.flatMap(_.material)
+      } yield assertTrue(dusts.size == 2) &&
+              assertTrue(dusts.count(_ == MaterialKind.RubyDust) == 1) &&
+              assertTrue(dusts.count(_ == MaterialKind.SapphireDust) == 1)
+    },
+
+    test("места в сумке нет — камни всё равно гибнут, но пыль не достаётся") {
+      // Сумка забита под завязку: вставляемый камень освободит одну ячейку,
+      // а под две горсти нужно две.
+      for {
+        t <- fullBagState(weapon(List(Some(Gem(GemKind.Sapphire, 1)), None)), GemKind.Ruby)
+        (state, dao, invRepo, renderer) = t
+        _       <- state.action(testUser, pickTarget(50L), renderer)
+        w       <- weaponOf(dao)
+        screens <- renderer.sentScreens
+      } yield assertTrue(w.socketedGems.isEmpty) &&
+              assertTrue(invRepo.snapshot.flatMap(_.material).isEmpty) &&
+              assertTrue(screens.last.text.contains("не нашлось места"))
     },
 
     test("сапфир в оружие с рубином — симметрично") {
