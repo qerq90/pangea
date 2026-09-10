@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.monster.Rarity
+import pangea.model.monster.{MonsterRaceFactor, Race, Rarity}
 import zio.test._
 
 object MonsterGeneratorSpec extends ZIOSpecDefault {
@@ -38,6 +38,43 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
       val legendaryAvg = legendaryHp.sum.toDouble / legendaryHp.size
       val commonAvg    = commonHp.sum.toDouble    / commonHp.size
       assertTrue(legendaryAvg > commonAvg * 2.0)
+    },
+
+    test("статы считаются по базе 10/40/22/4 и расовым множителям") {
+      // base = уровень × rarity.factor × 1.1; на 10 уровне у обычного = 8.8.
+      val (m, _) = MonsterGenerator.generateOfRace(10, Race.Murloc, Rng(7L))
+      val base   = 10.0 * m.rarity.factor * 1.1
+      val f      = MonsterRaceFactor.of(Race.Murloc)
+      assertTrue(m.fightStats.atk     == (10.0 * base * f.attackFactor).toLong) &&
+      assertTrue(m.fightStats.hp      == (40.0 * base * f.hpFactor).toLong) &&
+      assertTrue(m.fightStats.armor   == (22.0 * base * f.armorFactor).toLong) &&
+      assertTrue(m.fightStats.defence == (4.0  * base * f.defenceFactor).toLong)
+    },
+
+    test("защита есть у всех рас и идёт по своему ряду, а не по броневому") {
+      def statsOf(race: Race) = MonsterGenerator.generateOfRace(10, race, Rng(3L))._1.fightStats
+      val goblin  = statsOf(Race.Goblin)
+      val elf     = statsOf(Race.Elf)
+      val human   = statsOf(Race.Human)
+      val gnome   = statsOf(Race.Gnome)
+      val khajiit = statsOf(Race.Khajiit)
+      // ряд защиты: гоблин 3 — самый защищённый, каджит 0.5 — самый уязвимый
+      assertTrue(Race.mortals.forall(statsOf(_).defence > 0L)) &&
+      assertTrue(goblin.defence > elf.defence) &&
+      assertTrue(elf.defence > human.defence) &&
+      assertTrue(human.defence > gnome.defence) &&
+      assertTrue(gnome.defence > khajiit.defence) &&
+      // а броня по-прежнему по своему ряду: гном бронирован лучше гоблина,
+      // при том что защита у него — наоборот, меньше. Две шкалы разведены.
+      assertTrue(gnome.armor > goblin.armor) &&
+      assertTrue(gnome.defence < goblin.defence)
+    },
+
+    test("демон получил свой коэффициент защиты — между человеком и эльфом") {
+      val demon = MonsterRaceFactor.of(Race.Demon).defenceFactor
+      assertTrue(demon == 1.2) &&
+      assertTrue(demon > MonsterRaceFactor.of(Race.Human).defenceFactor) &&
+      assertTrue(demon < MonsterRaceFactor.of(Race.Elf).defenceFactor)
     },
 
     test("одинаковый сид даёт одинакового монстра") {

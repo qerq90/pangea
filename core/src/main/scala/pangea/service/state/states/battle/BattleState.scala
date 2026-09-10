@@ -257,7 +257,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // (см. splitElementalDamage). Без стихий поведение прежнее.
             // Сопротивление минибосса стихии оружия — до разбивки по броне/HP.
             resisted = (damage * bossResistance(hero, battle)).toLong.max(1L)
-            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
+            // Защита моба режет удар ДО разбивки по броне/HP, иначе поехали бы
+            // грани стихий (см. splitElementalDamage).
+            guarded = (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L)
+            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, guarded, hero)
             // В лог идёт то, что РЕАЛЬНО ушло в цель: сырое число сбивало с толку
             // там, где сопротивление режет удар в разы (каменного элементаля голая
             // сталь берёт на 20%, и «357 урона» превращались в 71 снятой брони).
@@ -809,6 +812,26 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       bonusPct    = battle.heroBattleState.reductionBonusPct
     )
     (base - battle.effects.heroColdDefenceCut / 100.0).max(0.0)
+  }
+
+  /** Насколько защита моба срежет удар героя — одинаково для базовой атаки и для
+    * умений, которые режутся защитой. Порядок: пробитие героя сначала съедает саму
+    * защиту (уже с учётом %-дебафа комбо), остаток идёт в общую формулу против
+    * Мощи героя, и только потом Холод и «Дикое пламя» срезают итоговые проценты. */
+  private def monsterDefenceCut(
+      hero: Hero,
+      battle: SoloPveBattle,
+      buffed: FightStats,
+      nowMs: Long
+  ): Double = {
+    val base   = hero.effectiveBaseStats(nowMs)
+    val power  = BattleState.power(base.str, buffed.atk)
+    val pierce = BattleState.pierce(base.int, base.agi, power, buffed.pierce)
+    val red0   = BattleState.defenceReduction(effectiveMonsterDefence(battle), pierce, power)
+    // «Дикое пламя» (порог 12) добавляет к срезу столько п.п., на сколько цель горит.
+    val burnCut =
+      if (hero.sets.skillsAlwaysIgnite) battle.effects.monsterBurn.map(_.pct).getOrElse(0) else 0
+    (red0 - (battle.effects.monsterColdDefenceCut + burnCut) / 100.0).max(0.0)
   }
 
   /** Стихия, которой моб бьёт после «Порошка!» (если он его высыпал). */
@@ -1369,20 +1392,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
       // Дебаф Холода снижает итоговое %-снижение цели на monsterColdDefenceCut п.п.;
       // временный дебаф защиты (комбо) режет саму защиту (effectiveMonsterDefence).
-      reduced = {
-        val def0 = effectiveMonsterDefence(battle)
-        val red0 = BattleState.damageReduction(
-          protection  = def0,
-          defenderInt = def0,
-          attackerInt = hero.effectiveBaseStats(nowMs).int,
-          bonusPct    = 0L)
-        // Холод режет итоговое %-снижение цели; «Дикое пламя» (порог 12)
-        // добавляет к срезу столько п.п., на сколько процентов цель горит.
-        val burnCut =
-          if (hero.sets.skillsAlwaysIgnite) battle.effects.monsterBurn.map(_.pct).getOrElse(0) else 0
-        val red = (red0 - (battle.effects.monsterColdDefenceCut + burnCut) / 100.0).max(0.0)
-        (raw * (1.0 - red)).toLong.max(1L)
-      }
+      reduced = (raw * (1.0 - monsterDefenceCut(hero, battle, effWithAir(hero, battle, nowMs), nowMs))).toLong.max(1L)
       result <- slot.skill.effect match {
         case Skill.Effect.Damage(reducedByDefence) =>
           val value = if (reducedByDefence) reduced else raw
@@ -1861,6 +1871,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       attackerInt = battle.monsterStats.atk,
       bonusPct = battle.heroBattleState.reductionBonusPct
     ) * 100.0).toInt
+    // Защита моба показывается так же, как своя, — процентом снижения урона, и
+    // уже с учётом пробития героя: сырое число защиты игроку ни о чём не говорит,
+    // ведь один и тот же моб против сильного героя держит хуже.
+    val monsterReductionPct = (monsterDefenceCut(hero, battle, buffedEff, nowMs) * 100.0).toInt
     // Энергия моба видна игроку: по ней читается, когда прилетит умение, и по ней
     // же видно работу Молнии. Шанс каста больше не показываем — его нет.
     val mobEnergy    = battle.monsterCurrentEnergy.max(0L)
@@ -1898,6 +1912,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "monsterArmor"    -> battle.monsterCurrentArmor.toString,
       "monsterMaxArmor" -> battle.monsterStats.armor.toString,
       "monsterAtk"      -> battle.monsterStats.atk.toString,
+      "monsterReduction" -> s"$monsterReductionPct%",
       "mobHit"          -> s"$mobHitPct%",
       "monsterDodge"    -> s"$monsterDodgePct%",
       "heroHit"         -> s"$heroHitPct%",
@@ -2005,14 +2020,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   }
 
   // Уклонение моба от удара игрока — та же формула: у моба нет ловкости (agi = 0),
-  // в знаменателе его защита (с учётом %-дебафа комбо) и точность игрока ×1.5.
+  // в знаменателе только точность игрока ×1.5. Защита сюда БОЛЬШЕ НЕ входит: она
+  // отвечает лишь за процентное снижение урона (см. monsterDefenceCut), иначе
+  // одна цифра работала бы дважды — и в уклонении, и в защите.
   private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double = {
     // Тот же прок Воздуха добавляет мобу и уклонения.
     val evasion =
       if (battle.effects.mobAirBoostTurns > 0)
         battle.monsterStats.evasion * (100L + Element.Air.ProcBonusPct) / 100L
       else battle.monsterStats.evasion
-    BattleState.dodgeChance(0L, evasion, effectiveMonsterDefence(battle), heroAccuracy)
+    BattleState.dodgeChance(0L, evasion, 0L, heroAccuracy)
   }
 }
 
@@ -2110,6 +2127,31 @@ object BattleState {
     val boosted = raw + bonusPct / 100.0
     boosted.max(0.0).min(0.7)
   }
+
+  /** Мощь бойца — его ударный потенциал: у героя это сила втрое плюс атака (ровно
+    * то, из чего складывается удар), у моба — просто атака. Стоит в знаменателе
+    * снижения урона у того, кого он бьёт, поэтому считается одинаково для обеих
+    * сторон — так же будет и в бою двух героев. */
+  def power(str: Long, atk: Long): Long = str * 3L + atk
+
+  /** Пробитие защиты: интеллект и ловкость с двойным весом, десятая часть Мощи и
+    * стат «пробитие» с предметов (пока его никто не даёт). Растёт линейно по
+    * уровню — в одном темпе с защитой мобов, поэтому доля срезанной защиты не
+    * уезжает от первого уровня к последнему. У мобов пробития нет вовсе: защиту
+    * героя они не пробивают. */
+  def pierce(int: Long, agi: Long, power: Long, pierceStat: Long): Long =
+    2L * int + 2L * agi + power / 10L + pierceStat
+
+  /** Снижение урона защитой: пробитие сначала съедает саму защиту, и уже её
+    * остаток идёт в общую формулу. Интеллекта у мобов нет, поэтому в числителе
+    * только защита. */
+  def defenceReduction(defence: Long, pierce: Long, attackerPower: Long): Double =
+    damageReduction(
+      protection  = (defence - pierce).max(0L),
+      defenderInt = 0L,
+      attackerInt = attackerPower,
+      bonusPct    = 0L
+    )
 
   def dodgeChance(
       agi: Long,

@@ -198,9 +198,10 @@ object MonsterSkill extends Enum[MonsterSkill] {
     }
   }
 
-  /** Максимум брони моба: armor × defence (как при `SoloPveBattle.fromMonster`). */
+  /** Максимум брони моба — ровно его броня. Защита к броне отношения не имеет:
+    * это отдельный слой, процентное снижение урона (см. BattleState.pierce). */
   def monsterMaxArmor(battle: SoloPveBattle): Long =
-    battle.monsterStats.armor * battle.monsterStats.defence.max(1L)
+    battle.monsterStats.armor
 
   /** Урон по герою с учётом баффовой брони и текущей физической брони. Возвращает
    *  новые `hp` и `armor` героя.

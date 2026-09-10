@@ -126,7 +126,7 @@ object SoloPveBattle {
     monsterRarity       = monster.rarity.entryName,
     monsterStats        = monster.fightStats,
     monsterCurrentHp    = monster.fightStats.hp,
-    monsterCurrentArmor = monster.fightStats.armor * monster.fightStats.defence.max(1L),
+    monsterCurrentArmor = monster.fightStats.armor,
     monsterMarked       = monster.marked,
     skillSlots          = hero.activeSkillSlots,
     monsterCurrentEnergy = monster.fightStats.energy

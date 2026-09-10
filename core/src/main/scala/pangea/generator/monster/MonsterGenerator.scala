@@ -82,10 +82,13 @@ object MonsterGenerator {
     val base = level.toDouble * rarity.factor * N
     val f    = MonsterRaceFactor.of(race)
     FightStats(
-      atk = (14.0 * base * f.attackFactor).toLong.max(1L),
-      hp = (36.0 * base * f.hpFactor).toLong.max(1L),
-      armor = (18.0 * base * f.defenceFactor).toLong,
-      defence = 0L,
+      atk = (10.0 * base * f.attackFactor).toLong.max(1L),
+      hp = (40.0 * base * f.hpFactor).toLong.max(1L),
+      armor = (22.0 * base * f.armorFactor).toLong,
+      // Защита — процентное снижение урона, третий слой поверх брони и HP.
+      // Растёт линейно по уровню, как и пробитие героя, — поэтому доля
+      // срезанного держится ровной всю игру (см. BattleState.pierce).
+      defence = (4.0 * base * f.defenceFactor).toLong,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
       // Потолок энергии — из него моб платит за свои умения (см. MonsterEnergy).

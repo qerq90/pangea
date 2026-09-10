@@ -54,9 +54,9 @@ object MonsterSkillSpec extends ZIOSpecDefault {
       },
 
       test("EmergencyRepair: применим только если armor < maxArmor") {
-        // maxArmor = monsterStats.armor * monsterStats.defence (с min(1))
-        val maxedOut = battle(mobArmor = 10, mobDefence = 5, curArmor = 50) // max = 10*5 = 50, текущая = 50
-        val damaged  = battle(mobArmor = 10, mobDefence = 5, curArmor = 20) // max = 50, текущая = 20
+        // maxArmor = monsterStats.armor: защита к броне отношения не имеет
+        val maxedOut = battle(mobArmor = 50, curArmor = 50) // max = 50, текущая = 50
+        val damaged  = battle(mobArmor = 50, curArmor = 20) // max = 50, текущая = 20
         assertTrue(!MonsterSkill.EmergencyRepair.applicable(maxedOut)) &&
         assertTrue(MonsterSkill.EmergencyRepair.applicable(damaged))
       }
@@ -101,14 +101,14 @@ object MonsterSkillSpec extends ZIOSpecDefault {
 
       test("EmergencyRepair: восстанавливает 20% от maxArmor моба") {
         // maxArmor = 10 * 5 = 50; текущая 20; ремонт +10 → 30
-        val b    = battle(mobArmor = 10, mobDefence = 5, curArmor = 20)
+        val b    = battle(mobArmor = 50, curArmor = 20)
         val cast = MonsterSkill.EmergencyRepair.cast(b, hero(100, 0), 0L)
         assertTrue(cast.battle.monsterCurrentArmor == 30L) &&
         assertTrue(cast.line.contains("10"))
       },
 
       test("EmergencyRepair: clamp до maxArmor") {
-        val b    = battle(mobArmor = 10, mobDefence = 5, curArmor = 45) // +10 → 55, clamp 50, gained 5
+        val b    = battle(mobArmor = 50, curArmor = 45) // +10 → 55, clamp 50, gained 5
         val cast = MonsterSkill.EmergencyRepair.cast(b, hero(100, 0), 0L)
         assertTrue(cast.battle.monsterCurrentArmor == 50L) &&
         assertTrue(cast.line.contains("5"))
