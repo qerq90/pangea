@@ -7,7 +7,7 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemType}
+import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
@@ -63,9 +63,12 @@ case class InventoryState(
       scene <- readScene(user)
       _ <- if (items.isEmpty) renderer.show(user, emptyScreen(hero))
            else {
-             val (pageItems, totalPages, page) = ItemMenu.page(items, scene.page.getOrElse(0))
+             // Одинаковые камни, материалы и трофеи показываются одной кнопкой,
+             // но места в сумке занимают по-прежнему поштучно.
+             val stacks = ItemStack.grouped(items)
+             val (pageItems, totalPages, page) = ItemMenu.page(stacks, scene.page.getOrElse(0))
              val header   = s"📦 Инвентарь${if (totalPages > 1) s" (${page + 1}/$totalPages)" else ""} | 🪙 ${hero.silver} | 🟡 ${hero.doubloons}"
-             val itemBtns = ItemMenu.itemButtons(pageItems, ItemActionPrefix)
+             val itemBtns = ItemMenu.stackButtons(pageItems, ItemActionPrefix)
              val nav      = navRow(page, totalPages, "InventoryPrev", "InventoryNext", "BackFromInventory")
              renderer.show(user, Screen(header, itemBtns ++ nav))
            }
@@ -93,7 +96,10 @@ case class InventoryState(
       res <- inv.items.data.find(_.id == itemId) match {
         case None => showList(user, renderer)
         case Some(item) =>
-          val text     = itemDetail(item, hero, hero.silver)
+          // Сколько таких же лежит в сумке — счётчик над описанием; кнопки при
+          // этом трогают ровно один предмет из стопки.
+          val count    = ItemStack.countOf(inv.items.data, item)
+          val text     = itemDetail(item, hero, hero.silver) + stackLine(count)
           val canEquip = ItemType.equippable.contains(item.itemType)
           val canCombine = item.itemType == ItemType.TreasureMapHalf
           val canSocket  = item.gem.isDefined
@@ -451,6 +457,10 @@ case class InventoryState(
       Option.when(page < totalPages - 1)(Choice(nextId, content.text("common.next"), row = Some(row)))
     ).flatten
   }
+
+  /** Приписка «в сумке: N шт» — только когда таких вещей больше одной. */
+  private def stackLine(count: Int): String =
+    if (count > 1) "\n\n" + content.format("inventory.stackCount", "count" -> count.toString) else ""
 
   private def itemDetail(item: Item, hero: Hero, silver: Long): String =
     s"🪙 $silver\n\n${itemText(item, hero.equipment, Some(hero))}"

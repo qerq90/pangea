@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.item.{Item, ItemStack, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -143,12 +143,12 @@ case class MerchantState(
              renderer.show(user, Screen(content.text("merchant.sellEmpty"),
                List(content.choice("BackFromSell", "merchant.sellBackLabel"))))
            else {
-             val (pageItems, totalPages, p) = ItemMenu.page(items, page)
+             val (pageItems, totalPages, p) = ItemMenu.page(ItemStack.grouped(items), page)
              val header  = content.format("merchant.sellHeader",
                "page"  -> (p + 1).toString,
                "total" -> totalPages.toString,
                "silver" -> hero.silver.toString)
-             val btns    = ItemMenu.itemButtons(pageItems, SellItemPrefix)
+             val btns    = ItemMenu.stackButtons(pageItems, SellItemPrefix)
              val nav     = sellNavRow(p, totalPages)
              heroDao.writeSceneData(user.userId, SellScene(page = p).asJson) *>
                renderer.show(user, Screen(header, btns ++ nav))

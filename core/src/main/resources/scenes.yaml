@@ -756,7 +756,7 @@ rest:
 
 death:
   penalty: "Потери: -{expLost} опыта, -{silverLost} серебра."
-  itemDropped: "{monsterName} забрал(а) {itemName} себе в качестве трофея."
+  itemDropped: "{monsterName} забрал(а) себе в качестве трофея: {itemName}."
   trauma: "⚠ Новая травма: «{traumaName}». {description}"
   traumaMax: "На вас не осталось живого места.."
 
@@ -920,6 +920,7 @@ inventory:
   equipped: "{name} надет! Прежний: {old}."
   ringChoice: "Оба слота колец заняты. Какое кольцо снять, чтобы надеть {name}?"
   ringSlot: "Снять из слота {slot}: {name}"
+  stackCount: "🧮 В сумке таких: {count} шт."
   dropped: "{name} выброшен."
   tooHighLevel: "❌ Недостаточный уровень! Требуется {required}, ваш уровень {current}."
   notEquippable: "❌ Этот предмет нельзя надеть."
