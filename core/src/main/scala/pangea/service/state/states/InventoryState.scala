@@ -395,12 +395,11 @@ case class InventoryState(
         case Some(dust) =>
           val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
           val line = outcome match {
-            case WeaponDust.Outcome.Applied(next) =>
+            // Сколько слоёв уже на оружии, игрок держит в голове сам — не считаем за него.
+            case WeaponDust.Outcome.Applied(_) =>
               content.format("inventory.dustApplied",
                 "dust"   -> dust.displayName,
-                "weapon" -> hero.equipment.weapon.name,
-                "layers" -> next.layers.size.toString,
-                "max"    -> WeaponDust.MaxLayers.toString)
+                "weapon" -> hero.equipment.weapon.name)
             case WeaponDust.Outcome.Clash(_) =>
               content.format("inventory.dustClash", "dust" -> dust.displayName,
                 "pct" -> WeaponDust.PenaltyPct.toString)
