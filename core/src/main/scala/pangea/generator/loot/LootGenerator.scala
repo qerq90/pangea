@@ -247,7 +247,8 @@ object LootGenerator {
     else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
   /** С Гнилого Джо падает поровну четыре вещи: кожа упыря, расколотый усилитель,
-    * горсть дублонов и фиолетовая вещь «Упыря». */
+    * горсть дублонов и вещь «Упыря» — последнюю четверть делят пополам фиолетовая
+    * и синяя, как и у элементалей. */
   private def joeDrop(boss: MiniBoss, roll: Long, bossLvl: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < 25L) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
     else if (roll < 50L) {
@@ -260,7 +261,8 @@ object LootGenerator {
       val base       = JoeDoubloonsPerLvl * bossLvl
       val (pct, r1)  = rng.between(100L - JoeDoubloonSpreadPct, 100L + JoeDoubloonSpreadPct + 1L)
       (LootDrop.Doubloons((base * pct / 100L).max(1L)), r1)
-    } else setGear(boss, heroLvl, ItemRarity.Purple, rng)
+    } else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
+    else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
   /** Вещь набора этого босса заданной редкости: уровень героя ±1, но строго в
     * границах игры — на первом уровне разброс не уводит вещь в нулевой, на
@@ -280,6 +282,10 @@ object LootGenerator {
   /** Из оставшейся половины столько процентов приходится на фиолетовую вещь; всё,
     * что не выпало ингредиентом и не фиолетовым, — синяя вещь того же набора. */
   val ElementalPurpleChancePct: Long = 25L
+
+  /** Граница внутри последней четверти роллов Джо (75..99): до неё — фиолетовая
+    * вещь набора, после — синяя. Нечётный остаток достаётся фиолетовой. */
+  val JoePurpleUntil: Long = 88L
 
   /** Сколько дублонов за уровень босса роняет Джо и с каким разбросом (в %). */
   val JoeDoubloonsPerLvl: Long   = 2L

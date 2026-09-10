@@ -190,13 +190,19 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(math.abs(purple - blue) / (purple + blue) < 0.15)
     },
 
-    test("у Гнилого Джо вещь набора осталась фиолетовой") {
-      val gear = (1L to 300L).iterator
+    test("у Гнилого Джо вещь набора тоже бывает и фиолетовой, и синей") {
+      val gear = (1L to 600L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.RottenJoe, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt)
         .filter(i => i.set.contains(pangea.model.item.ItemSet.Ghoul)).toList
+      val purple = gear.count(_.rarity == pangea.model.item.Rarity.Purple).toDouble
+      val blue   = gear.count(_.rarity == pangea.model.item.Rarity.Blue).toDouble
       assertTrue(gear.nonEmpty) &&
-      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple))
+      assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
+                                  g.rarity == pangea.model.item.Rarity.Blue)) &&
+      assertTrue(purple > 0.0) && assertTrue(blue > 0.0) &&
+      // последняя четверть роллов делится пополам
+      assertTrue(math.abs(purple - blue) / (purple + blue) < 0.2)
     },
 
     test("уровень сетовой вещи — уровень героя ±1, а не уровень босса") {
