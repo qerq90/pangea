@@ -1246,14 +1246,19 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
          content.format("battle.elemental.burnTick", "damage" -> dmg.toString))
       case None => (hero, battle, "")
     }
-    // Яд Гнилого Джо: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
+    // Яд на герое: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
+    // Гниль Джо и отравленное оружие мобов делят одно поле, но не одну строку:
+    // разъедающая гниль — это про минибосса, у обычного яда свой текст.
     val (poisonedHero, poisonedBattle, poisonLine) = burnedBattle.effects.heroPoison match {
       case Some(poison) =>
         val dmg = poison.damageOn(burnedHero.effectiveMaxHp(nowMs))
+        val key =
+          if (burnedBattle.boss.contains(MiniBoss.RottenJoe)) "battle.joe.poisonTick"
+          else "battle.heroPoisonTick"
         (burnedHero.copy(fightStats = burnedHero.fightStats.copy(
            hp = (burnedHero.fightStats.hp - dmg).max(0L))),
          burnedBattle.copy(effects = burnedBattle.effects.copy(heroPoison = poison.decayed)),
-         content.format("battle.joe.poisonTick", "damage" -> dmg.toString))
+         content.format(key, "damage" -> dmg.toString))
       case None => (burnedHero, burnedBattle, "")
     }
     val (finalHero, finalBattle, regenLine) = poisonedBattle.effects.heroRegen match {

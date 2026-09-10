@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Gem, GemKind, Item, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
@@ -163,6 +163,19 @@ object MobEnergySpec extends ZIOSpecDefault {
         (after, _, log) = r
       } yield assertTrue(after.effects.heroPoison.isDefined) &&
               assertTrue(log.contains("Отравленное оружие"))
+    },
+
+    test("яд обычного моба тикает своей строкой, а не гнилью Джо") {
+      // Гниль — особенность минибосса; у отравленного оружия мобов текст тот же,
+      // что и у яда, который герой накладывает на них: «Яд снимает …».
+      val h = hero()
+      val b = mobBattle(Race.Murloc, energy = 0L)
+      val poisoned = b.copy(effects = b.effects.copy(heroPoison = Some(Poison.onHit)))
+      for {
+        r <- strike(h, poisoned, seedTurn())
+        (_, _, log) = r
+      } yield assertTrue(log.contains("Яд снимает с вас")) &&
+              assertTrue(!log.contains("Гниль разъедает"))
     },
 
     test("грязный удар мурлока бьёт слабее обычного, но всегда травит") {

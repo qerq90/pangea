@@ -673,6 +673,7 @@ battle:
   beltEnergy: "⚡ Зелье энергии: восстановлено {energy} энергии. Энергия: {cur}/{max}"
   poisonApplied: "🟢 {monster} отравлен!"
   poisonTick: "🟢 Яд снимает {damage} HP с {monster}."
+  heroPoisonTick: "🟢 Яд снимает с вас {damage} HP."
   bleedTick: "🔴 -{damage}"
   burnTick: "🔥 Пламя сжигает {damage} HP у {monster}."
   comboFireAir: "🔥💨 Огонь и воздух, объединив усилия, наносят чудовищный урон… (-{damage})"
