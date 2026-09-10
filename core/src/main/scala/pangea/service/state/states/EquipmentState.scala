@@ -1,7 +1,6 @@
 package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
@@ -12,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.EquipmentState._
-import pangea.service.state.{InventoryFeedback, ItemMenu, State, UserAction}
+import pangea.service.state.{InventoryFeedback, ItemMenu, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 case class EquipmentState(
@@ -255,10 +254,10 @@ case class EquipmentState(
   }
 
   private def readScene(user: User): Task[EquipmentScene] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[EquipmentScene].toOption).getOrElse(EquipmentScene()))
+    UiScene.read(heroDao, user.userId, UiScene.Equipment, EquipmentScene())
 
   private def writeScene(user: User, scene: EquipmentScene): Task[Unit] =
-    heroDao.writeSceneData(user.userId, scene.asJson)
+    UiScene.write(heroDao, user.userId, UiScene.Equipment, scene)
 
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))

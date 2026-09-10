@@ -1,7 +1,6 @@
 package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
@@ -15,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{ItemMenu, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 case class InventoryState(
@@ -423,7 +422,8 @@ case class InventoryState(
       res <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)).flatMap(_.gem.map(_ => scene.selectedId.get)) match {
         case None => showList(user, renderer)
         case Some(gemId) =>
-          heroDao.writeSceneData(user.userId, SocketingState.Scene(gemId).asJson).as(StateType.Socketing)
+          UiScene.write(heroDao, user.userId, UiScene.Socketing, SocketingState.Scene(gemId))
+            .as(StateType.Socketing)
       }
     } yield res
 
@@ -456,10 +456,10 @@ case class InventoryState(
     s"🪙 $silver\n\n${itemText(item, hero.equipment, Some(hero))}"
 
   private def readScene(user: User): Task[InventoryScene] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[InventoryScene].toOption).getOrElse(InventoryScene()))
+    UiScene.read(heroDao, user.userId, UiScene.Inventory, InventoryScene())
 
   private def writeScene(user: User, scene: InventoryScene): Task[Unit] =
-    heroDao.writeSceneData(user.userId, scene.asJson)
+    UiScene.write(heroDao, user.userId, UiScene.Inventory, scene)
 
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))

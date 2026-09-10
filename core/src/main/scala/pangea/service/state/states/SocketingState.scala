@@ -1,7 +1,6 @@
 package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
@@ -13,7 +12,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.SocketingState._
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{ItemMenu, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 /** Экран вставки камня-усилителя в гнездо. Вход из инвентаря: id выбранного камня
@@ -93,7 +92,7 @@ case class SocketingState(
         case Some(s) =>
           val (_, totalPages, _) = ItemMenu.page(socketableItems(hero.equipment), 0)
           val np = (s.page.getOrElse(0) + delta).max(0).min(totalPages - 1)
-          heroDao.writeSceneData(user.userId, s.copy(page = Some(np)).asJson)
+          UiScene.write(heroDao, user.userId, UiScene.Socketing, s.copy(page = Some(np)))
       }
       res <- showTargets(user, renderer)
     } yield res
@@ -131,7 +130,7 @@ case class SocketingState(
                     inventoryRepo.removeItem(scene.gemId, hero.id).mapError(e => new Throwable(e.toString)) *>
                     renderer.show(user, Screen(
                       content.format("socketing.done", "gem" -> g.displayName, "item" -> item.name), Nil)) *>
-                    heroDao.writeSceneData(user.userId, io.circe.Json.Null).as(StateType.Inventory)
+                    UiScene.clear(heroDao, user.userId, UiScene.Socketing).as(StateType.Inventory)
               }
           }
       }
@@ -168,7 +167,7 @@ case class SocketingState(
                content.format("socketing.annihilate", "dust" -> dusts.map(_.displayName).mkString(", "))
              else content.text("socketing.annihilateNoRoom")
       _   <- renderer.show(user, Screen(line, Nil))
-      _   <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _   <- UiScene.clear(heroDao, user.userId, UiScene.Socketing)
     } yield StateType.Inventory
   }
 
@@ -219,7 +218,7 @@ case class SocketingState(
     }
 
   private def readScene(user: User): Task[Option[Scene]] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[Scene].toOption))
+    heroDao.readSceneData(user.userId).map(_.flatMap(_.hcursor.get[Scene](UiScene.Socketing).toOption))
 
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))

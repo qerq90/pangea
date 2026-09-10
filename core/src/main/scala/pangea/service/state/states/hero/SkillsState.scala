@@ -1,7 +1,6 @@
 package pangea.service.state.states.hero
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
@@ -10,7 +9,7 @@ import pangea.model.item.{ItemSet, PassiveKind}
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{ItemMenu, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -109,10 +108,10 @@ case class SkillsState(heroDao: HeroDao, content: SceneContent) extends State {
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
   private def readScene(user: User): Task[SkillsScene] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[SkillsScene].toOption).getOrElse(SkillsScene()))
+    UiScene.read(heroDao, user.userId, UiScene.Skills, SkillsScene())
 
   private def writeScene(user: User, scene: SkillsScene): Task[Unit] =
-    heroDao.writeSceneData(user.userId, scene.asJson)
+    UiScene.write(heroDao, user.userId, UiScene.Skills, scene)
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)

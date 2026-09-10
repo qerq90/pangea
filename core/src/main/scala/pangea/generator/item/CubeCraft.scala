@@ -122,12 +122,35 @@ object CubeCraft {
       }
   }
 
+  // 3 вещи одного набора → ингредиент этого набора. Редкость вещей не важна:
+  // в переплавку одинаково идут и синие, и фиолетовые. Наборы без ингредиента
+  // («Охотник») в рецепт не попадают — переплавлять их не во что.
+  private object SetSalvage extends Recipe {
+    val size = 3
+
+    private def materialOf(set: ItemSet): Option[MaterialKind] =
+      MiniBoss.values.find(_.set == set).map(_.ingredient)
+
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
+      val bySet = pool
+        .filter(i => ItemType.equippable.contains(i.itemType))
+        .flatMap(i => i.set.map(_ -> i))
+        .groupBy(_._1).view.mapValues(_.map(_._2)).toMap
+      bySet.collect { case (set, items) if items.sizeIs >= 3 => set }
+        .toList.sortBy(_.entryName)
+        .flatMap(set => materialOf(set).map(set -> _))
+        .headOption
+        .map { case (set, material) => (bySet(set).take(3), MaterialGenerator.item(material), rng) }
+    }
+  }
+
   // От самого длинного рецепта к самому короткому.
   private val recipes: List[Recipe] = List(
     NineHeads,                                             // 9
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
     DustAssembly,                                          // 3
+    SetSalvage,                                            // 3
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     SetInfusion                                            // 2
   )

@@ -262,7 +262,11 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
       assertTrue(gems.forall(_.gem.exists(_.grade == pangea.model.item.Gem.MinGrade))) &&
       // дублоны: 2 × BossLvL с разбросом ±20%
       assertTrue(gold.forall(a => a >= 3L && a <= 4L)) &&
-      assertTrue(gear.forall(_.rarity == pangea.model.item.Rarity.Purple))
+      // вещь набора приходит фиолетовой или синей — четверть роллов делится пополам
+      assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
+                                  g.rarity == pangea.model.item.Rarity.Blue)) &&
+      assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple)) &&
+      assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Blue))
     },
 
     test("после Джо игрок не идёт осматривать логово элементаля") {

@@ -238,13 +238,17 @@ object LootGenerator {
     }
   }
 
-  /** С элементаля поровну падают его ингредиент и фиолетовая вещь его набора. */
+  /** С элементаля половину роллов забирает ингредиент, а вторую делят пополам
+    * фиолетовая и синяя вещи его набора. */
   private def elementalDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < ElementalIngredientChancePct) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
-    else setGear(boss, heroLvl, rng)
+    else if (roll < ElementalIngredientChancePct + ElementalPurpleChancePct)
+      setGear(boss, heroLvl, ItemRarity.Purple, rng)
+    else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
   /** С Гнилого Джо падает поровну четыре вещи: кожа упыря, расколотый усилитель,
-    * горсть дублонов и фиолетовая вещь «Упыря». */
+    * горсть дублонов и вещь «Упыря» — последнюю четверть делят пополам фиолетовая
+    * и синяя, как и у элементалей. */
   private def joeDrop(boss: MiniBoss, roll: Long, bossLvl: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < 25L) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
     else if (roll < 50L) {
@@ -257,21 +261,31 @@ object LootGenerator {
       val base       = JoeDoubloonsPerLvl * bossLvl
       val (pct, r1)  = rng.between(100L - JoeDoubloonSpreadPct, 100L + JoeDoubloonSpreadPct + 1L)
       (LootDrop.Doubloons((base * pct / 100L).max(1L)), r1)
-    } else setGear(boss, heroLvl, rng)
+    } else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
+    else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
-  /** Фиолетовая вещь набора этого босса: уровень героя ±1, но строго в границах
-    * игры — на первом уровне разброс не уводит вещь в нулевой, на последнем в 151-й.
-    * Имя перекатываем как сетовое: имя набора встаёт вместо титула. */
-  private def setGear(boss: MiniBoss, heroLvl: Long, rng: Rng): (LootDrop, Rng) = {
+  /** Вещь набора этого босса заданной редкости: уровень героя ±1, но строго в
+    * границах игры — на первом уровне разброс не уводит вещь в нулевой, на
+    * последнем в 151-й. Имя перекатываем как сетовое: имя набора встаёт вместо
+    * титула. */
+  private def setGear(boss: MiniBoss, heroLvl: Long, rarity: ItemRarity, rng: Rng): (LootDrop, Rng) = {
     val (delta, r2) = rng.between(-1L, 2L)
     val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
-    val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, ItemRarity.Purple, r2)
+    val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, rarity, r2)
     val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, boss.set, r3)
     (LootDrop.Gear(item.copy(name = name, set = Some(boss.set))), r4)
   }
 
   /** Шанс (в %), что предмет с элементаля окажется ингредиентом, а не вещью набора. */
   val ElementalIngredientChancePct: Long = 50L
+
+  /** Из оставшейся половины столько процентов приходится на фиолетовую вещь; всё,
+    * что не выпало ингредиентом и не фиолетовым, — синяя вещь того же набора. */
+  val ElementalPurpleChancePct: Long = 25L
+
+  /** Граница внутри последней четверти роллов Джо (75..99): до неё — фиолетовая
+    * вещь набора, после — синяя. Нечётный остаток достаётся фиолетовой. */
+  val JoePurpleUntil: Long = 88L
 
   /** Сколько дублонов за уровень босса роняет Джо и с каким разбросом (в %). */
   val JoeDoubloonsPerLvl: Long   = 2L

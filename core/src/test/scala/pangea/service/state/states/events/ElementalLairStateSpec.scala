@@ -8,7 +8,8 @@ import pangea.model.monster.{MiniBoss, Race}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.service.state.states.{EquipmentState, InventoryState}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 import zio.test.TestRandom
@@ -87,6 +88,30 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
       } yield assertTrue(first.contains("пока работал в ордене")) &&
               assertTrue(lore.metElemental) &&
               assertTrue(!second.contains("пока работал в ордене"))
+    },
+
+    test("поход в инвентарь и снаряжение не сбрасывает логово — элементаль тот же") {
+      // Инвентарь и снаряжение держат свои сцены в той же колонке scene_data.
+      // Раньше они затирали её целиком, и на выходе логово разыгрывалось заново.
+      for {
+        t <- makeState()
+        (state, dao, renderer) = t
+        _        <- TestRandom.feedInts(stoneIdx)
+        _        <- state.action(testUser, tap("ApproachElemental"), renderer)
+        before   <- renderer.sentScreens.map(_.last.text)
+        invRepo   = TestInventoryRepository.withItems(Nil)
+        itemRepo  = TestItemRepository.make
+        content  <- ZIO.attempt(SceneContent.load())
+        _        <- InventoryState(dao, invRepo, itemRepo, content).enter(testUser, renderer)
+        _        <- EquipmentState(dao, invRepo, content).enter(testUser, renderer)
+        _        <- state.enter(testUser, renderer)
+        after    <- renderer.sentScreens.map(_.last.text)
+        result   <- state.action(testUser, tap("AttackElemental"), renderer)
+        battle   <- battleOf(dao).map(_.get)
+      } yield assertTrue(before.contains("каменного элементаля")) &&
+              assertTrue(after.contains("каменного элементаля")) &&
+              assertTrue(result == StateType.Battle) &&
+              assertTrue(battle.boss.contains(MiniBoss.StoneElemental))
     },
 
     test("«Персонаж» возвращает в ту же сцену с тем же элементалем, а не в начало") {
