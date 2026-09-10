@@ -105,41 +105,23 @@ object ElementComboSpec extends ZIOSpecDefault {
               // ни быстрых атак, ни удара плашмя — умение застряло
               assertTrue(!log.contains("делает быстрые атаки")) &&
               assertTrue(!log.contains("бьёт плашмя")) &&
-              // тик в начале хода моба съел один заряд, осталось ещё на один каст
-              assertTrue(after.effects.monsterSkillBlockedTurns == 2)
+              // тик в начале хода моба съел один заряд, остался последний
+              assertTrue(after.effects.monsterSkillBlockedTurns == 1)
     },
 
-    test("следующий ход моб тоже молчит — комбо гасит два каста подряд") {
+    test("следующий ход моб кастует снова — блок держится ровно один каст") {
       for {
         first <- turn(battle(), 60, 1, 1, 99)
         (afterCombo, _) = first
         t <- makeState(hero, afterCombo)
         (state, dao, r) = t
-        // второй ход: проки мимо (99), удар моба мимо
-        _      <- TestRandom.feedInts(60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        // второй ход: проки мимо (99), удар моба мимо, выбор умения
+        _      <- TestRandom.feedInts(60, 99, 99, 99, 0) *> TestRandom.feedLongs(100L, 100L)
         _      <- state.action(testUser, tap("Attack"), r)
         log    <- r.sentScreens.map(_.map(_.text).mkString)
         after  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-      } yield assertTrue(log.contains("не смог применить умение")) &&
-              assertTrue(!log.contains("делает быстрые атаки")) &&
-              assertTrue(after.effects.monsterSkillBlockedTurns == 1)
-    },
-
-    test("на третий ход умение возвращается") {
-      for {
-        first <- turn(battle(), 60, 1, 1, 99)
-        (afterCombo, _) = first
-        t1 <- makeState(hero, afterCombo)
-        (s1, dao1, r1) = t1
-        _      <- TestRandom.feedInts(60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L)
-        _      <- s1.action(testUser, tap("Attack"), r1)
-        second <- dao1.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        t2 <- makeState(hero, second)
-        (s2, _, r2) = t2
-        _      <- TestRandom.feedInts(60, 99, 99, 99, 0) *> TestRandom.feedLongs(100L, 100L)
-        _      <- s2.action(testUser, tap("Attack"), r2)
-        log    <- r2.sentScreens.map(_.map(_.text).mkString)
-      } yield assertTrue(!log.contains("не смог применить умение"))
+      } yield assertTrue(!log.contains("не смог применить умение")) &&
+              assertTrue(after.effects.monsterSkillBlockedTurns == 0)
     },
 
     test("без комбо одиночный прок Холода работает как прежде") {
