@@ -4,8 +4,8 @@ import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
-import pangea.generator.item.GemGenerator
-import pangea.model.item.{Gem, GemKind}
+import pangea.generator.item.{GemGenerator, MaterialGenerator}
+import pangea.model.item.{Gem, GemKind, Item, MaterialKind}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -86,32 +86,43 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
       heroDao.writeSceneData(user.userId, Json.Null) *>
       renderer.show(user, Screen(content.text("silverVein.left"), Nil)).as(StateType.Dungeon)
 
-  // Завершение добычи (по таймеру от поллера или вручную после fireAt). С шансом
-  // GemDropChancePct из жилы выпадает один камень-усилитель грейда «расколотый»
-  // (1-й тир) — тогда серебро и камень выдаются через экран добычи (Loot); иначе
-  // серебро начисляется сразу с флейвор-сообщением.
+  // Завершение добычи (по таймеру от поллера или вручную после fireAt). Из жилы
+  // независимо роллятся две находки: камень-усилитель «расколотого» грейда
+  // (GemDropChancePct) и горсть пыли (DustDropChancePct). Выпало хоть что-то —
+  // серебро и находки едут через экран добычи (Loot); пусто — серебро
+  // начисляется сразу с флейвор-сообщением.
   private def harvest(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero    <- getHero(user)
-      base     = (hero.dungeonLevel.toLong + 5L) * 4L
-      delta   <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
-      sign    <- Random.nextBoolean.map(if (_) 1 else -1)
-      reward   = (base * (100L + sign * delta.toLong)) / 100L
-      _       <- scheduler.cancel(user.userId, TaskKind.Harvest)
-      gemRoll <- Random.nextIntBetween(1, 101)
-      result  <- if (gemRoll <= GemDropChancePct) dropGem(user, reward)
-                 else grantSilverDirectly(user, hero.silver, reward, renderer)
+      hero     <- getHero(user)
+      base      = (hero.dungeonLevel.toLong + 5L) * 4L
+      delta    <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
+      sign     <- Random.nextBoolean.map(if (_) 1 else -1)
+      reward    = (base * (100L + sign * delta.toLong)) / 100L
+      _        <- scheduler.cancel(user.userId, TaskKind.Harvest)
+      gemRoll  <- Random.nextIntBetween(1, 101)
+      gem      <- if (gemRoll <= GemDropChancePct) randomGem.map(Some(_)) else ZIO.none
+      dustRoll <- Random.nextIntBetween(1, 101)
+      dust     <- if (dustRoll <= DustDropChancePct) randomDust.map(Some(_)) else ZIO.none
+      finds     = gem.toList ++ dust.toList
+      result   <- if (finds.nonEmpty) dropFinds(user, reward, finds)
+                  else grantSilverDirectly(user, hero.silver, reward, renderer)
     } yield result
 
-  // Серебро + камень через экран добычи (Loot начислит серебро и предложит забрать камень).
   // Череп (Skull) намеренно исключён из пула — см. SilverVeinState.DroppableGemKinds.
-  private def dropGem(user: User, reward: Long): Task[StateType] =
-    for {
-      kindIdx <- Random.nextIntBounded(SilverVeinState.DroppableGemKinds.size)
-      gem      = GemGenerator.item(SilverVeinState.DroppableGemKinds(kindIdx), Gem.MinGrade)
-      loot     = LootData(items = List(gem), silvers = List(reward))
-      _       <- heroDao.writeSceneData(user.userId, loot.asJson)
-    } yield StateType.Loot
+  private def randomGem: Task[Item] =
+    Random.nextIntBounded(SilverVeinState.DroppableGemKinds.size)
+      .map(idx => GemGenerator.item(SilverVeinState.DroppableGemKinds(idx), Gem.MinGrade))
+
+  /** Горсть пыли — её намывает вместе с серебром. Чёрного порошка в жиле нет по
+    * той же причине, что и самого черепа: он не из этой породы. */
+  private def randomDust: Task[Item] =
+    Random.nextIntBounded(SilverVeinState.DroppableDusts.size)
+      .map(idx => MaterialGenerator.item(SilverVeinState.DroppableDusts(idx)))
+
+  // Серебро + находки через экран добычи (Loot начислит серебро и предложит забрать вещи).
+  private def dropFinds(user: User, reward: Long, finds: List[Item]): Task[StateType] =
+    heroDao.writeSceneData(user.userId, LootData(items = finds, silvers = List(reward)).asJson)
+      .as(StateType.Loot)
 
   private def grantSilverDirectly(user: User, curSilver: Long, reward: Long, renderer: Renderer): Task[StateType] =
     heroDao.updateSilver(user.userId, curSilver + reward) *>
@@ -142,10 +153,15 @@ object SilverVeinState {
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
   val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы
+  val DustDropChancePct: Int  = 20 // шанс намыть вместе с серебром горсть пыли
 
   /** Виды камней, которые может выкатить жила. Череп (Skull) намеренно исключён —
    *  «Надколотый череп» не должен выпадать с добычи серебряной руды. */
   val DroppableGemKinds: IndexedSeq[GemKind] = GemKind.values.filterNot(_ == GemKind.Skull)
+
+  /** Виды пыли, которые может намыть жила, — ровно те же камни без черепа, а
+   *  значит и без чёрного порошка. */
+  val DroppableDusts: IndexedSeq[MaterialKind] = DroppableGemKinds.map(MaterialKind.dustOf)
 
   private val StartedAtKey  = "silverVeinStartedAt"
   private val HarvestAction = """{"action":"Harvest"}"""
