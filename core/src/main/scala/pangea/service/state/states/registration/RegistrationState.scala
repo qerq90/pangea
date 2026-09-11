@@ -30,31 +30,58 @@ case class RegistrationState(
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  private lazy val travelNarrative: Narrative = {
-    val bs = content.beats("registration.travel").map {
-      case ("Travel7", beat) =>
-        "Travel7" -> Beat(
-          beat.text,
-          user => players.getDisplayName(user).map(name => List(content.choice("Travel8", "registration.nameLabel", "name" -> name)))
-        )
+  /** Ветки пролога: какой из четырёх смертей игрок выбрал в «Кинжале в спину».
+    * Ключ — суффикс битов `Pick_*` / `Wake_*` в scenes.yaml. */
+  private val branches: Set[String] = Set("Gnome", "Orc", "Elf", "Human")
+
+  /** Пролог из scenes.yaml (`registration.prologue`). Два бита переопределены:
+    * `Pick_<ветка>` запоминает выбранную смерть в scene_data, а `Remember` строит
+    * единственную кнопку «Всё равно помереть» по этой ветке — в Twine это делал
+    * макрос по истории, у нас истории нет, есть сцена. */
+  private lazy val prologue: Narrative = {
+    val beats = content.beats("registration.prologue").map {
+      case (key, beat) if key.startsWith("Pick_") =>
+        key -> beat // текст и кнопка как в yaml; запись ветки — в маршруте ниже
+      case ("Remember", beat) =>
+        "Remember" -> Beat(beat.text, user =>
+          readBranch(user).map { branch =>
+            List(Choice(s"Wake_${branch.getOrElse("Human")}", content.text("registration.rememberLabel")))
+          })
       case other => other
     }
-    new Narrative(bs)
+    new Narrative(beats)
   }
 
+  /** Маршруты `Pick_*` поверх повествования: сначала запоминаем ветку, потом
+    * показываем бит. Без этого `Remember` не знал бы, в чьё тело просыпаться. */
+  private lazy val pickRoutes: Map[String, Target] =
+    branches.map { branch =>
+      val key = s"Pick_$branch"
+      key -> Target.Run { (user, ua, renderer) =>
+        writeBranch(user, branch) *> (prologue.toRoutes(Registration)(key) match {
+          case Target.Run(show) => show(user, ua, renderer)
+          case _                => ZIO.succeed(Registration)
+        })
+      }
+    }.toMap
+
   private lazy val branch: Branch = new Branch(
-    routes = Map(
-      "EndOfTravel"     -> Target.Run { (user, _, renderer)  => endTravel(user, renderer) },
-      "Travel"          -> Target.Run { (user, ua, renderer)  => updateRace(user, ua, renderer) },
+    routes = prologue.toRoutes(Registration) ++ pickRoutes ++ Map(
+      "ConfirmRace"     -> Target.Run { (user, ua, renderer)  => confirmRace(user, ua, renderer) },
       "RaceDescription" -> Target.Run { (user, ua, renderer)  => getRaceDescription(user, ua.text, renderer) },
       "Race"            -> Target.Run { (user, _, renderer)   => getRace(user, renderer) }
-    ) ++ travelNarrative.toRoutes(Registration),
+    ),
     fallback = Target.Run { (user, _, renderer) => showWelcome(user, renderer) }
   )
 
-  private def endTravel(user: User, renderer: Renderer): Task[StateType] =
+  /** Финал: раса выбрана и подтверждена — герой получает стартовое снаряжение
+    * и уходит в лабиринт. Это единственный выход из регистрации. */
+  private def confirmRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
-      _    <- renderer.show(user, Screen(content.text("registration.endTravel"), Nil))
+      race <- ZIO.fromEither(decode[Race](ua.payload.get))
+      _    <- heroDao.updateRace(user.userId, race)
+      _    <- journal.append(GameEvent(user.userId, "race_selected",
+                Json.obj("race" -> race.entryName.asJson)))
       hero <- heroDao.getHeroByUserId(user.userId)
       _    <- ZIO.whenCase(hero) { case Some(h) =>
                  ZIO.foreachDiscard(RegistrationState.starterItems) { item =>
@@ -64,16 +91,15 @@ case class RegistrationState(
                  } *>
                  renderer.show(user, Screen(content.text("registration.startingEquipment"), Nil))
                }
+      _    <- heroDao.writeSceneData(user.userId, Json.Null)
     } yield StateType.Dungeon
 
-  private def updateRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
-    for {
-      race <- ZIO.fromEither(decode[Race](ua.payload.get))
-      _    <- heroDao.updateRace(user.userId, race)
-      _    <- journal.append(GameEvent(user.userId, "race_selected",
-                Json.obj("race" -> race.entryName.asJson)))
-      _    <- renderer.show(user, content.screen("registration.preTravel"))
-    } yield Registration
+  private def readBranch(user: User): Task[Option[String]] =
+    heroDao.readSceneData(user.userId)
+      .map(_.flatMap(_.hcursor.get[String](RegistrationState.BranchKey).toOption).filter(branches.contains))
+
+  private def writeBranch(user: User, branch: String): Task[Unit] =
+    heroDao.writeSceneData(user.userId, Json.obj(RegistrationState.BranchKey -> branch.asJson))
 
   private lazy val raceChoices: List[Choice] =
     Race.mortals.toList.map(r => Choice("RaceDescription", r.toString))
@@ -82,7 +108,7 @@ case class RegistrationState(
     Race.withNameOption(raceName) match {
       case Some(r) =>
         val choices = List(
-          content.choice("Travel", "registration.raceDescription.confirmLabel").copy(data = Map("race" -> r.entryName)),
+          content.choice("ConfirmRace", "registration.raceDescription.confirmLabel").copy(data = Map("race" -> r.entryName)),
           content.choice("Race", "registration.raceDescription.backLabel")
         )
         renderer.show(user, Screen(r.description, choices)).as(Registration)
@@ -100,6 +126,9 @@ case class RegistrationState(
 }
 
 object RegistrationState {
+  /** Ключ в scene_data, под которым живёт выбранная ветка пролога. */
+  val BranchKey: String = "prologueBranch"
+
   val starterItems: List[Item] = List(
     Item(-1L,  "Меч новобранца",            1L, Rarity.Gray, ItemType.Weapon,
       attack = 1, accuracy = 1, energy = 0, armor = 0, defence = 0, evasion = 0),
