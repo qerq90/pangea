@@ -60,20 +60,21 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(rng2 != rng)
     },
 
-    test("rarityForLevel level≤15 → только Gray/White/Green") {
-      val rarities = (1L to 50L).map(seed => ItemGenerator.rarityForLevel(5, Rng(seed))._1).toSet
-      assertTrue(rarities.forall(r => r == Rarity.Gray || r == Rarity.White || r == Rarity.Green))
+    test("находка на полу — только серый, белый или зелёный, на любом этаже") {
+      val rarities = (1L to 300L).map(seed => ItemGenerator.foundItemRarity(Rng(seed))._1).toSet
+      assertTrue(rarities.subsetOf(Set[Rarity](Rarity.Gray, Rarity.White, Rarity.Green))) &&
+      assertTrue(rarities.size == 3)
     },
 
-    test("rarityForLevel level>100 → только Purple/Violet/Orange") {
-      val rarities = (1L to 50L).map(seed => ItemGenerator.rarityForLevel(120, Rng(seed))._1).toSet
-      assertTrue(rarities.forall(r => r == Rarity.Purple || r == Rarity.Violet || r == Rarity.Orange))
-    },
-
-    test("rarityForLevel разные уровни дают разные редкости") {
-      val low  = ItemGenerator.rarityForLevel(1,   Rng(42L))._1
-      val high = ItemGenerator.rarityForLevel(150, Rng(42L))._1
-      assertTrue(low != high)
+    test("доли находки: 60% серый, 30% белый, 10% зелёный") {
+      val n     = 3000
+      val all   = (1L to n.toLong).map(seed => ItemGenerator.foundItemRarity(Rng(seed))._1)
+      def share(r: Rarity) = all.count(_ == r).toDouble / n
+      assertTrue(ItemGenerator.FoundGrayPct == 60L) &&
+      assertTrue(ItemGenerator.FoundWhitePct == 30L) &&
+      assertTrue(math.abs(share(Rarity.Gray)  - 0.60) < 0.05) &&
+      assertTrue(math.abs(share(Rarity.White) - 0.30) < 0.05) &&
+      assertTrue(math.abs(share(Rarity.Green) - 0.10) < 0.05)
     },
 
     test("оружие всегда получает обязательную атаку (>0)") {

@@ -42,7 +42,9 @@ case class FoundItemState(
         .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
       seed              <- Random.nextLong
       rng0               = Rng(seed)
-      (rarity, rng1)     = ItemGenerator.rarityForLevel(hero.dungeonLevel, rng0)
+      // Редкость не зависит от этажа — только серый, белый, зелёный. Уровень
+      // предмета при этом по-прежнему от этажа.
+      (rarity, rng1)     = ItemGenerator.foundItemRarity(rng0)
       item              <- itemRepository.generate(hero.id, hero.dungeonLevel.toLong, rarity, rng1)
       _                 <- heroDao.writeSceneData(user.userId, FoundItemData(item).asJson)
       _                 <- journal.append(GameEvent(user.userId, "item_found",

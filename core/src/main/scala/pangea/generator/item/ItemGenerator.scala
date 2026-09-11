@@ -76,35 +76,21 @@ object ItemGenerator {
       updateExtraParams(n - 1, modified, rng2)
     }
 
-  def rarityForLevel(dungeonLevel: Int, rng: Rng): (Rarity, Rng) = {
+  /** Редкость находки для события «найденный предмет». Одна таблица на все
+    * этажи: 60% серый, 30% белый, 10% зелёный. Находка на полу — не награда за
+    * глубину, глубина отыгрывается уровнем самого предмета (см. getModifiedLvl)
+    * и дропом с мобов; синих и выше здесь не бывает. */
+  def foundItemRarity(rng: Rng): (Rarity, Rng) = {
     val (roll, next) = rng.between(0L, 100L)
-    val rarity = dungeonLevel match {
-      case l if l <= 15 =>
-        if (roll < 60) Rarity.Gray
-        else if (roll < 90) Rarity.White
-        else Rarity.Green
-      case l if l <= 35 =>
-        if (roll < 25) Rarity.White
-        else if (roll < 65) Rarity.Green
-        else if (roll < 92) Rarity.Blue
-        else Rarity.Purple
-      case l if l <= 60 =>
-        if (roll < 20) Rarity.Green
-        else if (roll < 60) Rarity.Blue
-        else if (roll < 88) Rarity.Purple
-        else Rarity.Violet
-      case l if l <= 100 =>
-        if (roll < 10) Rarity.Blue
-        else if (roll < 50) Rarity.Purple
-        else if (roll < 80) Rarity.Violet
-        else Rarity.Orange
-      case _ =>
-        if (roll < 20) Rarity.Purple
-        else if (roll < 55) Rarity.Violet
-        else Rarity.Orange
-    }
+    val rarity =
+      if (roll < FoundGrayPct) Rarity.Gray
+      else if (roll < FoundGrayPct + FoundWhitePct) Rarity.White
+      else Rarity.Green
     (rarity, next)
   }
+
+  val FoundGrayPct: Long  = 60L
+  val FoundWhitePct: Long = 30L
 
   def createItem(lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) = {
     val (itemLvl, rng1) = getModifiedLvl(lvl, rng)
