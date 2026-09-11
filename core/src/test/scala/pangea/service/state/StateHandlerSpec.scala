@@ -137,6 +137,77 @@ object StateHandlerSpec extends ZIOSpecDefault {
         messages <- api.sentMessages
       } yield assertTrue(updated.state == StateType.GlobalMap) &&
               assertTrue(messages.nonEmpty)
+    },
+
+    // ── /restart ──────────────────────────────────────────────────────────────
+    test("/restart сам по себе ничего не стирает — только предупреждение с inline-кнопкой") {
+      for {
+        t <- makeRestartHandler(StateType.GlobalMap)
+        (handler, heroDao, api) = t
+        _        <- handler.makeActionVK(vkId, eventId = 1L, UserAction("/restart", None))
+        still    <- heroDao.getHeroByUserId(userId)
+        messages <- api.sentMessages
+        (text, keyboard) = messages.last
+      } yield assertTrue(still.exists(_.silver == 123L)) &&              // герой на месте
+              assertTrue(text.contains("сотрёт героя")) &&
+              assertTrue(keyboard.exists(_.inline)) &&                    // клавиатура сцены не сбита
+              assertTrue(keyboard.exists(_.buttons.flatten.exists(
+                _.action.payload.exists(_.noSpaces.contains(StateHandler.RestartConfirmId)))))
+    },
+
+    test("подтверждение → герой удалён, заведён новый и показана регистрация") {
+      for {
+        t <- makeRestartHandler(StateType.Battle)
+        (handler, heroDao, api) = t
+        _        <- handler.makeActionVK(vkId, eventId = 1L,
+                      UserAction("", Some(s"""{"action":"${StateHandler.RestartConfirmId}"}""")))
+        fresh    <- heroDao.getHeroByUserId(userId)
+        battleOp <- heroDao.readActiveBattle(userId)
+        messages <- api.sentMessages.map(_.map(_._1))
+      } yield // новый герой — с нуля, а не тот, что был
+              assertTrue(fresh.exists(_.silver == 0L)) &&
+              assertTrue(fresh.exists(_.exp == 0L)) &&
+              assertTrue(fresh.exists(_.state == StateType.Registration)) &&
+              assertTrue(battleOp.isEmpty) &&
+              assertTrue(messages.exists(_.contains("Прошлое стёрто"))) &&
+              // сразу же начался первый экран регистрации
+              assertTrue(messages.size >= 2)
+    },
+
+    test("кнопка с payload не считается командой /restart, даже если текст совпадает") {
+      for {
+        t <- makeRestartHandler(StateType.GlobalMap)
+        (handler, heroDao, api) = t
+        _        <- handler.makeActionVK(vkId, eventId = 1L, UserAction("/restart", Some("""{"action":"OpenCharacter"}""")))
+        still    <- heroDao.getHeroByUserId(userId)
+        messages <- api.sentMessages
+      } yield assertTrue(still.exists(_.silver == 123L)) &&
+              assertTrue(!messages.exists(_._1.contains("сотрёт героя")))
     }
   )
+
+  /** Обвязка для /restart: репозиторий поверх DAO, как в проде, — иначе удаление
+    * в DAO не было бы видно репозиторию, и цепочка «стёрли → завели нового» не
+    * сошлась бы. Регистрация в наборе состояний — на неё уходит новый герой. */
+  private def makeRestartHandler(startState: StateType) =
+    for {
+      baseHero <- ZIO.succeed(hero.copy(state = startState))
+      heroDao  <- TestHeroDao.withHero(userId, baseHero)
+      _        <- heroDao.writeActiveBattle(userId, battle.asJson)
+      heroRepo  = TestHeroRepository.backedBy(heroDao)
+      userRepo <- TestUserRepository.withUser(testUser)
+      api      <- TestApi.make
+      content  <- ZIO.attempt(SceneContent.load())
+      players   = new pangea.test.TestPlayers
+      invRepo   = pangea.test.TestInventoryRepository.accepting
+      itemRepo  = pangea.test.TestItemRepository.make
+      journal  <- pangea.test.TestJournal.make
+      states = Map[StateType, State](
+        StateType.GlobalMap    -> GlobalMapState(heroDao, content),
+        StateType.Battle       -> BattleState(heroDao, content),
+        StateType.Registration -> pangea.service.state.states.registration.RegistrationState(
+                                    players, heroDao, invRepo, itemRepo, journal, content)
+      )
+      lock <- PlayerLock.make
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, states, lock), heroDao, api)
 }

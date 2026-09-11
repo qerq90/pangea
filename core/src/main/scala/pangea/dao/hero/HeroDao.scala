@@ -12,6 +12,8 @@ import zio.{Task, ZLayer}
 trait HeroDao {
   def getHeroByUserId(userId: UserId): Task[Option[Hero]]
   def insertHero(hero: Hero): Task[HeroId]
+  /** Полное удаление героя со всем, что к нему привязано (см. Queries.deleteHeroCascade). */
+  def deleteHero(userId: UserId): Task[Unit]
   def updateRace(userId: UserId, race: Race): Task[Unit]
   def updateState(userId: UserId, potentiallyNewState: StateType): Task[Unit]
 
