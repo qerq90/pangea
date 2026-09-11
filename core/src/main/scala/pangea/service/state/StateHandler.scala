@@ -2,7 +2,7 @@ package pangea.service.state
 
 import io.circe.Json
 import pangea.dao.hero.HeroDao
-import pangea.engine.Renderer
+import pangea.engine.{Choice, ChoiceColor, Renderer, Screen}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.hero.HeroRepository
@@ -116,6 +116,10 @@ class StateHandler(
       _ <-
         if (StateHandler.isHomeCommand(action))
           goHome(user, renderer)
+        else if (StateHandler.isRestartCommand(action))
+          offerRestart(user, renderer)
+        else if (StateHandler.isRestartConfirm(action))
+          restart(user, renderer)
         else
           for {
             state <- ZIO
@@ -129,6 +133,27 @@ class StateHandler(
             potentiallyNewState <- state.action(user, action, renderer)
             _ <- transitionTo(user, hero.state, potentiallyNewState, renderer)
           } yield ()
+    } yield ()
+
+  /** `/restart`, первый шаг: только предупреждение с inline-кнопкой. Клавиатура
+    * текущей сцены при этом остаётся на месте — передумавший игрок просто играет
+    * дальше, никакой «отмены» ему не нужно. */
+  private def offerRestart(user: User, renderer: Renderer): Task[Unit] =
+    renderer.show(user, Screen(
+      StateHandler.RestartWarning,
+      List(Choice(StateHandler.RestartConfirmId, "💀 Да, стереть всё и начать заново",
+        color = ChoiceColor.Negative)),
+      inline = true))
+
+  /** `/restart`, второй шаг: герой и всё, что к нему привязано, удаляются одной
+    * транзакцией. Запись пользователя остаётся, поэтому тут же прогоняем пустое
+    * действие через обычный диспетчер — он не найдёт героя, заведёт нового и
+    * покажет первый экран регистрации, как при самом первом входе. */
+  private def restart(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      _ <- heroDao.deleteHero(user.userId)
+      _ <- api.sendMessage(user, StateHandler.RestartDone, List.empty, None)
+      _ <- makeAction(user, UserAction("", None), renderer)
     } yield ()
 
   /** Глобальная команда `/home` (см. ARCHITECTURE.md §10) — аварийный выход в
@@ -201,6 +226,27 @@ object StateHandler {
     * тоже считалась бы командой). Регистр и пробелы по краям не важны. */
   private def isHomeCommand(action: UserAction): Boolean =
     action.payload.isEmpty && action.text.trim.equalsIgnoreCase("/home")
+
+  /** `/restart` — по тем же правилам, что и `/home`: голый текст, без payload. */
+  private def isRestartCommand(action: UserAction): Boolean =
+    action.payload.isEmpty && action.text.trim.equalsIgnoreCase("/restart")
+
+  /** Подтверждение перезапуска — единственная кнопка, которую диспетчер ловит
+    * поверх состояний. Её id больше нигде не используется, так что чужую
+    * кнопку с ним не спутать. */
+  private def isRestartConfirm(action: UserAction): Boolean =
+    action.payload.exists(p =>
+      io.circe.jawn.decode[Map[String, String]](p).toOption
+        .flatMap(_.get("action")).contains(RestartConfirmId))
+
+  val RestartConfirmId: String = "RestartConfirm"
+
+  val RestartWarning: String =
+    "⚠️ Это сотрёт героя без возможности вернуть: уровень, опыт, серебро, дублоны, " +
+    "снаряжение, сумку, бочку, куб Азата, репутацию и всё, что вы узнали о мире. " +
+    "Игра начнётся с самого начала.\n\nЕсли передумали — просто продолжайте играть."
+
+  val RestartDone: String = "💀 Прошлое стёрто. Начинаем заново."
 
   val live: ZLayer[
     Api with StatesMap with HeroRepository with UserRepository with HeroDao,

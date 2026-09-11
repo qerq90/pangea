@@ -126,6 +126,20 @@ object Queries {
   def updateWeaponDust(userId: UserId, dust: Json): Fragment =
     sql"update $tableName set weapon_dust = $dust where user_id = $userId"
 
+  /** Стереть игрока подчистую — всё, что заведено на его героя. Порядок важен:
+    * у `items` внешний ключ на `heroes`, так что сначала уходит содержимое, и
+    * только потом сам герой. `users` не трогаем: за ним закреплены vk/telegram,
+    * и следующее же сообщение заведёт нового героя с чистого листа. Журналы
+    * событий тоже остаются — это история, а не состояние. */
+  def deleteHeroCascade(userId: UserId): doobie.ConnectionIO[Unit] =
+    for {
+      _ <- sql"delete from items where hero_id in (select id from heroes where user_id = $userId)".update.run
+      _ <- sql"delete from inventories where hero_id in (select id from heroes where user_id = $userId)".update.run
+      _ <- sql"delete from barrels where hero_id in (select id from heroes where user_id = $userId)".update.run
+      _ <- sql"delete from scheduled_tasks where user_id = $userId".update.run
+      _ <- sql"delete from heroes where user_id = $userId".update.run
+    } yield ()
+
   def writeLoreData(userId: UserId, data: Json): Fragment =
     sql"update $tableName set lore_data = $data where user_id = $userId"
 

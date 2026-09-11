@@ -28,6 +28,20 @@ class TestHeroDao(
   def insertHero(hero: Hero): Task[HeroId] =
     heroRef.update(_.updated(hero.userId, hero)).as(hero.id)
 
+  /** В проде всё это — колонки одной строки `heroes`, они уходят вместе с ней. */
+  def deleteHero(userId: UserId): Task[Unit] =
+    heroRef.update(_ - userId) *>
+      raceRef.update(_ - userId) *>
+      sceneDataRef.update(_ - userId) *>
+      battleRef.update(_ - userId) *>
+      merchantRef.update(_ - userId) *>
+      questRef.update(_ - userId) *>
+      gustavoRef.update(_ - userId) *>
+      cardSellerRef.update(_ - userId) *>
+      returnRef.update(_ - userId) *>
+      azatRef.update(_ - userId) *>
+      loreRef.update(_ - userId)
+
   def updateRace(userId: UserId, race: Race): Task[Unit] =
     raceRef.update(_.updated(userId, race))
 
