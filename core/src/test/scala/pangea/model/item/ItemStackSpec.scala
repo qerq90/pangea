@@ -32,7 +32,7 @@ object ItemStackSpec extends ZIOSpecDefault {
       assertTrue(groups.size == 2) &&
       assertTrue(groups.head._2 == 3) &&   // три надколотых
       assertTrue(groups.last._2 == 1) &&   // повреждённый сам по себе
-      assertTrue(groups.head._1.id == 1L)  // кнопка ведёт на первый из стопки
+      assertTrue(groups.head._1.id == 3L)  // кнопка ведёт на последний добавленный
     },
 
     test("камни разных видов не смешиваются") {
@@ -69,11 +69,25 @@ object ItemStackSpec extends ZIOSpecDefault {
       assertTrue(!ItemStack.stackable(sword(1L)))
     },
 
-    test("порядок сохраняется: группа встаёт на место первой своей вещи") {
+    test("порядок сохраняется: группа встаёт на место первой своей вещи, а ведёт на последнюю") {
       val items = List(sword(1L), gem(GemKind.Ruby, 1, 2L), dust(MaterialKind.RubyDust, 3L),
                        gem(GemKind.Ruby, 1, 4L))
       val ids = ItemStack.grouped(items).map(_._1.id)
-      assertTrue(ids == List(1L, 2L, 3L))
+      // рубины стоят на втором месте (где лежит первый из них), но кнопка — на id 4
+      assertTrue(ids == List(1L, 4L, 3L))
+    },
+
+    test("стопка не скачет по меню: после ухода одной вещи группа стоит там же") {
+      val items = List(sword(1L), gem(GemKind.Ruby, 1, 2L), dust(MaterialKind.RubyDust, 3L),
+                       gem(GemKind.Ruby, 1, 4L), gem(GemKind.Ruby, 1, 5L))
+      val before = ItemStack.grouped(items)
+      // ушёл тот, на кого вела кнопка, — последний добавленный
+      val gone   = before.find(_._1.gem.isDefined).get._1.id
+      val after  = ItemStack.grouped(items.filterNot(_.id == gone))
+      assertTrue(gone == 5L) &&
+      // позиция рубинов в списке не изменилась, изменился только счётчик
+      assertTrue(before.indexWhere(_._1.gem.isDefined) == after.indexWhere(_._1.gem.isDefined)) &&
+      assertTrue(after.find(_._1.gem.isDefined).exists(_._2 == 2))
     },
 
     test("счётчик отдельной вещи и приписка к названию") {

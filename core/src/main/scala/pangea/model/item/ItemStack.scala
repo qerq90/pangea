@@ -24,16 +24,23 @@ object ItemStack {
   def stackable(item: Item): Boolean = key(item).isDefined
 
   /** Список для экрана: представитель группы и сколько таких же лежит рядом.
-    * Порядок исходного списка сохраняется — группа встаёт на место первого
-    * своего предмета, а действия идут по его id. */
+    *
+    * Место группы в списке — по ПЕРВОМУ её предмету, а представитель, по чьему
+    * id идёт действие, — ПОСЛЕДНИЙ добавленный. Так стопка не скачет по меню:
+    * переложил или выбросил одну — ушла последняя, первая осталась на месте, и
+    * кнопка стоит там же, где стояла. Если бы уходила первая, группа каждый
+    * раз «переезжала» на позицию следующего своего предмета. */
   def grouped(items: List[Item]): List[(Item, Int)] = {
-    val counts = items.flatMap(key).groupBy(identity).map { case (k, xs) => k -> xs.size }
-    val seen   = scala.collection.mutable.Set.empty[String]
+    val byKey = items.flatMap(i => key(i).map(_ -> i)).groupBy(_._1).map { case (k, xs) => k -> xs.map(_._2) }
+    val seen  = scala.collection.mutable.Set.empty[String]
     items.flatMap { item =>
       key(item) match {
-        case None                       => Some(item -> 1)
+        case None                        => Some(item -> 1)
         case Some(k) if seen.contains(k) => None
-        case Some(k)                    => seen += k; Some(item -> counts.getOrElse(k, 1))
+        case Some(k)                     =>
+          seen += k
+          val group = byKey.getOrElse(k, List(item))
+          Some(group.last -> group.size)
       }
     }
   }
