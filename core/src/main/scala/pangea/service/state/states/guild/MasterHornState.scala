@@ -5,10 +5,12 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, MasterHornBoosts}
+import pangea.model.item.{ItemType, Rarity}
+import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -26,8 +28,15 @@ case class MasterHornState(
 ) extends State {
   import MasterHornState._
 
+  /** «Ржавая вилка»: набрать сто репутации трофеями — и одно улучшение даром.
+    * Завязка смотрит на оружие героя. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Horn, "Horn")
+
   private val branch = new Branch(
     routes = Map(
+      quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> enter(u, r).as(StateType.MasterHorn) },
+      quest.declineAction -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) },
       "ImproveArmor"         -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Armor) },
       "ImproveEvasion"       -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Evasion) },
       "ImproveAttack"        -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Attack) },
@@ -48,7 +57,40 @@ case class MasterHornState(
     // Сбрасываем выбор стата при возврате на главный экран — confirm-сценарий
     // считается завершённым (или прерванным CancelImprove).
     heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, content.screen("guild.masterHorn.menu"))
+      quest.load(user).flatMap { quests =>
+        val base = content.screen("guild.masterHorn.menu")
+        val (front, back) = base.choices.partition(_.id != "LeaveMasterHorn")
+        renderer.show(user, base.copy(choices = front ++ quest.button(quests).toList ++ back))
+      }
+
+  // ── Задание Горна ──────────────────────────────────────────────────────────
+
+  /** Кнопка задания: завязка по оружию героя, пока не взято; счёт репутации на
+    * первом шаге; на втором — напоминание, что улучшение даром. */
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero   <- getHero(user)
+      quests <- quest.load(user)
+      p       = quests.of(NpcQuest.Horn)
+      _ <- if (p.done) enter(user, renderer)
+           else if (!p.taken) quest.offer(user, renderer, quest.format("intro", "verdict" -> verdict(hero)))
+           else if (p.step == 1)
+             renderer.show(user, Screen(quest.format("step1Fail", "rep" -> p.counter.toString), Nil)) *> enter(user, renderer)
+           else renderer.show(user, Screen(quest.text("step2Hint"), Nil)) *> enter(user, renderer)
+    } yield StateType.MasterHorn
+
+  /** Что Горн думает об оружии героя: серое и белое — хлам, лучше — «хоть
+    * что-то», без оружия — отдельная реплика. */
+  private def verdict(hero: Hero): String = {
+    val weapon = hero.equipment.weapon
+    if (weapon.itemType == ItemType.NoItem) quest.text("verdictBareHands")
+    else if (weapon.rarity == Rarity.Gray || weapon.rarity == Rarity.White) quest.format("verdictJunk", "weapon" -> weapon.name)
+    else quest.format("verdictDecent", "weapon" -> weapon.name)
+  }
+
+  /** Улучшение даром — пока задание на втором шаге. */
+  private def freeImprove(user: User): Task[Boolean] =
+    quest.load(user).map(_.onStep(NpcQuest.Horn, 2))
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -58,13 +100,14 @@ case class MasterHornState(
   private def askImprove(user: User, renderer: Renderer, stat: Stat): Task[StateType] =
     for {
       hero <- getHero(user)
+      free <- freeImprove(user)
       _    <- heroDao.writeSceneData(user.userId, Json.obj(StatKey -> stat.entryName.asJson))
-      _    <- renderer.show(user, Screen(
-                content.format("guild.masterHorn.confirm.text",
-                  "stat" -> stat.label,
-                  "step" -> stat.step.toString,
-                  "cost" -> cost(hero, stat).toString),
-                content.screen("guild.masterHorn.confirm").choices))
+      text  = if (free) quest.format("confirmFree", "stat" -> stat.label, "step" -> stat.step.toString)
+              else content.format("guild.masterHorn.confirm.text",
+                     "stat" -> stat.label,
+                     "step" -> stat.step.toString,
+                     "cost" -> cost(hero, stat).toString)
+      _    <- renderer.show(user, Screen(text, content.screen("guild.masterHorn.confirm").choices))
     } yield StateType.MasterHorn
 
   // Применяет прокачку: проверяет репутацию, списывает её, повышает
@@ -85,19 +128,38 @@ case class MasterHornState(
             enter(user, renderer).as(StateType.MasterHorn)
         case Some(stat) =>
           val price = cost(hero, stat)
-          if (hero.guildReputation < price)
-            renderer.show(user, Screen(
-              content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil)) *>
-              askImprove(user, renderer, stat)
-          else if (hero.silver < price)
-            renderer.show(user, Screen(
-              content.format("guild.masterHorn.notEnoughSilver", "cost" -> price.toString), Nil)) *>
-              askImprove(user, renderer, stat)
-          else
-            applyBoost(user, hero, stat, price, renderer) *>
-              askImprove(user, renderer, stat)
+          freeImprove(user).flatMap { free =>
+            if (free)
+              // Задание Горна: этот раз — даром, и это его развязка.
+              writeBoost(user, hero, stat, 0L) *> questFinish(user, hero, stat, renderer)
+            else if (hero.guildReputation < price)
+              renderer.show(user, Screen(
+                content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil)) *>
+                askImprove(user, renderer, stat)
+            else if (hero.silver < price)
+              renderer.show(user, Screen(
+                content.format("guild.masterHorn.notEnoughSilver", "cost" -> price.toString), Nil)) *>
+                askImprove(user, renderer, stat)
+            else
+              applyBoost(user, hero, stat, price, renderer) *>
+                askImprove(user, renderer, stat)
+          }
       }
     } yield next
+
+  /** Развязка задания Горна после бесплатного улучшения: рассказ и опыт. */
+  private def questFinish(user: User, hero: Hero, stat: Stat, renderer: Renderer): Task[StateType] =
+    for {
+      done <- quest.complete(user, hero, identity)
+      (_, expLine) = done
+      weapon = hero.equipment.weapon
+      closing = if (weapon.itemType == ItemType.NoItem) quest.text("closingBareHands")
+                else quest.format("closingWeapon", "weapon" -> weapon.name)
+      outro   = quest.format("outro", "closing" -> closing)
+      _    <- renderer.show(user, Screen(outro, Nil))
+      _    <- renderer.show(user, Screen(quest.format("reward", "stat" -> stat.label, "step" -> stat.step.toString, "exp" -> expLine), Nil))
+      _    <- enter(user, renderer)
+    } yield StateType.MasterHorn
 
   // Бусты Горна не пишутся в `fightStats` напрямую — они хранятся в
   // `masterHornBoosts` и прибавляются на чтение в `Hero.fightStatsWith` /
@@ -111,11 +173,7 @@ case class MasterHornState(
     val remainingRep    = hero.guildReputation - price
     val remainingSilver = hero.silver - price
     for {
-      _ <- heroDao.updateGuildReputation(user.userId, remainingRep)
-      _ <- heroDao.updateSilver(user.userId, remainingSilver)
-      _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
-      newBoosts = bumped(hero.masterHornBoosts, stat)
-      _ <- heroDao.updateMasterHornBoosts(user.userId, newBoosts)
+      _ <- writeBoost(user, hero, stat, price)
       _ <- renderer.show(user, Screen(
         content.format("guild.masterHorn.applied",
           "stat" -> stat.label, "step" -> stat.step.toString,
@@ -123,6 +181,15 @@ case class MasterHornState(
           "remainingSilver" -> remainingSilver.toString), Nil))
     } yield ()
   }
+
+  /** Записи прокачки без сообщения: списание обеих валют, вместимость, буст. */
+  private def writeBoost(user: User, hero: Hero, stat: Stat, price: Long): Task[Unit] =
+    for {
+      _ <- heroDao.updateGuildReputation(user.userId, hero.guildReputation - price)
+      _ <- heroDao.updateSilver(user.userId, hero.silver - price)
+      _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
+      _ <- heroDao.updateMasterHornBoosts(user.userId, bumped(hero.masterHornBoosts, stat))
+    } yield ()
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)

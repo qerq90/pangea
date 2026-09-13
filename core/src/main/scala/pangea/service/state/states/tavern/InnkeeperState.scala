@@ -4,13 +4,13 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, LoreData}
-import pangea.model.item.{Item, ItemDetails}
+import pangea.model.item.{Item, ItemDetails, ItemType}
 import pangea.model.monster.Race
-import pangea.model.quest.QuestData
+import pangea.model.quest.{NpcQuest, QuestData}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{CharacterMenu, State, UserAction}
+import pangea.service.state.{CharacterMenu, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Трактирщик. Принимает квестовые предметы: из подходящих трофеев инвентаря
@@ -26,11 +26,20 @@ case class InnkeeperState(
   content: SceneContent
 ) extends State {
 
+  /** «Плата за первую кружку»: принести любой трофей — Трактирщик забирает самый
+    * дешёвый, платит серебром и рассказывает, куда герой попал. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Innkeeper, "Inn")
+
   private val branch = new Branch(
     routes = Map(
       "TurnInQuest" -> Target.Run { (user, _, renderer) =>
         turnInQuest(user, renderer)
       },
+      quest.questAction   -> Target.Run { (user, _, renderer) => questTalk(user, renderer) },
+      quest.acceptAction  -> Target.Run { (user, _, renderer) => quest.accept(user, renderer) *> showMenu(user, renderer).as(StateType.Innkeeper) },
+      quest.declineAction -> Target.Run { (user, _, renderer) => showMenu(user, renderer).as(StateType.Innkeeper) },
+      "KinetLore"         -> Target.Run { (user, _, renderer) =>
+        renderer.show(user, Screen(quest.text("lore"), List(content.choice("BackFromLore", quest.key("loreBack"))))).as(StateType.Innkeeper) },
       "OpenCharacter" -> Target.Run { (user, _, _) =>
         CharacterMenu.open(heroDao, user.userId, StateType.Innkeeper)
       },
@@ -58,20 +67,27 @@ case class InnkeeperState(
   ): Task[StateType] = branch.act(user, ua, renderer)
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
-    readLore(user).flatMap { lore =>
+    for {
+      lore   <- readLore(user)
+      quests <- quest.load(user)
       // Кнопка про элементалей появляется, только когда герой их уже видел, и
       // висит, пока он не заплатит за рассказ.
-      val loreBtn = Option.when(lore.metElemental && !lore.elementalLore)(
+      loreBtn = Option.when(lore.metElemental && !lore.elementalLore)(
         content.choice("ElementalLore", "innkeeper.elementalLoreLabel"))
       // То же и про Гнилого Джо: кнопка висит, пока рассказ не куплен.
-      val joeBtn = Option.when(lore.metJoe && !lore.joeLore)(
+      joeBtn = Option.when(lore.metJoe && !lore.joeLore)(
         content.choice("JoeLore", "innkeeper.joeLoreLabel"))
-      renderer.show(
+      // Рассказ о Кинэте — награда за первое задание, дальше бесплатно.
+      kinetBtn = Option.when(quests.isDone(NpcQuest.Innkeeper))(
+        content.choice("KinetLore", quest.key("loreLabel")))
+      _ <- renderer.show(
         user,
         Screen(
           content.text("innkeeper.text"),
           List(
             Some(content.choice("TurnInQuest", "innkeeper.turnInLabel")),
+            quest.button(quests),
+            kinetBtn,
             loreBtn,
             joeBtn,
             Some(content.choice("OpenCharacter", "common.character")),
@@ -79,7 +95,38 @@ case class InnkeeperState(
           ).flatten
         )
       )
-    }
+    } yield ()
+
+  /** Кнопка задания: завязка, пока не взято; сдача трофея, пока идёт. */
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    quest.load(user).flatMap { quests =>
+      if (quests.isDone(NpcQuest.Innkeeper)) showMenu(user, renderer)
+      else if (!quests.isTaken(NpcQuest.Innkeeper)) quest.offer(user, renderer, quest.text("intro"))
+      else questTurnIn(user, renderer)
+    }.as(StateType.Innkeeper)
+
+  /** Сдача: самый дешёвый трофей из сумки уходит Трактирщику, герой получает
+    * серебро, опыт и рассказ. Без трофея — только упрёк. */
+  private def questTurnIn(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- InnkeeperState.cheapestTrophy(inv.items.data) match {
+        case None =>
+          renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> showMenu(user, renderer)
+        case Some(trophy) =>
+          for {
+            _        <- inventoryRepo.removeItem(trophy.id, hero.id).mapError(e => new Throwable(e.toString))
+            _        <- heroDao.updateSilver(user.userId, hero.silver + InnkeeperState.QuestSilver)
+            done     <- quest.complete(user, hero, identity)
+            (_, expLine) = done
+            _        <- renderer.show(user, Screen(quest.text("outro"), Nil))
+            _        <- renderer.show(user, Screen(quest.format("reward",
+                          "item" -> trophy.name, "silver" -> InnkeeperState.QuestSilver.toString, "exp" -> expLine), Nil))
+            _        <- showMenu(user, renderer)
+          } yield ()
+      }
+    } yield ()
 
   /** Предложение купить рассказ об элементалях. */
   private def offerLore(user: User, renderer: Renderer): Task[StateType] =
@@ -232,6 +279,17 @@ object InnkeeperState {
 
   /** Цена рассказа про Гнилого Джо — он попроще элементалей. */
   val JoeLorePrice: Long = 1000L
+
+  /** Сколько серебра Трактирщик даёт за первый трофей. */
+  val QuestSilver: Long = 100L
+
+  /** Самый дешёвый трофей в сумке — для платы за первую кружку: наименьший
+    * коэффициент вида, при равных — младший по уровню. */
+  def cheapestTrophy(items: List[Item]): Option[Item] =
+    items
+      .filter(i => i.id != 0L && i.itemType == ItemType.Trophy)
+      .sortBy(i => (trophyCoef(i), i.lvl))
+      .headOption
 
   /** Трофей, который уйдёт в счёт задания по расе `raceName`: из подходящих
     * берём с наибольшим коэффициентом вида, при равных — старший по уровню

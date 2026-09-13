@@ -6,6 +6,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Beat, Branch, Choice, Journal, Narrative, Players, Renderer, SceneContent, Screen, Target}
 import pangea.model.GameEvent
+import pangea.model.hero.LoreData
 import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType, Rarity}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
@@ -75,13 +76,18 @@ case class RegistrationState(
   )
 
   /** Финал: раса выбрана и подтверждена — герой получает стартовое снаряжение
-    * и уходит в лабиринт. Это единственный выход из регистрации. */
+    * и уходит в лабиринт. Это единственный выход из регистрации. Ветка пролога
+    * (какой смертью прошёл) переезжает из scene_data в durable `lore_data`:
+    * сцена сейчас сотрётся, а выбор ещё пригодится сюжету. */
   private def confirmRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
-      race <- ZIO.fromEither(decode[Race](ua.payload.get))
-      _    <- heroDao.updateRace(user.userId, race)
-      _    <- journal.append(GameEvent(user.userId, "race_selected",
-                Json.obj("race" -> race.entryName.asJson)))
+      race   <- ZIO.fromEither(decode[Race](ua.payload.get))
+      branch <- readBranch(user)
+      _      <- heroDao.updateRace(user.userId, race)
+      lore   <- heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
+      _      <- heroDao.writeLoreData(user.userId, lore.copy(prologueBranch = branch).asJson)
+      _      <- journal.append(GameEvent(user.userId, "race_selected",
+                  Json.obj("race" -> race.entryName.asJson, "prologueBranch" -> branch.asJson)))
       hero <- heroDao.getHeroByUserId(user.userId)
       _    <- ZIO.whenCase(hero) { case Some(h) =>
                  ZIO.foreachDiscard(RegistrationState.starterItems) { item =>

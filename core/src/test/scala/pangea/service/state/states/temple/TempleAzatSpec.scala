@@ -5,7 +5,7 @@ import pangea.engine.SceneContent
 import pangea.model.hero.{AzatState, CubeStatus}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -31,7 +31,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
         dao      <- TestHeroDao.withHero(userId, hero(doubloons = 300L))
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
-        state     = TempleAzatState(dao, content)
+        state     = TempleAzatState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content)
         _        <- state.action(testUser, tap("Donate"), renderer)
         azat     <- readAzat(dao)
         left     <- doubloonsOf(dao)
@@ -45,7 +45,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
         dao      <- TestHeroDao.withHero(userId, hero(doubloons = 10L))
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
-        state     = TempleAzatState(dao, content)
+        state     = TempleAzatState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content)
         _        <- state.action(testUser, tap("Donate"), renderer)
         azat     <- readAzat(dao)
         left     <- doubloonsOf(dao)

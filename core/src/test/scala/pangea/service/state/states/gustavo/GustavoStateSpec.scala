@@ -64,7 +64,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
     // ── Меню ────────────────────────────────────────────────────────────────
     suite("GustavoState (меню)")(
 
-      test("enter → зелёная кнопка лечения, баф, травы, припасы, Назад") {
+      test("enter → зелёная кнопка лечения, баф, травы, припасы, задание, Назад") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
@@ -73,7 +73,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           ids      = screens.last.choices.map(_.id)
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Positive)) &&
-                assertTrue(ids == List("Heal", "Boost", "Herbs", "Supplies", "Back"))
+                assertTrue(ids == List("Heal", "Boost", "Herbs", "Supplies", "GusQuest", "Back"))
       },
 
       test("Herbs → заглушка, остаёмся в меню; Supplies → GustavoSupplies") {
