@@ -5,7 +5,8 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
-import pangea.model.battle.{Bleed, Buff, Burn, Element, Poison, Regen, SoloPveBattle, SkillSlotState}
+import pangea.generator.monster.MonsterGenerator
+import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SlainMonster, SoloPveBattle, SkillSlotState}
 import pangea.model.hero.{AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.MiniBoss
@@ -82,9 +83,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // засчитывать. Ловим здесь, где сходятся ВСЕ пути урона: удар, навык,
       // шипы, яд. Иначе каждый из них пришлось бы проверять отдельно.
       risen   = joeRises(guarded)
+      // Группа: павший в паре уступает место следующему, мобы вне пары ходят
+      // (сбоку бьёт только сосед), в конце раунда — подкрепление, перемешивание
+      // каждый четвёртый раунд и отложенный Таран. Ход, который не был ходом
+      // (навык не готов и т.п.), группу не двигает.
+      promoted = promoteAfterKill(risen)
+      sided   <- sideMobsPhase(promoted, now)
+      ended   <- endRound(battle, sided)
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
-      hinted  = plainSteelHint(hero, risen)
+      hinted  = plainSteelHint(hero, ended)
       state  <- commit(user, hinted, now, renderer)
     } yield state
 
@@ -185,10 +193,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
+    // Групповая сводка: что делали мобы вне пары и кто где стоит. Только пока
+    // бой идёт и в нём больше одного моба.
+    val groupMsg = (res.sideLog ++ (if (res.battle.isGroup) groupLines(res.battle) else Vector.empty)).mkString("\n")
+    val showGroup = ZIO.when(groupMsg.nonEmpty && res.outcome == Outcome.Continue)(
+      renderer.show(user, Screen(groupMsg, Nil)))
     res.outcome match {
       case Outcome.Continue =>
         (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
-          showLog *>
+          showLog *> showGroup *>
           renderer
             .show(user, buildBattleScreen(res.hero, res.battle, res.hero.effectiveMaxHp(nowMs), nowMs))
             .as(StateType.Battle)
@@ -1693,10 +1706,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     for {
       buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
       monster   = battle.toMonster
+      // Мобы вне пары могут не выпустить: по 5% за каждого. Окружили — бой
+      // продолжается, как будто бегства и не было.
+      surroundPct = GroupState.SurroundPctPerFreeMob * battle.group.others.size
+      surrounded <- chanceRoll(surroundPct > 0L, surroundPct)
       hitRoll <- Random.nextIntBetween(1, 101)
       // «Сверкающий» дают +25% к уклонению именно при бегстве.
       result <-
-        if (hitRoll > playerDodgeChance(hero, battle, nowMs, fleeing = true)) {
+        if (surrounded)
+          ZIO.succeed(TurnResult(hero, battle,
+            Vector(content.format("battle.group.surround", "race" -> monster.race.toString)), Outcome.Continue))
+        else if (hitRoll > playerDodgeChance(hero, battle, nowMs, fleeing = true)) {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
             rawDamage = (monster.fightStats.atk * spread / 100L).max(1L)
@@ -1719,6 +1739,214 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         } else
           ZIO.succeed(TurnResult(hero, battle, Vector.empty, Outcome.Fled))
     } yield result
+
+  // ── Группа ──────────────────────────────────────────────────────────────────
+
+  /** Активный моб пал, а в группе есть ещё: в паре встаёт следующий по номеру,
+    * бой продолжается. Павший ждёт выдачи добычи в `slain`. Новичок в этом
+    * раунде уже не бьёт — он только что шагнул вперёд. */
+  private def promoteAfterKill(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Victory) res
+    else res.battle.promoteNext match {
+      case None       => res
+      case Some(next) =>
+        val fallen = res.battle.monsterName
+        res.copy(battle = next, outcome = Outcome.Continue,
+          log = res.log :+ content.format("battle.group.fell", "monster" -> fallen, "next" -> next.monsterName))
+    }
+
+  /** Ход мобов вне пары. Сосед героя (номер 2) достаёт его сбоку: обычная
+    * атака, а поверх — умение, как у моба в паре; лечащее умение он отдаёт
+    * раненому соседу, если сам цел. Мобы дальше по строю героя не достают —
+    * копят энергию и лечат соседей. Раны на них (яд, кровь, огонь) тикают как у
+    * всех; кого добило — уходит в павшие. */
+  private def sideMobsPhase(res: TurnResult, nowMs: Long): Task[TurnResult] =
+    if (res.outcome != Outcome.Continue || !res.battle.isGroup) ZIO.succeed(res)
+    else {
+      val n = res.battle.group.others.size
+      ZIO.foldLeft((0 until n).toList)((res.hero, res.battle, Vector.empty[String])) {
+        case ((h, b, log), idx) =>
+          // Индексы могли сдвинуться, если кто-то выше по строю пал от ран.
+          if (h.fightStats.hp <= 0 || idx >= b.group.others.size) ZIO.succeed((h, b, log))
+          else freeMobTurn(h, b, idx, nowMs).map { case (h2, b2, lines) => (h2, b2, log ++ lines) }
+      }.map { case (h, b, log) =>
+        val outcome = if (h.fightStats.hp <= 0) Outcome.Death else Outcome.Continue
+        res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ log)
+      }
+    }
+
+  /** Один моб вне пары, `idx` — его индекс в `others` (номер в строю idx + 2). */
+  private def freeMobTurn(hero: Hero, battle: SoloPveBattle, idx: Int, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] = {
+    val slot       = battle.group.others(idx)
+    val reachesHero = idx + 2 - 1 <= GroupState.Reach   // герой под номером 1
+    // Временный бой: этот моб — «активный», геройская половина эффектов та же.
+    val tmp0 = battle.withActive(slot)
+    val tmp  = tmp0.copy(effects = tickSlotEffects(tmp0.effects))
+    for {
+      // 1) удар сбоку — только если достаёт
+      struck <-
+        if (!reachesHero) ZIO.succeed((hero, tmp, Vector.empty[String]))
+        else for {
+          hitRoll <- Random.nextIntBetween(1, 101)
+          dodge    = playerDodgeChance(hero, tmp, nowMs)
+          out <-
+            if (hitRoll > dodge)
+              mobStrike(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs).map { st =>
+                val line = content.format("battle.group.sideHit", "monster" -> tmp.monsterName, "damage" -> st.damage.toString)
+                (hero.copy(fightStats = hero.fightStats.copy(hp = st.newHp, armor = st.newArmor)), st.battle,
+                  Vector(line) ++ st.extraLines)
+              }
+            else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
+        } yield out
+      (h1, t1, log1) = struck
+      // 2) умение: раненому соседу — лечение, себе — что по карману, герою — урон
+      casted <-
+        if (h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
+          ZIO.succeed((h1, t1, battle, Vector.empty[String]))
+        else allyAid(h1, t1, battle, idx, nowMs).flatMap {
+          case Some((t2, b2, line)) => ZIO.succeed((h1, t2, b2, Vector(line)))
+          case None =>
+            if (reachesHero) mobSkillCast(h1, t1, nowMs).map { case (t2, h2, line) =>
+              (h2, t2, battle, if (line.isEmpty) Vector.empty else Vector(line))
+            }
+            else selfAid(h1, t1, nowMs).map { case (t2, line) => (h1, t2, battle, if (line.isEmpty) Vector.empty else Vector(line)) }
+        }
+      (h2, t2, b2, log2) = casted
+      // 3) конец хода этого моба: энергия и тик ран
+      withEnergy = t2.copy(monsterCurrentEnergy =
+        (t2.monsterCurrentEnergy + MonsterEnergy.regen(t2.monsterLvl, t2.rarity)).min(t2.monsterStats.energy))
+      (ticked, dotLine, _) = tickMonsterEffects(withEnergy, withEnergy.monsterName, h2.sets.burnGrowthMult)
+      log3 = log1 ++ log2 ++ (if (dotLine.isEmpty) Vector.empty else Vector(dotLine))
+      // 4) обратно в строй — или в павшие, если раны добили
+      afterSlot = ticked.activeSlot
+      merged = b2.copy(effects = ticked.effects.withMonsterPart(b2.effects))
+      result =
+        if (afterSlot.alive)
+          (h2, merged.copy(group = merged.group.copy(others = merged.group.others.updated(idx, afterSlot))), log3)
+        else {
+          val fallen = SlainMonster(afterSlot.lvl, afterSlot.race, afterSlot.rarity, afterSlot.marked, afterSlot.name)
+          (h2, merged.copy(group = merged.group.copy(
+             others = merged.group.others.patch(idx, Nil, 1), slain = merged.group.slain :+ fallen)),
+           log3 :+ content.format("battle.group.sideFell", "monster" -> afterSlot.name))
+        }
+    } yield result
+  }
+
+  /** Временные эффекты на мобе вне пары тикают сами: общий `tickBuffs` крутит
+    * только активную пару. */
+  private def tickSlotEffects(e: BattleEffects): BattleEffects = e.copy(
+    mobAirBoostTurns         = (e.mobAirBoostTurns - 1).max(0),
+    monsterSkillBlockedTurns = (e.monsterSkillBlockedTurns - 1).max(0),
+    monsterWeakenedTurns     = (e.monsterWeakenedTurns - 1).max(0),
+    monsterDefenceDebuff     = e.monsterDefenceDebuff.flatMap(_.ticked)
+  )
+
+  /** Помощь соседу: если у моба по карману лечение или починка, сам он цел, а
+    * сосед по строю (номер ±1) ранен — умение уходит соседу, цена списывается
+    * с лекаря. Сосед под номером 1 — активный моб в паре с героем. */
+  private def allyAid(
+      hero: Hero, caster: SoloPveBattle, battle: SoloPveBattle, idx: Int, nowMs: Long
+  ): Task[Option[(SoloPveBattle, SoloPveBattle, String)]] = {
+    val race       = pangea.model.monster.Race.withName(caster.monsterRace)
+    val affordable = MonsterSkill.values.filter(sk =>
+      sk.availableTo(race) && sk.cost(caster.monsterLvl) <= caster.monsterCurrentEnergy)
+    // Кандидаты: сосед выше по строю (активный при idx == 0) и сосед ниже.
+    val neighbours: List[Either[Unit, Int]] =
+      (if (idx == 0) List(Left(())) else List(Right(idx - 1))) ++
+        (if (idx + 1 < battle.group.others.size) List(Right(idx + 1)) else Nil)
+    def target(n: Either[Unit, Int]): SoloPveBattle = n match {
+      case Left(_)  => battle
+      case Right(i) => battle.withActive(battle.group.others(i))
+    }
+    val heals   = affordable.contains(MonsterSkill.HealingFlask) && !MonsterSkill.HealingFlask.applicable(caster)
+    val repairs = affordable.contains(MonsterSkill.EmergencyRepair) && !MonsterSkill.EmergencyRepair.applicable(caster)
+    val pick: Option[(MonsterSkill, Either[Unit, Int])] =
+      (if (heals) neighbours.find(n => MonsterSkill.HealingFlask.applicable(target(n))).map(MonsterSkill.HealingFlask -> _) else None)
+        .orElse(if (repairs) neighbours.find(n => MonsterSkill.EmergencyRepair.applicable(target(n))).map(MonsterSkill.EmergencyRepair -> _) else None)
+    ZIO.succeed(pick.map { case (skill, n) =>
+      val tgt    = target(n)
+      val cast   = skill.cast(tgt, hero, nowMs)
+      val paid   = caster.copy(monsterCurrentEnergy = (caster.monsterCurrentEnergy - skill.cost(caster.monsterLvl)).max(0L))
+      val (line, healed) =
+        if (skill == MonsterSkill.HealingFlask)
+          (content.format("battle.group.healedAlly", "monster" -> caster.monsterName,
+            "hp" -> (cast.battle.monsterCurrentHp - tgt.monsterCurrentHp).toString), cast.battle)
+        else
+          (content.format("battle.group.repairedAlly", "monster" -> caster.monsterName,
+            "armor" -> (cast.battle.monsterCurrentArmor - tgt.monsterCurrentArmor).toString), cast.battle)
+      val updated = n match {
+        case Left(_)  => healed.copy(group = battle.group)                          // активный
+        case Right(i) => battle.copy(group = battle.group.copy(others = battle.group.others.updated(i, healed.activeSlot)))
+      }
+      (paid, updated, line)
+    })
+  }
+
+  /** Моб, который никого не достаёт, тратит энергию только на себя. */
+  private def selfAid(hero: Hero, caster: SoloPveBattle, nowMs: Long): Task[(SoloPveBattle, String)] = {
+    val race = pangea.model.monster.Race.withName(caster.monsterRace)
+    val own  = List(MonsterSkill.HealingFlask, MonsterSkill.EmergencyRepair).filter(sk =>
+      sk.availableTo(race) && sk.applicable(caster) && sk.cost(caster.monsterLvl) <= caster.monsterCurrentEnergy)
+    ZIO.succeed(own.headOption match {
+      case None     => (caster, "")
+      case Some(sk) =>
+        val paid = caster.copy(monsterCurrentEnergy = (caster.monsterCurrentEnergy - sk.cost(caster.monsterLvl)).max(0L))
+        val cast = sk.cast(paid, hero, nowMs)
+        (cast.battle, cast.line)
+    })
+  }
+
+  /** Конец раунда группы. Ход, который ходом не был (`turn` вернул бой без
+    * изменений), сюда не доходит. Порядок: подкрепление → перемешивание каждый
+    * четвёртый раунд → отложенный Таран, чтобы перемешивание его не съело. */
+  private def endRound(before: SoloPveBattle, res: TurnResult): Task[TurnResult] =
+    if (res.outcome != Outcome.Continue || res.battle == before || res.battle.boss.isDefined) ZIO.succeed(res)
+    else {
+      val b0 = res.battle.copy(group = res.battle.group.copy(round = res.battle.group.round + 1))
+      for {
+        // подкрепление: сородич первого моба, редкость как обычно
+        comes <- chanceRoll(b0.group.aliveCount < GroupState.MaxMonsters, GroupState.ReinforcementChancePct)
+        withMore <-
+          if (!comes) ZIO.succeed((b0, Vector.empty[String]))
+          else for {
+            seed  <- Random.nextLong
+            race   = pangea.model.monster.Race.withName(b0.reinforcementRace)
+            (m, _) = MonsterGenerator.generateOfRace(res.hero.dungeonLevel, race, Rng(seed))
+            pct   <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+            slot   = MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
+                       m.fightStats.armor, m.marked, MonsterEnergy.startEnergy(m.lvl, m.rarity, pct), BattleEffects.empty)
+            joined = b0.withReinforcement(slot).copy(group = b0.group.copy(
+                       others = b0.group.others :+ slot, originRace = Some(b0.reinforcementRace)))
+          } yield (joined, Vector(content.text("battle.group.reinforcement")))
+        (b1, log1) = withMore
+        // перемешивание: каждый четвёртый раунд, если есть кого мешать
+        shuffled <-
+          if (!b1.isGroup || b1.group.round % GroupState.ShufflePeriod != 0) ZIO.succeed((b1, Vector.empty[String]))
+          else Random.shuffle(b1.monstersInOrder.indices.toList).map { order =>
+            val b = b1.reorderMonsters(order).copy(group = b1.group.copy(pendingSwap = None))
+            (b, Vector(content.format("battle.group.shuffle", "monster" -> b.monsterName)))
+          }
+        (b2, log2) = shuffled
+        // Таран: в пару встаёт тот, кого таранили
+        rammed = b2.group.pendingSwap match {
+          case Some(i) if i < b2.group.others.size =>
+            val b = b2.swapWith(i).copy(group = b2.group.copy(pendingSwap = None))
+            (b.copy(group = b.group.copy(pendingSwap = None)), Vector(content.format("battle.group.ram", "monster" -> b.monsterName)))
+          case _ => (b2.copy(group = b2.group.copy(pendingSwap = None)), Vector.empty[String])
+        }
+        (b3, log3) = rammed
+      } yield res.copy(battle = b3, sideLog = res.sideLog ++ log1 ++ log2 ++ log3)
+    }
+
+  /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. */
+  private def groupLines(battle: SoloPveBattle): Vector[String] = {
+    val active = battle.activeSlot
+    val head   = content.format("battle.group.lineHero",
+      "monster" -> battle.monsterName, "hp" -> active.hpPct.toString, "armor" -> active.armorPct.toString)
+    val rest   = battle.group.others.map(o =>
+      content.format("battle.group.lineFree", "monster" -> o.name, "hp" -> o.hpPct.toString, "armor" -> o.armorPct.toString))
+    (head :: rest).toVector
+  }
 
   // ── Победа ──────────────────────────────────────────────────────────────────
 
@@ -2087,7 +2315,10 @@ object BattleState {
       hero: Hero,
       battle: SoloPveBattle,
       log: Vector[String],
-      outcome: Outcome
+      outcome: Outcome,
+      // Что делали мобы вне пары: удары сбоку, лечение врага, подкрепление,
+      // перемешивание. Идёт игроку ОТДЕЛЬНЫМ сообщением после лога раунда.
+      sideLog: Vector[String] = Vector.empty
   )
 
   /** Текущее число зарядов надетой фляги (0, если фляга не надета). */

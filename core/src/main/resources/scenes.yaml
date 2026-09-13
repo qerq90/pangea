@@ -1297,6 +1297,19 @@ battle:
 
 
 
+  group:
+    lineHero: "🟢 Вы VS 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
+    lineFree: "🔴 {monster} ❤ {hp}% 🧥 {armor}%"
+    sideHit: "⚔ {monster} атаковал вас сбоку на {damage} урона."
+    sideMiss: "💨 {monster} ударил сбоку, но промахнулся."
+    healedAlly: "💉 {monster} исцелил вашего врага на {hp} HP!"
+    repairedAlly: "🔧 {monster} восстановил броню вашего врага на {armor}!"
+    fell: "☠ {monster} пал. На его место встаёт {next}."
+    sideFell: "☠ {monster} пал, не дойдя до вас."
+    reinforcement: "🐾 На звуки битвы прибежал сородич вашего врага."
+    shuffle: "🔀 Ряды смешались — теперь против вас {monster}."
+    ram: "🛡 Таран сработал: против вас встал {monster}."
+    surround: "⛓ Группа {race} окружает вас и навязывает вам продолжение боя."
   mobColdBite: "❄️ Морозный удар сковывает вас: ваша защита держит хуже."
   mobAirBoost: "💨 Ветер подхватывает врага — он бьёт точнее и уворачивается лучше."
   mobPoisons: "🟢 Отравленное оружие оставило яд в вашей ране."
