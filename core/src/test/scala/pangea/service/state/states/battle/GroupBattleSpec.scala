@@ -275,6 +275,25 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.round == 0)
     },
 
+    test("кнопки выбора цели влезают в лимит подписи даже у отмеченного тьмой с длинным именем") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
+      // Самое длинное имя в игре, да ещё с меткой тьмы — полностью не влезет.
+      val chief = Monster(0L, lvl, Race.Goblin, Rarity.Mythical,
+        FightStats(atk = 20, hp = 1000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0),
+        marked = true)
+      val b = SoloPveBattle.fromGroup(List(chief, chief), h, Nil)
+      for {
+        t <- makeState(h, b)
+        (state, _, r) = t
+        _       <- state.action(testUser, tap("Skill_101"), r)
+        ask     <- r.sentScreens.map(_.last)
+        labels   = ask.choices.filter(_.id == "Skill_101").map(_.label)
+      } yield assertTrue(labels.size == 2) &&
+              assertTrue(labels.forall(_.length <= pangea.engine.Choice.MaxLabelLength)) &&
+              assertTrue(labels.head == "1. Отмеченный тьмой Гоблин ❤ 100%") &&
+              assertTrue(chief.name == "Отмеченный тьмой Хобгоблин — предводитель банды")
+    },
+
     test("лечащее умение цели не спрашивает — ход идёт сразу") {
       val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
       for {

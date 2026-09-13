@@ -11,3 +11,13 @@ case class Choice(
   color: ChoiceColor          = ChoiceColor.Primary,
   row:   Option[Int]          = None
 )
+
+object Choice {
+  /** Самая длинная подпись, которую принимает клавиатура ВК; длиннее — ошибка
+    * отправки и «зависший» экран у игрока. */
+  val MaxLabelLength: Int = 40
+
+  /** Подпись, укладывающаяся в лимит: лишнее срезается с многоточием. */
+  def fit(label: String): String =
+    if (label.length <= MaxLabelLength) label else label.take(MaxLabelLength - 1) + "…"
+}

@@ -1411,13 +1411,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero) &&
           BattleState.dealsDamage(slot.skill.effect))
 
-  /** Экран выбора цели: моб в паре и сосед за ним, с их полосками. */
+  /** Экран выбора цели: моб в паре и сосед за ним, с их полосками. Подпись
+    * кнопки ограничена по длине, поэтому имя — короткое (у отмеченного тьмой —
+    * только раса), а что всё равно не влезло, срезается. */
   private def targetScreen(battle: SoloPveBattle, itemId: Long): Screen = {
     val skillLabel = battle.slotByItem(itemId).map(_.skill.label).getOrElse("")
     val targets    = battle.monstersInOrder.take(GroupState.Reach + 1).zipWithIndex.map { case (m, i) =>
       pangea.engine.Choice(
         id    = s"Skill_$itemId",
-        label = content.format("battle.group.targetLabel", "n" -> (i + 1).toString, "monster" -> m.name, "hp" -> m.hpPct.toString),
+        label = pangea.engine.Choice.fit(
+          content.format("battle.group.targetLabel", "n" -> (i + 1).toString, "monster" -> m.shortName, "hp" -> m.hpPct.toString)),
         data  = Map("target" -> i.toString),
         row   = Some(i))
     }

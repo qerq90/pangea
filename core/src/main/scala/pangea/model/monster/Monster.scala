@@ -17,6 +17,11 @@ case class Monster(
     ) // fallback на случай новой расы без записи
     if (marked) s"${Monster.MarkedPrefix} $base" else base
   }
+
+  /** Имя для кнопки: у отмеченного тьмой полное имя с меткой не влезает в
+    * кнопку (лимит [[pangea.engine.Choice.MaxLabelLength]]), поэтому вместо
+    * пафосного имени — просто раса: «Отмеченный тьмой Гоблин». */
+  def shortName: String = if (marked) s"${Monster.MarkedPrefix} $race" else name
 }
 
 object Monster {
