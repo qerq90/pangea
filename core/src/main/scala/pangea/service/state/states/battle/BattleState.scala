@@ -2193,11 +2193,14 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   // ── Экран боя ───────────────────────────────────────────────────────────────
 
+  /** Экран боя; в группе перед ним — строй, чтобы с порога было видно, кто
+    * стоит против героя (после хода строй идёт в сводке раунда). */
   private def showScreen(user: User, renderer: Renderer): Task[Unit] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
+      _ <- ZIO.when(battle.isGroup)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
       _ <- renderer.show(
         user,
         buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now)

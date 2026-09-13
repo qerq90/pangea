@@ -96,6 +96,17 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(summary.contains("❤")) && assertTrue(summary.contains("🧥"))
     },
 
+    test("вход в групповой бой показывает строй перед экраном боя") {
+      for {
+        t <- makeState(hero(), group(1000L, 1000L))
+        (state, _, r) = t
+        _       <- state.enter(testUser, r)
+        screens <- r.sentScreens.map(_.map(_.text))
+      } yield assertTrue(screens.size == 2) &&
+              assertTrue(screens.head.contains("🟢 Вы VS 🔴")) &&
+              assertTrue(screens.head.linesIterator.count(_.contains("🔴")) == 2)
+    },
+
     test("сосед под номером 2 бьёт героя сбоку, дальний под номером 3 — нет") {
       val h = hero(hp = 100000L)
       for {
