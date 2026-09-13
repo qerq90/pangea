@@ -1985,15 +1985,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             pct   <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
             slot   = MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
                        m.fightStats.armor, m.marked, MonsterEnergy.startEnergy(m.lvl, m.rarity, pct), BattleEffects.empty)
-            joined = b0.withReinforcement(slot).copy(group = b0.group.copy(
-                       others = b0.group.others :+ slot, originRace = Some(b0.reinforcementRace)))
+            more   = b0.withReinforcement(slot)
+            joined = more.copy(group = more.group.copy(originRace = Some(b0.reinforcementRace)))
           } yield (joined, Vector(content.text("battle.group.reinforcement")))
         (b1, log1) = withMore
-        // перемешивание: каждый четвёртый раунд, если есть кого мешать
+        // перемешивание: каждый четвёртый раунд, если есть кого мешать. Группу
+        // берём у УЖЕ перемешанного боя — иначе новый активный встанет поверх
+        // старого строя, один моб пропадёт, а другой задвоится.
         shuffled <-
           if (!b1.isGroup || b1.group.round % GroupState.ShufflePeriod != 0) ZIO.succeed((b1, Vector.empty[String]))
           else Random.shuffle(b1.monstersInOrder.indices.toList).map { order =>
-            val b = b1.reorderMonsters(order).copy(group = b1.group.copy(pendingSwap = None))
+            val mixed = b1.reorderMonsters(order)
+            val b     = mixed.copy(group = mixed.group.copy(pendingSwap = None))
             (b, Vector(content.format("battle.group.shuffle", "monster" -> b.monsterName)))
           }
         (b2, log2) = shuffled

@@ -203,20 +203,35 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.others.size == 4)
     },
 
-    test("каждый четвёртый раунд ряды перемешиваются") {
-      // Три раунда без перемен, на четвёртом — перемешивание. С двумя мобами
-      // разных HP видно, кто встал в пару.
-      val b = group(1000L, 2000L).copy(group = group(1000L, 2000L).group.copy(round = 3))
-      for {
-        t <- makeState(hero(), b)
-        (state, dao, r) = t
-        _       <- quietRound(99, 99)
-        _       <- state.action(testUser, tap("Attack"), r)
-        after   <- battleOf(dao)
-        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-      } yield assertTrue(after.group.round == 4) &&
-              assertTrue(screens.contains("Ряды смешались") ||
-                         after.monsterStats.hp == 1000L) // перемешивание могло вернуть тот же порядок
+    test("каждый четвёртый раунд ряды перемешиваются — никто не пропадает и не двоится") {
+      // Три раунда без перемен, на четвёртом — перемешивание. Три моба с разным
+      // запасом HP: по нему видно, что после перемешивания это те же трое.
+      // Раненый сосед (броня 18 из 100) должен остаться ровно одним и с той же
+      // раной — из-за этого и пропал следопыт у игрока.
+      // Порядок после перемешивания зависит от сида — гоняем несколько, чтобы
+      // проверить и случай, когда в пару встал не первый.
+      val trio    = group(1000L, 2000L, 3000L)
+      val wounded = trio.group.others.head.copy(currentArmor = 18L, currentHp = 1940L)
+      val b = trio.copy(group = trio.group.copy(others = wounded :: trio.group.others.tail, round = 3))
+      def run(seed: Long) =
+        for {
+          t <- makeState(hero(), b)
+          (state, dao, r) = t
+          _       <- TestRandom.setSeed(seed) *> quietRound(99, 99, 99)
+          _       <- state.action(testUser, tap("Attack"), r)
+          after   <- battleOf(dao)
+          screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          lineUp   = after.monstersInOrder
+          // удар героя этим ходом получил тот, кто стоял в паре ДО перемешивания
+          // (1000 HP); раненый сосед (2000) остался с той же раной, дальний (3000) цел
+          byMax    = lineUp.map(m => m.stats.hp -> m).toMap
+        } yield assertTrue(after.group.round == 4) &&
+                assertTrue(screens.contains("Ряды смешались")) &&
+                assertTrue(lineUp.map(_.stats.hp).sorted == List(1000L, 2000L, 3000L)) &&
+                assertTrue(byMax(1000L).currentHp < 1000L) &&
+                assertTrue(byMax(2000L).currentHp == 1940L && byMax(2000L).currentArmor == 18L) &&
+                assertTrue(byMax(3000L).currentHp == 3000L)
+      ZIO.foreach((1L to 6L).toList)(run).map(_.reduce(_ && _))
     },
 
     test("бегство: свободные мобы могут окружить — по 5% за каждого") {
