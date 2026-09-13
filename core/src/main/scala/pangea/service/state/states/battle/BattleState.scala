@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
   * «одна из веток забыла сохранить стат» (см. Кровавую жатву). */
 case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
-  import BattleState.{Outcome, TurnResult, VictoryOutcome}
+  import BattleState.{MobStrike, Outcome, TurnResult, VictoryOutcome}
 
   /** Чистое вычисление одного хода: снимок состояния → результат хода. */
   private type Turn = (Hero, SoloPveBattle, Long) => Task[TurnResult]
@@ -1047,29 +1047,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * между сегментами игрока и монстра вставляется пустая строка-разделитель
     * (в склейке `mkString("\n")` даёт двойной перенос).
     */
-  private def monsterPhase(
-      hero: Hero,
-      battle: SoloPveBattle,
-      nowMs: Long,
-      log: Vector[String],
-      skip: Set[Long]
-  ): Task[TurnResult] =
+  /** Что случилось с героем от обычной атаки моба: новые HP и броня, сам урон,
+    * побочные строки (Непробиваемый, Крепкость, шипы, поджог, яд, проки
+    * порошка) и бой после удара (шипы, порошок). Строку «наносит N урона»
+    * собирает вызывающий — у активного моба и у бьющего сбоку она разная. */
+  private def mobStrike(hero: Hero, battle: SoloPveBattle, buffedEff: FightStats, nowMs: Long): Task[MobStrike] = {
+    val monster = battle.toMonster
     for {
-      ticked <- ZIO.succeed(battle.tickBuffs(skip))
-      buffedEff = effWithAir(hero, ticked, nowMs)
-      monster   = ticked.toMonster
-      hitRoll <- Random.nextIntBetween(1, 101)
-      dodge = playerDodgeChance(hero, ticked, nowMs)
-      // Тот же порядок округления, что на экране боя: 100 - floor(dodge).
-      mobHitPct = 100 - dodge.toInt
-
-      // 1) Обычная атака моба — обновляем hp/armor героя и (для Шипастого/Крепкости) бой.
-      atkResult <-
-        if (hitRoll > dodge) {
-          for {
             spread <- Random.nextLongBetween(80L, 121L)
-            rawDamage = (monsterAttack(ticked) * spread / 100L).max(1L)
-            reduction = heroDamageReduction(hero, ticked, buffedEff, monster.fightStats.atk, nowMs)
+            rawDamage = (monsterAttack(battle) * spread / 100L).max(1L)
+            reduction = heroDamageReduction(hero, battle, buffedEff, monster.fightStats.atk, nowMs)
             baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
@@ -1077,12 +1064,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
               if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
               else baseReduced
             // Удар элементаля — это стихия, а не сталь: «Каменный страж» его режет.
-            reducedDamage = bossDamageTaken(hero, ticked, impenDamage)
-            (newHp, newArmor) = bossHit(ticked, hero, reducedDamage)
+            reducedDamage = bossDamageTaken(hero, battle, impenDamage)
+            (newHp, newArmor) = bossHit(battle, hero, reducedDamage)
             // «Крепкость»: при обнулении брони 25% шанс одноразово восстановить 10% макс.брони.
             armorEmptied = hero.fightStats.armor > 0 && newArmor <= 0
             toughTriggered <- chanceRoll(
-              armorEmptied && !ticked.toughnessUsed && hero.passives.hasToughness,
+              armorEmptied && !battle.toughnessUsed && hero.passives.hasToughness,
               PassiveKind.Toughness.TriggerPct
             )
             restoredArmor =
@@ -1093,24 +1080,24 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // (огненный элементаль), и только пока не скован холодом. У камня и
             // гнили шанс нулевой, поэтому бросок у них не тратится.
             // Огненный порошок даёт мобу тот же шанс поджечь, что и обычный прок Огня.
-            igniteChance = ticked.boss.map(_.heroIgniteChancePct)
-                             .getOrElse(if (powderElement(ticked).contains(Element.Fire)) Element.ProcChancePct else 0L)
+            igniteChance = battle.boss.map(_.heroIgniteChancePct)
+                             .getOrElse(if (powderElement(battle).contains(Element.Fire)) Element.ProcChancePct else 0L)
             ignites <- chanceRoll(
-              igniteChance > 0L && !ticked.effects.chilled,
+              igniteChance > 0L && !battle.effects.chilled,
               (igniteChance - hero.sets.igniteResistPct).max(0L)
             )
-            burnPct = ticked.boss.map(_.heroIgniteBurnPct).getOrElse(Burn.Initial)
+            burnPct = battle.boss.map(_.heroIgniteBurnPct).getOrElse(Burn.Initial)
             // Прок стихии порошка — тот же 30%-й бросок, что и у стихий оружия.
             // Огонь уже отыгран поджогом выше, здесь остаются холод и воздух.
-            procElement = powderElement(ticked).filter(e => e == Element.Cold || e == Element.Air)
+            procElement = powderElement(battle).filter(e => e == Element.Cold || e == Element.Air)
             mobProc <- chanceRoll(procElement.isDefined, Element.ProcChancePct)
             // Порошок мурлока и эльфа: удар, дошедший до HP, всегда травит.
-            poisons = ticked.effects.monsterPoisonsOnHit && newHp < hero.fightStats.hp
+            poisons = battle.effects.monsterPoisonsOnHit && newHp < hero.fightStats.hp
             effectsAfterHit = {
               val burned =
-                if (!ignites) ticked.effects
-                else ticked.effects.copy(heroBurn = Some(
-                  ticked.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
+                if (!ignites) battle.effects
+                else battle.effects.copy(heroBurn = Some(
+                  battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
               val poisonedE =
                 if (!poisons) burned
                 else burned.copy(heroPoison = Some(
@@ -1126,23 +1113,73 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
                 case _ => poisonedE
               }
             }
-            battleAfterAtk = ticked.copy(
-              monsterCurrentHp = (ticked.monsterCurrentHp - thorns).max(0L),
-              toughnessUsed    = ticked.toughnessUsed || toughTriggered,
+            battleAfterAtk = battle.copy(
+              monsterCurrentHp = (battle.monsterCurrentHp - thorns).max(0L),
+              toughnessUsed    = battle.toughnessUsed || toughTriggered,
               effects          = effectsAfterHit
             )
             lines = List(
-              Some(content.format("battle.mobHit", "damage" -> reducedDamage.toString, "monster" -> ticked.monsterName)),
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
-              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> ticked.monsterName)),
+              Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> battle.monsterName)),
               Option.when(ignites)(content.text("battle.elemental.ignites")),
               Option.when(poisons)(content.text("battle.mobPoisons")),
               Option.when(mobProc && procElement.contains(Element.Cold))(content.text("battle.mobColdBite")),
               Option.when(mobProc && procElement.contains(Element.Air))(content.text("battle.mobAirBoost"))
-            ).flatten.mkString("\n")
-          } yield (newHp, newArmor + restoredArmor, lines, battleAfterAtk)
-        } else
+            ).flatten
+          } yield MobStrike(newHp, newArmor + restoredArmor, reducedDamage, lines, battleAfterAtk)
+  }
+
+  /** Умение моба поверх обычной атаки: самое дорогое по карману, оплачивается
+    * энергией. «Охотник» может погасить первую вредную способность. Возвращает
+    * бой моба, героя и строку лога (пустую, если кастовать нечего). */
+  private def mobSkillCast(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[(SoloPveBattle, Hero, String)] =
+    for {
+      affordable <- ZIO.succeed(affordableSkills(battle).toVector)
+      out <-
+        if (affordable.nonEmpty)
+          for {
+            best <- ZIO.succeed {
+                      val top = affordable.map(_.cost(battle.monsterLvl)).max
+                      affordable.filter(_.cost(battle.monsterLvl) == top)
+                    }
+            idx <- Random.nextIntBetween(0, best.size)
+            ms   = best(idx)
+            paid = battle.copy(monsterCurrentEnergy = (battle.monsterCurrentEnergy - ms.cost(battle.monsterLvl)).max(0L))
+            cast = ms.cast(paid, hero, nowMs)
+            hurts = cast.heroHp < hero.fightStats.hp || cast.heroArmor < hero.fightStats.armor
+            cancels = hurts && hero.sets.cancelsFirstEnemySkill && !battle.effects.cancelSpent
+          } yield
+            if (cancels)
+              (cast.battle.copy(effects = cast.battle.effects.copy(cancelSpent = true)), hero, content.text("battle.hunterCancel"))
+            else
+              (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
+        else ZIO.succeed((battle, hero, ""))
+    } yield out
+
+  private def monsterPhase(
+      hero: Hero,
+      battle: SoloPveBattle,
+      nowMs: Long,
+      log: Vector[String],
+      skip: Set[Long]
+  ): Task[TurnResult] =
+    for {
+      ticked <- ZIO.succeed(battle.tickBuffs(skip))
+      buffedEff = effWithAir(hero, ticked, nowMs)
+      hitRoll <- Random.nextIntBetween(1, 101)
+      dodge = playerDodgeChance(hero, ticked, nowMs)
+      // Тот же порядок округления, что на экране боя: 100 - floor(dodge).
+      mobHitPct = 100 - dodge.toInt
+
+      // 1) Обычная атака моба — обновляем hp/armor героя и (для Шипастого/Крепкости) бой.
+      atkResult <-
+        if (hitRoll > dodge)
+          mobStrike(hero, ticked, buffedEff, nowMs).map { st =>
+            val line = content.format("battle.mobHit", "damage" -> st.damage.toString, "monster" -> ticked.monsterName)
+            (st.newHp, st.newArmor, (line :: st.extraLines).mkString("\n"), st.battle)
+          }
+        else
           ZIO.succeed(
             (
               hero.fightStats.hp,
@@ -1175,49 +1212,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         // Минибосс не выбирает умение: он идёт строго по своему кругу.
         else if (battleAfterAtk.boss.isDefined)
           bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
-        else
-          for {
-            affordable <- ZIO.succeed(affordableSkills(battleAfterAtk).toVector)
-            out <-
-              if (affordable.nonEmpty)
-                for {
-                  // Самое дорогое по карману; при равной цене — любое из них.
-                  best <- ZIO.succeed {
-                            val top = affordable.map(_.cost(battleAfterAtk.monsterLvl)).max
-                            affordable.filter(_.cost(battleAfterAtk.monsterLvl) == top)
-                          }
-                  idx <- Random.nextIntBetween(0, best.size)
-                  ms   = best(idx)
-                  paid = battleAfterAtk.copy(monsterCurrentEnergy =
-                           (battleAfterAtk.monsterCurrentEnergy - ms.cost(battleAfterAtk.monsterLvl)).max(0L))
-                  cast = ms.cast(paid, heroAfterAtk, nowMs)
-                  // «Охотник» (порог 10): первая за бой вражеская способность,
-                  // которая реально снимает HP или броню, гасится целиком. Хилы и
-                  // починку моба не трогаем — отмена тратится только на уроне.
-                  hurts = cast.heroHp < heroAfterAtk.fightStats.hp ||
-                          cast.heroArmor < heroAfterAtk.fightStats.armor
-                  cancels = hurts && heroAfterAtk.sets.cancelsFirstEnemySkill &&
-                            !battleAfterAtk.effects.cancelSpent
-                } yield
-                  if (cancels)
-                    (
-                      // Урона нет, но бой мог измениться иначе (кулдауны моба) —
-                      // берём состояние из каста и лишь помечаем отмену.
-                      cast.battle.copy(effects = cast.battle.effects.copy(cancelSpent = true)),
-                      heroAfterAtk,
-                      content.text("battle.hunterCancel")
-                    )
-                  else
-                    (
-                      cast.battle,
-                      heroAfterAtk.copy(
-                        fightStats = heroAfterAtk.fightStats
-                          .copy(hp = cast.heroHp, armor = cast.heroArmor)
-                      ),
-                      cast.line
-                    )
-              else ZIO.succeed((battleAfterAtk, heroAfterAtk, ""))
-          } yield out
+        else mobSkillCast(heroAfterAtk, battleAfterAtk, nowMs)
       (finalBattle, finalHero, castLine) = castResult
 
       // 3) Конец раунда: тик статус-эффектов. Стадии героя и монстра — раздельные,
@@ -2085,6 +2080,9 @@ object BattleState {
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
     * накопленный лог сообщений (склеивается и показывается один раз) и исход. */
+  /** Итог обычной атаки моба по герою — см. `BattleState.mobStrike`. */
+  final case class MobStrike(newHp: Long, newArmor: Long, damage: Long, extraLines: List[String], battle: SoloPveBattle)
+
   final case class TurnResult(
       hero: Hero,
       battle: SoloPveBattle,
