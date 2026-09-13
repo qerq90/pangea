@@ -62,16 +62,15 @@ case class SoloPveBattle(
   def activeSlot: MonsterSlot = MonsterSlot(
     lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
     currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
-    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, toughnessUsed = toughnessUsed)
+    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart)
 
   /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
-    * геройская половина эффектов остаётся как была. Минибоссы в группе не
-    * бывают, поэтому их поля не трогаем. */
+    * геройская половина эффектов (и разовые флаги героя вроде «Крепкости»)
+    * остаётся как была. Минибоссы в группе не бывают, поэтому их поля не трогаем. */
   def withActive(slot: MonsterSlot): SoloPveBattle = copy(
     monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
-    monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
-    toughnessUsed = slot.toughnessUsed)
+    monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects))
 
   /** Поменять активного моба местами с мобом `others(idx)`. Чужой индекс — бой
     * не меняется. */
@@ -83,13 +82,19 @@ case class SoloPveBattle(
     }
 
   /** Активный моб пал, а в группе есть ещё: записать его в павшие и поставить в
-    * пару следующего по номеру. Если ставить некого — None, это победа. */
+    * пару следующего по номеру. Если ставить некого — None, это победа.
+    * Отложенный Таран сгорает: тот, кого таранили, либо сам шагнул в пару, либо
+    * его индекс уже не тот. */
   def promoteNext: Option[SoloPveBattle] =
     group.others.headOption.map { next =>
       withActive(next).copy(group = group.copy(
-        others = group.others.tail,
-        slain  = group.slain :+ slainActive))
+        others      = group.others.tail,
+        slain       = group.slain :+ slainActive,
+        pendingSwap = None))
     }
+
+  /** Моб вне пары `others(idx)` пал — в павшие, строй смыкается. */
+  def sideFallen(idx: Int): SoloPveBattle = copy(group = group.withoutSlot(idx))
 
   /** Активный моб как запись о павшем — для добычи после боя. */
   def slainActive: SlainMonster =

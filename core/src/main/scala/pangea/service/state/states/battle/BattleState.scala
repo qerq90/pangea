@@ -6,10 +6,10 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SlainMonster, SoloPveBattle, SkillSlotState}
+import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState}
 import pangea.model.hero.{AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
-import pangea.model.monster.MiniBoss
+import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
 import pangea.model.skill.{MonsterEnergy, MonsterSkill, Skill}
@@ -42,14 +42,16 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
-      "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle))
+      "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
+      "CancelTarget" -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle))
     ),
     fallback = Target.Run { (user, ua, renderer) =>
       // Кнопки способностей именуются Skill_<itemId> и роутятся динамически: id
       // указывает на конкретный предмет, поэтому два предмета с «одним» Skill
-      // имеют независимые cd/uses.
+      // имеют независимые cd/uses. В группе к умению может прилагаться цель —
+      // номер моба в строю (см. skillRoute).
       BattleState.parseSkillAction(ua) match {
-        case Some(itemId) => resolve(user, renderer)(skillTurn(itemId))
+        case Some(itemId) => skillRoute(user, itemId, BattleState.parseTarget(ua), renderer)
         case None         => showScreen(user, renderer).as(StateType.Battle)
       }
     }
@@ -75,6 +77,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
+      state  <- resolveLoaded(user, renderer, hero, battle, now)(turn)
+    } yield state
+
+  private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long)(turn: Turn): Task[StateType] =
+    for {
       result <- turn(hero, battle, now)
       // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
       // именно источник добил героя до полоски, а что за этот ход он её перешёл.
@@ -193,10 +200,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
-    // Групповая сводка: что делали мобы вне пары и кто где стоит. Только пока
-    // бой идёт и в нём больше одного моба.
-    val groupMsg = (res.sideLog ++ (if (res.battle.isGroup) groupLines(res.battle) else Vector.empty)).mkString("\n")
-    val showGroup = ZIO.when(groupMsg.nonEmpty && res.outcome == Outcome.Continue)(
+    // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
+    // показываем, пока бой идёт и в нём больше одного моба; удары сбоку — и
+    // тогда, когда они добили героя, иначе смерть придёт без объяснения.
+    val standing  = if (res.outcome == Outcome.Continue && res.battle.isGroup) groupLines(res.battle) else Vector.empty
+    val groupMsg  = (res.sideLog ++ standing).mkString("\n")
+    val showGroup = ZIO.when(groupMsg.nonEmpty && (res.outcome == Outcome.Continue || res.outcome == Outcome.Death))(
       renderer.show(user, Screen(groupMsg, Nil)))
     res.outcome match {
       case Outcome.Continue =>
@@ -212,7 +221,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           _       <- showVictory(user, outcome, renderer)
         } yield StateType.Loot
       case Outcome.Death =>
-        (persistHero *> clearDust).uninterruptible *> showLog *>
+        (persistHero *> clearDust).uninterruptible *> showLog *> showGroup *>
           renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
       case Outcome.Fled =>
         (persistHero *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
@@ -1029,7 +1038,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   /** Умения, которые моб может применить прямо сейчас: доступные его расе,
     * полезные в этой ситуации и оплатимые текущей энергией. */
   private def affordableSkills(battle: SoloPveBattle): Seq[MonsterSkill] = {
-    val race = pangea.model.monster.Race.withName(battle.monsterRace)
+    val race = Race.withName(battle.monsterRace)
     MonsterSkill.values.filter { s =>
       s.availableTo(race) && s.applicable(battle) && s.cost(battle.monsterLvl) <= battle.monsterCurrentEnergy
     }
@@ -1380,11 +1389,49 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   // ── Ход игрока: активный навык ──────────────────────────────────────────────
 
+  /** Кнопка умения. В группе умение с уроном достаёт и соседа героя (моб под
+    * номером 2), поэтому сначала спрашиваем, в кого бить; лечение и броня — на
+    * себя, без вопросов. Неготовому умению экран цели не нужен — обычный ход сам
+    * скажет, почему нельзя. */
+  private def skillRoute(user: User, itemId: Long, target: Option[Int], renderer: Renderer): Task[StateType] =
+    for {
+      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero   <- getHero(user)
+      battle <- getBattle(user)
+      state  <-
+        if (target.isEmpty && needsTarget(hero, battle, itemId))
+          renderer.show(user, targetScreen(battle, itemId)).as(StateType.Battle)
+        else resolveLoaded(user, renderer, hero, battle, now)(skillTurn(itemId, target.getOrElse(0)))
+    } yield state
+
+  /** Спрашивать ли цель: в строю есть сосед, умение готово и бьёт. */
+  private def needsTarget(hero: Hero, battle: SoloPveBattle, itemId: Long): Boolean =
+    battle.group.others.headOption.exists(_.alive) &&
+      battle.slotByItem(itemId).exists(slot =>
+        slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero) &&
+          BattleState.dealsDamage(slot.skill.effect))
+
+  /** Экран выбора цели: моб в паре и сосед за ним, с их полосками. */
+  private def targetScreen(battle: SoloPveBattle, itemId: Long): Screen = {
+    val skillLabel = battle.slotByItem(itemId).map(_.skill.label).getOrElse("")
+    val targets    = battle.monstersInOrder.take(GroupState.Reach + 1).zipWithIndex.map { case (m, i) =>
+      pangea.engine.Choice(
+        id    = s"Skill_$itemId",
+        label = content.format("battle.group.targetLabel", "n" -> (i + 1).toString, "monster" -> m.name, "hp" -> m.hpPct.toString),
+        data  = Map("target" -> i.toString),
+        row   = Some(i))
+    }
+    val cancel = pangea.engine.Choice("CancelTarget", content.text("battle.group.cancelTarget"),
+      color = pangea.engine.ChoiceColor.Negative, row = Some(targets.size))
+    Screen(content.format("battle.group.chooseTarget", "skill" -> skillLabel), targets :+ cancel)
+  }
+
   /** Применение активного навыка. Проверки (слот существует / готов / хватает
     * энергии) дают Continue-сообщение без траты хода. Умение ВСЕГДА срабатывает:
     * списываем энергию (в героя, персист — в commit), применяем эффект с ±20%
-    * разбросом, ставим cd и инкрементируем uses. */
-  private def skillTurn(itemId: Long)(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    * разбросом, ставим cd и инкрементируем uses. `target` — номер цели в строю,
+    * считая с нуля: 0 — моб в паре, 1 — сосед. */
+  private def skillTurn(itemId: Long, target: Int)(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
     battle.slotByItem(itemId) match {
       case None =>
         cont(hero, battle, content.text("battle.skillUnavailable"))
@@ -1404,34 +1451,59 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         val cost      = slot.skill.energyCost(hero)
         val heroAfter = hero.copy(fightStats =
           hero.fightStats.copy(energy = (hero.fightStats.energy - cost).max(0L)))
-        skillHit(heroAfter, battle, slot, nowMs)
+        skillHit(heroAfter, battle, slot, nowMs, target)
     }
 
   /** Применяет эффект навыка (матч по Skill.Effect). После урона/лечения идёт
     * базовая атака игрока (кроме случая, когда моб убит самим скиллом). Кулдаун
     * использованного слота не тикается в этом же ходу (`skip`). Изменения статов
     * героя (энергия/HP Кровавой жатвы/лечение) едут в `hero` результата и
-    * персистятся в commit — здесь никаких записей в БД. */
+    * персистятся в commit — здесь никаких записей в БД.
+    *
+    * Удар по соседу (`target == 1`) идёт через временную пару: сосед встаёт на
+    * место активного, получает урон и проки, и после этого пара возвращается
+    * как была — базовая атака и ответ мобов идут по-прежнему. Убитый умением
+    * сосед уходит в павшие сразу, Таран по живому соседу помечает его на смену
+    * пары в конце раунда. */
   private def skillHit(
       hero: Hero,
       battle: SoloPveBattle,
       slot: SkillSlotState,
-      nowMs: Long
-  ): Task[TurnResult] =
+      nowMs: Long,
+      target: Int
+  ): Task[TurnResult] = {
+    val aimSide = target == 1 && BattleState.dealsDamage(slot.skill.effect) && battle.group.others.headOption.exists(_.alive)
+    val aimed   = if (aimSide) battle.swapWith(0) else battle
+    val skip    = Set(slot.itemId)
+    // Что делать после урона: в паре — победа или базовая атака; по соседу —
+    // вернуть пару на место, а уже потом базовая атака по активному.
+    val next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] =
+      if (!aimSide) (h, b, lines) =>
+        if (b.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(h, b, lines, Outcome.Victory))
+        else playerStrike(h, b, nowMs, lines, skip)
+      else (h, b, lines) => {
+        val back = b.swapWith(0)
+        if (b.monsterCurrentHp <= 0)
+          playerStrike(h, back.sideFallen(0), nowMs,
+            lines :+ content.format("battle.group.sideSlain", "monster" -> b.monsterName), skip)
+        else {
+          val rammed = if (slot.skill == Skill.Ram) back.copy(group = back.group.copy(pendingSwap = Some(0))) else back
+          playerStrike(h, rammed, nowMs, lines, skip)
+        }
+      }
     for {
       spread <- Random.nextLongBetween(80L, 121L)
       raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult).toLong.max(1L)
-      bumped = battle.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
-      skip = Set(slot.itemId)
+      bumped = aimed.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
       tmpl = slot.skill.hitTemplate
       // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
       // Дебаф Холода снижает итоговое %-снижение цели на monsterColdDefenceCut п.п.;
       // временный дебаф защиты (комбо) режет саму защиту (effectiveMonsterDefence).
-      reduced = (raw * (1.0 - monsterDefenceCut(hero, battle, effWithAir(hero, battle, nowMs), nowMs))).toLong.max(1L)
+      reduced = (raw * (1.0 - monsterDefenceCut(hero, aimed, effWithAir(hero, aimed, nowMs), nowMs))).toLong.max(1L)
       result <- slot.skill.effect match {
         case Skill.Effect.Damage(reducedByDefence) =>
           val value = if (reducedByDefence) reduced else raw
-          dealSkillDamage(hero, bumped, value, dealt => tmpl.replace("{}", dealt.toString), nowMs, skip)
+          dealSkillDamage(hero, bumped, value, dealt => tmpl.replace("{}", dealt.toString), next)
 
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
@@ -1439,18 +1511,18 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           val bled     = bumped.withEffects(bumped.effects.copy(monsterBleed = Some(stacked)))
           // Отдельное сообщение «истекает кровью» убрано — прок уже виден по
           // компактному индикатору (🔴 -N ❤), приписанному к строке атаки.
-          dealSkillDamage(hero, bled, raw, dealt => tmpl.replace("{}", dealt.toString), nowMs, skip)
+          dealSkillDamage(hero, bled, raw, dealt => tmpl.replace("{}", dealt.toString), next)
 
         case Skill.Effect.WeakSpotStrike =>
           for {
             roll <- Random.nextIntBetween(1, 101)
-            chance = (2L * hero.effectiveBaseStats(nowMs).int - battle.monsterLvl).max(0L).min(95L)
+            chance = (2L * hero.effectiveBaseStats(nowMs).int - aimed.monsterLvl).max(0L).min(95L)
             doubled = roll <= chance
             value   = if (doubled) raw * 2L else raw
             line: (Long => String) = (dealt: Long) =>
               tmpl.replace("{}", dealt.toString) +
                 (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
-            r <- dealSkillDamage(hero, bumped, value, line, nowMs, skip)
+            r <- dealSkillDamage(hero, bumped, value, line, next)
           } yield r
 
         case Skill.Effect.BloodHarvest =>
@@ -1462,7 +1534,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           // Первый {} — урон по цели (пишем фактический), второй — цена крови героя.
           val line: Long => String = dealt =>
             tmpl.replaceFirst("\\{\\}", dealt.toString).replaceFirst("\\{\\}", hpLost.toString)
-          dealSkillDamage(woundedHero, bumped, raw, line, nowMs, skip)
+          dealSkillDamage(woundedHero, bumped, raw, line, next)
 
         case Skill.Effect.Heal =>
           // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
@@ -1484,11 +1556,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           playerStrike(hero.copy(fightStats = newStats), guarded, nowMs, Vector(tmpl.replace("{}", gained.toString)), skip)
       }
     } yield result
+  }
 
-  /** Наносит `value` урона мобу (сначала броня, затем HP). Если моб убит — победа
-    * без базовой атаки; иначе — базовая атака игрока тем же ходом. Никаких записей
-    * в БД: итог (в т.ч. изменённые статы героя) уезжает в TurnResult и
-    * персистится в commit. */
+  /** Наносит `value` урона мобу в паре (сначала броня, затем HP) и отдаёт ход
+    * дальше в `next`: там решается, победа это, базовая атака или возврат
+    * временной пары (см. [[skillHit]]). Никаких записей в БД: итог (в т.ч.
+    * изменённые статы героя) уезжает в TurnResult и персистится в commit. */
   /** `line` — шаблон строки умения: получает урон, который РЕАЛЬНО прошёл по
     * цели (после сопротивления минибосса и граней стихий), а не заявленный. */
   private def dealSkillDamage(
@@ -1496,8 +1569,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       battle: SoloPveBattle,
       value: Long,
       line: Long => String,
-      nowMs: Long,
-      skip: Set[Long]
+      next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult]
   ): Task[TurnResult] = {
     // «Охотник» (порог 12): первая за бой способность, наносящая урон, бьёт вдвое.
     val doubles = hero.sets.doublesFirstSkill && !battle.effects.doubleSpent
@@ -1525,12 +1597,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val hit      = battle
       .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
       .withEffects(effects)
-    if (newHp <= 0) ZIO.succeed(TurnResult(hero, hit, Vector(skillLine + dotIndicators(hit)), Outcome.Victory))
+    if (newHp <= 0) next(hero, hit, Vector(skillLine + dotIndicators(hit)))
     else
       resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>
-        val lines = Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog
-        if (afterProcs.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(hero, afterProcs, lines, Outcome.Victory))
-        else playerStrike(hero, afterProcs, nowMs, lines, skip)
+        next(hero, afterProcs, Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog)
       }
   }
 
@@ -1764,12 +1834,15 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     if (res.outcome != Outcome.Continue || !res.battle.isGroup) ZIO.succeed(res)
     else {
       val n = res.battle.group.others.size
-      ZIO.foldLeft((0 until n).toList)((res.hero, res.battle, Vector.empty[String])) {
-        case ((h, b, log), idx) =>
-          // Индексы могли сдвинуться, если кто-то выше по строю пал от ран.
-          if (h.fightStats.hp <= 0 || idx >= b.group.others.size) ZIO.succeed((h, b, log))
-          else freeMobTurn(h, b, idx, nowMs).map { case (h2, b2, lines) => (h2, b2, log ++ lines) }
-      }.map { case (h, b, log) =>
+      // Павший выше по строю смыкает ряды: следующий моб стоит уже на его индексе.
+      ZIO.foldLeft((0 until n).toList)((res.hero, res.battle, Vector.empty[String], 0)) {
+        case ((h, b, log, fallen), i) =>
+          val idx = i - fallen
+          if (h.fightStats.hp <= 0 || idx >= b.group.others.size) ZIO.succeed((h, b, log, fallen))
+          else freeMobTurn(h, b, idx, nowMs).map { case (h2, b2, lines) =>
+            (h2, b2, log ++ lines, fallen + (b.group.others.size - b2.group.others.size))
+          }
+      }.map { case (h, b, log, _) =>
         val outcome = if (h.fightStats.hp <= 0) Outcome.Death else Outcome.Continue
         res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ log)
       }
@@ -1823,12 +1896,9 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       result =
         if (afterSlot.alive)
           (h2, merged.copy(group = merged.group.copy(others = merged.group.others.updated(idx, afterSlot))), log3)
-        else {
-          val fallen = SlainMonster(afterSlot.lvl, afterSlot.race, afterSlot.rarity, afterSlot.marked, afterSlot.name)
-          (h2, merged.copy(group = merged.group.copy(
-             others = merged.group.others.patch(idx, Nil, 1), slain = merged.group.slain :+ fallen)),
+        else
+          (h2, merged.copy(group = merged.group.copy(others = merged.group.others.updated(idx, afterSlot))).sideFallen(idx),
            log3 :+ content.format("battle.group.sideFell", "monster" -> afterSlot.name))
-        }
     } yield result
   }
 
@@ -1847,7 +1917,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
   private def allyAid(
       hero: Hero, caster: SoloPveBattle, battle: SoloPveBattle, idx: Int, nowMs: Long
   ): Task[Option[(SoloPveBattle, SoloPveBattle, String)]] = {
-    val race       = pangea.model.monster.Race.withName(caster.monsterRace)
+    val race       = Race.withName(caster.monsterRace)
     val affordable = MonsterSkill.values.filter(sk =>
       sk.availableTo(race) && sk.cost(caster.monsterLvl) <= caster.monsterCurrentEnergy)
     // Кандидаты: сосед выше по строю (активный при idx == 0) и сосед ниже.
@@ -1884,7 +1954,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
 
   /** Моб, который никого не достаёт, тратит энергию только на себя. */
   private def selfAid(hero: Hero, caster: SoloPveBattle, nowMs: Long): Task[(SoloPveBattle, String)] = {
-    val race = pangea.model.monster.Race.withName(caster.monsterRace)
+    val race = Race.withName(caster.monsterRace)
     val own  = List(MonsterSkill.HealingFlask, MonsterSkill.EmergencyRepair).filter(sk =>
       sk.availableTo(race) && sk.applicable(caster) && sk.cost(caster.monsterLvl) <= caster.monsterCurrentEnergy)
     ZIO.succeed(own.headOption match {
@@ -1910,7 +1980,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           if (!comes) ZIO.succeed((b0, Vector.empty[String]))
           else for {
             seed  <- Random.nextLong
-            race   = pangea.model.monster.Race.withName(b0.reinforcementRace)
+            race   = Race.withName(b0.reinforcementRace)
             (m, _) = MonsterGenerator.generateOfRace(res.hero.dungeonLevel, race, Rng(seed))
             pct   <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
             slot   = MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
@@ -1930,7 +2000,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         // Таран: в пару встаёт тот, кого таранили
         rammed = b2.group.pendingSwap match {
           case Some(i) if i < b2.group.others.size =>
-            val b = b2.swapWith(i).copy(group = b2.group.copy(pendingSwap = None))
+            val b = b2.swapWith(i)
             (b.copy(group = b.group.copy(pendingSwap = None)), Vector(content.format("battle.group.ram", "monster" -> b.monsterName)))
           case _ => (b2.copy(group = b2.group.copy(pendingSwap = None)), Vector.empty[String])
         }
@@ -1964,64 +2034,89 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       azat <- loadAzat(user)
       // Недельное благословение Азата: +10% опыта/серебра, +10% редкости, +5% доп. дроп.
       blessed = azat.blessingActive(now)
+      // Все павшие этого боя в порядке гибели; в бою 1 на 1 — один моб.
+      fallen = battle.group.slain :+ battle.slainActive
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
+      // Группа — опыт одной суммой за всех.
       baseExp = battle.boss
                   .map(_.expReward(battle.monsterLvl))
-                  .getOrElse((hero.dungeonLevel.toLong * battle.rarity.factor).toLong)
+                  .getOrElse(fallen.map(m => (hero.dungeonLevel.toLong * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
                   .max(1L)
       expGained = if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
-      monster = battle.toMonster
       // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
-      (baseDrops, rngAfter) = battle.boss match {
-        case Some(e) => LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed))
-        case None    => LootGenerator.roll(
-          battle.rarity,
-          monster.race,
-          hero.dungeonLevel.toLong,
-          Rng(seed),
-          gearChanceBonusPct = hero.gems.gearDropBonusPct,
-          rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
-        )
+      // Группа — своя добыча с каждого павшего, по порядку гибели.
+      (perMonster, rngAfter) = battle.boss match {
+        case Some(e) =>
+          val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed))
+          (List(battle.monsterName -> d), r)
+        case None =>
+          fallen.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], Rng(seed))) { case ((acc, rng), m) =>
+            val (d, r) = LootGenerator.roll(
+              Rarity.withName(m.rarity),
+              Race.withName(m.race),
+              hero.dungeonLevel.toLong,
+              rng,
+              gearChanceBonusPct = hero.gems.gearDropBonusPct,
+              rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
+            )
+            (acc :+ (m.name -> d), r)
+          }
       }
-      // «Таксидермист»/«Ювелир» дают отдельные доп. дропы поверх основного лута.
-      (extraDrops, rngAfter2) = LootGenerator.rollPassiveDrops(
-        hero.passives.hasTaxidermist,
-        hero.passives.hasJeweler,
-        battle.rarity,
-        monster.race,
-        hero.dungeonLevel.toLong,
-        rngAfter
-      )
+      // «Таксидермист»/«Ювелир» дают отдельные доп. дропы поверх основного лута —
+      // с каждого павшего.
+      (withExtras, rngAfter2) = fallen.zip(perMonster).foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], rngAfter)) {
+        case ((acc, rng), (m, (name, d))) =>
+          val (extra, r) = LootGenerator.rollPassiveDrops(
+            hero.passives.hasTaxidermist,
+            hero.passives.hasJeweler,
+            Rarity.withName(m.rarity),
+            Race.withName(m.race),
+            hero.dungeonLevel.toLong,
+            rng
+          )
+          (acc :+ (name -> (d ++ extra)), r)
+      }
       // Благословение: 5% шанс дополнительной экипировки после боя.
       (blessingGear, _) =
         if (blessed) LootGenerator.rollBlessingExtraGear(BattleState.BlessingExtraDropPct, battle.rarity, hero.dungeonLevel.toLong, rngAfter2)
         else (Option.empty[pangea.model.item.Item], rngAfter2)
-      drops = baseDrops ++ extraDrops
+      lootByMonster = withExtras.map { case (name, drops) =>
+        LootState.MonsterLoot(
+          monsterName = name,
+          items       = drops.flatMap(_.itemOpt),
+          silvers     = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct(blessed) / 100L },
+          doubloons   = drops.collect { case LootGenerator.LootDrop.Doubloons(a) => a }.sum
+        )
+      }
+      first = lootByMonster.head
       // routing события (returnState/eventData) кладётся в scene_data ДО боя
       // (напр. цепочка «мобы с сокровищем»); переносим его в добычу, чтобы экран
       // добычи знал, куда вернуться. Для обычного боя scene_data пуст → None.
       prev <- heroDao
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
-      silverScalePct = if (blessed) 100L + BattleState.BlessingBonusPct else 100L
       // После добычи с элементаля игрок идёт осматривать ЕГО логово. Гнилого Джо
       // это не касается — осматривать после него нечего.
-      lootReturn = if (battle.boss.exists(_.race == pangea.model.monster.Race.Elemental))
+      lootReturn = if (battle.boss.exists(_.race == Race.Elemental))
                      Some(StateType.ElementalSearch)
                    else prev.flatMap(_.returnState)
+      // Первый экран добычи — первый павший; остальные ждут своей очереди. Имя
+      // моба над добычей показываем только в группе.
       lootData = LootState.LootData(
-        items = drops.flatMap(_.itemOpt) ++ blessingGear.toList,
-        silvers = drops.collect { case LootGenerator.LootDrop.Silver(a, _) => a * silverScalePct / 100L },
-        doubloons = drops.collect { case LootGenerator.LootDrop.Doubloons(a) => a }.sum,
+        items = first.items ++ blessingGear.toList,
+        silvers = first.silvers,
+        doubloons = first.doubloons,
         returnState = lootReturn,
-        eventData = prev.flatMap(_.eventData)
+        eventData = prev.flatMap(_.eventData),
+        monsterName = Option.when(fallen.size > 1)(first.monsterName),
+        queue = lootByMonster.tail
       )
       // Первый поверженный легендарный моб роняет квестовый «Неактивный куб Азата»
       // (если куба ещё нет и он не был куплен). Хранится флагом в azat_data.
-      cubeDropped = battle.rarity == pangea.model.monster.Rarity.Legendary && azat.cubeAbsent
+      cubeDropped = fallen.exists(_.rarity == Rarity.Legendary.entryName) && azat.cubeAbsent
       _ <- ZIO.when(cubeDropped)(saveAzat(user, azat.copy(cube = CubeStatus.FoundInactive)))
       _ <- heroDao.clearActiveBattle(user.userId)
       _ <- heroDao.updateExpAndLevel(
@@ -2034,18 +2129,23 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       // победа над «Отмеченным тьмой» на текущем этаже открывает путь вглубь
       newMaxDungeon = math.min(150, hero.dungeonLevel + 1)
       unlocksDarkness =
-        battle.monsterMarked && newMaxDungeon > hero.maxDungeonLevel
+        fallen.exists(_.marked) && newMaxDungeon > hero.maxDungeonLevel
       _ <- ZIO.when(unlocksDarkness)(
         heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon)
       )
     } yield VictoryOutcome(
-      monsterName       = battle.monsterName,
+      monsterName       = if (battle.boss.isDefined) battle.monsterName else fallen.map(_.name).mkString(", "),
       expGained         = expGained,
       newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
       unlocksDarkness   = unlocksDarkness,
       cubeDropped       = cubeDropped,
-      elementalDefeated = battle.boss.isDefined
+      elementalDefeated = battle.boss.isDefined,
+      slainCount        = fallen.size
     )
+
+  /** Серебро с благословением Азата — на его бонус больше. */
+  private def silverScalePct(blessed: Boolean): Long =
+    if (blessed) 100L + BattleState.BlessingBonusPct else 100L
 
   /** Показ итогов победы — вызывается ПОСЛЕ того, как [[applyVictory]] всё
     * записал. Падение любого сообщения уже не откатывает бой. */
@@ -2059,7 +2159,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         user,
         Screen(
           content.format(
-            "battle.victory",
+            if (outcome.slainCount > 1) "battle.group.victory" else "battle.victory",
             "monster" -> outcome.monsterName,
             "exp"     -> outcome.expGained.toString
           ),
@@ -2297,13 +2397,16 @@ object BattleState {
   /** Уже ЗАПИСАННЫЙ итог победы — всё, что осталось показать игроку.
     * `newLvl` непуст, если ход дал новый уровень. */
   final case class VictoryOutcome(
+      // В групповом бою — имена всех павших через запятую.
       monsterName: String,
       expGained: Long,
       newLvl: Option[Long],
       unlocksDarkness: Boolean,
       cubeDropped: Boolean,
       // Победа над минибоссом ведёт не в обычную добычу, а в осмотр логова.
-      elementalDefeated: Boolean = false
+      elementalDefeated: Boolean = false,
+      // Сколько мобов легло в этом бою: больше одного — групповая реплика.
+      slainCount: Int = 1
   )
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
@@ -2353,6 +2456,17 @@ object BattleState {
       case s"Skill_$rest" => rest.toLongOption
       case _              => None
     }
+  }
+
+  /** Номер цели умения в строю (с нуля), если кнопка его несла. */
+  def parseTarget(ua: pangea.service.state.UserAction): Option[Int] =
+    ua.payload.flatMap(p =>
+      io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("target")).flatMap(_.toIntOption))
+
+  /** Бьёт ли умение по врагу — таким в группе нужна цель. */
+  def dealsDamage(effect: Skill.Effect): Boolean = effect match {
+    case Skill.Effect.Damage(_) | Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
+    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _)                                    => false
   }
 
   /** Шанс уклонения защищающегося юнита от удара атакующего, в процентах, зажат

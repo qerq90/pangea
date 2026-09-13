@@ -18,8 +18,7 @@ final case class MonsterSlot(
   currentArmor:  Long,
   marked:        Boolean,
   currentEnergy: Long,
-  effects:       BattleEffects,
-  toughnessUsed: Boolean = false
+  effects:       BattleEffects
 ) {
   def toMonster: Monster =
     Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked)
@@ -27,6 +26,9 @@ final case class MonsterSlot(
   def name: String = toMonster.name
 
   def alive: Boolean = currentHp > 0L
+
+  /** Слот как запись о павшем — для добычи после боя. */
+  def slain: SlainMonster = SlainMonster(lvl, race, rarity, marked, name)
 
   /** Проценты для строки группового экрана. */
   def hpPct: Long    = if (stats.hp <= 0L) 0L else currentHp * 100L / stats.hp
@@ -47,8 +49,7 @@ object MonsterSlot {
       marked        <- c.getOrElse[Boolean]("marked")(false)
       currentEnergy <- c.getOrElse[Long]("currentEnergy")(0L)
       effects       <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
-      toughnessUsed <- c.getOrElse[Boolean]("toughnessUsed")(false)
-    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects, toughnessUsed)
+    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects)
 }
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */
@@ -88,6 +89,21 @@ final case class GroupState(
 
   /** Сколько мобов ещё на ногах, включая активного. */
   def aliveCount: Int = 1 + others.count(_.alive)
+
+  /** Моб `others(idx)` пал: из строя — в павшие. Строй смыкается, поэтому
+    * отложенный Таран, если целил в него, пропадает, а если целил дальше по
+    * строю — сдвигается на одного. Чужой индекс — ничего не меняется. */
+  def withoutSlot(idx: Int): GroupState =
+    others.lift(idx) match {
+      case None       => this
+      case Some(slot) =>
+        val swap = pendingSwap.flatMap {
+          case i if i == idx => None
+          case i if i > idx  => Some(i - 1)
+          case i             => Some(i)
+        }
+        copy(others = others.patch(idx, Nil, 1), slain = slain :+ slot.slain, pendingSwap = swap)
+    }
 }
 
 object GroupState {

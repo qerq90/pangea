@@ -73,6 +73,25 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.promoteNext.isEmpty)
     },
 
+    test("павший вне пары смыкает строй, а отложенный Таран едет за своей целью") {
+      val four = SoloPveBattle.fromGroup(trio :+ monster(Race.Orc, 400L), hero, Nil)
+      val aimedAtThird  = four.copy(group = four.group.copy(pendingSwap = Some(1))) // моб №3
+      val aimedAtSecond = four.copy(group = four.group.copy(pendingSwap = Some(0))) // моб №2
+      val secondFell    = aimedAtThird.sideFallen(0)
+      val targetFell    = aimedAtSecond.sideFallen(0)
+      assertTrue(secondFell.group.others.map(_.currentHp) == List(300L, 400L)) &&
+      assertTrue(secondFell.group.slain.map(_.name).size == 1) &&
+      assertTrue(secondFell.group.pendingSwap.contains(0)) &&     // цель сдвинулась на одного
+      assertTrue(targetFell.group.pendingSwap.isEmpty) &&          // цель пала — Таран сгорел
+      assertTrue(four.sideFallen(9) == four)
+    },
+
+    test("смена пары после гибели активного гасит отложенный Таран") {
+      val b = SoloPveBattle.fromGroup(trio, hero, Nil).copy(monsterCurrentHp = 0L)
+      val aimed = b.copy(group = b.group.copy(pendingSwap = Some(0)))
+      assertTrue(aimed.promoteNext.get.group.pendingSwap.isEmpty)
+    },
+
     test("подкрепление встаёт последним по номеру") {
       val b   = SoloPveBattle.fromGroup(trio.take(2), hero, Nil)
       val slot = SoloPveBattle.fromGroup(List(monster(Race.Orc, 999L)), hero, Nil).activeSlot
