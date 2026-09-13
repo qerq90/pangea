@@ -25,6 +25,9 @@ final case class MonsterSlot(
 
   def name: String = toMonster.name
 
+  /** Имя для кнопки — см. `Monster.shortName`. */
+  def shortName: String = toMonster.shortName
+
   def alive: Boolean = currentHp > 0L
 
   /** Слот как запись о павшем — для добычи после боя. */
