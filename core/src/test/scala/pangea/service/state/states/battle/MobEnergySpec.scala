@@ -165,6 +165,45 @@ object MobEnergySpec extends ZIOSpecDefault {
               assertTrue(log.contains("Отравленное оружие"))
     },
 
+    test("огненный порошок не бьёт сквозь броню: удар меньше брони в HP не проходит") {
+      // Бой из лога: у героя брони с запасом, у демона — Огонь после порошка.
+      // Раньше множители огня (0.8 по броне, 1.1 по HP) подставлялись в раскол
+      // минибосса как ДОЛИ, и 110% удара уходило в HP мимо брони.
+      val h = hero().copy(fightStats = FightStats(atk = 20, hp = 480L, armor = 1400L, defence = 0,
+                                                  evasion = 0, accuracy = 9999, energy = 0))
+      val b = mobBattle(Race.Demon, energy = 0L)
+      val fiery = b.copy(
+        monsterStats = b.monsterStats.copy(atk = 700),
+        effects = b.effects.copy(monsterPowderUsed = true,
+                                 monsterAttackElement = Some(pangea.model.battle.Element.Fire.entryName)))
+      for {
+        r <- strike(h, fiery, seedTurn(99))
+        (_, updated, _) = r
+      } yield assertTrue(updated.fightStats.hp == 480L) &&      // HP не тронуты
+              assertTrue(updated.fightStats.armor < 1400L) &&   // удар ушёл в броню
+              assertTrue(updated.fightStats.armor > 0L)
+    },
+
+    test("огонь порошка: в HP идёт только то, что вылилось за броню, с усилением 1.1") {
+      // Брони 100, удар ~700: броня встречает свои 100, но огонь по броне на 20%
+      // слабее — с неё уходит 80, а остаток удара (600) идёт в HP с ×1.1.
+      val h = hero().copy(fightStats = FightStats(atk = 20, hp = 5000L, armor = 100L, defence = 0,
+                                                  evasion = 0, accuracy = 9999, energy = 0))
+      val b = mobBattle(Race.Demon, energy = 0L)
+      val fiery = b.copy(
+        monsterStats = b.monsterStats.copy(atk = 700),
+        effects = b.effects.copy(monsterPowderUsed = true,
+                                 monsterAttackElement = Some(pangea.model.battle.Element.Fire.entryName)))
+      for {
+        r <- strike(h, fiery, seedTurn(99))
+        (_, updated, _) = r
+        lostHp = 5000L - updated.fightStats.hp
+      } yield assertTrue(updated.fightStats.armor == 20L) &&
+              // урон в HP ≈ (удар − 100) × 1.1, но никак не удар × 1.1 целиком
+              assertTrue(lostHp > 0L) &&
+              assertTrue(lostHp < (700L * 11L) / 10L)
+    },
+
     test("яд обычного моба тикает своей строкой, а не гнилью Джо") {
       // Гниль — особенность минибосса; у отравленного оружия мобов текст тот же,
       // что и у яда, который герой накладывает на них: «Яд снимает …».

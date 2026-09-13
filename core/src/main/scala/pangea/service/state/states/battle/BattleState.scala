@@ -429,13 +429,29 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     * по броне и HP так же, как стихии оружия двигают урон героя по мобу.
     * Возвращает новые hp и armor героя. */
   private def bossHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
-    battle.boss.flatMap(_.heroHitSplit).orElse(powderSplit(battle)) match {
-      case None => MonsterSkill.applyPhysicalDamage(battle, hero, damage)
+    battle.boss.flatMap(_.heroHitSplit) match {
+      // Минибосс с расколом: пара чисел — ДОЛИ удара, каменный бьёт и в броню,
+      // и в HP мимо неё одновременно, это его особенность.
       case Some((armorPart, hpPart)) =>
         val curArmor = hero.fightStats.armor.max(0L)
         val absorbed = (damage * armorPart).toLong.min(curArmor)
         val toHp     = (damage - absorbed).max((damage * hpPart).toLong)
         ((hero.fightStats.hp - toHp).max(0L), curArmor - hero.sets.armorSpent(absorbed))
+      case None =>
+        powderSplit(battle) match {
+          case None => MonsterSkill.applyPhysicalDamage(battle, hero, damage)
+          // Стихия порошка: пара чисел — МНОЖИТЕЛИ, как у стихии в оружии героя.
+          // Броня поглощает удар (со своим множителем), в HP идёт только то, что
+          // за неё вылилось (со своим). Подставлять множители в раскол минибосса
+          // нельзя: огонь с 1.1 по HP гнал 110% удара сквозь броню.
+          case Some((armorMult, hpMult)) =>
+            val curArmor  = hero.fightStats.armor.max(0L)
+            val rawArmor  = math.min(curArmor, damage)
+            val rawHp     = damage - rawArmor
+            val armorDmg  = (rawArmor * armorMult).toLong.min(curArmor).max(0L)
+            val hpDmg     = (rawHp * hpMult).toLong.max(0L)
+            ((hero.fightStats.hp - hpDmg).max(0L), curArmor - hero.sets.armorSpent(armorDmg))
+        }
     }
 
   /** Шипы огненного элементаля. Пока у него ЦЕЛА БРОНЯ (проверяется её запас до
