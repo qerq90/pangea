@@ -48,8 +48,73 @@ case class SoloPveBattle(
   bossRevives:    Int = 0,
   // Текущая энергия моба. У рядовых мобов не расходуется (их скиллы бесплатны),
   // а элементаль тратит её на способности и восстанавливает по столько-то за раунд.
-  monsterCurrentEnergy: Long = 0L
+  monsterCurrentEnergy: Long = 0L,
+  // Групповая часть боя: мобы под номерами 2+, павшие, счётчик раундов, Таран.
+  // Обычный бой 1 на 1 — группа из одного, здесь пусто (см. GroupState).
+  group: GroupState = GroupState.empty
 ) {
+
+  // ── Группа ────────────────────────────────────────────────────────────────
+
+  def isGroup: Boolean = group.isGroup
+
+  /** Активный моб (тот, что в паре с героем) как слот — для перекладывания. */
+  def activeSlot: MonsterSlot = MonsterSlot(
+    lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
+    currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
+    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, toughnessUsed = toughnessUsed)
+
+  /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
+    * геройская половина эффектов остаётся как была. Минибоссы в группе не
+    * бывают, поэтому их поля не трогаем. */
+  def withActive(slot: MonsterSlot): SoloPveBattle = copy(
+    monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
+    monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
+    monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
+    toughnessUsed = slot.toughnessUsed)
+
+  /** Поменять активного моба местами с мобом `others(idx)`. Чужой индекс — бой
+    * не меняется. */
+  def swapWith(idx: Int): SoloPveBattle =
+    group.others.lift(idx) match {
+      case None => this
+      case Some(incoming) =>
+        withActive(incoming).copy(group = group.copy(others = group.others.updated(idx, activeSlot)))
+    }
+
+  /** Активный моб пал, а в группе есть ещё: записать его в павшие и поставить в
+    * пару следующего по номеру. Если ставить некого — None, это победа. */
+  def promoteNext: Option[SoloPveBattle] =
+    group.others.headOption.map { next =>
+      withActive(next).copy(group = group.copy(
+        others = group.others.tail,
+        slain  = group.slain :+ slainActive))
+    }
+
+  /** Активный моб как запись о павшем — для добычи после боя. */
+  def slainActive: SlainMonster =
+    SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName)
+
+  /** Подкрепление встаёт последним по номеру. */
+  def withReinforcement(slot: MonsterSlot): SoloPveBattle =
+    copy(group = group.copy(others = group.others :+ slot))
+
+  /** Перемешать всех живых мобов: любой может оказаться в паре. `order` — новый
+    * порядок индексов по списку «активный :: others». */
+  def reorderMonsters(order: List[Int]): SoloPveBattle = {
+    val all = activeSlot :: group.others
+    if (order.sorted != all.indices.toList) this
+    else {
+      val shuffled = order.map(all)
+      withActive(shuffled.head).copy(group = group.copy(others = shuffled.tail))
+    }
+  }
+
+  /** Все живые мобы по номерам: активный — номер 1. */
+  def monstersInOrder: List[MonsterSlot] = activeSlot :: group.others
+
+  /** Раса, которой приходит подкрепление: первого моба этого боя. */
+  def reinforcementRace: String = group.originRace.getOrElse(monsterRace)
 
   /** Элементаль этого боя, если сражаемся с минибоссом. */
   def boss: Option[pangea.model.monster.MiniBoss] =
@@ -133,6 +198,18 @@ object SoloPveBattle {
     monsterCurrentEnergy = monster.fightStats.energy
   )
 
+  /** Бой против группы: первый моб в паре, остальные — слотами под номерами 2+.
+    * Раса первого запоминается — подкрепление приходит такой же. */
+  def fromGroup(monsters: List[Monster], hero: Hero, startEnergies: List[Long]): SoloPveBattle = {
+    val energies = startEnergies.padTo(monsters.size, 0L)
+    val slots = monsters.zip(energies).map { case (m, e) =>
+      MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
+        m.fightStats.armor, m.marked, e, BattleEffects.empty)
+    }
+    val head = from(monsters.head, hero).copy(monsterCurrentEnergy = energies.head)
+    head.copy(group = GroupState(others = slots.tail, originRace = Some(monsters.head.race.entryName)))
+  }
+
   implicit val encoder: Encoder[SoloPveBattle] = deriveEncoder
 
   implicit val decoder: Decoder[SoloPveBattle] = (c: HCursor) =>
@@ -154,7 +231,8 @@ object SoloPveBattle {
       charges             <- c.getOrElse[Int]("bossCharges")(0)
       revives             <- c.getOrElse[Int]("bossRevives")(0)
       monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
+      group               <- c.getOrElse[GroupState]("group")(GroupState.empty)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy)
+                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy, group)
 }

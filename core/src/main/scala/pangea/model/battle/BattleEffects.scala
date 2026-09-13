@@ -169,6 +169,62 @@ case class BattleEffects(
   monsterSkillBlockedTurns: Int                    = 0
 ) {
 
+  /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
+    * половина обнулена. Нужно, когда моб уходит из пары в слот группы — его
+    * эффекты уезжают с ним, а не остаются на следующем противнике. */
+  def monsterPart: BattleEffects = BattleEffects(
+    monsterPoison            = monsterPoison,
+    monsterBleed             = monsterBleed,
+    monsterBurn              = monsterBurn,
+    monsterColdDefenceCut    = monsterColdDefenceCut,
+    mobAirBoostTurns         = mobAirBoostTurns,
+    monsterDefenceDebuff     = monsterDefenceDebuff,
+    chilledTurns             = chilledTurns,
+    monsterPowderUsed        = monsterPowderUsed,
+    monsterPoisonsOnHit      = monsterPoisonsOnHit,
+    monsterAttackElement     = monsterAttackElement,
+    monsterWeakenedTurns     = monsterWeakenedTurns,
+    monsterWeakenedPct       = monsterWeakenedPct,
+    monsterMaxArmorCut       = monsterMaxArmorCut,
+    monsterSkillBlockedTurns = monsterSkillBlockedTurns
+  )
+
+  /** Геройская половина: реген, горение и яд на герое, срезы, флаги наборов. Она
+    * остаётся при смене пары — у героя противник сменился, а его раны нет. */
+  def heroPart: BattleEffects = BattleEffects(
+    heroColdDefenceCut   = heroColdDefenceCut,
+    airBoostTurns        = airBoostTurns,
+    heroRegen            = heroRegen,
+    heroBurn             = heroBurn,
+    heroPoisonousAttacks = heroPoisonousAttacks,
+    cancelSpent          = cancelSpent,
+    doubleSpent          = doubleSpent,
+    heroStunnedTurns     = heroStunnedTurns,
+    heroGroundedTurns    = heroGroundedTurns,
+    heroPoison           = heroPoison
+  )
+
+  /** Своя геройская половина плюс мобовая половина другого набора. */
+  def withMonsterPart(m: BattleEffects): BattleEffects = {
+    val mp = m.monsterPart
+    heroPart.copy(
+      monsterPoison            = mp.monsterPoison,
+      monsterBleed             = mp.monsterBleed,
+      monsterBurn              = mp.monsterBurn,
+      monsterColdDefenceCut    = mp.monsterColdDefenceCut,
+      mobAirBoostTurns         = mp.mobAirBoostTurns,
+      monsterDefenceDebuff     = mp.monsterDefenceDebuff,
+      chilledTurns             = mp.chilledTurns,
+      monsterPowderUsed        = mp.monsterPowderUsed,
+      monsterPoisonsOnHit      = mp.monsterPoisonsOnHit,
+      monsterAttackElement     = mp.monsterAttackElement,
+      monsterWeakenedTurns     = mp.monsterWeakenedTurns,
+      monsterWeakenedPct       = mp.monsterWeakenedPct,
+      monsterMaxArmorCut       = mp.monsterMaxArmorCut,
+      monsterSkillBlockedTurns = mp.monsterSkillBlockedTurns
+    )
+  }
+
   /** Скован ли сейчас элементаль холодом. */
   def chilled: Boolean = chilledTurns > 0
 
