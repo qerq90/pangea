@@ -163,7 +163,7 @@ object StatesMap {
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
-          TempleAzat -> TempleAzatState(heroDao, content),
+          TempleAzat -> TempleAzatState(heroDao, inventoryRepo, itemRepo, content),
           HallAzat   -> HallAzatState(heroDao, content),
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),
           Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),

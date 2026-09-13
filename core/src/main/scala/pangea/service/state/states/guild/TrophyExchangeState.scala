@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.guild.TrophyExchangeState._
-import pangea.service.state.{AzatData, ItemMenu, State, UserAction}
+import pangea.service.state.{AzatData, ItemMenu, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -55,6 +55,7 @@ case class TrophyExchangeState(
       gained    <- blessedReputation(user, trophies.map(TrophyExchangeState.reputationFor).sum)
       _         <- ZIO.foreachDiscard(trophies)(t => inventoryRepo.removeItem(t.id, hero.id).orElse(ZIO.unit))
       _         <- ZIO.when(gained > 0)(heroDao.updateGuildReputation(user.userId, hero.guildReputation + gained))
+      _         <- NpcQuestLog.onReputation(heroDao, user.userId, gained)
       msg        = if (trophies.isEmpty) content.text("guild.noTrophies")
                    else content.format("guild.trophiesSubmitted",
                      "count"  -> trophies.length.toString,
@@ -112,6 +113,7 @@ case class TrophyExchangeState(
           val total  = hero.guildReputation + gained
           inventoryRepo.removeItem(trophy.id, hero.id).orElse(ZIO.unit) *>
             heroDao.updateGuildReputation(user.userId, total) *>
+            NpcQuestLog.onReputation(heroDao, user.userId, gained) *>
             renderer.show(user, Screen(content.format("guild.trophySubmitted",
               "name"   -> trophy.name,
               "gained" -> gained.toString,

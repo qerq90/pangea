@@ -4,10 +4,11 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
+import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.stats.StatBoost
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{NpcQuestLog, State, UserAction}
 import zio.Task
 
 /** Экран зелий-бафов Густаво (бык/медоед/кошка/злобомозг). Каждое даёт +15% соответствующей
@@ -36,23 +37,29 @@ case class GustavoBoostState(
 
   private def render(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now  <- nowMs
-      hero <- getHero(user)
-      data <- loadData(user)
-      choices = BoostStat.all.map(bs => boostButton(bs, hero, data, now)) :+
+      now    <- nowMs
+      hero   <- getHero(user)
+      data   <- loadData(user)
+      treat  <- questTreat(user)
+      choices = BoostStat.all.map(bs => boostButton(bs, hero, data, now, treat)) :+
                   content.choice("Back", "gustavo.boostBack")
       _ <- renderer.show(user, Screen(content.text("gustavo.boost.intro"), choices))
     } yield ()
 
+  /** Поблажка от Густаво по заданию: зелье выветрилось раньше, чем герой побил
+    * троих, — следующее наливается бесплатно, какое бы ни выбрал. */
+  private def questTreat(user: User): Task[Boolean] =
+    NpcQuestLog.load(heroDao, user.userId).map(q => q.onStep(NpcQuest.Gustavo, 1) && q.of(NpcQuest.Gustavo).bonus)
+
   /** Кнопка характеристики: красная «готовится» пока баф активен, зелёная «бесплатно» пока не
-    * потрачено бесплатное зелье этого типа, иначе синяя с ценой. */
-  private def boostButton(bs: BoostStat, hero: Hero, data: GustavoData, now: Long): Choice = {
+    * потрачено бесплатное зелье этого типа (или Густаво угощает по заданию), иначе синяя с ценой. */
+  private def boostButton(bs: BoostStat, hero: Hero, data: GustavoData, now: Long, treat: Boolean): Choice = {
     val stat = Map("stat" -> bs.key)
     hero.statBoosts.remainingMs(bs.boostName, now) match {
       case Some(left) =>
         content.choice("BoostBuy", "gustavo.boostBusyLabel", "stat" -> bs.label, "mins" -> minsOf(left))
           .copy(data = stat, color = ChoiceColor.Negative)
-      case None if !data.freeBoostsUsed.contains(bs.key) =>
+      case None if treat || !data.freeBoostsUsed.contains(bs.key) =>
         content.choice("BoostBuy", "gustavo.boostFreeLabel", "stat" -> bs.label)
           .copy(data = stat, color = ChoiceColor.Positive)
       case None =>
@@ -66,21 +73,24 @@ case class GustavoBoostState(
       case None     => render(user, renderer).as(StateType.GustavoBoost)
       case Some(bs) =>
         for {
-          now  <- nowMs
-          hero <- getHero(user)
-          data <- loadData(user)
+          now   <- nowMs
+          hero  <- getHero(user)
+          data  <- loadData(user)
+          treat <- questTreat(user)
           _ <- hero.statBoosts.remainingMs(bs.boostName, now) match {
                  case Some(left) => // повтор того же типа, пока прежний баф действует
                    renderer.show(user, Screen(content.format("gustavo.boostBusy",
                      "potion" -> bs.potion, "mins" -> minsOf(left)), Nil))
                  case None =>
+                   // Угощение по заданию не тратит бесплатное зелье этого типа.
                    val free  = !data.freeBoostsUsed.contains(bs.key)
-                   val price = if (free) 0L else cost(hero)
+                   val price = if (free || treat) 0L else cost(hero)
                    if (price > 0 && hero.silver < price)
                      renderer.show(user, Screen(content.format("gustavo.boostNotEnoughSilver",
                        "potion" -> bs.potion, "cost" -> price.toString), Nil))
                    else
-                     applyBoost(user, hero, data, bs, free, price, now, renderer)
+                     applyBoost(user, hero, data, bs, free && !treat, price, now, renderer) *>
+                       questPotionTaken(user, now)
                }
           _ <- render(user, renderer)
         } yield StateType.GustavoBoost
@@ -92,12 +102,19 @@ case class GustavoBoostState(
   ): Task[Unit] = {
     val newBoosts = hero.statBoosts.add(StatBoost(bs.boostName, bs.buff, now + GustavoData.BoostDurationMs), now)
     val newFree   = if (free) data.freeBoostsUsed :+ bs.key else data.freeBoostsUsed
-    val msgKey    = if (free) "gustavo.boostAppliedFree" else "gustavo.boostApplied"
+    val msgKey    = if (price == 0L) "gustavo.boostAppliedFree" else "gustavo.boostApplied"
     heroDao.updateSilver(user.userId, hero.silver - price) *>
       heroDao.updateStatBoosts(user.userId, newBoosts) *>
       heroDao.writeGustavoData(user.userId, data.copy(freeBoostsUsed = newFree).asJson) *>
       renderer.show(user, Screen(content.format(msgKey, "potion" -> bs.potion, "stat" -> bs.label), Nil))
   }
+
+  /** Выпитое зелье закрывает первый шаг задания Густаво: дальше счёт побитых. */
+  private def questPotionTaken(user: User, now: Long): Task[Unit] =
+    NpcQuestLog.modify(heroDao, user.userId) { q =>
+      if (!q.onStep(NpcQuest.Gustavo, 1)) q
+      else q.update(NpcQuest.Gustavo)(_.copy(step = 2, counter = 0L, since = now, bonus = false))
+    }.unit
 
   private def payloadStat(ua: UserAction): Option[String] =
     ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("stat")))

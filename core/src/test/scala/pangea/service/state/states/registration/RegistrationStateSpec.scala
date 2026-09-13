@@ -1,6 +1,7 @@
 package pangea.service.state.states.registration
 
 import pangea.engine.SceneContent
+import pangea.model.hero.LoreData
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -203,10 +204,13 @@ object RegistrationStateSpec extends ZIOSpecDefault {
         result  <- state.action(testUser, confirmRace(Race.Demon), renderer)
         snap    <- heroDao.raceSnapshot
         scene   <- heroDao.readSceneData(userId)
+        lore    <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
         screens <- renderer.sentScreens
       } yield assertTrue(result == StateType.Dungeon) &&
               // раса — та, что выбрана в конце, а не та, чью ветку прошли
               assertTrue(snap.get(testUser.userId).contains(Race.Demon)) &&
+              // а ветка пролога остаётся с героем навсегда — сюжету пригодится
+              assertTrue(lore.exists(_.prologueBranch.contains("Elf"))) &&
               assertTrue(invRepo.snapshot.map(_.name).toSet ==
                 Set("Меч новобранца", "Фляга начинающего исследователя")) &&
               assertTrue(screens.exists(_.text.contains("снаряжение"))) &&
@@ -224,8 +228,22 @@ object RegistrationStateSpec extends ZIOSpecDefault {
         _      <- state.action(testUser, raceDescription(Race.Human), renderer)
         result <- state.action(testUser, confirmRace(Race.Human), renderer)
         snap   <- heroDao.raceSnapshot
+        lore   <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
       } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(snap.get(testUser.userId).contains(Race.Human))
+              assertTrue(snap.get(testUser.userId).contains(Race.Human)) &&
+              assertTrue(lore.exists(_.prologueBranch.contains("Gnome")))
+    },
+
+    test("«прожить заново» перезаписывает ветку: в финале остаётся последняя") {
+      for {
+        quad                         <- makeStateWithHero
+        (state, renderer, heroDao, _) = quad
+        _      <- state.action(testUser, tap("Pick_Orc"), renderer)
+        _      <- state.action(testUser, tap("P1_Intro"), renderer)
+        _      <- state.action(testUser, tap("Pick_Human"), renderer)
+        _      <- state.action(testUser, confirmRace(Race.Elf), renderer)
+        lore   <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
+      } yield assertTrue(lore.exists(_.prologueBranch.contains("Human")))
     }
   )
 }

@@ -9,12 +9,13 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemStack, ItemType, Rarity}
+import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{CharacterMenu, InventoryFeedback, ItemMenu, State, UserAction}
+import pangea.service.state.{CharacterMenu, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -32,8 +33,15 @@ case class MerchantState(
   content:       SceneContent
 ) extends State {
 
+  /** «Товар с того света»: три серых вещи через «Продать хлам» — Ришелье
+    * доплачивает до цены белых и обновляет партию вне очереди. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Richelieu, "Rich")
+
   private val branch = new Branch(
     routes = Map(
+      quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showMenu(u, r).as(StateType.Merchant) },
+      quest.declineAction -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.Merchant) },
       "Buy"             -> Target.Run { (u, ua, r) => confirmBuy(u, ua, r) },
       "ConfirmBuy"      -> Target.Run { (u, ua, r) => doBuy(u, ua, r) },
       "CancelBuy"       -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
@@ -64,7 +72,7 @@ case class MerchantState(
       now  <- nowMs
       data <- loadOrInit(user, now)
       hero <- getHero(user)
-      _    <- renderer.show(user, menuScreen(data, hero))
+      _    <- showMenu(user, renderer, data, hero)
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -128,9 +136,9 @@ case class MerchantState(
       _ <- if (now - data.refreshedAt < RefreshCooldownMs) {
              val mins = ((RefreshCooldownMs - (now - data.refreshedAt)) / 60000L).max(1L)
              renderer.show(user, Screen(content.format("merchant.refreshCooldown", "mins" -> mins.toString), Nil)) *>
-               renderer.show(user, menuScreen(data, hero))
+               showMenu(user, renderer, data, hero)
            } else
-             regenerate(user, now, data.junkSale).flatMap(d => renderer.show(user, menuScreen(d, hero)))
+             regenerate(user, now, data.junkSale).flatMap(d => showMenu(user, renderer, d, hero))
     } yield StateType.Merchant
 
   // ── Продажа ─────────────────────────────────────────────────────────────────
@@ -220,8 +228,54 @@ case class MerchantState(
                heroDao.updateSilver(user.userId, hero.silver + total) *>
                renderer.show(user, Screen(content.format("merchant.sellJunkDone",
                  "count" -> junk.size.toString, "silver" -> total.toString), Nil)) *>
+               questAfterJunk(user, hero.copy(silver = hero.silver + total), data, junk, renderer) *>
                showMenu(user, renderer)
     } yield StateType.Merchant
+
+  // ── Задание Ришелье ─────────────────────────────────────────────────────────
+
+  /** Кнопка задания: завязка, пока не взято; пока идёт — считает серые вещи в
+    * сумке и говорит, чего не хватает или что жать. */
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      quests <- quest.load(user)
+      _ <- if (quests.isDone(NpcQuest.Richelieu)) showMenu(user, renderer)
+           else if (!quests.isTaken(NpcQuest.Richelieu)) quest.offer(user, renderer, quest.text("intro"))
+           else for {
+             hero  <- getHero(user)
+             items <- inventoryItems(hero)
+             grays  = items.count(isGrayGear)
+             line   = if (grays >= NpcQuest.RichelieuGrayGoal) quest.text("step1Ready")
+                      else quest.format("step1Fail", "count" -> grays.toString)
+             _     <- renderer.show(user, Screen(line, Nil)) *> showMenu(user, renderer)
+           } yield ()
+    } yield StateType.Merchant
+
+  /** После «Продать хлам»: если задание идёт и среди проданного три серых вещи —
+    * оно закрыто. Ришелье доплачивает за первые три как за белые, сбрасывает
+    * кулдаун обновления партии и рассказывает, откуда серые вещи. `hero` — уже с
+    * серебром за проданное. */
+  private def questAfterJunk(user: User, hero: Hero, data: MerchantData, sold: List[Item], renderer: Renderer): Task[Unit] =
+    quest.load(user).flatMap { quests =>
+      val grays = sold.filter(isGrayGear).take(NpcQuest.RichelieuGrayGoal)
+      if (!quests.onStep(NpcQuest.Richelieu, 1) || grays.size < NpcQuest.RichelieuGrayGoal) ZIO.unit
+      else {
+        val topUp = grays.map(g => sellPrice(g.copy(rarity = Rarity.White)) - sellPrice(g)).sum.max(0L)
+        for {
+          _    <- heroDao.updateSilver(user.userId, hero.silver + topUp)
+          _    <- heroDao.writeMerchantData(user.userId, data.copy(refreshedAt = 0L).asJson)
+          done <- quest.complete(user, hero, identity)
+          (_, expLine) = done
+          _    <- renderer.show(user, Screen(quest.text("outro"), Nil))
+          _    <- renderer.show(user, Screen(quest.format("reward", "silver" -> topUp.toString, "exp" -> expLine), Nil))
+        } yield ()
+      }
+    }
+
+  /** Серая вещь снаряжения — то, что Ришелье считает «серым товаром»: не трофей,
+    * не камень, не материал и не карта. */
+  private def isGrayGear(item: Item): Boolean =
+    item.rarity == Rarity.Gray && ItemType.equippable.contains(item.itemType)
 
   // ── Настройка автопродажи ───────────────────────────────────────────────────
 
@@ -309,10 +363,13 @@ case class MerchantState(
       now  <- nowMs
       data <- loadOrInit(user, now)
       hero <- getHero(user)
-      _    <- renderer.show(user, menuScreen(data, hero))
+      _    <- showMenu(user, renderer, data, hero)
     } yield ()
 
-  private def menuScreen(data: MerchantData, hero: Hero): Screen = {
+  private def showMenu(user: User, renderer: Renderer, data: MerchantData, hero: Hero): Task[Unit] =
+    quest.load(user).flatMap(q => renderer.show(user, menuScreen(data, hero, quest.button(q))))
+
+  private def menuScreen(data: MerchantData, hero: Hero, questBtn: Option[Choice]): Screen = {
     val lines = data.items.zipWithIndex.map { case (mi, i) =>
       if (mi.bought) content.format("merchant.boughtLine", "n" -> (i + 1).toString, "name" -> mi.item.name)
       else saleLine(mi, i, hero)
@@ -324,7 +381,7 @@ case class MerchantState(
       case (mi, i) if !mi.bought =>
         content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
     }
-    val choices = buyButtons ++ List(
+    val choices = buyButtons ++ questBtn.toList ++ List(
       content.choice("Refresh",       "merchant.refreshLabel"),
       content.choice("Sell",          "merchant.sellLabel"),
       content.choice("SellJunk",      "merchant.sellJunkLabel"),

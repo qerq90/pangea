@@ -3,10 +3,15 @@ package pangea.service.state.states.temple
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.generator.item.MaterialGenerator
 import pangea.model.hero.{AzatState, Hero}
+import pangea.model.item.{Item, ItemType, MaterialKind}
+import pangea.model.quest.{NpcQuest, NpcQuests}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
+import pangea.service.state.{AzatData, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -14,11 +19,23 @@ import java.util.concurrent.TimeUnit
 /** Храм Азата: вход, Жрец (лор + благословение) и переход в Зал Азата. Благословение
  *  — пожертвование 250 дублонов даёт недельный баф ([[AzatState.blessingUntil]]) и
  *  250 мгновенных отдыхов. */
-case class TempleAzatState(heroDao: HeroDao, content: SceneContent) extends State {
+case class TempleAzatState(
+  heroDao:       HeroDao,
+  inventoryRepo: InventoryRepository,
+  itemRepo:      ItemRepository,
+  content:       SceneContent
+) extends State {
   import TempleAzatState._
+
+  /** «То, что не пропадает»: показать найденный камень — Жрец объясняет, что с
+    * ним делать, отсыпает пыль и открывает первый рецепт куба. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Priest, "Priest")
 
   private val branch = new Branch(
     routes = Map(
+      quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showPriest(u, r) },
+      quest.declineAction -> Target.Run { (u, _, r) => showPriest(u, r) },
       "Priest"       -> Target.Run { (u, _, r) => showPriest(u, r) },
       "Hall"         -> Target.Goto(StateType.HallAzat),
       "LeaveTemple"  -> Target.Goto(StateType.CityCenter),
@@ -46,8 +63,48 @@ case class TempleAzatState(heroDao: HeroDao, content: SceneContent) extends Stat
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
+  /** Меню Жреца: кнопка задания встаёт перед «Назад». */
   private def showPriest(user: User, renderer: Renderer): Task[StateType] =
-    renderer.show(user, content.screen("temple.priest")).as(StateType.TempleAzat)
+    quest.load(user).flatMap { quests =>
+      val base    = content.screen("temple.priest")
+      val (front, back) = base.choices.partition(_.id != "BackToTemple")
+      renderer.show(user, base.copy(choices = front ++ quest.button(quests).toList ++ back))
+    }.as(StateType.TempleAzat)
+
+  /** Кнопка задания: завязка, пока не взято; показ камня, пока идёт. */
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    quest.load(user).flatMap { quests =>
+      if (quests.isDone(NpcQuest.Priest)) showPriest(user, renderer).unit
+      else if (!quests.isTaken(NpcQuest.Priest)) quest.offer(user, renderer, quest.text("intro"))
+      else questShowGem(user, renderer)
+    }.as(StateType.TempleAzat)
+
+  /** Показ камня: он остаётся у героя; Жрец отсыпает горсть такой же пыли (если
+    * есть место), записывает рецепт и платит серебром и опытом. */
+  private def questShowGem(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- inv.items.data.find(i => i.id != 0L && i.itemType == ItemType.Gem).flatMap(_.gem) match {
+        case None =>
+          renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> showPriest(user, renderer)
+        case Some(gem) =>
+          val dust: Item = MaterialGenerator.item(MaterialKind.dustOf(gem.kind))
+          for {
+            given <- itemRepo.persist(hero.id, dust)
+                       .flatMap(d => inventoryRepo.addItem(hero.id, d)).as(true)
+                       .catchAll(_ => ZIO.succeed(false))
+            _     <- heroDao.updateSilver(user.userId, hero.silver + QuestSilver)
+            done  <- quest.complete(user, hero, (q: NpcQuests) => q.withRecipe(NpcQuests.DustAssemblyRecipe))
+            (_, expLine) = done
+            _     <- renderer.show(user, Screen(quest.text("outro"), Nil))
+            _     <- renderer.show(user, Screen(
+                       if (given) quest.format("rewardDust", "dust" -> dust.name, "silver" -> QuestSilver.toString, "exp" -> expLine)
+                       else quest.format("rewardNoRoom", "silver" -> QuestSilver.toString, "exp" -> expLine), Nil))
+            _     <- showPriest(user, renderer)
+          } yield ()
+      }
+    } yield ()
 
   private def showWho(user: User, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(content.text("temple.whoIsAzat"),
@@ -107,4 +164,7 @@ case class TempleAzatState(heroDao: HeroDao, content: SceneContent) extends Stat
 
 object TempleAzatState {
   val BlessingCost: Long = 250L
+
+  /** Серебро за показанный Жрецу камень. */
+  val QuestSilver: Long = 50L
 }

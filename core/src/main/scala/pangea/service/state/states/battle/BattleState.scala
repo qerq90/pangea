@@ -16,7 +16,8 @@ import pangea.model.skill.{MonsterEnergy, MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.service.state.states.gustavo.GustavoState
+import pangea.service.state.{AzatData, NpcQuestLog, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -2122,6 +2123,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       cubeDropped = fallen.exists(_.rarity == Rarity.Legendary.entryName) && azat.cubeAbsent
       _ <- ZIO.when(cubeDropped)(saveAzat(user, azat.copy(cube = CubeStatus.FoundInactive)))
       _ <- heroDao.clearActiveBattle(user.userId)
+      // Задание Густаво: павшие идут в счёт, пока действует его зелье.
+      _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
       _ <- heroDao.updateExpAndLevel(
         user.userId,
         leveled.exp,

@@ -69,6 +69,11 @@ trait HeroDao {
    *  трактирщика. Durable, живёт в `heroes.lore_data`. */
   def writeLoreData(userId: UserId, data: Json): Task[Unit]
   def readLoreData(userId: UserId): Task[Option[Json]]
+
+  /** Сюжетные задания горожан ([[pangea.model.quest.NpcQuests]]). Durable,
+    * живёт в `heroes.npc_quests`. */
+  def writeNpcQuests(userId: UserId, data: Json): Task[Unit]
+  def readNpcQuests(userId: UserId): Task[Option[Json]]
 }
 
 object HeroDao {

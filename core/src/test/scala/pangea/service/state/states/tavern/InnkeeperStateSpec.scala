@@ -43,13 +43,13 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("InnkeeperState")(
 
-    test("enter → кнопки «Сдать квестовые предметы» и «Вернуться»") {
+    test("enter → кнопки «Сдать квестовые предметы», задание Трактирщика и «Вернуться»") {
       for {
         t <- makeState(Nil, None)
         (state, _, _, renderer) = t
         _       <- state.enter(testUser, renderer)
         screens <- renderer.sentScreens
-      } yield assertTrue(screens.last.choices.map(_.id).toSet == Set("TurnInQuest", "OpenCharacter", "BackFromInnkeeper"))
+      } yield assertTrue(screens.last.choices.map(_.id).toSet == Set("TurnInQuest", "InnQuest", "OpenCharacter", "BackFromInnkeeper"))
     },
 
     test("TurnInQuest без активного задания → сообщение об отсутствии задания") {
