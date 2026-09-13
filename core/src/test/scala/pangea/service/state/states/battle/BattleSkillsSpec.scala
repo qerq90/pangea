@@ -13,6 +13,7 @@ import pangea.service.state.UserAction
 import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
 import zio.ZIO
 import zio.test._
+import zio.test.TestRandom
 
 object BattleSkillsSpec extends ZIOSpecDefault {
 
@@ -163,6 +164,8 @@ object BattleSkillsSpec extends ZIOSpecDefault {
       for {
         triple                     <- makeState(hero, weakBattle(slots))
         (state, _, renderer)        = triple
+        // броски раунда, последний — подкрепление (99: сородич не пришёл)
+        _                          <- TestRandom.feedInts(50, 50, 99, 99)
         _                          <- state.action(testUser, tap("Skill_101"), renderer)
         screens                    <- renderer.sentScreens
         ids                         = screens.lastOption.map(_.choices.map(_.id)).getOrElse(Nil)

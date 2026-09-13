@@ -48,31 +48,31 @@ object TreasureMobsFightStateSpec extends ZIOSpecDefault {
       } yield assertTrue(state.autoAdvance.contains(StateType.Battle))
     },
 
-    test("enter (есть ещё бои) → спавнит моба той же расы, routing возвращает снова в Fight, remaining-1") {
+    test("enter → один групповой бой на всех мобов той же расы, routing сразу в схрон") {
       for {
         t <- setup(TreasureMobsChain(Race.Orc.entryName, remaining = 3, 2, 3))
         (state, renderer, heroDao) = t
-        _       <- TestRandom.feedLongs(1L) // seed моба
         _       <- state.enter(testUser, renderer)
         battle  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
         routing <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
         nextChain = routing.flatMap(_.eventData).flatMap(_.as[TreasureMobsChain].toOption)
       } yield assertTrue(battle.exists(_.monsterRace == Race.Orc.entryName)) &&
-              assertTrue(routing.exists(_.returnState.contains(StateType.TreasureMobsFight))) &&
-              assertTrue(nextChain.exists(_.remaining == 2)) &&
+              assertTrue(battle.exists(_.group.others.size == 2)) &&
+              assertTrue(battle.exists(_.group.others.forall(_.race == Race.Orc.entryName))) &&
+              assertTrue(battle.exists(_.group.originRace.contains(Race.Orc.entryName))) &&
+              assertTrue(routing.exists(_.returnState.contains(StateType.TreasureSchron))) &&
+              assertTrue(nextChain.exists(_.remaining == 0)) &&
               assertTrue(nextChain.exists(_.race == Race.Orc.entryName))
     },
 
-    test("enter (последний бой) → routing ведёт в TreasureSchron, remaining=0") {
+    test("enter с двумя мобами → в строю ровно двое") {
       for {
-        t <- setup(TreasureMobsChain(Race.Elf.entryName, remaining = 1, 2, 3))
+        t <- setup(TreasureMobsChain(Race.Elf.entryName, remaining = 2, 2, 3))
         (state, renderer, heroDao) = t
-        _       <- TestRandom.feedLongs(7L)
         _       <- state.enter(testUser, renderer)
-        routing <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
-        nextChain = routing.flatMap(_.eventData).flatMap(_.as[TreasureMobsChain].toOption)
-      } yield assertTrue(routing.exists(_.returnState.contains(StateType.TreasureSchron))) &&
-              assertTrue(nextChain.exists(_.remaining == 0))
+        battle  <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+      } yield assertTrue(battle.exists(_.group.others.size == 1)) &&
+              assertTrue(battle.exists(_.isGroup))
     },
 
     test("интеграция: победа в бою цепочки переносит routing из scene_data в добычу") {

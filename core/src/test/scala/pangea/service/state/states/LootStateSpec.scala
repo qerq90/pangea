@@ -7,7 +7,7 @@ import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKi
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.service.state.states.LootState.LootData
+import pangea.service.state.states.LootState.{LootData, MonsterLoot}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestJournal, TestRenderer}
 import zio.ZIO
 import zio.test._
@@ -141,6 +141,59 @@ object LootStateSpec extends ZIOSpecDefault {
         (state, renderer, _, _) = t
         result <- state.action(testUser, UserAction("что угодно", None), renderer)
       } yield assertTrue(result == StateType.Dungeon)
+    },
+
+    test("группа: над добычей имя павшего, «Забрать» ведёт к следующему, последний — наружу") {
+      val loot = LootData(
+        items = List(gear("Шлем орка")), silvers = List(10L),
+        monsterName = Some("Орк-первый"),
+        queue = List(MonsterLoot("Орк-второй", Nil, List(5L), 0L), MonsterLoot("Орк-третий", Nil, Nil, 0L)))
+      for {
+        t <- makeState(loot)
+        (state, renderer, heroDao, invRepo) = t
+        _        <- state.enter(testUser, renderer)
+        first    <- renderer.sentScreens.map(_.last)
+        afterTake <- state.action(testUser, tap("Take"), renderer)
+        second   <- renderer.sentScreens.map(_.last)
+        stored   <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption).get)
+        afterNext <- state.action(testUser, tap("Continue"), renderer)
+        third    <- renderer.sentScreens.map(_.last)
+        afterLast <- state.action(testUser, tap("Continue"), renderer)
+        hero     <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(first.text.contains("Орк-первый")) &&
+              assertTrue(afterTake == StateType.Loot) &&           // в очереди ещё двое — остаёмся
+              assertTrue(invRepo.snapshot.size == 1) &&
+              assertTrue(second.text.contains("Орк-второй")) &&
+              assertTrue(second.choices.map(_.label) == List("Дальше")) &&   // за ним ещё один
+              assertTrue(stored.monsterName.contains("Орк-второй") && stored.queue.size == 1) &&
+              assertTrue(afterNext == StateType.Loot) &&
+              assertTrue(third.text.contains("Орк-третий") && third.text.contains("Ничего ценного")) &&
+              assertTrue(third.choices.map(_.label) == List("Продолжить")) && // последний — наружу
+              assertTrue(hero.exists(_.silver == 100L + 10L + 5L)) &&  // серебро со всех
+              assertTrue(afterLast == StateType.Dungeon)
+    },
+
+    test("группа: «Оставить» тоже ведёт к следующему павшему") {
+      val loot = LootData(
+        items = List(gear("Шлем")), silvers = Nil,
+        monsterName = Some("Орк-первый"),
+        queue = List(MonsterLoot("Орк-второй", List(gear("Сапоги")), Nil, 0L)))
+      for {
+        t <- makeState(loot)
+        (state, renderer, _, invRepo) = t
+        _      <- state.enter(testUser, renderer)
+        result <- state.action(testUser, tap("Leave"), renderer)
+        last   <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(last.text.contains("Орк-второй")) &&
+              assertTrue(last.choices.map(_.id).toSet == Set("Take", "Leave"))
+    },
+
+    test("старая запись добычи без полей группы читается как одиночная") {
+      val json = io.circe.parser.parse("""{"items":[],"silvers":[3]}""").toOption.get
+      val loot = json.as[LootData].toOption
+      assertTrue(loot.exists(l => l.monsterName.isEmpty && l.queue.isEmpty && l.silvers == List(3L)))
     }
   )
 }

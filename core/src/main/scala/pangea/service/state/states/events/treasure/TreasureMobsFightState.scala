@@ -16,12 +16,11 @@ import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 
 /**
- * Эффект-нода цепочки боёв: спавнит очередной бой той же расы и сразу уводит в
- * [[StateType.Battle]] (`autoAdvance`). В `scene_data` кладёт «роутинг» добычи —
- * куда вернуться после боя:
- *   - ещё остались бои → снова сюда ([[StateType.TreasureMobsFight]]);
- *   - это был последний бой → к выдаче схрона ([[StateType.TreasureSchron]]).
- * Туда же прокидывается обновлённый [[TreasureMobsChain]] (`remaining - 1`).
+ * Эффект-нода: мобы, выкопавшие сокровище, нападают все разом — один групповой
+ * бой на `remaining` мобов одной расы, и сразу в [[StateType.Battle]]
+ * (`autoAdvance`). В `scene_data` кладёт «роутинг» добычи: после победы — к
+ * выдаче схрона ([[StateType.TreasureSchron]]), туда же прокидывается
+ * [[TreasureMobsChain]] с диапазоном дублонов.
  */
 case class TreasureMobsFightState(heroDao: HeroDao, content: SceneContent) extends State {
 
@@ -35,18 +34,20 @@ case class TreasureMobsFightState(heroDao: HeroDao, content: SceneContent) exten
       raw   <- heroDao.readSceneData(user.userId)
       chain <- ZIO.fromOption(raw.flatMap(_.as[TreasureMobsChain].toOption))
                  .orElseFail(new Throwable(s"No treasure chain for user ${user.userId}"))
-      seed  <- Random.nextLong
-      (monster, _) = MonsterGenerator.generateOfRace(hero.dungeonLevel, Race.withName(chain.race), Rng(seed))
-      afterThis    = chain.remaining - 1
-      returnTarget = if (afterThis > 0) StateType.TreasureMobsFight else StateType.TreasureSchron
-      routing      = LootData(
-                       items       = Nil,
-                       silvers     = Nil,
-                       returnState = Some(returnTarget),
-                       eventData   = Some(chain.copy(remaining = afterThis).asJson))
-      startPct <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
-      _ <- heroDao.writeActiveBattle(user.userId,
-             SoloPveBattle.from(monster, hero).withStartEnergy(startPct).asJson)
+      race   = Race.withName(chain.race)
+      count  = chain.remaining.max(1)
+      // Каждому мобу — свой бросок генерации и своя стартовая энергия.
+      monsters <- ZIO.foreach(List.fill(count)(()))(_ =>
+                    Random.nextLong.map(seed => MonsterGenerator.generateOfRace(hero.dungeonLevel, race, Rng(seed))._1))
+      energies <- ZIO.foreach(monsters)(m =>
+                    Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+                      .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
+      routing  = LootData(
+                   items       = Nil,
+                   silvers     = Nil,
+                   returnState = Some(StateType.TreasureSchron),
+                   eventData   = Some(chain.copy(remaining = 0).asJson))
+      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(monsters, hero, energies).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text("treasureMobs.nextFight"), Nil))
     } yield ()

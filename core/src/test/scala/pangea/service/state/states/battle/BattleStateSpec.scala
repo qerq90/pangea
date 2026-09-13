@@ -1010,10 +1010,13 @@ object BattleStateSpec extends ZIOSpecDefault {
       for {
         t1            <- makeState(tankHero,  highAtkBattle)
         (s1, hd1, r1)  = t1
+        // удар героя, удар моба (попал), подкрепление (99 — не пришло)
+        _             <- TestRandom.feedInts(50, 50, 99)
         _             <- s1.action(testUser, tap("Attack"), r1)
         tankHp        <- hd1.getHeroByUserId(userId).map(_.map(_.fightStats.hp).getOrElse(0L))
         t2            <- makeState(glassHero, highAtkBattle)
         (s2, hd2, r2)  = t2
+        _             <- TestRandom.feedInts(50, 50, 99)
         _             <- s2.action(testUser, tap("Attack"), r2)
         glassHp       <- hd2.getHeroByUserId(userId).map(_.map(_.fightStats.hp).getOrElse(0L))
       } yield assertTrue(tankHp > glassHp)
