@@ -59,7 +59,7 @@ object GirlStateSpec extends ZIOSpecDefault {
         scene  <- sceneOf(dao)
         result <- state.action(testUser, tap("PassBy"), r)
         after  <- dao.readSceneData(userId)
-      } yield assertTrue(first.text.contains("трое вооружённых Орк")) &&
+      } yield assertTrue(first.text.contains("трое вооружённых орков")) &&
               assertTrue(first.choices.map(_.id) == List("Help", "PassBy")) &&
               assertTrue(scene.exists(s => s.step == Step.Meet && s.race == Race.Orc.entryName)) &&
               assertTrue(result == StateType.Dungeon) &&

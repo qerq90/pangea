@@ -6,6 +6,8 @@ import io.circe.{Decoder, HCursor}
 sealed trait Race extends EnumEntry {
   val description: String
   val genitive: String // родительный падеж названия расы («Демона») — для имён трофеев
+  /** Родительный падеж множественного числа («трое демонов», «группа мурлоков»). */
+  val genitivePlural: String
 }
 
 object Race extends Enum[Race] with DoobieEnum[Race] {
@@ -14,6 +16,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Human extends Race {
     override def toString: String = "Человек"
     val genitive: String          = "Человека"
+    val genitivePlural: String    = "людей"
 
     override val description: String = """Человек:
                                          |Внешность:
@@ -40,6 +43,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Elf extends Race {
     override def toString: String = "Эльф"
     val genitive: String          = "Эльфа"
+    val genitivePlural: String    = "эльфов"
 
     override val description: String = """Внешность:
                                          |Высокие,
@@ -65,6 +69,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Murloc extends Race {
     override def toString: String = "Мурлок"
     val genitive: String          = "Мурлока"
+    val genitivePlural: String    = "мурлоков"
 
     override val description: String = """Мурлок:
                                          |Внешность:
@@ -91,6 +96,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Orc extends Race {
     override def toString: String = "Орк"
     val genitive: String          = "Орка"
+    val genitivePlural: String    = "орков"
 
     override val description: String = """Орк:
                                          |Внешность:
@@ -117,6 +123,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Goblin extends Race {
     override def toString: String = "Гоблин"
     val genitive: String          = "Гоблина"
+    val genitivePlural: String    = "гоблинов"
 
     override val description: String = """Гоблин:
                                          |Внешность:
@@ -141,6 +148,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Demon extends Race {
     override def toString: String = "Демон"
     val genitive: String          = "Демона"
+    val genitivePlural: String    = "демонов"
 
     override val description: String = """Демон:
                                          |Внешность:
@@ -163,6 +171,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Gnome extends Race {
     override def toString: String = "Гном"
     val genitive: String          = "Гнома"
+    val genitivePlural: String    = "гномов"
 
     override val description: String = """Гном:
                                          |Внешность:
@@ -187,6 +196,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Khajiit extends Race {
     override def toString: String = "Каджит"
     val genitive: String          = "Каджита"
+    val genitivePlural: String    = "каджитов"
 
     override val description: String = """Каджит:
                                          |Внешность:
@@ -216,6 +226,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Elemental extends Race {
     override def toString: String = "Элементаль"
     val genitive: String          = "Элементаля"
+    val genitivePlural: String    = "элементалей"
 
     override val description: String = """Элементаль:
                                          |Существо из чистой
@@ -232,6 +243,7 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   case object Undead extends Race {
     override def toString: String = "Нежить"
     val genitive: String          = "Нежити"
+    val genitivePlural: String    = "нежити"
 
     override val description: String = """Нежить:
                                          |Тело, которое

@@ -41,7 +41,9 @@ class VkRenderer(api: Api) extends Renderer {
 
   private def toButton(choice: Choice): Button = {
     val payload = (Map("action" -> choice.id) ++ choice.data).asJson
-    Button.withAction(VkAction.Text(choice.label, Some(payload)))
+    // Подпись длиннее лимита ВК роняет отправку — режем здесь, чтобы ни одна
+    // сцена не могла уронить экран.
+    Button.withAction(VkAction.Text(Choice.fit(choice.label), Some(payload)))
       .withColor(VkRenderer.toButtonColor(choice.color))
   }
 }
