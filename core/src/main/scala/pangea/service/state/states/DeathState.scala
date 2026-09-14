@@ -11,7 +11,9 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.model.trauma.{Trauma, TraumaRoll}
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.service.state.states.LootState.LootData
+import pangea.service.state.states.marisa.MarisaHuntState
+import pangea.service.state.{AzatData, MarisaQuest, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -35,18 +37,22 @@ case class DeathState(
                         .flatMap(ZIO.fromOption(_))
                         .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
       battleJson   <- heroDao.readActiveBattle(user.userId)
-      monsterName   = battleJson
-                        .flatMap(_.as[SoloPveBattle].toOption)
-                        .map(_.monsterName)
-                        .getOrElse("Монстр")
+      battle        = battleJson.flatMap(_.as[SoloPveBattle].toOption)
+      monsterName   = battle.map(_.monsterName).getOrElse("Монстр")
+      // Смерть от коллектора («Письмо Марисе»): серебра уходит не меньше 15 000,
+      // дублонов — 105, задание закрывается, проснуться — в городе.
+      collector     = battle.exists(_.story.contains(MarisaQuest.CollectorStory))
+      withMarisa   <- heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LootData].toOption)
+                        .flatMap(_.eventData).flatMap(_.as[MarisaHuntState.Progress].toOption).exists(_.withMarisa))
       // Благословение Азата смягчает штраф: теряется на BlessingBonusPct% меньше.
       azat         <- AzatData.load(heroDao, user.userId, now)
       blessed       = azat.blessingActive(now)
       expPenalty    = (hero.exp * DeathState.ExpLossPct / 100L).max(0L)
       expLost       = if (blessed) expPenalty * (100L - AzatState.BlessingBonusPct) / 100L else expPenalty
       newExp        = (hero.exp - expLost).max(0L)
-      silverLost    = hero.silver / 2
+      silverLost    = if (collector) (hero.silver / 2).max(MarisaQuest.DeathSilverMin).min(hero.silver) else hero.silver / 2
       newSilver     = hero.silver - silverLost
+      doubloonsLost = if (collector) MarisaQuest.DeathDoubloons.min(hero.doubloons) else 0L
 
       // traumas that are still active are kept; expired ones reset to empty list
       existingNames = if (hero.traumaActive(now)) hero.traumaNames else Nil
@@ -59,6 +65,7 @@ case class DeathState(
 
       _            <- heroDao.updateExpAndLevel(user.userId, newExp, hero.lvl, hero.upgradePoints)
       _            <- heroDao.updateSilver(user.userId, newSilver)
+      _            <- ZIO.when(doubloonsLost > 0L)(heroDao.updateDoubloons(user.userId, hero.doubloons - doubloonsLost))
       _            <- heroDao.clearActiveBattle(user.userId)
       // Первое сообщение после смерти — сразу убираем боевую клавиатуру, чтобы
       // не висела поверх «обморока».
@@ -75,9 +82,18 @@ case class DeathState(
       // На 1 уровне == 1 минута; k — коэффициент роста.
       deathRestMinutes = 90.0 - 89.0 * math.exp(-DeathState.RestGrowthK * (hero.lvl - 1L))
       deathRestMs      = (deathRestMinutes * 60000.0).toLong
+      // Коллектор: задание закрыто здесь же, а что сказать и куда идти —
+      // RestState прочитает при пробуждении.
+      _            <- ZIO.when(collector)(MarisaQuest.finish(heroDao, inventoryRepo, content, user.userId, hero))
+      wake          = if (!collector) Json.obj()
+                      else Json.obj(
+                        "wakeTo"    -> (StateType.GlobalMap: StateType).asJson,
+                        "wakeLines" -> List(
+                          if (withMarisa) "marisa.deathReturnWithMarisa" else "marisa.deathReturn",
+                          "marisa.questDone").asJson)
       _            <- heroDao.writeSceneData(user.userId, Json.obj(
                         "restDurationMs" -> deathRestMs.asJson,
-                        "postDeath"      -> true.asJson))
+                        "postDeath"      -> true.asJson).deepMerge(wake))
     } yield ()
 
   // Unused in the normal flow (Death routes onward via autoAdvance). Kept as a
@@ -114,7 +130,8 @@ case class DeathState(
       inventory <- inventoryRepo.get(heroId).orElse(ZIO.succeed(
                      pangea.model.inventory.Inventory(0L, heroId, 0L,
                        pangea.model.inventory.Inventory.Items(Nil))))
-      realItems  = inventory.items.data.filter(_.id != 0L)
+      // Сюжетные предметы при смерти не теряются.
+      realItems  = inventory.items.data.filter(i => i.id != 0L && !i.isQuestItem)
       // Бросок идёт на КАЖДЫЙ предмет отдельно, в том числе на каждый камень и
       // каждую горсть пыли: сложенные в одну строку на экране, в сумке они
       // остаются разными вещами, и уносят их поштучно, а не стопкой.

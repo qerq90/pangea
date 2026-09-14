@@ -159,7 +159,7 @@ case class SocketingState(
                user.userId, hero.equipment.replacing(cleaned), hero.fightStats)
       _   <- inventoryRepo.removeItem(gemId, hero.id).mapError(e => new Throwable(e.toString))
       inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      room = inv.maxItems - inv.items.data.length >= dusts.size
+      room = inv.freeSlots >= dusts.size
       _   <- ZIO.when(room)(ZIO.foreachDiscard(dusts)(kind =>
                inventoryRepo.addItem(hero.id, MaterialGenerator.item(kind))
                  .mapError(e => new Throwable(e.toString))))

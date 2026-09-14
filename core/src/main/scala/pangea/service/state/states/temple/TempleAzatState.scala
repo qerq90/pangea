@@ -36,6 +36,9 @@ case class TempleAzatState(
       quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
       quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showPriest(u, r) },
       quest.declineAction -> Target.Run { (u, _, r) => showPriest(u, r) },
+      // «Письмо Марисе»: Жрец помнит прихожанку и знает её подругу.
+      "AskMarisa"    -> Target.Run { (u, _, r) => r.show(u, content.screen("marisa.priest.answer")).as(StateType.TempleAzat) },
+      "SearchDolores" -> Target.Goto(StateType.MarisaSearch),
       "Priest"       -> Target.Run { (u, _, r) => showPriest(u, r) },
       "Hall"         -> Target.Goto(StateType.HallAzat),
       "LeaveTemple"  -> Target.Goto(StateType.CityCenter),
@@ -68,7 +71,9 @@ case class TempleAzatState(
     quest.load(user).flatMap { quests =>
       val base    = content.screen("temple.priest")
       val (front, back) = base.choices.partition(_.id != "BackToTemple")
-      renderer.show(user, base.copy(choices = front ++ quest.button(quests).toList ++ back))
+      // О Марисе — после того как о ней спросили Трактирщика.
+      val marisa  = Option.when(quests.onStep(NpcQuest.Marisa, 2))(content.choice("AskMarisa", "marisa.priest.askLabel"))
+      renderer.show(user, base.copy(choices = front ++ marisa.toList ++ quest.button(quests).toList ++ back))
     }.as(StateType.TempleAzat)
 
   /** Кнопка задания: завязка, пока не взято; показ камня, пока идёт. */

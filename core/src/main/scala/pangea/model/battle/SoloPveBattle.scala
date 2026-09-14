@@ -51,7 +51,12 @@ case class SoloPveBattle(
   monsterCurrentEnergy: Long = 0L,
   // Групповая часть боя: мобы под номерами 2+, павшие, счётчик раундов, Таран.
   // Обычный бой 1 на 1 — группа из одного, здесь пусто (см. GroupState).
-  group: GroupState = GroupState.empty
+  group: GroupState = GroupState.empty,
+  // Сюжетный бой (ключ сценария): добыча и опыт за него решаются сюжетом, а не
+  // таблицами; смерть в нём — тоже (см. DeathState).
+  story: Option[String] = None,
+  // Имя моба от сюжета («Коллектор») вместо имени по расе и редкости.
+  customName: Option[String] = None
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ case class SoloPveBattle(
    *  («Огненный Элементаль»); у обычных мобов — из таблицы раса × редкость.
    *  Держим его ЗДЕСЬ, а не в [[Monster]]: тот читается из таблицы `monsters`
    *  целиком (`select *`), и лишнее поле сломало бы чтение. */
-  def monsterName: String = boss.map(_.monsterName).getOrElse(toMonster.name)
+  def monsterName: String = customName.orElse(boss.map(_.monsterName)).getOrElse(toMonster.name)
 
   def rarity: Rarity = Rarity.withName(monsterRarity)
 
@@ -237,7 +242,10 @@ object SoloPveBattle {
       revives             <- c.getOrElse[Int]("bossRevives")(0)
       monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
       group               <- c.getOrElse[GroupState]("group")(GroupState.empty)
+      story               <- c.getOrElse[Option[String]]("story")(None)
+      customName          <- c.getOrElse[Option[String]]("customName")(None)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy, group)
+                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy, group,
+                         story, customName)
 }

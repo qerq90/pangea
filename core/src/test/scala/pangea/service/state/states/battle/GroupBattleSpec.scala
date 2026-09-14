@@ -12,7 +12,7 @@ import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
 import pangea.service.state.states.LootState.LootData
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
@@ -70,7 +70,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
       _        <- dao.writeActiveBattle(userId, b.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, content), dao, renderer)
+    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
   private def battleOf(dao: TestHeroDao) =
     dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)

@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, HCursor, Json}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Journal, Renderer, SceneContent, Screen, Target}
 import pangea.model.GameEvent
-import pangea.model.hero.Hero
+import pangea.model.hero.{Achievement, Hero}
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -61,18 +61,20 @@ case class LootState(
     }
 
   override def targetStates: Set[StateType] =
-    Set(StateType.Dungeon, StateType.GlobalMap, StateType.TreasureMobsFight, StateType.TreasureSchron, StateType.Loot, StateType.Girl)
+    Set(StateType.Dungeon, StateType.GlobalMap, StateType.TreasureMobsFight, StateType.TreasureSchron, StateType.Loot, StateType.Girl, StateType.MarisaHunt)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
       hero <- getHero(user)
       loot <- readLoot(user)
 
-      // серебро и дублоны забираются всегда и сразу, без выбора
-      silverTotal = loot.silvers.sum
+      // серебро и дублоны забираются всегда и сразу, без выбора; «Спаситель
+      // Марисы» получает серебра на десятую больше.
+      silvers     = loot.silvers.map(_ * Achievement.silverPct(hero) / 100L)
+      silverTotal = silvers.sum
       _        <- ZIO.when(silverTotal > 0L)(heroDao.updateSilver(user.userId, hero.silver + silverTotal))
       _        <- ZIO.when(loot.doubloons > 0L)(heroDao.updateDoubloons(user.userId, hero.doubloons + loot.doubloons))
-      silverLines = loot.silvers.map { s => content.format("loot.silver", "amount" -> s.toString) }
+      silverLines = silvers.map { s => content.format("loot.silver", "amount" -> s.toString) }
       currencyLines = silverLines ++
         (if (loot.doubloons > 0L) List(content.format("loot.doubloons", "amount" -> loot.doubloons.toString)) else Nil)
 

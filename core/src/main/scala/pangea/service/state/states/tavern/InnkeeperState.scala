@@ -10,7 +10,7 @@ import pangea.model.quest.{NpcQuest, QuestData}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{CharacterMenu, NpcQuestDialog, State, UserAction}
+import pangea.service.state.{CharacterMenu, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Трактирщик. Принимает квестовые предметы: из подходящих трофеев инвентаря
@@ -40,6 +40,12 @@ case class InnkeeperState(
       quest.declineAction -> Target.Run { (user, _, renderer) => showMenu(user, renderer).as(StateType.Innkeeper) },
       "KinetLore"         -> Target.Run { (user, _, renderer) =>
         renderer.show(user, Screen(quest.text("lore"), List(content.choice("BackFromLore", quest.key("loreBack"))))).as(StateType.Innkeeper) },
+      // «Письмо Марисе»: что Трактирщик знает об адресате.
+      "AskMarisa"         -> Target.Run { (user, _, renderer) =>
+        NpcQuestLog.modify(heroDao, user.userId)(q => if (q.onStep(NpcQuest.Marisa, 1)) q.update(NpcQuest.Marisa)(_.copy(step = 2)) else q) *>
+          renderer.show(user, content.screen("marisa.innkeeper.answer")).as(StateType.Innkeeper) },
+      "ContinueSearch"    -> Target.Run { (user, _, renderer) =>
+        renderer.show(user, Screen(content.text("marisa.innkeeper.farewell"), Nil)).as(StateType.Tavern) },
       "OpenCharacter" -> Target.Run { (user, _, _) =>
         CharacterMenu.open(heroDao, user.userId, StateType.Innkeeper)
       },
@@ -55,7 +61,7 @@ case class InnkeeperState(
   )
 
   override def targetStates: Set[StateType] =
-    branch.gotoTargets + StateType.HeroStats
+    branch.gotoTargets + StateType.HeroStats + StateType.Tavern
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     showMenu(user, renderer)
@@ -80,12 +86,16 @@ case class InnkeeperState(
       // Рассказ о Кинэте — награда за первое задание, дальше бесплатно.
       kinetBtn = Option.when(quests.isDone(NpcQuest.Innkeeper))(
         content.choice("KinetLore", quest.key("loreLabel")))
+      // Письмо Марисе на руках, а о ней ещё не спрашивали.
+      marisaBtn = Option.when(quests.onStep(NpcQuest.Marisa, 1))(
+        content.choice("AskMarisa", "marisa.innkeeper.askLabel"))
       _ <- renderer.show(
         user,
         Screen(
           content.text("innkeeper.text"),
           List(
             Some(content.choice("TurnInQuest", "innkeeper.turnInLabel")),
+            marisaBtn,
             quest.button(quests),
             kinetBtn,
             loreBtn,

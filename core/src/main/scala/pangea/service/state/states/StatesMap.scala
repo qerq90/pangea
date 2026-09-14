@@ -46,6 +46,8 @@ import pangea.model.state.StateType.{
   TrainingHall,
   TreasureDig,
   Girl,
+  MarisaSearch,
+  MarisaHunt,
   TreasureHunt,
   TreasureMobs,
   TreasureMobsFight,
@@ -77,6 +79,7 @@ import pangea.service.state.states.guild.{
   TrophyExchangeState
 }
 import pangea.service.state.states.events.item.FoundItemState
+import pangea.service.state.states.marisa.{MarisaHuntState, MarisaSearchState}
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.gustavo.{
   GustavoBoostState,
@@ -148,7 +151,7 @@ object StatesMap {
             journal,
             content
           ),
-          Battle -> BattleState(heroDao, content),
+          Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content),
           Death  -> DeathState(heroDao, inventoryRepo, content),
           Rest   -> RestState(heroDao, scheduler, content),
           Inventory -> InventoryState(
@@ -190,6 +193,8 @@ object StatesMap {
           TreasureSchron    -> TreasureSchronState(heroDao, content),
           TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
           Girl              -> GirlState(heroDao, inventoryRepo, itemRepo, barrelRepo, scheduler, content),
+          MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
+          MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content),
           Outskirts -> OutskirtsState(
             heroDao,
             inventoryRepo,

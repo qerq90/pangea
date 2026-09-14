@@ -10,7 +10,7 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.battle.BattleState
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -84,7 +84,7 @@ object TreasureMobsFightStateSpec extends ZIOSpecDefault {
         _        <- heroDao.writeSceneData(userId, routing.asJson)
         renderer <- TestRenderer.make
         content  <- ZIO.attempt(SceneContent.load())
-        battle    = BattleState(heroDao, content)
+        battle    = BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content)
         result   <- battle.action(testUser, tap("Attack"), renderer)
         loot     <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
       } yield assertTrue(result == StateType.Loot) &&

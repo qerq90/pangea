@@ -21,7 +21,11 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
   // содержимое — пробуждение решает таймер, не ключ маршрута).
   private val ReviveAction = """{"action":"Revive"}"""
 
-  override def targetStates: Set[StateType] = Set(StateType.Dungeon)
+  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.GlobalMap)
+
+  /** Ключи в scene_data от сюжетной смерти (см. DeathState). */
+  private val WakeToKey    = "wakeTo"
+  private val WakeLinesKey = "wakeLines"
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -33,10 +37,15 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
                         .getOrElse(DefaultRestMs)
       postDeath     = existingData.flatMap(_.hcursor.get[Boolean]("postDeath").toOption)
                         .getOrElse(false)
+      // Сюжетная смерть: куда проснуться и что сказать при пробуждении.
+      wakeTo        = existingData.flatMap(_.hcursor.get[Option[StateType]](WakeToKey).toOption).flatten
+      wakeLines     = existingData.flatMap(_.hcursor.get[List[String]](WakeLinesKey).toOption).getOrElse(Nil)
       _            <- heroDao.writeSceneData(user.userId, Json.obj(
                         "restStartedAt"  -> now.asJson,
                         "restDurationMs" -> duration.asJson,
-                        "postDeath"      -> postDeath.asJson))
+                        "postDeath"      -> postDeath.asJson,
+                        WakeToKey        -> wakeTo.asJson,
+                        WakeLinesKey     -> wakeLines.asJson))
       // push-пробуждение: поллер по таймеру сам выполнит wakeUp. Перепланирование
       // снимает прежний Revive.
       _            <- scheduler.schedule(user.userId, now + duration, TaskKind.Revive, StateType.Rest, ReviveAction)
@@ -63,6 +72,8 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
       startedAt  = sceneData.flatMap(_.hcursor.get[Long]("restStartedAt").toOption).getOrElse(now)
       duration   = sceneData.flatMap(_.hcursor.get[Long]("restDurationMs").toOption).getOrElse(DefaultRestMs)
       postDeath  = sceneData.flatMap(_.hcursor.get[Boolean]("postDeath").toOption).getOrElse(false)
+      wakeTo     = sceneData.flatMap(_.hcursor.get[Option[StateType]](WakeToKey).toOption).flatten
+      wakeLines  = sceneData.flatMap(_.hcursor.get[List[String]](WakeLinesKey).toOption).getOrElse(Nil)
       elapsed    = now - startedAt
       isInstant  = parseAction(ua.payload).contains("InstantRest")
       result    <- if (isInstant && !postDeath) instantRest(user, now, renderer)
@@ -70,7 +81,7 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
                      heroDao.getHeroByUserId(user.userId)
                        .flatMap(ZIO.fromOption(_))
                        .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
-                       .flatMap(hero => wakeUp(user, now, hero, postDeath, renderer))
+                       .flatMap(hero => wakeUp(user, now, hero, postDeath, wakeTo, wakeLines, renderer))
                    else {
                      val remainSec = ((duration - elapsed) / 1000L).max(1L)
                      renderer.show(user, Screen(
@@ -95,7 +106,12 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
-  private def wakeUp(user: User, nowMs: Long, hero: pangea.model.hero.Hero, postDeath: Boolean, renderer: Renderer): Task[StateType] = {
+  /** `wakeTo`/`wakeLines` — от сюжетной смерти: проснуться не в лабиринте, а где
+    * сказано, и сказать игроку, чем всё кончилось. */
+  private def wakeUp(
+    user: User, nowMs: Long, hero: pangea.model.hero.Hero, postDeath: Boolean,
+    wakeTo: Option[StateType], wakeLines: List[String], renderer: Renderer
+  ): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
     val maxArmor = hero.effectiveMaxArmor(nowMs)
     val maxEn    = hero.maxEnergy(nowMs)
@@ -105,7 +121,8 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
       _ <- heroDao.writeSceneData(user.userId, Json.Null)
       _ <- scheduler.cancel(user.userId, TaskKind.Revive)
       _ <- renderer.show(user, Screen(content.text(textKey), Nil))
-    } yield StateType.Dungeon
+      _ <- ZIO.foreachDiscard(wakeLines)(key => renderer.show(user, Screen(content.text(key), Nil)))
+    } yield wakeTo.getOrElse(StateType.Dungeon)
   }
 
   private def formatDuration(seconds: Long): String = {

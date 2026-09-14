@@ -72,6 +72,14 @@ case class Item(
   }
 
   /** Материал-ингредиент, если этот предмет — материал. */
+  /** Сюжетный предмет: вид, если это он. */
+  def questItem: Option[QuestItemKind] = details match {
+    case ItemDetails.Quest(kind) => Some(kind)
+    case _                       => None
+  }
+
+  def isQuestItem: Boolean = itemType == ItemType.QuestItem
+
   def material: Option[MaterialKind] = details match {
     case ItemDetails.Material(k) => Some(k)
     case _                       => None
@@ -105,7 +113,7 @@ case class Item(
    *
    *  У карт клада, камней-усилителей и материалов уровня нет — только имя. */
   def displayTitle: String =
-    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material) name
+    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material || isQuestItem) name
     else {
       val prefix = s"${rarity.emoji} "
       if (name.startsWith(prefix)) s"${rarity.emoji} [Ур.$lvl] ${name.stripPrefix(prefix)}"

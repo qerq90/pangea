@@ -85,4 +85,16 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход
   case object TreasureHunt extends StateType // сам поход по таймеру (~10 минут) → добыча
+
+  // «Письмо Марисе».
+  case object MarisaSearch extends StateType // поиски Долорес и Марисы в Портовом квартале
+  case object MarisaHunt   extends StateType // поход к тайнику Кельвина по таймеру и встреча с коллектором
+
+  /** Городские сцены — где герой «в городе» (сюжетную карту можно открыть только
+    * отсюда). Смотрится по `returnState` меню персонажа. */
+  val cityStates: Set[StateType] = Set(
+    GlobalMap, HarborQuarter, MarketSquare, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
+    Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoFlask, GustavoBelt,
+    Tavern, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
+    MasterHorn, MentorKazimir)
 }

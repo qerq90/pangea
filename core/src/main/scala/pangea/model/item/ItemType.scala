@@ -29,7 +29,7 @@ object ItemType extends Enum[ItemType] {
 
   // Типы, которые не надеваются: трофеи, карты клада и камни-усилители. Пусто
   // (NoItem) сюда тоже относится, но оно и так исключено из itemTypes.
-  private val nonEquippable: Set[ItemType] = Set(Trophy, TreasureMap, TreasureMapHalf, Gem, Material)
+  private val nonEquippable: Set[ItemType] = Set(Trophy, TreasureMap, TreasureMapHalf, Gem, Material, QuestItem)
 
   /** Надеваемые типы — всё, кроме трофеев, карт клада и NoItem. Экраны, где
    *  предмет предлагается к надеванию, опираются на этот список. */
@@ -64,6 +64,10 @@ object ItemType extends Enum[ItemType] {
 
   // Материал-ингредиент (мифрил и т.п.): лежит в инвентаре, не надевается.
   case object Material extends ItemType
+
+  // Сюжетный предмет: лежит в инвентаре, но места не занимает; его нельзя
+  // продать, выбросить, потерять при смерти, положить в бочку или в куб.
+  case object QuestItem extends ItemType
 
   case object NoItem extends ItemType
 

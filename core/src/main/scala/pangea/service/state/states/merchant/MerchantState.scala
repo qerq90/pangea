@@ -457,8 +457,9 @@ case class MerchantState(
   private def doubloonPrice(item: Item): Long =
     item.material.map(_.doubloonPrice).getOrElse(0L)
 
+  /** Вещи на продажу: сюжетные предметы Ришелье не берёт ни в каком виде. */
   private def inventoryItems(hero: Hero): Task[List[Item]] =
-    inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data)
+    inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data.filterNot(_.isQuestItem))
 
   private def currentSellPage(user: User): Task[Int] = currentSellScene(user).map(_.page)
 
@@ -540,7 +541,8 @@ object MerchantState {
     * них ничего осмысленного не значил бы. Способности у трофеев не бывают,
     * поэтому их защита трофеев тоже не касается. */
   def isJunk(item: Item, s: JunkSaleSettings): Boolean =
-    if (item.itemType == ItemType.Trophy) s.trophies
+    if (item.isQuestItem) false
+    else if (item.itemType == ItemType.Trophy) s.trophies
     else
       // Камни и материалы крафта не хлам никогда: их редкость ничего не говорит
       // о ценности (вечно огненное железо — серое, а стоит дороже иной вещи).

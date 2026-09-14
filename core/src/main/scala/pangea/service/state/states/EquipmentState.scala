@@ -194,7 +194,7 @@ case class EquipmentState(
               for {
                 inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
                 count  = gem.dustYield
-                free   = inv.maxItems - inv.items.data.length
+                free   = inv.freeSlots
                 res <-
                   if (free < count)
                     renderer.show(user, Screen(

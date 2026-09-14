@@ -20,8 +20,9 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
   def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit] =
     ZIO.succeed { capacity += delta }
 
+  // Сюжетный предмет места не занимает — кладётся и в полную сумку, как в проде.
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
-    if (canAdd) ZIO.succeed { items = items :+ item }
+    if (canAdd || item.isQuestItem) ZIO.succeed { items = items :+ item }
     else ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
 
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =

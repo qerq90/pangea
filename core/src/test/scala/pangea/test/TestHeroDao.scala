@@ -83,6 +83,12 @@ class TestHeroDao(
   def updateWeaponDust(userId: UserId, dust: pangea.model.hero.WeaponDust): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(weaponDust = dust))))
 
+  def updateKills(userId: UserId, kills: Long): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(kills = kills))))
+
+  def updateAchievements(userId: UserId, achievements: List[String]): Task[Unit] =
+    heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(achievements = achievements))))
+
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(baseStats = stats))))
 

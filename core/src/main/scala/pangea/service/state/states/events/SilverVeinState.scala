@@ -3,6 +3,7 @@ package pangea.service.state.states.events
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
+import pangea.model.hero.Achievement
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
 import pangea.model.item.{Gem, GemKind, Item, MaterialKind}
@@ -97,14 +98,17 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
       base      = (hero.dungeonLevel.toLong + 5L) * 4L
       delta    <- Random.nextIntBetween(MinSpreadPct, MaxSpreadPct + 1)
       sign     <- Random.nextBoolean.map(if (_) 1 else -1)
-      reward    = (base * (100L + sign * delta.toLong)) / 100L
+      // «Спаситель Марисы»: серебра на десятую больше. Через экран добычи
+      // надбавка своя, поэтому здесь — только для прямой выдачи.
+      rolled    = (base * (100L + sign * delta.toLong)) / 100L
+      reward    = rolled * Achievement.silverPct(hero) / 100L
       _        <- scheduler.cancel(user.userId, TaskKind.Harvest)
       gemRoll  <- Random.nextIntBetween(1, 101)
       gem      <- if (gemRoll <= GemDropChancePct) randomGem.map(Some(_)) else ZIO.none
       dustRoll <- Random.nextIntBetween(1, 101)
       dust     <- if (dustRoll <= DustDropChancePct) randomDust.map(Some(_)) else ZIO.none
       finds     = gem.toList ++ dust.toList
-      result   <- if (finds.nonEmpty) dropFinds(user, reward, finds)
+      result   <- if (finds.nonEmpty) dropFinds(user, rolled, finds)
                   else grantSilverDirectly(user, hero.silver, reward, renderer)
     } yield result
 
