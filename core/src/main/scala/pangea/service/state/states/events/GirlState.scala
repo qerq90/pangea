@@ -55,9 +55,9 @@ case class GirlState(
       "Decline"       -> Target.Run { (u, _, r) => leave(u, r, "girl.leftAlone", StateType.Dungeon) },
       "Ask"           -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> show(u, r, Step.Asked) },
       "Farewell"      -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> clear(u).as(StateType.GlobalMap) },
-      "FarewellAsked" -> Target.Run { (u, _, r) => reward(u, r, _ => RepFarewell) *> clear(u).as(StateType.GlobalMap) },
+      "FarewellAsked" -> Target.Run { (u, _, r) => rewardSpread(u, r, RepPerLevelFarewell) *> clear(u).as(StateType.GlobalMap) },
       "OfferBuy"      -> Target.Run { (u, _, r) => offerMap(u, r) },
-      "WishLuck"      -> Target.Run { (u, _, r) => reward(u, r, _ => RepFarewell) *> clear(u).as(StateType.GlobalMap) },
+      "WishLuck"      -> Target.Run { (u, _, r) => rewardSpread(u, r, RepPerLevelFarewell) *> clear(u).as(StateType.GlobalMap) },
       "BuyMap"        -> Target.Run { (u, _, r) => buyMap(u, r) },
       "CantAfford"    -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> clear(u).as(StateType.GlobalMap) },
       "ToTavern"      -> Target.Run { (u, _, r) => show(u, r, Step.Tavern) },
@@ -321,6 +321,11 @@ case class GirlState(
       _    <- renderer.show(user, Screen(content.format("girl.repGained", "rep" -> gained.toString), Nil))
     } yield ()
 
+  /** Репутация с разбросом ±20%: уровень × `perLevel`. */
+  private def rewardSpread(user: User, renderer: Renderer, perLevel: Long): Task[Unit] =
+    Random.nextLongBetween(SpreadMin, SpreadMax + 1L).flatMap(spread =>
+      reward(user, renderer, h => (h.lvl * perLevel * spread / 100L).max(1L)))
+
   private def leave(user: User, renderer: Renderer, key: String, to: StateType): Task[StateType] =
     renderer.show(user, Screen(content.text(key), Nil)) *> clear(user).as(to)
 
@@ -400,10 +405,10 @@ object GirlState {
   /** Благодарность после боя: серебро = уровень × 2 (±20%), репутация = уровень × 2. */
   val SilverPerLevel: Long    = 2L
   val RepPerLevelThanks: Long = 2L
-  /** В городе: уровень × 3 за прощание, ровно 300 — за «попрощаться и уйти» после
-    * расспросов и за пожелание удачи хозяйке карты. */
-  val RepPerLevelCity: Long   = 3L
-  val RepFarewell: Long       = 300L
+  /** В городе: уровень × 3 за прощание; уровень × 10 (±20%) — за «попрощаться и
+    * уйти» после расспросов и за пожелание удачи хозяйке карты. */
+  val RepPerLevelCity: Long     = 3L
+  val RepPerLevelFarewell: Long = 10L
   /** Уйти из таверны, не поднимаясь в комнату: уровень × 2. */
   val RepPerLevelTavern: Long = 2L
   /** Цена карты отца: уровень × 110 (±20%). */

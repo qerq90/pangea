@@ -119,7 +119,7 @@ object GirlStateSpec extends ZIOSpecDefault {
               assertTrue(h.guildReputation == 50L)
     },
 
-    test("в городе 48%: благодарность; прощание — уровень×3; расспрос — уровень×3, потом ещё 300") {
+    test("в городе 48%: благодарность; прощание — уровень×3; расспрос — уровень×3, потом ещё уровень×10 ±20%") {
       for {
         t <- make(hero, Some(orcScene(Step.Escort)))
         (state, dao, _, _, _, r) = t
@@ -129,6 +129,7 @@ object GirlStateSpec extends ZIOSpecDefault {
         _      <- state.action(testUser, tap("Ask"), r)
         asked  <- r.sentScreens.map(_.last)
         mid    <- heroOf(dao)
+        _      <- TestRandom.feedLongs(80L)
         result <- state.action(testUser, tap("FarewellAsked"), r)
         h      <- heroOf(dao)
         t2 <- make(hero, Some(orcScene(Step.CityThanks)))
@@ -138,7 +139,7 @@ object GirlStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screen.choices.map(_.id) == List("Ask", "Farewell")) &&
               assertTrue(asked.text.contains("приворотного зелья")) &&
               assertTrue(mid.guildReputation == 50L + 30L) &&
-              assertTrue(result == StateType.GlobalMap && h.guildReputation == 50L + 30L + 300L) &&
+              assertTrue(result == StateType.GlobalMap && h.guildReputation == 50L + 30L + 80L) &&   // 10 × 10 × 80%
               assertTrue(res2 == StateType.GlobalMap && h2.guildReputation == 50L + 30L)
     },
 
@@ -158,7 +159,7 @@ object GirlStateSpec extends ZIOSpecDefault {
               assertTrue(inv.snapshot.exists(_.itemType == ItemType.TreasureMap))
     },
 
-    test("карта отца: без серебра — остаёмся; отказ от покупки — уровень×3; пожелать удачи — 300") {
+    test("карта отца: без серебра — остаёмся; отказ от покупки — уровень×3; пожелать удачи — уровень×10 ±20%") {
       for {
         t <- make(hero.copy(silver = 100L), Some(orcScene(Step.MapOffer).copy(price = 1100L)))
         (state, dao, inv, _, _, r) = t
@@ -168,12 +169,13 @@ object GirlStateSpec extends ZIOSpecDefault {
         h      <- heroOf(dao)
         t2 <- make(hero, Some(orcScene(Step.CityMap)))
         (state2, dao2, _, _, _, r2) = t2
+        _      <- TestRandom.feedLongs(120L)
         res2   <- state2.action(testUser, tap("WishLuck"), r2)
         h2     <- heroOf(dao2)
       } yield assertTrue(stay == StateType.Girl && all.contains("Столько серебра у вас нет")) &&
               assertTrue(inv.snapshot.isEmpty) &&
               assertTrue(res == StateType.GlobalMap && h.guildReputation == 50L + 30L) &&
-              assertTrue(res2 == StateType.GlobalMap && h2.guildReputation == 50L + 300L)
+              assertTrue(res2 == StateType.GlobalMap && h2.guildReputation == 50L + 120L)   // 10 × 10 × 120%
     },
 
     test("в городе 48%: таверна; уйти, не поднимаясь, — уровень×2") {
