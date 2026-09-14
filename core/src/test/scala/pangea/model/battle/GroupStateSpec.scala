@@ -73,15 +73,17 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.monsterAt(3).exists(_.currentHp == 300L))
     },
 
-    test("павший активный уходит в slain, напротив встаёт тот, кто теперь на месте героя; с края — герой шагает назад") {
-      val b   = SoloPveBattle.fromGroup(trio, hero, Nil).copy(monsterCurrentHp = 0L)
-      val nxt = b.promoteNext.get
+    test("павший активный уходит в slain, его место пустеет, герой шагает к ближайшему (при равенстве — правее)") {
+      val b    = SoloPveBattle.fromGroup(trio, hero, Nil).copy(monsterCurrentHp = 0L)
+      val nxt  = b.promoteNext.get
       val edge = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(3).copy(monsterCurrentHp = 0L).promoteNext.get
-      assertTrue(nxt.monsterCurrentHp == 200L && nxt.group.heroPos == 1) &&
-      assertTrue(nxt.group.others.map(_.currentHp) == List(300L)) &&
+      val mid  = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(2).copy(monsterCurrentHp = 0L).promoteNext.get
+      assertTrue(nxt.monsterCurrentHp == 200L && nxt.group.heroPos == 2) &&
+      assertTrue(nxt.placesInOrder.map(_._2.map(_.currentHp)) == List(None, Some(200L), Some(300L))) &&
       assertTrue(nxt.group.slain.size == 1) &&
       assertTrue(nxt.group.slain.head.race == Race.Orc.entryName) &&
-      assertTrue(edge.group.heroPos == 2 && edge.monsterCurrentHp == 200L && edge.group.others.map(_.currentHp) == List(100L))
+      assertTrue(edge.group.heroPos == 2 && edge.monsterCurrentHp == 200L) &&
+      assertTrue(mid.group.heroPos == 3 && mid.monsterCurrentHp == 300L)   // равные — правее
     },
 
     test("последнему мобу заменить себя некем — это победа") {
@@ -89,19 +91,20 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.promoteNext.isEmpty)
     },
 
-    test("павший вне пары смыкает строй, а отложенный Таран едет за своей целью") {
+    test("павший вне пары оставляет пустое место: строй не смыкается, места и Таран остаются") {
       val four = SoloPveBattle.fromGroup(trio :+ monster(Race.Orc, 400L), hero, Nil)
       val aimedAtThird  = four.copy(group = four.group.copy(pendingMove = Some(3)))
       val aimedAtSecond = four.copy(group = four.group.copy(pendingMove = Some(2)))
       val secondFell    = aimedAtThird.sideFallen(0)   // пал моб на месте 2
       val targetFell    = aimedAtSecond.sideFallen(0)
-      // герой на месте 3: пал моб слева — место героя сдвигается вместе со строем
-      val leftFell      = four.moveHeroTo(3).sideFallen(0)
-      assertTrue(secondFell.group.others.map(_.currentHp) == List(300L, 400L)) &&
+      val moved         = four.moveHeroTo(3)              // герой на 3, моб с места 1 остался на месте 1
+      val leftFell      = moved.sideFallen(moved.group.idxOf(1)) // пал моб на месте 1
+      assertTrue(secondFell.placesInOrder.map(_._2.map(_.currentHp)) == List(Some(100L), None, Some(300L), Some(400L))) &&
       assertTrue(secondFell.group.slain.map(_.name).size == 1) &&
-      assertTrue(secondFell.group.pendingMove.contains(2)) &&     // цель сдвинулась на одно место
+      assertTrue(secondFell.group.pendingMove.contains(3)) &&     // цель на своём месте
       assertTrue(targetFell.group.pendingMove.isEmpty) &&          // цель пала — Таран сгорел
-      assertTrue(leftFell.group.heroPos == 2 && leftFell.monsterCurrentHp == 300L) &&
+      assertTrue(leftFell.group.heroPos == 3 && leftFell.monsterCurrentHp == 300L && !leftFell.group.occupied(1)) &&
+      assertTrue(!secondFell.group.inReach(2) && secondFell.group.neighbourPositions.isEmpty) &&
       assertTrue(four.sideFallen(9) == four)
     },
 
@@ -111,11 +114,14 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(aimed.promoteNext.get.group.pendingMove.isEmpty)
     },
 
-    test("подкрепление встаёт последним по номеру") {
+    test("подкрепление встаёт на первое свободное место за строем") {
       val b   = SoloPveBattle.fromGroup(trio.take(2), hero, Nil)
       val slot = SoloPveBattle.fromGroup(List(monster(Race.Orc, 999L)), hero, Nil).activeSlot
       val more = b.withReinforcement(slot)
-      assertTrue(more.group.others.map(_.currentHp) == List(200L, 999L))
+      // с пустым местом 2 подкрепление всё равно встаёт за строем, на место 4
+      val gap  = b.withReinforcement(slot).sideFallen(0).withReinforcement(slot)
+      assertTrue(more.group.others.map(_.currentHp) == List(200L, 999L) && more.group.places == List(2, 3)) &&
+      assertTrue(gap.group.places == List(3, 4) && !gap.group.occupied(2))
     },
 
     test("перемешивание: любой моб может оказаться в паре, никто не теряется") {

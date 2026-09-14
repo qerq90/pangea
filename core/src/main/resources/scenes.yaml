@@ -1449,6 +1449,7 @@ battle:
   group:
     lineHero: "{n}. 🟢 Вы VS 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
     lineFree: "{n}. 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
+    lineEmpty: "{n}. ⬜ пусто"
     sideHit: "⚔ {monster} атаковал вас сбоку на {damage} урона."
     sideMiss: "💨 {monster} ударил сбоку, но промахнулся."
     healedAlly: "💉 {monster} исцелил вашего врага на {hp} HP!"
@@ -1569,7 +1570,7 @@ girl:
     text: "«Спасибо, герой!»"
     choices:
       Ask: "Спросить, что она делала"
-      Farewell: "Попрощаться и пожелать удачи"
+      Farewell: "Пожелать больше не попадать в передряги"
   asked:
     text: "«Я собирала ингредиенты для приворотного зелья»."
     choices:
@@ -1588,7 +1589,7 @@ girl:
         label: "Согласиться"
         color: "positive"
       CantAfford:
-        label: "Мне это не по карману"
+        label: "Не могу позволить себе такие траты"
         color: "negative"
   mapBought: "Девушка отдаёт вам карту. 🪙 −{price} серебра."
   mapNoSilver: "Столько серебра у вас нет — {price} нужно."

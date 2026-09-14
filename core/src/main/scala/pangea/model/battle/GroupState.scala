@@ -72,9 +72,11 @@ object SlainMonster {
 
 /** Групповая часть боя. Мобы стоят в строю по местам 1, 2, …; герой стоит на
   * месте `heroPos` — напротив него активный моб, живущий в полях
-  * [[SoloPveBattle]]. Здесь — всё остальное:
+  * [[SoloPveBattle]]. Павший освобождает место, и оно остаётся пустым — строй
+  * не смыкается (пустоты — задел под тактику). Здесь — всё остальное:
   *
-  *  - `others`  — мобы на прочих местах, в порядке мест (без активного);
+  *  - `others`  — мобы на прочих местах (без активного), `places` — их места,
+  *    список в список;
   *  - `heroPos` — место героя (и активного моба), с единицы;
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
@@ -88,46 +90,47 @@ final case class GroupState(
   round:       Int                = 0,
   pendingMove: Option[Int]        = None,
   originRace:  Option[String]     = None,
-  heroPos:     Int                = 1
+  heroPos:     Int                = 1,
+  places:      List[Int]          = Nil
 ) {
   def isGroup: Boolean = others.nonEmpty
 
   /** Сколько мобов ещё на ногах, включая активного. */
   def aliveCount: Int = 1 + others.count(_.alive)
 
-  /** Сколько мест занято в строю, с активным. */
-  def size: Int = others.size + 1
+  /** Сколько мест в строю — до самого дальнего занятого (пустые между — тоже места). */
+  def size: Int = (heroPos :: places).max
 
-  /** Место моба `others(idx)`: до героя места идут подряд, после — с пропуском его места. */
-  def posOf(idx: Int): Int = if (idx < heroPos - 1) idx + 1 else idx + 2
+  /** Место моба `others(idx)`. */
+  def posOf(idx: Int): Int = places(idx)
 
-  /** Индекс в `others` для места `pos` (не места героя). */
-  def idxOf(pos: Int): Int = if (pos < heroPos) pos - 1 else pos - 2
+  /** Индекс в `others` моба на месте `pos`; −1, если там пусто или герой. */
+  def idxOf(pos: Int): Int = places.indexOf(pos)
 
-  /** Место есть в строю. */
+  /** Место есть в строю (пусть и пустое). */
   def hasPos(pos: Int): Boolean = pos >= 1 && pos <= size
 
-  /** Достаёт ли герой до места `pos` (в радиусе, но не своё). */
-  def inReach(pos: Int): Boolean = hasPos(pos) && pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach
+  /** Стоит ли на месте `pos` моб вне пары. */
+  def occupied(pos: Int): Boolean = idxOf(pos) >= 0
 
-  /** Места по соседству с героем, слева направо. */
-  def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(hasPos)
+  /** Достаёт ли герой до моба на месте `pos`: соседнее место, и там кто-то есть. */
+  def inReach(pos: Int): Boolean = pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach && occupied(pos)
 
-  /** Моб `others(idx)` пал: из строя — в павшие. Строй смыкается: места правее
-    * сдвигаются на одно, вместе с местом героя, если павший стоял левее, и с
-    * отложенным Тараном (в павшего — пропадает). Чужой индекс — ничего. */
+  /** Занятые места по соседству с героем, слева направо. */
+  def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(occupied)
+
+  /** Мобы с их местами, список в список. */
+  def entries: List[(Int, MonsterSlot)] = places.zip(others)
+
+  /** Моб `others(idx)` пал: из строя — в павшие, его место пустеет. Таран в него
+    * сгорает. Чужой индекс — ничего. */
   def withoutSlot(idx: Int): GroupState =
     others.lift(idx) match {
       case None       => this
       case Some(slot) =>
-        val pos  = posOf(idx)
-        val move = pendingMove.flatMap {
-          case p if p == pos => None
-          case p if p > pos  => Some(p - 1)
-          case p             => Some(p)
-        }
-        copy(others = others.patch(idx, Nil, 1), slain = slain :+ slot.slain, pendingMove = move,
-             heroPos = if (pos < heroPos) heroPos - 1 else heroPos)
+        val pos = posOf(idx)
+        copy(others = others.patch(idx, Nil, 1), places = places.patch(idx, Nil, 1),
+             slain = slain :+ slot.slain, pendingMove = pendingMove.filter(_ != pos))
     }
 }
 
@@ -159,5 +162,7 @@ object GroupState {
       pendingMove <- c.getOrElse[Option[Int]]("pendingMove")(None)
       originRace  <- c.getOrElse[Option[String]]("originRace")(None)
       heroPos     <- c.getOrElse[Int]("heroPos")(1)
-    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos)
+      // Без мест (старая запись) — строй сплошной: слева от героя, потом справа.
+      places      <- c.getOrElse[List[Int]]("places")(others.indices.map(i => if (i < heroPos - 1) i + 1 else i + 2).toList)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places)
 }

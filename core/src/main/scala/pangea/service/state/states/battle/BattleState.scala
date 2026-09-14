@@ -1941,8 +1941,10 @@ case class BattleState(
     // Кандидаты: соседи по местам; тот, что на месте героя, — активный.
     val myPos = battle.group.posOf(idx)
     val neighbours: List[Either[Unit, Int]] =
-      List(myPos - 1, myPos + 1).filter(battle.group.hasPos).map { p =>
-        if (p == battle.group.heroPos) Left(()) else Right(battle.group.idxOf(p))
+      List(myPos - 1, myPos + 1).flatMap { p =>
+        if (p == battle.group.heroPos) List(Left(()))
+        else if (battle.group.occupied(p)) List(Right(battle.group.idxOf(p)))
+        else Nil
       }
     def target(n: Either[Unit, Int]): SoloPveBattle = n match {
       case Left(_)  => battle
@@ -2023,7 +2025,7 @@ case class BattleState(
         // Таран: в пару встаёт тот, кого таранили
         // Таран: герой шагает на место, куда таранил; мобы остаются где стояли
         rammed = b2.group.pendingMove match {
-          case Some(pos) if b2.group.hasPos(pos) && pos != b2.group.heroPos =>
+          case Some(pos) if b2.group.occupied(pos) =>
             val b = b2.moveHeroTo(pos)
             (b.copy(group = b.group.copy(pendingMove = None)),
              Vector(content.format("battle.group.ram", "pos" -> pos.toString, "monster" -> b.monsterName)))
@@ -2035,10 +2037,12 @@ case class BattleState(
 
   /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. */
   private def groupLines(battle: SoloPveBattle): Vector[String] =
-    battle.monstersInOrder.zipWithIndex.map { case (m, i) =>
-      val pos = i + 1
-      val key = if (pos == battle.group.heroPos) "battle.group.lineHero" else "battle.group.lineFree"
-      content.format(key, "n" -> pos.toString, "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
+    battle.placesInOrder.map {
+      case (pos, Some(m)) =>
+        val key = if (pos == battle.group.heroPos) "battle.group.lineHero" else "battle.group.lineFree"
+        content.format(key, "n" -> pos.toString, "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
+      case (pos, None) =>
+        content.format("battle.group.lineEmpty", "n" -> pos.toString)
     }.toVector
 
   // ── Победа ──────────────────────────────────────────────────────────────────
