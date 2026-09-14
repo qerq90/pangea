@@ -49,6 +49,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object GirlRoom extends TaskKind
   // Поход к тайнику Кельвина по карте из письма Марисе (10 минут) — тайник и коллектор.
   case object MarisaHunt extends TaskKind
+  // Очередной цветок на поляне (2–3 минуты).
+  case object FlowerMeadow extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

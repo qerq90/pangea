@@ -14,14 +14,29 @@ import io.circe.{Decoder, Encoder, HCursor}
  *  `metJoe`/`joeLore` — то же самое про Гнилого Джо.
  *  `prologueBranch` — какой смертью герой прошёл пролог («Gnome», «Orc»,
  *  «Elf», «Human»); пишется в финале, когда раса подтверждена, — сюжет потом
- *  сможет на это опереться. */
+ *  сможет на это опереться.
+ *  `knowledge` — что герой умеет ([[Knowledge]], ключи); `selfTaught` — из них
+ *  те, до чего дошёл сам, а не по книге; `bookCooldowns` — когда книгу можно
+ *  читать снова (ключ книги → момент). */
 final case class LoreData(
-  metElemental:   Boolean        = false,
-  elementalLore:  Boolean        = false,
-  metJoe:         Boolean        = false,
-  joeLore:        Boolean        = false,
-  prologueBranch: Option[String] = None
-)
+  metElemental:   Boolean           = false,
+  elementalLore:  Boolean           = false,
+  metJoe:         Boolean           = false,
+  joeLore:        Boolean           = false,
+  prologueBranch: Option[String]    = None,
+  knowledge:      List[String]      = Nil,
+  selfTaught:     List[String]      = Nil,
+  bookCooldowns:  Map[String, Long] = Map.empty
+) {
+  def knows(k: Knowledge): Boolean = knowledge.contains(k.entryName)
+
+  def learnedAlone(k: Knowledge): Boolean = selfTaught.contains(k.entryName)
+
+  /** Выучить: второй раз одно и то же не записывается. */
+  def learn(k: Knowledge, alone: Boolean): LoreData =
+    if (knows(k)) this
+    else copy(knowledge = knowledge :+ k.entryName, selfTaught = if (alone) selfTaught :+ k.entryName else selfTaught)
+}
 
 object LoreData {
   val empty: LoreData = LoreData()
@@ -39,5 +54,8 @@ object LoreData {
       metJoe        <- c.getOrElse[Boolean]("metJoe")(false)
       joeLore       <- c.getOrElse[Boolean]("joeLore")(false)
       branch        <- c.getOrElse[Option[String]]("prologueBranch")(None)
-    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, branch)
+      knowledge     <- c.getOrElse[List[String]]("knowledge")(Nil)
+      selfTaught    <- c.getOrElse[List[String]]("selfTaught")(Nil)
+      cooldowns     <- c.getOrElse[Map[String, Long]]("bookCooldowns")(Map.empty)
+    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, branch, knowledge, selfTaught, cooldowns)
 }

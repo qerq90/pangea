@@ -17,8 +17,8 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.states.marisa.MarisaHuntState
-import pangea.service.state.{ItemMenu, MarisaQuest, NpcQuestLog, State, UiScene, UserAction}
-import zio.{Task, ZIO}
+import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, NpcQuestLog, State, UiScene, UserAction}
+import zio.{Random, Task, ZIO}
 
 case class InventoryState(
   heroDao:        HeroDao,
@@ -48,7 +48,9 @@ case class InventoryState(
       "OpenLetter"        -> Target.Run { (u, _,  r) => openLetter(u, r) },
       "UseKelvinMap"      -> Target.Run { (u, _,  r) => useKelvinMap(u, r) },
       "MapWithMarisa"     -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = true) },
-      "MapAlone"          -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = false) }
+      "MapAlone"          -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = false) },
+      // Трактаты Густаво: читать, пока не осилишь.
+      "ReadTreatise"      -> Target.Run { (u, _,  r) => readTreatise(u, r) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -151,7 +153,10 @@ case class InventoryState(
         case Some(QuestItemKind.KelvinMap) =>
           Screen(s"${item.name}\n\n${QuestItemKind.KelvinMap.description}", List(
             content.choice("UseKelvinMap", "marisa.mapUseLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
-        case None => Screen(item.name, List(exit))
+        case Some(book) if HerbLore.isTreatise(book) =>
+          Screen(s"${item.name}\n\n${book.description}", List(
+            content.choice("ReadTreatise", "knowledge.readLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
+        case _ => Screen(item.name, List(exit))
       }
       _ <- renderer.show(user, screen)
     } yield StateType.Inventory
@@ -165,6 +170,45 @@ case class InventoryState(
       _     <- ZIO.when(given)(renderer.show(user, Screen(
                  content.format("marisa.questItemAdded", "item" -> QuestItemKind.KelvinMap.displayName), Nil)))
       res   <- showList(user, renderer)
+    } yield res
+
+  /** Трактат: бросок интеллект ÷ 2 процентов; осилил — знание и книга уходит,
+    * нет — час на переварить, потом снова. */
+  private def readTreatise(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now   <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+      hero  <- getHero(user)
+      scene <- readScene(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      book   = scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)).flatMap(i => i.questItem.map(i -> _))
+      res <- book match {
+        case Some((item, kind)) if HerbLore.isTreatise(kind) =>
+          val knowledge = HerbLore.knowledgeOf(kind).get
+          for {
+            lore <- HerbLore.readLore(heroDao, user.userId)
+            until = lore.bookCooldowns.getOrElse(kind.entryName, 0L)
+            _ <- if (now < until)
+                   renderer.show(user, Screen(content.format("knowledge.readCooldown",
+                     "mins" -> (((until - now) + 59999L) / 60000L).max(1L).toString), Nil))
+                 else for {
+                   roll <- Random.nextIntBetween(1, 101)
+                   _    <- renderer.show(user, Screen(content.text("knowledge.readSpent"), Nil))
+                   _    <- if (roll <= HerbLore.readingChance(hero, now))
+                             HerbLore.writeLore(heroDao, user.userId, lore.learn(knowledge, alone = false)
+                               .copy(bookCooldowns = lore.bookCooldowns - kind.entryName)) *>
+                               inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+                               renderer.show(user, Screen(
+                                 content.text("knowledge.readSuccess") + "\n" +
+                                   content.format("knowledge.gained", "title" -> knowledge.title), Nil))
+                           else
+                             HerbLore.writeLore(heroDao, user.userId,
+                               lore.copy(bookCooldowns = lore.bookCooldowns.updated(kind.entryName, now + HerbLore.ReadingCooldownMs))) *>
+                               renderer.show(user, Screen(content.text("knowledge.readFailed"), Nil))
+                 } yield ()
+            r <- showList(user, renderer)
+          } yield r
+        case _ => showList(user, renderer)
+      }
     } yield res
 
   /** Карта Кельвина: только из города; если Мариса ждёт — спросить, брать ли её. */

@@ -8,7 +8,7 @@ import pangea.model.stats.{ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.trauma.Trauma
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -68,19 +68,19 @@ object GustavoStateSpec extends ZIOSpecDefault {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
-          _       <- GustavoState(heroDao, content).enter(testUser, renderer)
+          _       <- GustavoState(heroDao, TestInventoryRepository.accepting, content).enter(testUser, renderer)
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id)
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Positive)) &&
-                assertTrue(ids == List("Heal", "Boost", "Herbs", "Supplies", "GusQuest", "Back"))
+                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest", "Back"))
       },
 
       test("Herbs → заглушка, остаёмся в меню; Supplies → GustavoSupplies") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
-          state = GustavoState(heroDao, content)
+          state = GustavoState(heroDao, TestInventoryRepository.accepting, content)
           herbs   <- state.action(testUser, tap("Herbs"), renderer)
           supplies <- state.action(testUser, tap("Supplies"), renderer)
           screens <- renderer.sentScreens
@@ -94,7 +94,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           t <- env(hero())
           (heroDao, renderer, content) = t
           _       <- heroDao.writeGustavoData(userId, GustavoData(Some(farFuture), Nil).asJson)
-          _       <- GustavoState(heroDao, content).enter(testUser, renderer)
+          _       <- GustavoState(heroDao, TestInventoryRepository.accepting, content).enter(testUser, renderer)
           screens <- renderer.sentScreens
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Negative))
@@ -104,7 +104,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
-          state = GustavoState(heroDao, content)
+          state = GustavoState(heroDao, TestInventoryRepository.accepting, content)
           h    <- state.action(testUser, tap("Heal"), renderer)
           b    <- state.action(testUser, tap("Boost"), renderer)
           back <- state.action(testUser, tap("Back"), renderer)

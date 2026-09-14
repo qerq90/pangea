@@ -13,11 +13,16 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
-  // Battle 39% · FoundItem 20% · Spring 18% · Girl 2% · SilverVein 10% · TreasureMobs 5% ·
-  // TreasureDig 5% · ElementalLair 1% (вес = число повторов в пуле, сумма = 100).
-  // Процент под логово элементаля забран у боя, под девушку — у ручья.
+  // Battle 34% · FlowerMeadow 5% · FoundItem 20% · Spring 18% · Girl 2% · SilverVein 10% ·
+  // TreasureMobs 5% · TreasureDig 5% · ElementalLair 1% (вес = число повторов в пуле,
+  // сумма = 100). Процент под логово элементаля и поляну цветов забран у боя, под
+  // девушку — у ручья. Поляна стоит сразу за боем, чтобы билеты остальных событий
+  // не сдвинулись.
+  val BattleTickets: Int = 34
+
   val events: List[StateType] =
-    List.fill(39)(Battle) ++ List.fill(20)(FoundItem) ++ List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
+    List.fill(BattleTickets)(Battle) ++ List.fill(5)(FlowerMeadow) ++ List.fill(20)(FoundItem) ++
+      List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
       List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
       List.fill(1)(ElementalLair)
 
@@ -27,7 +32,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
    *  Прочие события не трогаются — их абсолютный вес прежний, а относительная доля
    *  сдвигается за счёт изменения общего числа билетов. */
   def eventsWithBattleFactor(battleFactor: Double): List[StateType] = {
-    val battleTickets = (39 * battleFactor).round.toInt.max(0)
+    val battleTickets = (BattleTickets * battleFactor).round.toInt.max(0)
     List.fill(battleTickets)(Battle) ++ events.filter(_ != Battle)
   }
 
@@ -81,6 +86,9 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TreasureSchron   extends StateType // эффект-нода: выдача схрона после цепочки боёв
   case object TreasureDig      extends StateType // прикопанный схрон (раскопки по таймеру)
   case object Girl             extends StateType // девушка с криком «Помогите!» и трое вооружённых
+  case object FlowerMeadow     extends StateType // поляна цветов: сбор трав по таймеру
+  case object Knowledge        extends StateType // знания героя (меню персонажа)
+  case object GustavoHerbs     extends StateType // Густаво: рассказ о травах и трактаты
 
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход

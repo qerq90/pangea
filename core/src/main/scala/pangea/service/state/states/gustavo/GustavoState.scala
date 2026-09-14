@@ -3,11 +3,12 @@ package pangea.service.state.states.gustavo
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.ItemDetails
+import pangea.model.item.{Item, ItemDetails}
 import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{NpcQuestDialog, NpcQuestLog, State, UserAction}
+import pangea.repository.inventory.InventoryRepository
+import pangea.service.state.{HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -20,8 +21,9 @@ import zio.{Task, ZIO}
  * Цвет кнопки лечения зависит от кулдауна зелья ([[GustavoData.healCooldownUntil]]).
  */
 case class GustavoState(
-  heroDao: HeroDao,
-  content: SceneContent
+  heroDao:       HeroDao,
+  inventoryRepo: InventoryRepository,
+  content:       SceneContent
 ) extends State with GustavoScene {
 
   /** «Подопытный»: выпить зелье, победить троих, пока оно действует, и
@@ -35,9 +37,10 @@ case class GustavoState(
       quest.declineAction -> Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) },
       "Heal"     -> Target.Goto(StateType.GustavoHeal),
       "Boost"    -> Target.Goto(StateType.GustavoBoost),
-      "Herbs"    -> Target.Run { (u, _, r) =>
-                      r.show(u, Screen(content.text("gustavo.herbsStub"), Nil)) *> renderMenu(u, r).as(StateType.Gustavo) },
-      "Supplies" -> Target.Goto(StateType.GustavoSupplies),
+      "Herbs"     -> Target.Run { (u, _, r) => showHerbs(u, r) },
+      "HerbsSell" -> Target.Run { (u, _, r) => sellHerbs(u, r) },
+      "HerbsTalk" -> Target.Goto(StateType.GustavoHerbs),
+      "Supplies"  -> Target.Goto(StateType.GustavoSupplies),
       "Back"     -> Target.Goto(StateType.MarketSquare)
     ),
     fallback = Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) }
@@ -45,7 +48,7 @@ case class GustavoState(
 
   override def targetStates: Set[StateType] =
     Set(StateType.MarketSquare, StateType.Gustavo, StateType.GustavoHeal,
-        StateType.GustavoBoost, StateType.GustavoSupplies)
+        StateType.GustavoBoost, StateType.GustavoSupplies, StateType.GustavoHerbs)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = renderMenu(user, renderer)
 
@@ -59,6 +62,48 @@ case class GustavoState(
       quests <- quest.load(user)
       _      <- renderer.show(user, menuScreen(data, now, quest.button(quests)))
     } yield ()
+
+  // ── Травы ───────────────────────────────────────────────────────────────
+
+  /** «Сдать травы»: что в сумке и почём, одной кнопкой на всё. Странные цветки
+    * Густаво берёт по цене сена — он и не собирается объяснять, что это было. */
+  private def showHerbs(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      herbs <- herbsOf(hero)
+      _ <- if (herbs.isEmpty)
+             renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil)) *> renderMenu(user, renderer)
+           else {
+             val lines = herbs.groupBy(_.name).toList.sortBy(_._1).map { case (name, same) =>
+               content.format("gustavo.herbs.line", "name" -> name, "count" -> same.size.toString,
+                 "price" -> same.map(i => HerbLore.price(i.material.get)).sum.toString)
+             }
+             val total = herbs.map(i => HerbLore.price(i.material.get)).sum
+             renderer.show(user, Screen(
+               content.text("gustavo.herbs.header") + "\n\n" + lines.mkString("\n"),
+               List(
+                 content.choice("HerbsSell", "gustavo.herbs.sellAll", "total" -> total.toString).copy(color = ChoiceColor.Positive),
+                 content.choice("Back", "gustavo.back"))))
+           }
+    } yield StateType.Gustavo
+
+  private def sellHerbs(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      herbs <- herbsOf(hero)
+      total  = herbs.map(i => HerbLore.price(i.material.get)).sum
+      _ <- if (herbs.isEmpty)
+             renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil))
+           else
+             inventoryRepo.removeItems(herbs.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
+               heroDao.updateSilver(user.userId, hero.silver + total) *>
+               renderer.show(user, Screen(content.format("gustavo.herbs.sold",
+                 "count" -> herbs.size.toString, "silver" -> total.toString), Nil))
+      _ <- renderMenu(user, renderer)
+    } yield StateType.Gustavo
+
+  private def herbsOf(hero: Hero): Task[List[Item]] =
+    inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(inv => HerbLore.herbs(inv.items.data))
 
   /** Кнопка задания: завязка, пока не взято; дальше — по шагу: напомнить про
     * зелье, посчитать побитых (или налить ещё, если зелье выветрилось), принять
@@ -120,8 +165,9 @@ case class GustavoState(
     }
     val boostBtn    = content.choice("Boost", "gustavo.boostLabel")
     val herbsBtn    = content.choice("Herbs", "gustavo.herbsLabel")
+    val herbsTalk   = content.choice("HerbsTalk", "gustavo.herbs.talkLabel")
     val suppliesBtn = content.choice("Supplies", "gustavo.suppliesLabel")
-    val choices = List(healBtn, boostBtn, herbsBtn, suppliesBtn) ++ questBtn.toList :+ content.choice("Back", "gustavo.back")
+    val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, suppliesBtn) ++ questBtn.toList :+ content.choice("Back", "gustavo.back")
     Screen(content.text("gustavo.menu.text"), choices)
   }
 }

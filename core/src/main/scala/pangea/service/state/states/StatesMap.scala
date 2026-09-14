@@ -46,6 +46,9 @@ import pangea.model.state.StateType.{
   TrainingHall,
   TreasureDig,
   Girl,
+  FlowerMeadow,
+  Knowledge,
+  GustavoHerbs,
   MarisaSearch,
   MarisaHunt,
   TreasureHunt,
@@ -62,7 +65,7 @@ import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
-import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, GirlState, RottenJoeState, SilverVeinState}
+import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RottenJoeState, SilverVeinState}
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
@@ -86,11 +89,12 @@ import pangea.service.state.states.gustavo.{
   GustavoBeltState,
   GustavoFlaskState,
   GustavoHealState,
+  GustavoHerbsState,
   GustavoState,
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
-import pangea.service.state.states.hero.{HeroStatsState, SkillsState}
+import pangea.service.state.states.hero.{HeroStatsState, KnowledgeState, SkillsState}
 import pangea.service.state.states.tavern.{
   CardSellerState,
   InnkeeperState,
@@ -162,6 +166,7 @@ object StatesMap {
           ),
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
           Skills    -> SkillsState(heroDao, content),
+          Knowledge -> KnowledgeState(heroDao, content),
           ElementalLair -> ElementalLairState(heroDao, content),
           RottenJoe     -> RottenJoeState(heroDao, content),
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
@@ -172,7 +177,8 @@ object StatesMap {
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),
           Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
           Merchant -> MerchantState(heroDao, inventoryRepo, itemRepo, content),
-          Gustavo  -> GustavoState(heroDao, content),
+          Gustavo  -> GustavoState(heroDao, inventoryRepo, content),
+          GustavoHerbs    -> GustavoHerbsState(heroDao, inventoryRepo, itemRepo, content),
           GustavoHeal     -> GustavoHealState(heroDao, content),
           GustavoBoost    -> GustavoBoostState(heroDao, content),
           GustavoSupplies -> GustavoSuppliesState(heroDao, content),
@@ -193,6 +199,7 @@ object StatesMap {
           TreasureSchron    -> TreasureSchronState(heroDao, content),
           TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
           Girl              -> GirlState(heroDao, inventoryRepo, itemRepo, barrelRepo, scheduler, content),
+          FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content),
           MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
           MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content),
           Outskirts -> OutskirtsState(
