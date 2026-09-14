@@ -13,15 +13,15 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
-  // Battle 34% · FlowerMeadow 5% · FoundItem 20% · Spring 18% · Girl 2% · SilverVein 10% ·
+  // Battle 38% · FlowerMeadow 2% · FoundItem 19% · Spring 18% · Girl 2% · SilverVein 10% ·
   // TreasureMobs 5% · TreasureDig 5% · ElementalLair 1% (вес = число повторов в пуле,
-  // сумма = 100). Процент под логово элементаля и поляну цветов забран у боя, под
-  // девушку — у ручья. Поляна стоит сразу за боем, чтобы билеты остальных событий
-  // не сдвинулись.
-  val BattleTickets: Int = 34
+  // сумма = 100). Процент под логово элементаля забран у боя, под девушку — у ручья,
+  // под поляну цветов — по одному у боя и у находки. Поляна стоит сразу за боем,
+  // чтобы билеты событий дальше по списку не сдвигались.
+  val BattleTickets: Int = 38
 
   val events: List[StateType] =
-    List.fill(BattleTickets)(Battle) ++ List.fill(5)(FlowerMeadow) ++ List.fill(20)(FoundItem) ++
+    List.fill(BattleTickets)(Battle) ++ List.fill(2)(FlowerMeadow) ++ List.fill(19)(FoundItem) ++
       List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
       List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
       List.fill(1)(ElementalLair)
