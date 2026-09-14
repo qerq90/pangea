@@ -45,6 +45,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object DarknessTracking extends TaskKind
   // Очередная находка при осмотре логова элементаля (2–4 минуты) — камень-усилитель.
   case object ElementalSearch extends TaskKind
+  // Уединение с девицей в комнате таверны (30 минут) — выход из комнаты.
+  case object GirlRoom extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

@@ -45,6 +45,7 @@ import pangea.model.state.StateType.{
   TempleAzat,
   TrainingHall,
   TreasureDig,
+  Girl,
   TreasureHunt,
   TreasureMobs,
   TreasureMobsFight,
@@ -59,7 +60,7 @@ import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
-import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, RottenJoeState, SilverVeinState}
+import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, GirlState, RottenJoeState, SilverVeinState}
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
   TreasureDigState,
@@ -188,6 +189,7 @@ object StatesMap {
           TreasureMobsFight -> TreasureMobsFightState(heroDao, content),
           TreasureSchron    -> TreasureSchronState(heroDao, content),
           TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
+          Girl              -> GirlState(heroDao, inventoryRepo, itemRepo, barrelRepo, scheduler, content),
           Outskirts -> OutskirtsState(
             heroDao,
             inventoryRepo,

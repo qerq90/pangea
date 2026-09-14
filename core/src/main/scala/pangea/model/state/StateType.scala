@@ -13,11 +13,11 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
-  // Battle 39% · FoundItem 20% · Spring 20% · SilverVein 10% · TreasureMobs 5% ·
+  // Battle 39% · FoundItem 20% · Spring 18% · Girl 2% · SilverVein 10% · TreasureMobs 5% ·
   // TreasureDig 5% · ElementalLair 1% (вес = число повторов в пуле, сумма = 100).
-  // Процент под логово элементаля забран у боя.
+  // Процент под логово элементаля забран у боя, под девушку — у ручья.
   val events: List[StateType] =
-    List.fill(39)(Battle) ++ List.fill(20)(FoundItem) ++ List.fill(20)(Spring) ++
+    List.fill(39)(Battle) ++ List.fill(20)(FoundItem) ++ List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
       List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
       List.fill(1)(ElementalLair)
 
@@ -80,6 +80,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TreasureMobsFight extends StateType // эффект-нода: спавн очередного боя цепочки
   case object TreasureSchron   extends StateType // эффект-нода: выдача схрона после цепочки боёв
   case object TreasureDig      extends StateType // прикопанный схрон (раскопки по таймеру)
+  case object Girl             extends StateType // девушка с криком «Помогите!» и трое вооружённых
 
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход
