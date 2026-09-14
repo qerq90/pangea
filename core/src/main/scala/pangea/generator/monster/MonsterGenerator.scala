@@ -52,6 +52,11 @@ object MonsterGenerator {
     (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked), rng3)
   }
 
+  /** Моб заданных расы и редкости — когда сюжет решает сам, кто вышел навстречу
+    * (трое бандитов первых трёх тиров, брат девицы). Метки тьмы у таких нет. */
+  def generateOfRaceAndRarity(dungeonLevel: Int, race: Race, rarity: Rarity): Monster =
+    Monster(0L, dungeonLevel.toLong, race, rarity, buildStats(dungeonLevel, rarity, race))
+
   /** Гарантированно «Отмеченный тьмой» моб заданного уровня — для механики
     * выслеживания прохода вглубь. Редкость роллится среди Rare+ (в тех же
     * относительных весах, что и обычный ролл), статы усилены
