@@ -51,12 +51,12 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
 
   override def spec = suite("Поляна цветов")(
 
-    test("в пуле событий: 5% у боя, остальные билеты не сдвинулись") {
+    test("в пуле событий: 2% (по одному у боя и у находки), билеты дальше по списку не сдвинулись") {
       val ev = StateType.events
-      assertTrue(ev.count(_ == StateType.FlowerMeadow) == 5) &&
-      assertTrue(ev.count(_ == StateType.Battle) == 34) &&
+      assertTrue(ev.count(_ == StateType.FlowerMeadow) == 2) &&
+      assertTrue(ev.count(_ == StateType.Battle) == 38 && ev.count(_ == StateType.FoundItem) == 19) &&
       assertTrue(ev.size == 100) &&
-      assertTrue(ev(67) == StateType.Spring && ev(34) == StateType.FlowerMeadow && ev(99) == StateType.ElementalLair)
+      assertTrue(ev(67) == StateType.Spring && ev(38) == StateType.FlowerMeadow && ev(99) == StateType.ElementalLair)
     },
 
     test("вход: 2–6 цветов, таймер на 2–3 минуты, кнопки «Персонаж» и красная «Уйти»; уйти — сразу в лабиринт") {
