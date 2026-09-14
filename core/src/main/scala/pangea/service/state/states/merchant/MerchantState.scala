@@ -457,9 +457,10 @@ case class MerchantState(
   private def doubloonPrice(item: Item): Long =
     item.material.map(_.doubloonPrice).getOrElse(0L)
 
-  /** Вещи на продажу: сюжетные предметы Ришелье не берёт ни в каком виде. */
+  /** Вещи на продажу: сюжетные предметы и травы Ришелье не берёт — травы несут Густаво. */
   private def inventoryItems(hero: Hero): Task[List[Item]] =
-    inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(_.items.data.filterNot(_.isQuestItem))
+    inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      .map(_.items.data.filterNot(i => i.isQuestItem || i.material.exists(_.isHerb)))
 
   private def currentSellPage(user: User): Task[Int] = currentSellScene(user).map(_.page)
 

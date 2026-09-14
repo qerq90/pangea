@@ -194,7 +194,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           _   <- seed(dao, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))
           r   <- TestRenderer.make
           c   <- content
-          _   <- GustavoState(dao, c).action(testUser, tap("GusQuest"), r)
+          _   <- GustavoState(dao, TestInventoryRepository.accepting, c).action(testUser, tap("GusQuest"), r)
           h   <- heroOf(dao)
           q   <- quests(dao)
           all <- texts(r)
@@ -202,7 +202,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           dao2 <- TestHeroDao.withHero(userId, hero)
           _   <- seed(dao2, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))
           r2  <- TestRenderer.make
-          _   <- GustavoState(dao2, c).action(testUser, tap("GusQuest"), r2)
+          _   <- GustavoState(dao2, TestInventoryRepository.accepting, c).action(testUser, tap("GusQuest"), r2)
           h2  <- heroOf(dao2)
         } yield assertTrue(charges == 4) &&
                 assertTrue(h.silver == 1000L + GustavoState.QuestSilver) &&
@@ -217,7 +217,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           _   <- seed(dao, NpcQuest.Gustavo, NpcQuestProgress(step = 2, counter = 1L))
           r   <- TestRenderer.make
           c   <- content
-          _   <- GustavoState(dao, c).action(testUser, tap("GusQuest"), r)
+          _   <- GustavoState(dao, TestInventoryRepository.accepting, c).action(testUser, tap("GusQuest"), r)
           q   <- quests(dao)
           all <- texts(r)
           boost = GustavoBoostState(dao, c)
