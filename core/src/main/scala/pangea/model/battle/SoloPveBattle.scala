@@ -77,25 +77,33 @@ case class SoloPveBattle(
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
     monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects))
 
-  /** Поменять активного моба местами с мобом `others(idx)`. Чужой индекс — бой
-    * не меняется. */
-  def swapWith(idx: Int): SoloPveBattle =
-    group.others.lift(idx) match {
-      case None => this
-      case Some(incoming) =>
-        withActive(incoming).copy(group = group.copy(others = group.others.updated(idx, activeSlot)))
+  /** Герой шагает на место `pos`: в пару встаёт моб, стоящий там, прежний
+    * активный остаётся на своём месте. Мобы не двигаются. Чужое место или своё
+    * — бой не меняется. */
+  def moveHeroTo(pos: Int): SoloPveBattle =
+    if (!group.hasPos(pos) || pos == group.heroPos) this
+    else {
+      val all      = monstersInOrder
+      val incoming = all(pos - 1)
+      withActive(incoming).copy(group = group.copy(others = all.patch(pos - 1, Nil, 1), heroPos = pos))
     }
 
-  /** Активный моб пал, а в группе есть ещё: записать его в павшие и поставить в
-    * пару следующего по номеру. Если ставить некого — None, это победа.
-    * Отложенный Таран сгорает: тот, кого таранили, либо сам шагнул в пару, либо
-    * его индекс уже не тот. */
+  /** Активный моб пал, а в группе есть ещё: записать его в павшие, строй
+    * смыкается, и в пару встаёт тот, кто теперь стоит на месте героя (сосед
+    * справа); если справа никого — герой шагает на одно место назад, к
+    * последнему. Если ставить некого — None, это победа. Отложенный Таран
+    * сгорает: места уже не те. */
   def promoteNext: Option[SoloPveBattle] =
-    group.others.headOption.map { next =>
-      withActive(next).copy(group = group.copy(
-        others      = group.others.tail,
+    if (group.others.isEmpty) None
+    else {
+      val rest   = group.others // строй без активного, в порядке мест
+      val pos    = group.heroPos.min(rest.size)
+      val next   = rest(pos - 1)
+      Some(withActive(next).copy(group = group.copy(
+        others      = rest.patch(pos - 1, Nil, 1),
         slain       = group.slain :+ slainActive,
-        pendingSwap = None))
+        pendingMove = None,
+        heroPos     = pos)))
     }
 
   /** Моб вне пары `others(idx)` пал — в павшие, строй смыкается. */
@@ -109,19 +117,27 @@ case class SoloPveBattle(
   def withReinforcement(slot: MonsterSlot): SoloPveBattle =
     copy(group = group.copy(others = group.others :+ slot))
 
-  /** Перемешать всех живых мобов: любой может оказаться в паре. `order` — новый
-    * порядок индексов по списку «активный :: others». */
+  /** Перемешать всех живых мобов по местам: любой может оказаться напротив
+    * героя, сам герой с места не сходит. `order` — новый порядок индексов по
+    * строю `monstersInOrder`. */
   def reorderMonsters(order: List[Int]): SoloPveBattle = {
-    val all = activeSlot :: group.others
+    val all = monstersInOrder
     if (order.sorted != all.indices.toList) this
     else {
       val shuffled = order.map(all)
-      withActive(shuffled.head).copy(group = group.copy(others = shuffled.tail))
+      val pos      = group.heroPos
+      withActive(shuffled(pos - 1)).copy(group = group.copy(others = shuffled.patch(pos - 1, Nil, 1)))
     }
   }
 
-  /** Все живые мобы по номерам: активный — номер 1. */
-  def monstersInOrder: List[MonsterSlot] = activeSlot :: group.others
+  /** Весь строй по местам: активный стоит на месте героя. */
+  def monstersInOrder: List[MonsterSlot] = {
+    val (before, after) = group.others.splitAt(group.heroPos - 1)
+    before ++ (activeSlot :: after)
+  }
+
+  /** Моб на месте `pos`, если такое есть. */
+  def monsterAt(pos: Int): Option[MonsterSlot] = monstersInOrder.lift(pos - 1)
 
   /** Раса, которой приходит подкрепление: первого моба этого боя. */
   def reinforcementRace: String = group.originRace.getOrElse(monsterRace)

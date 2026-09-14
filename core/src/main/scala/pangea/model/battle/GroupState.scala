@@ -70,14 +70,15 @@ object SlainMonster {
     } yield SlainMonster(lvl, race, rarity, marked, name)
 }
 
-/** Групповая часть боя. Герой всегда стоит под номером 1; моб под номером 1 —
-  * это активная пара, живущая в полях [[SoloPveBattle]]. Здесь — всё остальное:
+/** Групповая часть боя. Мобы стоят в строю по местам 1, 2, …; герой стоит на
+  * месте `heroPos` — напротив него активный моб, живущий в полях
+  * [[SoloPveBattle]]. Здесь — всё остальное:
   *
-  *  - `others`  — мобы под номерами 2, 3, … в порядке номеров;
+  *  - `others`  — мобы на прочих местах, в порядке мест (без активного);
+  *  - `heroPos` — место героя (и активного моба), с единицы;
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
-  *  - `pendingSwap` — Таран: индекс в `others`, кого в начале следующего раунда
-  *    поставить в пару вместо нынешнего;
+  *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
   *  - `originRace` — раса первого моба: подкрепление приходит той же расы.
   *
   * Обычный бой 1 на 1 — это группа из одного: `others` пуст. */
@@ -85,41 +86,62 @@ final case class GroupState(
   others:      List[MonsterSlot]  = Nil,
   slain:       List[SlainMonster] = Nil,
   round:       Int                = 0,
-  pendingSwap: Option[Int]        = None,
-  originRace:  Option[String]     = None
+  pendingMove: Option[Int]        = None,
+  originRace:  Option[String]     = None,
+  heroPos:     Int                = 1
 ) {
   def isGroup: Boolean = others.nonEmpty
 
   /** Сколько мобов ещё на ногах, включая активного. */
   def aliveCount: Int = 1 + others.count(_.alive)
 
-  /** Моб `others(idx)` пал: из строя — в павшие. Строй смыкается, поэтому
-    * отложенный Таран, если целил в него, пропадает, а если целил дальше по
-    * строю — сдвигается на одного. Чужой индекс — ничего не меняется. */
+  /** Сколько мест занято в строю, с активным. */
+  def size: Int = others.size + 1
+
+  /** Место моба `others(idx)`: до героя места идут подряд, после — с пропуском его места. */
+  def posOf(idx: Int): Int = if (idx < heroPos - 1) idx + 1 else idx + 2
+
+  /** Индекс в `others` для места `pos` (не места героя). */
+  def idxOf(pos: Int): Int = if (pos < heroPos) pos - 1 else pos - 2
+
+  /** Место есть в строю. */
+  def hasPos(pos: Int): Boolean = pos >= 1 && pos <= size
+
+  /** Достаёт ли герой до места `pos` (в радиусе, но не своё). */
+  def inReach(pos: Int): Boolean = hasPos(pos) && pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach
+
+  /** Места по соседству с героем, слева направо. */
+  def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(hasPos)
+
+  /** Моб `others(idx)` пал: из строя — в павшие. Строй смыкается: места правее
+    * сдвигаются на одно, вместе с местом героя, если павший стоял левее, и с
+    * отложенным Тараном (в павшего — пропадает). Чужой индекс — ничего. */
   def withoutSlot(idx: Int): GroupState =
     others.lift(idx) match {
       case None       => this
       case Some(slot) =>
-        val swap = pendingSwap.flatMap {
-          case i if i == idx => None
-          case i if i > idx  => Some(i - 1)
-          case i             => Some(i)
+        val pos  = posOf(idx)
+        val move = pendingMove.flatMap {
+          case p if p == pos => None
+          case p if p > pos  => Some(p - 1)
+          case p             => Some(p)
         }
-        copy(others = others.patch(idx, Nil, 1), slain = slain :+ slot.slain, pendingSwap = swap)
+        copy(others = others.patch(idx, Nil, 1), slain = slain :+ slot.slain, pendingMove = move,
+             heroPos = if (pos < heroPos) heroPos - 1 else heroPos)
     }
 }
 
 object GroupState {
   val empty: GroupState = GroupState()
 
-  /** Сколько мобов может стоять против героя одновременно, включая активного. */
-  val MaxMonsters: Int = 5
+  /** Сколько мест в строю: столько мобов может стоять против героя разом. */
+  val MaxMonsters: Int = 10
 
   /** Каждый такой раунд пары рвутся и собираются заново. */
   val ShufflePeriod: Int = 4
 
-  /** Радиус: моб под номером n достаёт бойцов под номерами n−1, n, n+1. Герой
-    * стоит под номером 1, поэтому сбоку его бьёт только моб под номером 2. */
+  /** Радиус: с места n достают до мест n−1, n, n+1. Герой бьёт соседей своего
+    * места, и только они бьют его сбоку. */
   val Reach: Int = 1
 
   /** Шанс (в %), что в начале раунда к мобу прибежит сородич. */
@@ -134,7 +156,8 @@ object GroupState {
       others      <- c.getOrElse[List[MonsterSlot]]("others")(Nil)
       slain       <- c.getOrElse[List[SlainMonster]]("slain")(Nil)
       round       <- c.getOrElse[Int]("round")(0)
-      pendingSwap <- c.getOrElse[Option[Int]]("pendingSwap")(None)
+      pendingMove <- c.getOrElse[Option[Int]]("pendingMove")(None)
       originRace  <- c.getOrElse[Option[String]]("originRace")(None)
-    } yield GroupState(others, slain, round, pendingSwap, originRace)
+      heroPos     <- c.getOrElse[Int]("heroPos")(1)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos)
 }

@@ -88,7 +88,7 @@ case class GirlState(
           race  = Race.mortals(idx)
           _    <- writeScene(user, GirlScene(Step.Meet, race.entryName))
           _    <- renderer.show(user, Screen(
-                    content.format("girl.meet.text", "race" -> race.toString),
+                    content.format("girl.meet.text", "race" -> race.genitivePlural),
                     content.screen("girl.meet").choices))
         } yield ()
       case Some(scene) if scene.step == Step.AfterFight => afterFight(user, renderer, scene)
@@ -117,7 +117,7 @@ case class GirlState(
                   eventData = Some(scene.copy(step = Step.AfterFight).asJson))
       _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(mobs, hero, energies).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
-      _ <- renderer.show(user, Screen(content.format("girl.fightStart", "race" -> race.toString), Nil))
+      _ <- renderer.show(user, Screen(content.format("girl.fightStart", "race" -> race.genitivePlural), Nil))
     } yield StateType.Battle
 
   /** После победы: либо благодарность серебром и репутацией, либо просьба
@@ -288,7 +288,7 @@ case class GirlState(
     } yield StateType.Girl
 
   private def screenFor(scene: GirlScene): Screen = scene.step match {
-    case Step.Meet     => Screen(content.format("girl.meet.text", "race" -> Race.withName(scene.race).toString), content.screen("girl.meet").choices)
+    case Step.Meet     => Screen(content.format("girl.meet.text", "race" -> Race.withName(scene.race).genitivePlural), content.screen("girl.meet").choices)
     case Step.Bandits  => content.screen("girl.bandits")
     case Step.Thanks   => content.screen("girl.thanks")
     case Step.Escort   => content.screen("girl.escort")

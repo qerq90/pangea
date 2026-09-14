@@ -1447,8 +1447,8 @@ battle:
 
 
   group:
-    lineHero: "🟢 Вы VS 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
-    lineFree: "🔴 {monster} ❤ {hp}% 🧥 {armor}%"
+    lineHero: "{n}. 🟢 Вы VS 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
+    lineFree: "{n}. 🔴 {monster} ❤ {hp}% 🧥 {armor}%"
     sideHit: "⚔ {monster} атаковал вас сбоку на {damage} урона."
     sideMiss: "💨 {monster} ударил сбоку, но промахнулся."
     healedAlly: "💉 {monster} исцелил вашего врага на {hp} HP!"
@@ -1457,7 +1457,7 @@ battle:
     sideFell: "☠ {monster} пал, не дойдя до вас."
     reinforcement: "🐾 На звуки битвы прибежал сородич вашего врага."
     shuffle: "🔀 Ряды смешались — теперь против вас {monster}."
-    ram: "🛡 Таран сработал: против вас встал {monster}."
+    ram: "🛡 Таран сработал: вы шагнули на место {pos}, против вас {monster}."
     surround: "⛓ Группа {race} окружает вас и навязывает вам продолжение боя."
     sideSlain: "☠ {monster} пал."
     victory: "Все повержены: {monster}. Получено {exp} опыта."
@@ -1569,7 +1569,7 @@ girl:
     text: "«Спасибо, герой!»"
     choices:
       Ask: "Спросить, что она делала"
-      Farewell: "Попрощаться и пожелать больше не попадать в такие передряги"
+      Farewell: "Попрощаться и пожелать удачи"
   asked:
     text: "«Я собирала ингредиенты для приворотного зелья»."
     choices:
@@ -1588,7 +1588,7 @@ girl:
         label: "Согласиться"
         color: "positive"
       CantAfford:
-        label: "Извините, но я не могу позволить себе такие траты"
+        label: "Мне это не по карману"
         color: "negative"
   mapBought: "Девушка отдаёт вам карту. 🪙 −{price} серебра."
   mapNoSilver: "Столько серебра у вас нет — {price} нужно."
