@@ -9,7 +9,7 @@ import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponDust}
 import pangea.model.inventory.Inventory
 import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
-import pangea.model.quest.NpcQuest
+import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
@@ -143,7 +143,7 @@ case class InventoryState(
       exit    = content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
       screen  = item.questItem match {
         case Some(QuestItemKind.MarisaLetter) =>
-          val text = s"${item.name}\n${content.text("marisa.difficulty")}\n\n${QuestItemKind.MarisaLetter.description}" +
+          val text = s"${item.name}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MarisaQuest.LetterDifficulty))}\n\n${QuestItemKind.MarisaLetter.description}" +
             (if (opened) "" else "\n\n" + content.text("marisa.letterHint"))
           Screen(text, List(
             content.choice("OpenLetter", if (opened) "marisa.readLetterLabel" else "marisa.openLetterLabel")

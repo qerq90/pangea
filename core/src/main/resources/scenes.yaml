@@ -1652,7 +1652,7 @@ marisa:
   questItemAdded: "📜 Добавлен квестовый предмет «{item}»."
   questDone: "📜 Квест «Письмо Марисе» завершён."
   achievement: "🏆 Вы получили достижение «{title}». {bonus}."
-  difficulty: "Сложность: 🦴🦴🦴"
+  difficulty: "Сложность: {difficulty}"
   letterHint: "Возможно, Трактирщик знает её?"
   openLetterLabel: "Вскрыть письмо"
   readLetterLabel: "Перечитать письмо"
