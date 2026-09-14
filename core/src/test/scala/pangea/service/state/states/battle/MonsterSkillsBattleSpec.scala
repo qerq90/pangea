@@ -8,7 +8,7 @@ import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 import zio.test.TestRandom
@@ -57,7 +57,7 @@ object MonsterSkillsBattleSpec extends ZIOSpecDefault {
       _        <- heroDao.writeActiveBattle(userId, b.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(heroDao, content), heroDao, renderer)
+    } yield (BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content), heroDao, renderer)
 
   override def spec = suite("MonsterSkillsBattleSpec")(
 

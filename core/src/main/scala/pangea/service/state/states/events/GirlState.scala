@@ -7,7 +7,7 @@ import pangea.engine.{Branch, Choice, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.TreasureMapGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
-import pangea.model.hero.Hero
+import pangea.model.hero.{Achievement, Hero}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.skill.MonsterEnergy
@@ -128,7 +128,7 @@ case class GirlState(
         for {
           hero   <- getHero(user)
           spread <- Random.nextLongBetween(SpreadMin, SpreadMax + 1L)
-          silver  = (hero.lvl * SilverPerLevel * spread / 100L).max(1L)
+          silver  = (hero.lvl * SilverPerLevel * spread / 100L * Achievement.silverPct(hero) / 100L).max(1L)
           rep     = hero.lvl * RepPerLevelThanks
           _      <- heroDao.updateSilver(user.userId, hero.silver + silver)
           _      <- heroDao.updateGuildReputation(user.userId, hero.guildReputation + rep)

@@ -79,7 +79,7 @@ case class CubeState(
       inv   <- inventoryRepo.get(hero.id).mapError(asThrowable)
       azat  <- loadAzat(user)
       scene <- readScene(user)
-      items  = inv.items.data
+      items  = inv.items.data.filterNot(_.isQuestItem) // сюжетное в куб не кладётся
       free   = AzatState.CubeCapacity - azat.cubeItems.length
       _ <- if (items.isEmpty)
              renderer.show(user, Screen(content.text("cube.emptyInventory"), backRow))
@@ -159,7 +159,7 @@ case class CubeState(
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(asThrowable)
       azat <- loadAzat(user)
-      _ <- inv.items.data.find(_.id == itemId) match {
+      _ <- inv.items.data.find(i => i.id == itemId && !i.isQuestItem) match {
         case None => showDeposit(user, renderer)
         case Some(item) =>
           if (azat.cubeItems.length >= AzatState.CubeCapacity)

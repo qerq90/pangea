@@ -1,20 +1,23 @@
 package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType}
+import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
+import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
-import pangea.service.state.{ItemMenu, State, UiScene, UserAction}
+import pangea.service.state.states.marisa.MarisaHuntState
+import pangea.service.state.{ItemMenu, MarisaQuest, NpcQuestLog, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 case class InventoryState(
@@ -40,12 +43,17 @@ case class InventoryState(
       "BreakGemDo"        -> Target.Run { (u, ua, r) => doBreak(u, ua, r) },
       "CrushGem"          -> Target.Run { (u, _,  r) => offerCrush(u, r) },
       "CrushGemDo"        -> Target.Run { (u, _,  r) => doCrush(u, r) },
-      "DustWeapon"        -> Target.Run { (u, _,  r) => sprinkleDust(u, r) }
+      "DustWeapon"        -> Target.Run { (u, _,  r) => sprinkleDust(u, r) },
+      // «Письмо Марисе»: вскрыть письмо, отправиться по карте Кельвина.
+      "OpenLetter"        -> Target.Run { (u, _,  r) => openLetter(u, r) },
+      "UseKelvinMap"      -> Target.Run { (u, _,  r) => useKelvinMap(u, r) },
+      "MapWithMarisa"     -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = true) },
+      "MapAlone"          -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = false) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing)
+  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing, StateType.MarisaHunt)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
@@ -95,6 +103,8 @@ case class InventoryState(
       scene <- readScene(user)
       res <- inv.items.data.find(_.id == itemId) match {
         case None => showList(user, renderer)
+        case Some(item) if item.isQuestItem =>
+          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showQuestItem(user, item, renderer)
         case Some(item) =>
           // Сколько таких же лежит в сумке — счётчик над описанием; кнопки при
           // этом трогают ровно один предмет из стопки.
@@ -120,6 +130,63 @@ case class InventoryState(
           writeScene(user, scene.copy(selectedId = Some(itemId))) *>
             renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
       }
+    } yield res
+
+  // ── Сюжетные предметы («Письмо Марисе») ────────────────────────────────────
+
+  /** Письмо: описание и «Вскрыть» (после вскрытия — «Перечитать»); карта:
+    * описание и «Отправиться по карте». Ни выбросить, ни продать. */
+  private def showQuestItem(user: User, item: Item, renderer: Renderer): Task[StateType] =
+    for {
+      quests <- NpcQuestLog.load(heroDao, user.userId)
+      opened  = quests.of(NpcQuest.Marisa).bonus
+      exit    = content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
+      screen  = item.questItem match {
+        case Some(QuestItemKind.MarisaLetter) =>
+          val text = s"${item.name}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MarisaQuest.LetterDifficulty))}\n\n${QuestItemKind.MarisaLetter.description}" +
+            (if (opened) "" else "\n\n" + content.text("marisa.letterHint"))
+          Screen(text, List(
+            content.choice("OpenLetter", if (opened) "marisa.readLetterLabel" else "marisa.openLetterLabel")
+              .copy(color = ChoiceColor.Positive, row = Some(0)), exit))
+        case Some(QuestItemKind.KelvinMap) =>
+          Screen(s"${item.name}\n\n${QuestItemKind.KelvinMap.description}", List(
+            content.choice("UseKelvinMap", "marisa.mapUseLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
+        case None => Screen(item.name, List(exit))
+      }
+      _ <- renderer.show(user, screen)
+    } yield StateType.Inventory
+
+  /** Вскрыть письмо: текст Кельвина и карта с обратной стороны. */
+  private def openLetter(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      given <- MarisaQuest.revealMap(heroDao, inventoryRepo, itemRepository, user.userId, hero)
+      _     <- renderer.show(user, Screen(content.text("marisa.letterText"), Nil))
+      _     <- ZIO.when(given)(renderer.show(user, Screen(
+                 content.format("marisa.questItemAdded", "item" -> QuestItemKind.KelvinMap.displayName), Nil)))
+      res   <- showList(user, renderer)
+    } yield res
+
+  /** Карта Кельвина: только из города; если Мариса ждёт — спросить, брать ли её. */
+  private def useKelvinMap(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      from   <- heroDao.readReturnState(user.userId)
+      quests <- NpcQuestLog.load(heroDao, user.userId)
+      res <- if (!from.exists(StateType.cityStates.contains))
+               renderer.show(user, Screen(content.text("marisa.mapOnlyInCity"), Nil)) *> showList(user, renderer)
+             else if (quests.onStep(NpcQuest.Marisa, 3))
+               renderer.show(user, content.screen("marisa.mapTakeMarisa")).as(StateType.Inventory)
+             else startHunt(user, renderer, withMarisa = false)
+    } yield res
+
+  private def startHunt(user: User, renderer: Renderer, withMarisa: Boolean): Task[StateType] =
+    for {
+      from <- heroDao.readReturnState(user.userId)
+      res  <- if (!from.exists(StateType.cityStates.contains))
+                renderer.show(user, Screen(content.text("marisa.mapOnlyInCity"), Nil)) *> showList(user, renderer)
+              else
+                heroDao.writeSceneData(user.userId,
+                  MarisaHuntState.Progress(MarisaHuntState.Step.Road, withMarisa).asJson).as(StateType.MarisaHunt)
     } yield res
 
   // ── Действия с выбранным предметом ─────────────────────────────────────────
@@ -359,7 +426,7 @@ case class InventoryState(
     for {
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       count  = gem.dustYield
-      free   = inv.maxItems - inv.items.data.length
+      free   = inv.freeSlots
       res <-
         if (free < count)
           renderer.show(user, Screen(content.format("inventory.breakGemNoRoom", "count" -> count.toString), Nil)) *>
@@ -537,7 +604,7 @@ object InventoryState {
    *  `returningItems` предметов, которые вернутся в сумку. Ложь → изменение
    *  переполнит сумку, и его надо блокировать. */
   def fitsAfterCapacityChange(inv: Inventory, capDelta: Long, returningItems: Int): Boolean =
-    inv.items.data.length + returningItems <= inv.maxItems + capDelta
+    inv.occupied + returningItems <= inv.maxItems + capDelta
 
   /** Зона карты клада (для целой карты и её половинки); None у прочих предметов. */
   private def zoneOf(item: Item): Option[pangea.model.item.MapZone] = item.details match {
@@ -604,6 +671,7 @@ object InventoryState {
     case ItemType.TreasureMapHalf  => Item.NoItem // половинка карты не экипируется
     case ItemType.Gem              => Item.NoItem // камень не экипируется
     case ItemType.Material         => Item.NoItem // материал не экипируется
+    case ItemType.QuestItem        => Item.NoItem // сюжетный предмет не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -630,6 +698,7 @@ object InventoryState {
     case ItemType.TreasureMapHalf  => eq // половинка карты не экипируется
     case ItemType.Gem              => eq // камень не экипируется
     case ItemType.Material         => eq // материал не экипируется
+    case ItemType.QuestItem        => eq // сюжетный предмет не экипируется
     case ItemType.NoItem           => eq
   }
 

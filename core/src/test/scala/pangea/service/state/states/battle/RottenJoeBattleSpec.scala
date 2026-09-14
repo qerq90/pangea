@@ -10,7 +10,7 @@ import pangea.model.stats.FightStats
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
@@ -73,7 +73,7 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
       _        <- dao.writeActiveBattle(userId, battle.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, content), dao, renderer)
+    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
   /** Броски хода: удар героя, попадание моба, затем `extra`. */
   private def seedTurn(extra: Int*) =

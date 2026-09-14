@@ -7,7 +7,7 @@ import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 import zio.test.TestRandom
@@ -52,7 +52,7 @@ object ElementalBattleSpec extends ZIOSpecDefault {
       _        <- dao.writeActiveBattle(userId, battle.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, content), dao, renderer)
+    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
   private def battleAfter(dao: TestHeroDao) =
     dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)

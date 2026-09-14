@@ -7,7 +7,9 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState}
-import pangea.model.hero.{AzatState, CubeStatus, Hero, WeaponDust}
+import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
+import pangea.model.item.QuestItemKind
+import pangea.model.quest.NpcQuest
 import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
@@ -17,7 +19,9 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState
 import pangea.service.state.states.gustavo.GustavoState
-import pangea.service.state.{AzatData, NpcQuestLog, State, UserAction}
+import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
+import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -29,7 +33,12 @@ import java.util.concurrent.TimeUnit
   * Единственная точка I/O — [[resolve]]/[[commit]]: она персистит итог хода
   * ровно один раз и показывает склеенный лог. Так исключён целый класс багов
   * «одна из веток забыла сохранить стат» (см. Кровавую жатву). */
-case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
+case class BattleState(
+  heroDao:       HeroDao,
+  inventoryRepo: InventoryRepository,
+  itemRepo:      ItemRepository,
+  content:       SceneContent
+) extends State {
 
   import BattleState.{MobStrike, Outcome, TurnResult, VictoryOutcome}
 
@@ -278,9 +287,11 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
             // входит: оно сдвигает грани урона по броне/HP в splitElementalDamage.
             // Пыль, севшая неудачно (всполох магии или четвёртая горсть), режет
             // весь урон героя на четверть — ровно этот бой (см. WeaponDust).
+            // «Мерзавец» бьёт на 5% сильнее — и получает на 5% больше (см. mobStrike).
             damage =
               (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) *
-                weaponMod * hero.passives.finalDamageMult * hero.weaponDust.damageMult).toLong
+                weaponMod * hero.passives.finalDamageMult * hero.weaponDust.damageMult *
+                Achievement.damagePct(hero) / 100.0).toLong
                 .max(1L)
             // Стихии оружия модифицируют раздельно урон по броне и по HP
             // (см. splitElementalDamage). Без стихий поведение прежнее.
@@ -1078,7 +1089,7 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
     val monster = battle.toMonster
     for {
             spread <- Random.nextLongBetween(80L, 121L)
-            rawDamage = (monsterAttack(battle) * spread / 100L).max(1L)
+            rawDamage = (monsterAttack(battle) * spread / 100L * Achievement.damagePct(hero) / 100L).max(1L)
             reduction = heroDamageReduction(hero, battle, buffedEff, monster.fightStats.atk, nowMs)
             baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
@@ -2043,19 +2054,23 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       blessed = azat.blessingActive(now)
       // Все павшие этого боя в порядке гибели; в бою 1 на 1 — один моб.
       fallen = battle.group.slain :+ battle.slainActive
+      // Сюжетный бой: ни опыта, ни добычи по таблицам — только то, что положил сюжет.
+      storyFight = battle.story.isDefined
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
       // Группа — опыт одной суммой за всех.
-      baseExp = battle.boss
+      baseExp = if (storyFight) 0L
+                else battle.boss
                   .map(_.expReward(battle.monsterLvl))
                   .getOrElse(fallen.map(m => (hero.dungeonLevel.toLong * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
                   .max(1L)
-      expGained = if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
+      expGained = if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
       // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
       // Группа — своя добыча с каждого павшего, по порядку гибели.
       (perMonster, rngAfter) = battle.boss match {
+        case _ if storyFight => (List(battle.monsterName -> List.empty[LootGenerator.LootDrop]), Rng(seed))
         case Some(e) =>
           val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed))
           (List(battle.monsterName -> d), r)
@@ -2098,7 +2113,10 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
           doubloons   = drops.collect { case LootGenerator.LootDrop.Doubloons(a) => a }.sum
         )
       }
-      first = lootByMonster.head
+      // Коллектор из «Письма Марисе» оставляет ровно 500 серебра и 10 дублонов.
+      storyLoot = battle.story.filter(_ == MarisaQuest.CollectorStory).map(_ =>
+        LootState.MonsterLoot(battle.monsterName, Nil, List(MarisaQuest.CollectorSilver), MarisaQuest.CollectorDoubloons))
+      first = storyLoot.getOrElse(lootByMonster.head)
       // routing события (returnState/eventData) кладётся в scene_data ДО боя
       // (напр. цепочка «мобы с сокровищем»); переносим его в добычу, чтобы экран
       // добычи знал, куда вернуться. Для обычного боя scene_data пуст → None.
@@ -2128,6 +2146,12 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       _ <- heroDao.clearActiveBattle(user.userId)
       // Задание Густаво: павшие идут в счёт, пока действует его зелье.
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
+      // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе.
+      kills = hero.kills + fallen.size.toLong
+      _ <- heroDao.updateKills(user.userId, kills)
+      letterFound <- if (hero.kills < NpcQuest.MarisaLetterKill && kills >= NpcQuest.MarisaLetterKill)
+                       MarisaQuest.giveLetter(heroDao, inventoryRepo, itemRepo, user.userId, hero)
+                     else ZIO.succeed(false)
       _ <- heroDao.updateExpAndLevel(
         user.userId,
         leveled.exp,
@@ -2149,7 +2173,8 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
       unlocksDarkness   = unlocksDarkness,
       cubeDropped       = cubeDropped,
       elementalDefeated = battle.boss.isDefined,
-      slainCount        = fallen.size
+      slainCount        = fallen.size,
+      letterFound       = letterFound
     )
 
   /** Серебро с благословением Азата — на его бонус больше. */
@@ -2168,12 +2193,17 @@ case class BattleState(heroDao: HeroDao, content: SceneContent) extends State {
         user,
         Screen(
           content.format(
-            if (outcome.slainCount > 1) "battle.group.victory" else "battle.victory",
+            if (outcome.expGained == 0L) "battle.victoryNoExp"
+            else if (outcome.slainCount > 1) "battle.group.victory" else "battle.victory",
             "monster" -> outcome.monsterName,
             "exp"     -> outcome.expGained.toString
           ),
           Nil
         )
+      )
+      _ <- ZIO.when(outcome.letterFound)(
+        renderer.show(user, Screen(content.text("marisa.letterFound") + "\n\n" +
+          content.format("marisa.questItemAdded", "item" -> QuestItemKind.MarisaLetter.displayName), Nil))
       )
       _ <- ZIO.when(outcome.unlocksDarkness)(
         renderer.show(
@@ -2418,7 +2448,9 @@ object BattleState {
       // Победа над минибоссом ведёт не в обычную добычу, а в осмотр логова.
       elementalDefeated: Boolean = false,
       // Сколько мобов легло в этом бою: больше одного — групповая реплика.
-      slainCount: Int = 1
+      slainCount: Int = 1,
+      // Пятидесятый убитый оставил письмо Марисе — отдельное сообщение после победы.
+      letterFound: Boolean = false
   )
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),

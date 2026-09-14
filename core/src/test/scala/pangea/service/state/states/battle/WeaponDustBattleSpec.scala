@@ -11,7 +11,7 @@ import pangea.model.stats.FightStats
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
@@ -50,7 +50,7 @@ object WeaponDustBattleSpec extends ZIOSpecDefault {
       _        <- dao.writeActiveBattle(userId, b.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, content), dao, renderer)
+    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
   /** Один удар: сколько снялось с HP и с брони моба. `extra` — броски после удара
     * героя и моба (например проки стихий). */

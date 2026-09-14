@@ -11,7 +11,7 @@ import pangea.model.skill.{MonsterEnergy, MonsterSkill}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
@@ -56,7 +56,7 @@ object MobDefenceSpec extends ZIOSpecDefault {
       _        <- dao.writeActiveBattle(userId, b.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, content), dao, renderer)
+    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
   /** Один удар героя: возвращает, сколько HP реально снялось с моба, и экран. */
   private def strike(h: Hero, b: SoloPveBattle) =

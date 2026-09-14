@@ -19,8 +19,14 @@ case class Inventory(
 
   def withItems(items: List[Item]): Inventory = copy(items = Items(items))
 
+  /** Сколько слотов занято: сюжетные предметы места не занимают. */
+  def occupied: Long = items.data.count(!_.isQuestItem).toLong
+
   /** Свободных слотов в сумке (не уходит ниже нуля). */
-  def freeSlots: Long = (maxItems - items.data.length).max(0L)
+  def freeSlots: Long = (maxItems - occupied).max(0L)
+
+  /** Влезет ли ещё `count` обычных предметов. */
+  def hasRoomFor(count: Long): Boolean = occupied + count <= maxItems
 }
 
 object Inventory {

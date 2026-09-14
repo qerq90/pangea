@@ -12,7 +12,7 @@ import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.states.GlobalMapState
 import pangea.service.state.states.battle.BattleState
-import pangea.test.{TestApi, TestFixtures, TestHeroDao, TestHeroRepository, TestUserRepository}
+import pangea.test.{TestApi, TestFixtures, TestHeroDao, TestHeroRepository, TestInventoryRepository, TestItemRepository, TestUserRepository}
 import zio.ZIO
 import zio.test._
 
@@ -52,7 +52,7 @@ object StateHandlerSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
       states = Map[StateType, State](
         StateType.GlobalMap -> GlobalMapState(heroDao, content),
-        StateType.Battle    -> BattleState(heroDao, content)
+        StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content)
       )
       lock <- PlayerLock.make
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, states, lock), heroDao, heroRepo, api)
@@ -204,7 +204,7 @@ object StateHandlerSpec extends ZIOSpecDefault {
       journal  <- pangea.test.TestJournal.make
       states = Map[StateType, State](
         StateType.GlobalMap    -> GlobalMapState(heroDao, content),
-        StateType.Battle       -> BattleState(heroDao, content),
+        StateType.Battle       -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content),
         StateType.Registration -> pangea.service.state.states.registration.RegistrationState(
                                     players, heroDao, invRepo, itemRepo, journal, content)
       )

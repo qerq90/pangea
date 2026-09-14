@@ -121,6 +121,7 @@ case class Equipment(
     case ItemType.TreasureMapHalf  => Nil
     case ItemType.Gem              => Nil
     case ItemType.Material         => Nil
+    case ItemType.QuestItem        => Nil
     case ItemType.NoItem           => Nil
   }
 }

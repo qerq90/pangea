@@ -20,7 +20,8 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
         .tapError(err => ZIO.logError(s"Error occurred: ${err.getMessage}"))
         .orElseFail(InventoryRepoError.CantFindInventory)
       updatedInventory <-
-        if (inventory.maxItems <= inventory.items.data.length)
+        // Сюжетный предмет места не занимает и кладётся всегда.
+        if (!item.isQuestItem && inventory.maxItems <= inventory.occupied)
           ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
         else ZIO.succeed(inventory.addItem(item))
       _ <- inventoryDao

@@ -29,8 +29,17 @@ case class Hero(
   doubloons: Long,
   statBoosts: StatBoosts,
   // Пыль, которой посыпано оружие: держится один бой (см. WeaponDust).
-  weaponDust: WeaponDust = WeaponDust.empty
+  weaponDust: WeaponDust = WeaponDust.empty,
+  // Сколько мобов герой убил за всю жизнь — сюжет по нему отсчитывает вехи.
+  kills: Long = 0L,
+  // Достижения (ключи [[Achievement]]) — разовые и навсегда, со своими бонусами.
+  achievements: List[String] = Nil
 ) {
+  def hasAchievement(a: Achievement): Boolean = achievements.contains(a.entryName)
+
+  def withAchievement(a: Achievement): Hero =
+    if (hasAchievement(a)) this else copy(achievements = achievements :+ a.entryName)
+
   /** Можно ли двигаться к тьме (глубже): следующий этаж открыт, только если на
    *  текущем (== максимально доступному) была повержена тьма — тогда
    *  `maxDungeonLevel` уже сдвинут вперёд. Этажи ≤ `maxDungeonLevel` доступны всегда. */
