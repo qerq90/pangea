@@ -17,7 +17,7 @@ import scala.annotation.tailrec
   *     каждого: Blue 20 · Purple 35 · Violet 31 · Orange 14 (сумма = 100);
   *   - серебро выпадает гарантированно (`lvl×12×100 ±20%`);
   *   - дублоны — с шансом 80% (30–70), сверх серебра;
-  *   - ингредиенты минибоссов — с шансом 35%: 0..1+ступень зоны штук, каждый —
+  *   - ингредиенты минибоссов — с шансом 35%: ступень зоны плюс 0..1 штук, каждый —
   *     любой из ингредиентов всех минибоссов поровну (новые боссы попадают сами);
   *   - редкие травы (2 ранга) — только знающему их герою, с шансом 15%, тем же
   *     счётом и тем же способом.
@@ -68,13 +68,15 @@ object TreasureHuntGenerator {
     (Reward(items, gems, silver, doubloons, ingredients ++ herbs), r7)
   }
 
-  /** Горсть материалов: с шансом `chancePct` — 0..1+ступень зоны штук, каждая
-    * поровну из `pool`. Не выпала горсть — счёт не бросается. */
+  /** Горсть материалов: с шансом `chancePct` — ступень зоны плюс 0 или 1 штук
+    * (как у дропа минибосса: `0..1 + BossLvL`), каждая поровну из `pool`. Не
+    * выпала горсть — счёт не бросается. */
   private def rollHandful(chancePct: Long, pool: List[MaterialKind], zone: MapZone, rng: Rng): (List[Item], Rng) = {
     val (roll, r1) = rng.between(0L, 100L)
     if (roll >= chancePct || pool.isEmpty) (Nil, r1)
     else {
-      val (count, r2) = r1.between(0L, zone.tier.toLong + 2L) // 0..1+ступень
+      val (extra, r2) = r1.between(0L, 2L) // 0 или 1 сверх ступени
+      val count       = zone.tier.toLong + extra
       (1L to count).foldLeft((List.empty[Item], r2)) { case ((acc, r), _) =>
         val (kind, rr) = r.pick(pool)
         (acc :+ MaterialGenerator.item(kind), rr)
