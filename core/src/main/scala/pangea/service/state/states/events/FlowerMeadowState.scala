@@ -160,19 +160,18 @@ case class FlowerMeadowState(
   }
 
   /** Бросок на догадку: интеллект ÷ 4 процентов. Удача — знания первого ранга,
-    * сам; купленный трактат об этом при этом становится лишним и уходит из сумки. */
+    * сам; купленный трактат об этом становится лишним и тихо уходит из сумки. */
   private def insight(user: User, hero: Hero, lore: pangea.model.hero.LoreData, now: Long, renderer: Renderer): Task[Unit] =
     Random.nextIntBetween(1, 101).flatMap { roll =>
       ZIO.when(roll <= HerbLore.insightChance(hero, now)) {
         val learned = lore.learn(Knowledge.FlowersRank1, alone = true)
         for {
-          _       <- HerbLore.writeLore(heroDao, user.userId, learned)
-          settled <- HerbLore.settleBooks(heroDao, inventoryRepo, user.userId, hero, learned)
-          (_, books) = settled
-          bookLines  = books.map(b => "\n" + content.format("knowledge.bookObsolete", "book" -> b.name)).mkString
-          _       <- renderer.show(user, Screen(
-                       content.text("flowerMeadow.insight") + "\n" +
-                         content.format("knowledge.gained", "title" -> Knowledge.FlowersRank1.title) + bookLines, Nil))
+          _ <- HerbLore.writeLore(heroDao, user.userId, learned)
+          // Купленный трактат об этом уходит из сумки тихо — герою о нём не напоминаем.
+          _ <- HerbLore.settleBooks(heroDao, inventoryRepo, user.userId, hero, learned)
+          _ <- renderer.show(user, Screen(
+                 content.text("flowerMeadow.insight") + "\n" +
+                   content.format("knowledge.gained", "title" -> Knowledge.FlowersRank1.title), Nil))
         } yield ()
       }.unit
     }

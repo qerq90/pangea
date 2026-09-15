@@ -294,8 +294,8 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         _     <- GustavoHerbsState(dao, inv, TestItemRepository.make, c).enter(testUser, r2)
         gus   <- r2.sentScreens.map(_.last)
       } yield assertTrue(lore.knows(Knowledge.FlowersRank1) && lore.learnedAlone(Knowledge.FlowersRank1)) &&
-              assertTrue(!inv.snapshot.exists(_.isQuestItem)) &&                          // трактат ушёл
-              assertTrue(all.contains("больше не нужен")) &&
+              assertTrue(!inv.snapshot.exists(_.isQuestItem)) &&                          // трактат ушёл — тихо
+              assertTrue(!all.contains("больше не нужен")) &&
               assertTrue(lore.bookFailures.isEmpty && lore.bookCooldowns.isEmpty) &&       // следы чтения стёрты
               assertTrue(gus.text.contains("Сам разобрался") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
     },
@@ -312,7 +312,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         all <- texts(r)
         gus <- r.sentScreens.map(_.last)
       } yield assertTrue(inv.snapshot.isEmpty) &&
-              assertTrue(all.contains("больше не нужен")) &&
+              assertTrue(!all.contains("больше не нужен")) &&
               assertTrue(!gus.text.contains("дочитай") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
     },
 

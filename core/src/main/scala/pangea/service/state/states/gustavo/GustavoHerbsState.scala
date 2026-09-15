@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.{HerbLore, MarisaQuest, State, UserAction}
-import zio.{Task, ZIO}
+import zio.Task
 
 /** «Расскажи о травах». Густаво учит нехотя: пока герой носит ему «странные
   * цветки» по цене сена, ему выгодно, чтобы тот ничего не понимал. Поэтому
@@ -40,15 +40,14 @@ case class GustavoHerbsState(
 
   /** Что Густаво скажет — по знаниям героя, и только потом по книге в сумке:
     * знание, добытое своим умом, важнее недочитанного трактата. Трактат о том,
-    * что герой уже знает, тут же уходит из сумки. */
+    * что герой уже знает, тихо уходит из сумки. */
   private def talk(user: User, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
       lore0 <- HerbLore.readLore(heroDao, user.userId)
+      // Трактат о том, что герой уже знает, тихо уходит из сумки.
       settled <- HerbLore.settleBooks(heroDao, inventoryRepo, user.userId, hero, lore0)
-      (lore, dropped) = settled
-      _     <- ZIO.foreachDiscard(dropped)(b =>
-                 renderer.show(user, Screen(content.format("knowledge.bookObsolete", "book" -> b.name), Nil)))
+      (lore, _) = settled
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       items  = inv.items.data
       back   = content.choice("Back", "gustavo.herbs.back")
