@@ -58,7 +58,12 @@ case class GustavoHerbsState(
         else if (MarisaQuest.has(items, QuestItemKind.FlowerTreatise1) || MarisaQuest.has(items, QuestItemKind.FlowerTreatise2))
           Screen(content.text("gustavo.herbs.finishReading"), List(back))
         else if (lore.knows(Knowledge.FlowersRank1)) {
-          val key = if (lore.learnedAlone(Knowledge.FlowersRank1)) "gustavo.herbs.selfTaught" else "gustavo.herbs.graduate"
+          // Самоучка, купивший первую часть, для Густаво всё равно «дочитал»: он
+          // помнит, кому продал книгу, и своё дело в чужой догадке не сомневается.
+          val key =
+            if (!lore.learnedAlone(Knowledge.FlowersRank1)) "gustavo.herbs.graduate"
+            else if (lore.bought(QuestItemKind.FlowerTreatise1.entryName)) "gustavo.herbs.selfTaughtWithBook"
+            else "gustavo.herbs.selfTaught"
           Screen(content.format(key, "price" -> HerbLore.Treatise2Price.toString), List(
             content.choice("BuyTreatise2", "gustavo.herbs.buy2", "price" -> HerbLore.Treatise2Price.toString).copy(color = ChoiceColor.Positive),
             back))
@@ -77,6 +82,8 @@ case class GustavoHerbsState(
              renderer.show(user, Screen(content.format("gustavo.herbs.noSilver", "price" -> price.toString), Nil))
            else
              heroDao.updateSilver(user.userId, hero.silver - price) *>
+               HerbLore.readLore(heroDao, user.userId).flatMap(l =>
+                 HerbLore.writeLore(heroDao, user.userId, l.bookBought(book.entryName))) *>
                MarisaQuest.give(inventoryRepo, itemRepo, hero, book) *>
                renderer.show(user, Screen(
                  content.text("gustavo.herbs.bought") + "\n" +
