@@ -3,7 +3,7 @@ package pangea.generator.loot
 import pangea.domain.Rng
 import pangea.generator.item.{GemGenerator, ItemGenerator, ItemNameGenerator, MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
+import pangea.model.item.{Item, ItemDetails, ItemType, MaterialKind, TrophyKind}
 import pangea.model.monster.{MiniBoss, Race, Rarity => MobRarity}
 import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
 
@@ -215,28 +215,78 @@ object LootGenerator {
     loop(dropChances(tier), Set.empty, Nil, rng)
   }
 
-  /** Дроп с элементаля-минибосса. В отличие от обычного лута он есть ВСЕГДА и не
-    * зависит от таблицы категорий: выпадает `0..1 + BossLvL` предметов, каждый с
-    * равным шансом — либо ингредиент стихии, либо фиолетовая вещь её набора.
+  /** Дроп с минибосса. В отличие от обычного лута он есть ВСЕГДА и не зависит
+    * от таблицы категорий: выпадает `0..1 + BossLvL` предметов, каждый — по
+    * своей раскладке босса (элементаль, Джо, волк).
     *
     * Уровень вещи берётся от уровня ГЕРОЯ с разбросом ±1: у босса свой BossLvL
-    * (1..10), и вещь по нему была бы мусором. */
+    * (1..10), и вещь по нему была бы мусором. `floorLvl` — этаж встречи: по нему
+    * считается клык волка. `hideAvailable` — не выпадала ли ещё шкура волка: она
+    * падает один раз за всю жизнь героя, и не больше одной за бой. */
   def rollMiniBoss(
       boss: MiniBoss,
       bossLvl: Long,
       heroLvl: Long,
-      rng: Rng
+      rng: Rng,
+      floorLvl: Long = 1L,
+      hideAvailable: Boolean = true
   ): (List[LootDrop], Rng) = {
     val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
     val count       = (extra + bossLvl).toInt.max(1)
-    (0 until count).foldLeft((List.empty[LootDrop], r0)) { case ((acc, r), _) =>
-      val (roll, r1) = r.between(0L, 100L)
-      val (drop, r2) =
-        if (boss == MiniBoss.RottenJoe) joeDrop(boss, roll, bossLvl, heroLvl, r1)
-        else elementalDrop(boss, roll, heroLvl, r1)
-      (acc :+ drop, r2)
-    }
+    (0 until count).foldLeft((List.empty[LootDrop], r0, hideAvailable)) { case ((acc, r, hide), _) =>
+      if (boss == MiniBoss.WhiteWolf) {
+        val (drop, r2) = wolfDrop(boss, bossLvl, heroLvl, floorLvl, hide, r)
+        (acc :+ drop, r2, hide && !isHide(drop))
+      } else {
+        val (roll, r1) = r.between(0L, 100L)
+        val (drop, r2) =
+          if (boss == MiniBoss.RottenJoe) joeDrop(boss, roll, bossLvl, heroLvl, r1)
+          else elementalDrop(boss, roll, heroLvl, r1)
+        (acc :+ drop, r2, hide)
+      }
+    } match { case (drops, r, _) => (drops, r) }
   }
+
+  /** Шкура волка ли это. */
+  def isHide(drop: LootDrop): Boolean =
+    drop.itemOpt.exists(_.material.contains(MaterialKind.WhiteWolfHide))
+
+  /** С Белого волка поровну четыре вещи: клык, фиолетовая и синяя вещи
+    * «Охотника» и шкура. Если шкура уже выпадала, её четверть делится между
+    * остальными тремя — бросок идёт по укороченной шкале. */
+  private def wolfDrop(
+      boss: MiniBoss,
+      bossLvl: Long,
+      heroLvl: Long,
+      floorLvl: Long,
+      hideAvailable: Boolean,
+      rng: Rng
+  ): (LootDrop, Rng) = {
+    val (roll, r1) = rng.between(0L, if (hideAvailable) 100L else WolfHideFrom)
+    if (roll < WolfFangUntil) (LootDrop.Trophy(wolfFang(bossLvl, floorLvl)), r1)
+    else if (roll < WolfPurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, r1)
+    else if (roll < WolfHideFrom) setGear(boss, heroLvl, ItemRarity.Blue, r1)
+    else (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
+  }
+
+  /** Клык Белого волка: трофей расы «Животное», уровень — этаж встречи,
+    * коэффициент — 6 за каждый BossLvL (лежит на самом предмете). */
+  def wolfFang(bossLvl: Long, floorLvl: Long): Item = Item(
+    id = -1L,
+    name = TrophyKind.Fang.displayName,
+    lvl = floorLvl.max(1L),
+    rarity = ItemRarity.Gray,
+    itemType = ItemType.Trophy,
+    attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+    details = ItemDetails.Trophy(Race.Animal.entryName, TrophyKind.Fang,
+      Some(MiniBoss.WhiteWolf.FangCoefPerLvl * bossLvl))
+  )
+
+  /** Границы роллов волка (0..99): до 25 — клык, до 50 — фиолетовая вещь, до 75 —
+    * синяя, дальше — шкура. */
+  val WolfFangUntil: Long   = 25L
+  val WolfPurpleUntil: Long = 50L
+  val WolfHideFrom: Long    = 75L
 
   /** С элементаля половину роллов забирает ингредиент, а вторую делят пополам
     * фиолетовая и синяя вещи его набора. */

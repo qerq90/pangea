@@ -181,8 +181,8 @@ object TrophyExchangeState {
   /** Репутация за один трофей: `ceil(5 + lvl × coef)`, где `coef` — у вида трофея. */
   def reputationFor(item: Item): Long = {
     val coef = item.details match {
-      case ItemDetails.Trophy(_, kind) => kind.coef
-      case _                           => 0.0
+      case t: ItemDetails.Trophy => t.coefValue
+      case _                     => 0.0
     }
     math.ceil(5.0 + item.lvl.toDouble * coef).toLong
   }

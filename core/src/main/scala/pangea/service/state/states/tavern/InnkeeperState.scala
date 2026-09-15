@@ -53,6 +53,8 @@ case class InnkeeperState(
       "PayElementalLore"  -> Target.Run { (user, _, renderer) => payLore(user, renderer) },
       "JoeLore"           -> Target.Run { (user, _, renderer) => offerJoeLore(user, renderer) },
       "PayJoeLore"        -> Target.Run { (user, _, renderer) => payJoeLore(user, renderer) },
+      "WolfLore"          -> Target.Run { (user, _, renderer) => offerWolfLore(user, renderer) },
+      "PayWolfLore"       -> Target.Run { (user, _, renderer) => payWolfLore(user, renderer) },
       "BackFromInnkeeper" -> Target.Goto(StateType.Tavern)
     ),
     fallback = Target.Run { (user, _, renderer) =>
@@ -83,6 +85,9 @@ case class InnkeeperState(
       // То же и про Гнилого Джо: кнопка висит, пока рассказ не куплен.
       joeBtn = Option.when(lore.metJoe && !lore.joeLore)(
         content.choice("JoeLore", "innkeeper.joeLoreLabel"))
+      // И про Белого волка — после первой встречи на поляне.
+      wolfBtn = Option.when(lore.metWolf && !lore.wolfLore)(
+        content.choice("WolfLore", "innkeeper.wolfLoreLabel"))
       // Рассказ о Кинэте — награда за первое задание, дальше бесплатно.
       kinetBtn = Option.when(quests.isDone(NpcQuest.Innkeeper))(
         content.choice("KinetLore", quest.key("loreLabel")))
@@ -100,6 +105,7 @@ case class InnkeeperState(
             kinetBtn,
             loreBtn,
             joeBtn,
+            wolfBtn,
             Some(content.choice("OpenCharacter", "common.character")),
             Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel"))
           ).flatten
@@ -187,6 +193,31 @@ case class InnkeeperState(
                renderer.show(user, Screen(
                  content.text("innkeeper.joeLoreText"),
                  List(content.choice("BackFromLore", "innkeeper.joeLoreDone"))))
+    } yield StateType.Innkeeper
+
+  /** Предложение рассказа про Белого волка: цена и две кнопки. */
+  private def offerWolfLore(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(
+      content.format("innkeeper.wolfLoreOffer", "price" -> InnkeeperState.WolfLorePrice.toString),
+      List(
+        content.choice("PayWolfLore", "innkeeper.wolfLorePay"),
+        content.choice("BackFromLore", "innkeeper.wolfLoreDecline")
+      ))).as(StateType.Innkeeper)
+
+  private def payWolfLore(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      lore <- readLore(user)
+      _ <- if (lore.wolfLore) showMenu(user, renderer)
+           else if (hero.silver < InnkeeperState.WolfLorePrice)
+             renderer.show(user, Screen(content.text("innkeeper.wolfLoreNoSilver"), Nil)) *>
+               showMenu(user, renderer)
+           else
+             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.WolfLorePrice) *>
+               heroDao.writeLoreData(user.userId, lore.copy(wolfLore = true).asJson) *>
+               renderer.show(user, Screen(
+                 content.text("innkeeper.wolfLoreText"),
+                 List(content.choice("BackFromLore", "innkeeper.wolfLoreDone"))))
     } yield StateType.Innkeeper
 
   private def readLore(user: User): Task[LoreData] =
@@ -290,6 +321,9 @@ object InnkeeperState {
   /** Цена рассказа про Гнилого Джо — он попроще элементалей. */
   val JoeLorePrice: Long = 1000L
 
+  /** Цена рассказа про Белого волка. */
+  val WolfLorePrice: Long = 1500L
+
   /** Сколько серебра Трактирщик даёт за первый трофей. */
   val QuestSilver: Long = 100L
 
@@ -308,14 +342,14 @@ object InnkeeperState {
   def bestTrophyFor(items: List[Item], raceName: String): Option[Item] =
     items
       .filter(_.details match {
-        case ItemDetails.Trophy(race, _) => race == raceName
-        case _                           => false
+        case ItemDetails.Trophy(race, _, _) => race == raceName
+        case _                              => false
       })
       .sortBy(i => (-trophyCoef(i), -i.lvl))
       .headOption
 
   private def trophyCoef(item: Item): Double = item.details match {
-    case ItemDetails.Trophy(_, kind) => kind.coef
-    case _                           => 0.0
+    case t: ItemDetails.Trophy => t.coefValue
+    case _                     => 0.0
   }
 }

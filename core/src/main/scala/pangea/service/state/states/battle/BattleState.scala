@@ -21,7 +21,7 @@ import pangea.service.state.states.LootState
 import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction}
+import pangea.service.state.{AzatData, HerbLore, MarisaQuest, NpcQuestLog, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -525,6 +525,7 @@ case class BattleState(
     battle.boss match {
       case Some(MiniBoss.StoneElemental) => stoneTurnCast(hero, battle, nowMs)
       case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs)
+      case Some(MiniBoss.WhiteWolf)      => wolfTurnCast(hero, battle, nowMs)
       case _                             => fireTurnCast(hero, battle, nowMs)
     }
 
@@ -641,11 +642,16 @@ case class BattleState(
     battle.copy(bossTurn = (battle.bossTurn + 1) % kind.abilities)
 
   /** Атака моба с учётом временного ослабления: подожжённый камень бьёт слабее,
-    * поднявшийся из мёртвых Джо — тоже. Процент приходит вместе со сроком. */
-  private def monsterAttack(battle: SoloPveBattle): Long =
-    if (battle.effects.monsterWeakened)
-      (battle.monsterStats.atk * (100L - battle.effects.monsterWeakenedPct).max(0L) / 100L).max(1L)
-    else battle.monsterStats.atk
+    * поднявшийся из мёртвых Джо — тоже. Процент приходит вместе со сроком.
+    * Волк, подстроившийся под добычу, наоборот, бьёт сильнее. */
+  private def monsterAttack(battle: SoloPveBattle): Long = {
+    val weakened =
+      if (battle.effects.monsterWeakened)
+        (battle.monsterStats.atk * (100L - battle.effects.monsterWeakenedPct).max(0L) / 100L).max(1L)
+      else battle.monsterStats.atk
+    if (battle.effects.mobInstinct) weakened * (100L + MiniBoss.WhiteWolf.InstinctBoostPct) / 100L
+    else weakened
+  }
 
   /** Потолок брони моба с учётом того, сколько его срезали поджоги. Текущая броня
     * может остаться ВЫШЕ потолка — её поджог не трогает, но чинить выше уже нельзя. */
@@ -712,6 +718,84 @@ case class BattleState(
 
       // 4) Пропуск хода.
       case _ => ZIO.succeed((next, hero, ""))
+    }
+  }
+
+  /** Круг Белого волка: пасть → когти → инстинкт → пропуск → смыкание пасти.
+    * Первое бьющее умение боя наносит двойной урон, дальше двойной — с шансом
+    * 5% (см. MiniBoss.WhiteWolf.CritChancePct). Бьёт он холодом, как и обычной
+    * атакой: урон ложится через `bossHit` с гранями стихии. Пасть и когти
+    * оставляют кровотечение, если удар дошёл до HP. Не хватило энергии —
+    * умение пропускается, а круг сдвигается, как у остальных боссов. */
+  private def wolfTurnCast(
+      hero: Hero,
+      battle: SoloPveBattle,
+      nowMs: Long
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val wolf   = MiniBoss.WhiteWolf
+    val lvl    = battle.monsterLvl
+    val atk    = monsterAttack(battle)
+    val energy = battle.monsterCurrentEnergy
+    val next   = nextTurn(battle, wolf)
+
+    def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
+
+    /** Множитель урона умения: первое бьющее — всегда вдвое (и запоминается),
+      * дальше бросок на крит. Возвращает множитель, был ли крит и бой. */
+    def critMult(b: SoloPveBattle): Task[(Long, Boolean, SoloPveBattle)] =
+      if (!b.bossFirstSkillSpent) ZIO.succeed((wolf.CritMult, true, b.copy(bossFirstSkillSpent = true)))
+      else Random.nextIntBetween(1, 101).map(roll =>
+        if (roll <= wolf.CritChancePct) (wolf.CritMult, true, b) else (1L, false, b))
+
+    /** Удар умением: крит, урон холодом по броне и HP, кровотечение при уроне по HP. */
+    def bite(b: SoloPveBattle, raw: Long, bleedPct: Int, textKey: String): Task[(SoloPveBattle, Hero, String)] =
+      critMult(b).map { case (mult, critted, b1) =>
+        val damage            = bossDamageTaken(hero, battle, (raw * mult).max(1L))
+        val (newHp, newArmor) = bossHit(battle, hero, damage)
+        val hurt              = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
+        val bleeds            = bleedPct > 0 && newHp < hero.fightStats.hp
+        val b2 =
+          if (!bleeds) b1
+          else b1.copy(effects = b1.effects.copy(heroBleed = Some(
+            b1.effects.heroBleed.map(_.stackedWith(bleedPct)).getOrElse(Bleed(bleedPct)))))
+        val line = List(
+          Some(content.format(textKey, "damage" -> damage.toString)),
+          Option.when(critted)(content.text("battle.wolf.crit")),
+          Option.when(bleeds)(content.format("battle.wolf.bleeds", "pct" -> bleedPct.toString))
+        ).flatten.mkString("\n")
+        (b2, hurt, line)
+      }
+
+    battle.bossTurn match {
+      // 1) Яростная пасть: половина атаки, кровь при уроне по HP.
+      case 0 =>
+        val cost = wolf.FangsCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else bite(spend(cost, next), (atk * wolf.FangsDamageFactor).toLong.max(1L), wolf.FangsBleedPct, "battle.wolf.fangs")
+
+      // 2) Яростные когти: то же, но слабее.
+      case 1 =>
+        val cost = wolf.ClawsCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else bite(spend(cost, next), (atk * wolf.ClawsDamageFactor).toLong.max(1L), wolf.ClawsBleedPct, "battle.wolf.claws")
+
+      // 3) Животный инстинкт: атака и уклонение выше на 4 хода.
+      case 2 =>
+        val cost = wolf.InstinctCostPerLvl * lvl
+        if (energy < cost) ZIO.succeed((next, hero, ""))
+        else ZIO.succeed((
+          spend(cost, next).copy(effects = next.effects.copy(mobInstinctTurns = wolf.InstinctTurns)),
+          hero,
+          content.text("battle.wolf.instinct")))
+
+      // 4) Пропуск хода.
+      case 3 => ZIO.succeed((next, hero, ""))
+
+      // 5) Смыкание пасти: четверть недостающего герою HP плюс пятая часть атаки. Бесплатно.
+      case _ =>
+        val missing = (hero.effectiveMaxHp(nowMs) - hero.fightStats.hp).max(0L)
+        val raw     = missing * wolf.JawsMissingHpPct / 100L + (atk * wolf.JawsDamageFactor).toLong
+        bite(next, raw.max(1L), 0, "battle.wolf.jaws")
     }
   }
 
@@ -824,10 +908,13 @@ case class BattleState(
     * пламя часть лечения съело (без неё слабое зелье читалось бы как поломка). */
   private def activeHeal(
       hero: Hero,
-      battle: SoloPveBattle,
+      battle0: SoloPveBattle,
       raw: Long,
       nowMs: Long
-  ): (Long, Long, SoloPveBattle, Option[String]) =
+  ): (Long, Long, SoloPveBattle, Option[String]) = {
+    // Кровотечение лечение снимает целиком — то же правило, что и у моба
+    // (см. Bleed): рана затянута.
+    val battle = battle0.copy(effects = battle0.effects.copy(heroBleed = None))
     battle.effects.heroBurn match {
       case None =>
         val newHp = (hero.fightStats.hp + raw).min(hero.effectiveMaxHp(nowMs))
@@ -849,6 +936,7 @@ case class BattleState(
         }
         (newHp, newHp - hero.fightStats.hp, updated, line)
     }
+  }
 
   /** Итоговое снижение урона у героя: его защита против атаки моба, плюс бонус
     * «Заслона», минус то, что обгрызли морозные удары моба (Холод режет снижение
@@ -890,12 +978,14 @@ case class BattleState(
     (red0 - (battle.effects.monsterColdDefenceCut + burnCut) / 100.0).max(0.0)
   }
 
-  /** Стихия, которой моб бьёт после «Порошка!» (если он его высыпал). */
+  /** Стихия, которой бьёт моб: своя по природе (Белый волк — холодом) либо
+    * наведённая «Порошком!», если он его высыпал. */
   private def powderElement(battle: SoloPveBattle): Option[Element] =
-    battle.effects.monsterAttackElement.flatMap(Element.withNameOption)
+    battle.boss.flatMap(_.attackElement)
+      .orElse(battle.effects.monsterAttackElement.flatMap(Element.withNameOption))
 
-  /** Доли урона по броне и HP от стихии порошка. У каменного элементаля свой
-    * раскол, он важнее — там это природа удара, а не наведённая стихия. */
+  /** Доли урона по броне и HP от стихии удара моба. У каменного элементаля
+    * свой раскол, он важнее — там это природа удара, а не стихия. */
   private def powderSplit(battle: SoloPveBattle): Option[(Double, Double)] =
     powderElement(battle).map(e => (e.armorMult, e.hpMult))
 
@@ -1063,13 +1153,19 @@ case class BattleState(
       case None    => battle.monsterStats.defence
     }
 
+  /** Урон яда или кровотечения по мобу с поправкой на его природу: зверь из
+    * плоти и крови (Белый волк) истекает на пятую часть сильнее. Горение сюда
+    * не входит. */
+  private def monsterDotDamage(battle: SoloPveBattle, base: Long): Long =
+    battle.boss.map(_.dotDamageTakenMult).filter(_ != 1.0).fold(base)(m => (base * m).toLong)
+
   /** Компактная сводка активных DoT на мобе для приписки к строкам атаки:
     * ` (🟢 -N ❤)(🔴 -N ❤)(🔥 -N ❤)`. Пусто, если эффектов нет. */
   private def dotIndicators(battle: SoloPveBattle): String = {
     val maxHp = battle.monsterStats.hp
     val parts = List(
-      battle.effects.monsterPoison.map(p => s"🟢 -${p.damageOn(maxHp)} ❤"),
-      battle.effects.monsterBleed.map(b => s"🔴 -${b.damageOn(maxHp)} ❤"),
+      battle.effects.monsterPoison.map(p => s"🟢 -${monsterDotDamage(battle, p.damageOn(maxHp))} ❤"),
+      battle.effects.monsterBleed.map(b => s"🔴 -${monsterDotDamage(battle, b.damageOn(maxHp))} ❤"),
       battle.effects.monsterBurn.map(bn => s"🔥 -${bn.damageOn(maxHp)} ❤")
     ).flatten
     if (parts.isEmpty) "" else parts.mkString(" (", ")(", ")")
@@ -1340,23 +1436,33 @@ case class BattleState(
          content.format(key, "damage" -> dmg.toString))
       case None => (burnedHero, burnedBattle, "")
     }
+    // Кровотечение на герое (пасть и когти волка): % макс.HP мимо брони, не
+    // затухает — снимает его только лечение (см. activeHeal).
+    val (bledHero, bleedLine) = poisonedBattle.effects.heroBleed match {
+      case Some(bleed) =>
+        val dmg = bleed.damageOn(poisonedHero.effectiveMaxHp(nowMs))
+        (poisonedHero.copy(fightStats = poisonedHero.fightStats.copy(
+           hp = (poisonedHero.fightStats.hp - dmg).max(0L))),
+         content.format("battle.heroBleedTick", "damage" -> dmg.toString))
+      case None => (poisonedHero, "")
+    }
     val (finalHero, finalBattle, regenLine) = poisonedBattle.effects.heroRegen match {
       case Some(regen) =>
-        val maxHp  = poisonedHero.effectiveMaxHp(nowMs)
+        val maxHp  = bledHero.effectiveMaxHp(nowMs)
         // Регенерация горением НЕ режется: это не действие игрока, а эффект,
         // который тикает сам по себе (см. activeHeal).
         val heal   = regen.healOn(maxHp)
-        val newHp  = (poisonedHero.fightStats.hp + heal).min(maxHp)
-        val healed = newHp - poisonedHero.fightStats.hp
+        val newHp  = (bledHero.fightStats.hp + heal).min(maxHp)
+        val healed = newHp - bledHero.fightStats.hp
         (
-          poisonedHero.copy(fightStats = poisonedHero.fightStats.copy(hp = newHp)),
+          bledHero.copy(fightStats = bledHero.fightStats.copy(hp = newHp)),
           poisonedBattle.copy(effects = poisonedBattle.effects.copy(heroRegen = regen.decayed)),
           content.format("battle.regenTick", "healed" -> healed.toString)
         )
-      case None => (poisonedHero, poisonedBattle, "")
+      case None => (bledHero, poisonedBattle, "")
     }
     // Строки бывают непустыми одновременно (горим, травимся и регенерируем) — склеиваем.
-    (finalHero, finalBattle, List(burnLine, poisonLine, regenLine).filter(_.nonEmpty).mkString("\n"))
+    (finalHero, finalBattle, List(burnLine, poisonLine, bleedLine, regenLine).filter(_.nonEmpty).mkString("\n"))
   }
 
   /** Тик DoT-эффектов МОНСТРА в конце раунда (каждый снимает `pct`% макс.HP мимо
@@ -1375,13 +1481,13 @@ case class BattleState(
     var bled  = 0L // урон кровотечения за этот тик — «Упырь» (порог 10) лечит им героя
 
     eff.monsterPoison.foreach { p =>
-      val dmg = p.damageOn(maxHp)
+      val dmg = monsterDotDamage(battle, p.damageOn(maxHp))
       hp = (hp - dmg).max(0L)
       eff = eff.copy(monsterPoison = p.decayed)
       lines = lines :+ content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
     }
     eff.monsterBleed.foreach { b =>
-      val dmg = b.damageOn(maxHp)
+      val dmg = monsterDotDamage(battle, b.damageOn(maxHp))
       hp = (hp - dmg).max(0L)
       bled += dmg
       // Кровотечение не затухает — сила остаётся прежней.
@@ -2076,12 +2182,15 @@ case class BattleState(
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
+      // Шкура Белого волка падает один раз за всю жизнь героя.
+      lore <- HerbLore.readLore(heroDao, user.userId)
       // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
       // Группа — своя добыча с каждого павшего, по порядку гибели.
       (perMonster, rngAfter) = battle.boss match {
         case _ if storyFight => (List(battle.monsterName -> List.empty[LootGenerator.LootDrop]), Rng(seed))
         case Some(e) =>
-          val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed))
+          val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed),
+            floorLvl = hero.dungeonLevel.toLong, hideAvailable = !lore.wolfHideDropped)
           (List(battle.monsterName -> d), r)
         case None =>
           fallen.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], Rng(seed))) { case ((acc, rng), m) =>
@@ -2152,6 +2261,9 @@ case class BattleState(
       // (если куба ещё нет и он не был куплен). Хранится флагом в azat_data.
       cubeDropped = fallen.exists(_.rarity == Rarity.Legendary.entryName) && azat.cubeAbsent
       _ <- ZIO.when(cubeDropped)(saveAzat(user, azat.copy(cube = CubeStatus.FoundInactive)))
+      // Выпала шкура — запоминаем: больше волк её не отдаст.
+      _ <- ZIO.when(perMonster.exists(_._2.exists(LootGenerator.isHide)))(
+             HerbLore.writeLore(heroDao, user.userId, lore.copy(wolfHideDropped = true)))
       _ <- heroDao.clearActiveBattle(user.userId)
       // Задание Густаво: павшие идут в счёт, пока действует его зелье.
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
@@ -2181,7 +2293,8 @@ case class BattleState(
       newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
       unlocksDarkness   = unlocksDarkness,
       cubeDropped       = cubeDropped,
-      elementalDefeated = battle.boss.isDefined,
+      elementalDefeated = battle.boss.exists(_ != MiniBoss.WhiteWolf),
+      wolfDefeated      = battle.boss.contains(MiniBoss.WhiteWolf),
       slainCount        = fallen.size,
       letterFound       = letterFound
     )
@@ -2229,6 +2342,9 @@ case class BattleState(
       // Победа над минибоссом: своя реплика перед экраном добычи.
       _ <- ZIO.when(outcome.elementalDefeated)(
         renderer.show(user, Screen(content.text("battle.elemental.victory"), Nil))
+      )
+      _ <- ZIO.when(outcome.wolfDefeated)(
+        renderer.show(user, Screen(content.text("battle.wolf.victory"), Nil))
       )
     } yield ()
 
@@ -2290,8 +2406,8 @@ case class BattleState(
     val monsterMaxHp = battle.monsterStats.hp
     val monsterPoison = {
       val parts = List(
-        battle.effects.monsterPoison.map(p => s"🟢-${p.damageOn(monsterMaxHp)}"),
-        battle.effects.monsterBleed.map(b => s"🔴-${b.damageOn(monsterMaxHp)}"),
+        battle.effects.monsterPoison.map(p => s"🟢-${monsterDotDamage(battle, p.damageOn(monsterMaxHp))}"),
+        battle.effects.monsterBleed.map(b => s"🔴-${monsterDotDamage(battle, b.damageOn(monsterMaxHp))}"),
         battle.effects.monsterBurn.map(bn => s"🔥-${bn.damageOn(monsterMaxHp)}")
       ).flatten
       if (parts.isEmpty) "" else " (" + parts.mkString(" ") + ")"
@@ -2425,11 +2541,10 @@ case class BattleState(
   // отвечает лишь за процентное снижение урона (см. monsterDefenceCut), иначе
   // одна цифра работала бы дважды — и в уклонении, и в защите.
   private def mobDodgeChance(heroAccuracy: Long, battle: SoloPveBattle): Double = {
-    // Тот же прок Воздуха добавляет мобу и уклонения.
-    val evasion =
-      if (battle.effects.mobAirBoostTurns > 0)
-        battle.monsterStats.evasion * (100L + Element.Air.ProcBonusPct) / 100L
-      else battle.monsterStats.evasion
+    // Тот же прок Воздуха добавляет мобу и уклонения; инстинкт волка — свои 5%.
+    val airPct      = if (battle.effects.mobAirBoostTurns > 0) Element.Air.ProcBonusPct else 0L
+    val instinctPct = if (battle.effects.mobInstinct) MiniBoss.WhiteWolf.InstinctBoostPct else 0L
+    val evasion     = battle.monsterStats.evasion * (100L + airPct + instinctPct) / 100L
     BattleState.dodgeChance(0L, evasion, 0L, heroAccuracy)
   }
 }
@@ -2456,6 +2571,8 @@ object BattleState {
       cubeDropped: Boolean,
       // Победа над минибоссом ведёт не в обычную добычу, а в осмотр логова.
       elementalDefeated: Boolean = false,
+      // Белый волк: своя реплика, логова у него нет.
+      wolfDefeated: Boolean = false,
       // Сколько мобов легло в этом бою: больше одного — групповая реплика.
       slainCount: Int = 1,
       // Пятидесятый убитый оставил письмо Марисе — отдельное сообщение после победы.

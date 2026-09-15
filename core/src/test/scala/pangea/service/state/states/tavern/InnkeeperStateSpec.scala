@@ -249,6 +249,37 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
               assertTrue(!after.contains("JoeLore"))
     },
 
+    // ── Рассказ о Белом волке ─────────────────────────────────────────────────
+    test("встретил Белого волка → кнопка появилась, рассказ стоит 1500 серебра и упоминает шкуру") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metWolf = true), 5000L)
+        (state, dao, _, renderer) = t
+        _      <- state.enter(testUser, renderer)
+        before <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        _      <- state.action(testUser, tap("WolfLore"), renderer)
+        offer  <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("PayWolfLore"), renderer)
+        lore   <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+        told   <- renderer.sentScreens.map(_.last)
+        _      <- state.enter(testUser, renderer)
+        after  <- renderer.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(before.contains("WolfLore")) &&
+              assertTrue(offer.text.contains("1500 серебра")) &&
+              assertTrue(lore.wolfLore) && assertTrue(silver == 3500L) &&
+              assertTrue(told.text.contains("Белые волки") && told.text.contains("растворяется")) &&
+              assertTrue(!after.contains("WolfLore"))
+    },
+
+    test("кнопки про волка нет, пока герой его не встречал") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData.empty, 5000L)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+      } yield assertTrue(!screens.last.choices.map(_.id).contains("WolfLore"))
+    },
+
     test("на рассказ о Джо не хватает серебра → деньги не списаны") {
       for {
         t <- makeStateWith(Nil, None, LoreData(metJoe = true), 100L)

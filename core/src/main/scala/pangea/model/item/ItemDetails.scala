@@ -2,7 +2,7 @@ package pangea.model.item
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
-import io.circe.{Decoder, DecodingFailure, Encoder, Json}
+import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
 import pangea.model.skill.Skill
 
 /** Специфичные для типа предмета данные. Общие боевые статы остаются плоскими на
@@ -62,8 +62,12 @@ object ItemDetails {
    *  слоты, не несущие активного навыка/зелья (см. [[PassiveKind]]). */
   case class Passive(kind: PassiveKind) extends ItemDetails
 
-  /** Трофей с убитого моба: раса (entryName) и вид трофея. */
-  case class Trophy(race: String, kind: TrophyKind) extends ItemDetails
+  /** Трофей с убитого моба: раса (entryName) и вид трофея. `coef` задан только у
+   *  трофеев с собственным коэффициентом (клык Белого волка: 6 × BossLvL); у
+   *  остальных он берётся с вида. */
+  case class Trophy(race: String, kind: TrophyKind, coef: Option[Double] = None) extends ItemDetails {
+    def coefValue: Double = coef.getOrElse(kind.coef)
+  }
 
   /** Карта клада или её половинка (целость кодирует `Item.itemType`). */
   case class TreasureMap(zone: MapZone) extends ItemDetails
@@ -90,7 +94,14 @@ object ItemDetails {
   private val passiveEnc: Encoder[Passive]         = deriveEncoder
   private val passiveDec: Decoder[Passive]         = deriveDecoder
   private val trophyEnc: Encoder[Trophy]           = deriveEncoder
-  private val trophyDec: Decoder[Trophy]           = deriveDecoder
+  // Рукописный: старые трофеи записаны без `coef`, и производный декодер их бы
+  // не прочёл (см. LoreData — та же история).
+  private val trophyDec: Decoder[Trophy]           = (c: HCursor) =>
+    for {
+      race <- c.get[String]("race")
+      kind <- c.get[TrophyKind]("kind")
+      coef <- c.getOrElse[Option[Double]]("coef")(None)
+    } yield Trophy(race, kind, coef)
   private val mapEnc:    Encoder[TreasureMap]      = deriveEncoder
   private val mapDec:    Decoder[TreasureMap]      = deriveDecoder
   private val gemEnc:    Encoder[Gem]              = deriveEncoder

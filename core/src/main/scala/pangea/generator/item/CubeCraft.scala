@@ -32,7 +32,7 @@ object CubeCraft {
   }
 
   private def isHead(i: Item): Boolean = i.details match {
-    case ItemDetails.Trophy(_, TrophyKind.Head) => true
+    case ItemDetails.Trophy(_, TrophyKind.Head, _) => true
     case _                                      => false
   }
 
@@ -123,13 +123,13 @@ object CubeCraft {
   }
 
   // 3 вещи одного набора → ингредиент этого набора. Редкость вещей не важна:
-  // в переплавку одинаково идут и синие, и фиолетовые. Наборы без ингредиента
-  // («Охотник») в рецепт не попадают — переплавлять их не во что.
+  // в переплавку одинаково идут и синие, и фиолетовые. «Охотник» в рецепт не
+  // попадает: шкура Белого волка падает единожды, и переплавкой её не добыть.
   private object SetSalvage extends Recipe {
     val size = 3
 
     private def materialOf(set: ItemSet): Option[MaterialKind] =
-      MiniBoss.values.find(_.set == set).map(_.ingredient)
+      MiniBoss.values.find(b => b.set == set && !b.ingredientOnce).map(_.ingredient)
 
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val bySet = pool
