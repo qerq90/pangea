@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.loot.TreasureHuntGenerator
-import pangea.model.item.{ItemType, MapZone, Rarity}
+import pangea.model.item.{ItemType, MapZone, MaterialKind, Rarity}
 import zio.test._
 
 object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
@@ -59,6 +59,31 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gems.nonEmpty) &&
         assertTrue(gems.forall(_.itemType == ItemType.Gem)) &&
         assertTrue(gems.forall(_.gem.exists(_.grade == 1)))
+    },
+
+    test("ингредиенты минибоссов: ~35% кладов, ступень зоны плюс 0..1 штук, любой ингредиент любого босса") {
+      import pangea.model.monster.MiniBoss
+      val pool = MiniBoss.values.map(_.ingredient).toSet
+      val handfuls = rewards.map(_.materials.filter(m => m.material.exists(pool.contains)))
+      val with_    = handfuls.count(_.nonEmpty)
+      assertTrue(MapZone.Kinet.tier == 1 && MapZone.DeadmansGorge.tier == 3 && MapZone.AbandonedTemple.tier == 6) &&
+        assertTrue(with_ > rewards.size * 28 / 100 && with_ < rewards.size * 42 / 100) &&
+        assertTrue(handfuls.forall(h => h.isEmpty || h.size == zone.tier || h.size == 1 + zone.tier)) &&
+        assertTrue(handfuls.exists(_.size == zone.tier) && handfuls.exists(_.size == 1 + zone.tier)) &&
+        // все ингредиенты встречаются, шкура волка в том числе
+        assertTrue(handfuls.flatten.flatMap(_.material).toSet == pool)
+    },
+
+    test("редкие травы — только знающему цветы 2 ранга, ~15%, тем же счётом") {
+      val known   = (1 to 800).map(s => TreasureHuntGenerator.roll(zone, Rng(s.toLong), knowsRareHerbs = true)._1)
+      val herbs   = known.map(_.materials.filter(_.material.exists(_.herbRank == 2)))
+      val with_   = herbs.count(_.nonEmpty)
+      assertTrue(rewards.forall(!_.materials.exists(_.material.exists(_.isHerb)))) &&   // без знания трав нет
+        assertTrue(with_ > known.size * 10 / 100 && with_ < known.size * 20 / 100) &&
+        assertTrue(herbs.forall(h => h.isEmpty || h.size == zone.tier || h.size == 1 + zone.tier)) &&
+        assertTrue(herbs.flatten.flatMap(_.material).toSet == MaterialKind.herbsOfRank(2).toSet) &&
+        // снаряжение и серебро от знания не меняются
+        assertTrue(known.take(500).map(r => (r.silver, r.items.map(_.name))) == rewards.map(r => (r.silver, r.items.map(_.name))))
     },
 
     test("детерминизм: один seed → одинаковая добыча") {

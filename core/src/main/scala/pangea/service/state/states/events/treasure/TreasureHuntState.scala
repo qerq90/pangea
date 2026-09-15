@@ -5,13 +5,14 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.TreasureHuntGenerator
+import pangea.model.hero.Knowledge
 import pangea.model.item.MapZone
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.LootState.LootData
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{HerbLore, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -70,9 +71,11 @@ case class TreasureHuntState(heroDao: HeroDao, scheduler: Scheduler, content: Sc
       zone      = progress.map(_.zone).getOrElse(MapZone.values.head)
       _        <- scheduler.cancel(user.userId, TaskKind.TreasureHunt)
       seed     <- Random.nextLong
-      (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed))
+      // Редкие травы в кладе находит только тот, кто знает цветы 2 ранга.
+      lore     <- HerbLore.readLore(heroDao, user.userId)
+      (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed), knowsRareHerbs = lore.knows(Knowledge.FlowersRank2))
       loot      = LootData(
-                    items       = reward.items ++ reward.gems,
+                    items       = reward.items ++ reward.gems ++ reward.materials,
                     silvers     = if (reward.silver > 0L) List(reward.silver) else Nil,
                     doubloons   = reward.doubloons,
                     returnState = Some(StateType.GlobalMap))

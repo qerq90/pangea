@@ -1,9 +1,10 @@
 package pangea.generator.loot
 
 import pangea.domain.Rng
-import pangea.generator.item.{GemGenerator, ItemGenerator}
-import pangea.model.item.Gem
+import pangea.generator.item.{GemGenerator, ItemGenerator, MaterialGenerator}
+import pangea.model.item.{Gem, MaterialKind}
 import pangea.model.item.{Item, MapZone, Rarity => ItemRarity}
+import pangea.model.monster.MiniBoss
 
 import scala.annotation.tailrec
 
@@ -15,11 +16,28 @@ import scala.annotation.tailrec
   *     если он выпал, ролится 4-й (тоже 50%) → итог 2–4 предмета; редкость
   *     каждого: Blue 20 · Purple 35 · Violet 31 · Orange 14 (сумма = 100);
   *   - серебро выпадает гарантированно (`lvl×12×100 ±20%`);
-  *   - дублоны — с шансом 80% (30–70), сверх серебра.
+  *   - дублоны — с шансом 80% (30–70), сверх серебра;
+  *   - ингредиенты минибоссов — с шансом 35%: ступень зоны плюс 0..1 штук, каждый —
+  *     любой из ингредиентов всех минибоссов поровну (новые боссы попадают сами);
+  *   - редкие травы (2 ранга) — только знающему их герою, с шансом 15%, тем же
+  *     счётом и тем же способом.
   */
 object TreasureHuntGenerator {
 
-  final case class Reward(items: List[Item], gems: List[Item], silver: Long, doubloons: Long)
+  final case class Reward(
+      items: List[Item],
+      gems: List[Item],
+      silver: Long,
+      doubloons: Long,
+      materials: List[Item] = Nil
+  )
+
+  /** Шанс (в %) горсти ингредиентов минибоссов и, для знающего, редких трав. */
+  val IngredientChancePct: Long = 35L
+  val RareHerbChancePct: Long   = 15L
+
+  /** Ингредиенты всех минибоссов — по одному от каждого, без повторов. */
+  def bossIngredients: List[MaterialKind] = MiniBoss.values.map(_.ingredient).distinct.toList
 
   // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -30,7 +48,9 @@ object TreasureHuntGenerator {
       ItemRarity.Orange -> 14
     )
 
-  def roll(zone: MapZone, rng: Rng): (Reward, Rng) = {
+  /** `knowsRareHerbs` — знает ли герой цветы 2 ранга: без знания редкие травы
+    * в кладе не попадаются (и бросок на них не тратится). */
+  def roll(zone: MapZone, rng: Rng, knowsRareHerbs: Boolean = false): (Reward, Rng) = {
     val (gearCount, r1)   = rollGearCount(rng)    // 2..4
     val (items, r2)       = rollGear(gearCount, zone, Nil, rng = r1)
     // Сверх снаряжения — 1..5 камней-усилителей грейда «расколотый» (1-й тир).
@@ -41,7 +61,27 @@ object TreasureHuntGenerator {
     val (doubloons, r5) =
       if (doubloonRoll < 80) r4.between(30L, 71L)                  // 80% — 30..70
       else                   (0L, r4)                              // 20% — без дублонов
-    (Reward(items, gems, silver, doubloons), r5)
+    val (ingredients, r6) = rollHandful(IngredientChancePct, bossIngredients, zone, r5)
+    val (herbs, r7)       =
+      if (knowsRareHerbs) rollHandful(RareHerbChancePct, MaterialKind.herbsOfRank(2).toList, zone, r6)
+      else (Nil, r6)
+    (Reward(items, gems, silver, doubloons, ingredients ++ herbs), r7)
+  }
+
+  /** Горсть материалов: с шансом `chancePct` — ступень зоны плюс 0 или 1 штук
+    * (как у дропа минибосса: `0..1 + BossLvL`), каждая поровну из `pool`. Не
+    * выпала горсть — счёт не бросается. */
+  private def rollHandful(chancePct: Long, pool: List[MaterialKind], zone: MapZone, rng: Rng): (List[Item], Rng) = {
+    val (roll, r1) = rng.between(0L, 100L)
+    if (roll >= chancePct || pool.isEmpty) (Nil, r1)
+    else {
+      val (extra, r2) = r1.between(0L, 2L) // 0 или 1 сверх ступени
+      val count       = zone.tier.toLong + extra
+      (1L to count).foldLeft((List.empty[Item], r2)) { case ((acc, r), _) =>
+        val (kind, rr) = r.pick(pool)
+        (acc :+ MaterialGenerator.item(kind), rr)
+      }
+    }
   }
 
   // 2 гарантированно; 3-й — 50%; и лишь если он выпал, 4-й — тоже 50%.
