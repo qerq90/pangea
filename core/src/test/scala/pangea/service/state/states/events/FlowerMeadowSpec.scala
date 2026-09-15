@@ -59,7 +59,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
       assertTrue(ev(67) == StateType.Spring && ev(38) == StateType.FlowerMeadow && ev(99) == StateType.ElementalLair)
     },
 
-    test("вход: 2–6 цветов, таймер на 2–3 минуты, кнопки «Персонаж» и красная «Уйти»; уйти — сразу в лабиринт") {
+    test("вход: 2–6 цветов, таймер на 2–3 минуты, кнопки «Персонаж» и красная «Уйти»; уйти — через подтверждение") {
       for {
         t <- meadow(hero())
         (state, dao, _, sched, r) = t
@@ -68,7 +68,12 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         scene  <- sceneOf(dao)
         tasks  <- sched.scheduled
         screen <- r.sentScreens.map(_.last)
-        left   <- state.action(testUser, tap("LeaveMeadow"), r)
+        ask    <- state.action(testUser, tap("LeaveMeadow"), r)
+        confirm <- r.sentScreens.map(_.last)
+        stay   <- state.action(testUser, tap("StayMeadow"), r)
+        stayed <- r.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("LeaveMeadow"), r)
+        left   <- state.action(testUser, tap("ConfirmLeave"), r)
         after  <- dao.readSceneData(userId)
         cancelled <- sched.cancelled
       } yield assertTrue(scene.exists(s => s.left == 2 && s.nextAt == 150000L)) &&
@@ -76,6 +81,8 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(screen.text.contains("поляна шепчет")) &&
               assertTrue(screen.choices.map(_.id) == List("OpenCharacter", "LeaveMeadow")) &&
               assertTrue(screen.choices.last.color == pangea.engine.ChoiceColor.Negative) &&
+              assertTrue(ask == StateType.FlowerMeadow && confirm.choices.map(_.id) == List("ConfirmLeave", "StayMeadow")) &&
+              assertTrue(stay == StateType.FlowerMeadow && !stayed.text.contains("поляна шепчет")) && // описание не повторяется
               assertTrue(left == StateType.Dungeon && after.contains(io.circe.Json.Null)) &&
               assertTrue(cancelled.contains(userId -> TaskKind.FlowerMeadow))
     },
@@ -98,7 +105,10 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         res   <- state.action(testUser, tap("FlowerFind"), r)
         all   <- texts(r)
         names  = inv.snapshot.map(_.name)
+        h     <- dao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(!lore1.knows(Knowledge.FlowersRank1)) &&
+              assertTrue(h.fightStats.energy > hero().fightStats.energy && all.contains("⚡ +")) &&   // каждый цветок возвращает энергию
+              assertTrue(!all.contains("поляна шепчет") && all.contains("бродите по поляне")) &&       // после цветка — короткий экран, не описание
               assertTrue(lore2.knows(Knowledge.FlowersRank1) && lore2.learnedAlone(Knowledge.FlowersRank1)) &&
               assertTrue(all.contains("стал лучше разбираться")) &&
               assertTrue(names.take(2) == List("Странный цветок", "Странный цветок")) &&

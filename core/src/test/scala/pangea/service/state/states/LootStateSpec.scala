@@ -143,7 +143,7 @@ object LootStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Dungeon)
     },
 
-    test("группа: над добычей имя павшего, «Забрать» ведёт к следующему, последний — наружу") {
+    test("группа: над добычей имя павшего, «Забрать» ведёт к следующему; павший без вещей проскакивает сам; последний — наружу") {
       val loot = LootData(
         items = List(gear("Шлем орка")), silvers = List(10L),
         monsterName = Some("Орк-первый"),
@@ -154,21 +154,20 @@ object LootStateSpec extends ZIOSpecDefault {
         _        <- state.enter(testUser, renderer)
         first    <- renderer.sentScreens.map(_.last)
         afterTake <- state.action(testUser, tap("Take"), renderer)
-        second   <- renderer.sentScreens.map(_.last)
-        stored   <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption).get)
-        afterNext <- state.action(testUser, tap("Continue"), renderer)
+        screens  <- renderer.sentScreens
+        second    = screens(screens.size - 2)
         third    <- renderer.sentScreens.map(_.last)
+        stored   <- heroDao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption).get)
         afterLast <- state.action(testUser, tap("Continue"), renderer)
         hero     <- heroDao.getHeroByUserId(userId)
       } yield assertTrue(first.text.contains("Орк-первый")) &&
               assertTrue(afterTake == StateType.Loot) &&           // в очереди ещё двое — остаёмся
               assertTrue(invRepo.snapshot.size == 1) &&
-              assertTrue(second.text.contains("Орк-второй")) &&
-              assertTrue(second.choices.map(_.label) == List("Дальше")) &&   // за ним ещё один
-              assertTrue(stored.monsterName.contains("Орк-второй") && stored.queue.size == 1) &&
-              assertTrue(afterNext == StateType.Loot) &&
+              // у второго только серебро: сообщение без кнопок и сразу третий
+              assertTrue(second.text.contains("Орк-второй") && second.choices.isEmpty) &&
               assertTrue(third.text.contains("Орк-третий") && third.text.contains("Ничего ценного")) &&
               assertTrue(third.choices.map(_.label) == List("Продолжить")) && // последний — наружу
+              assertTrue(stored.monsterName.contains("Орк-третий") && stored.queue.isEmpty) &&
               assertTrue(hero.exists(_.silver == 100L + 10L + 5L)) &&  // серебро со всех
               assertTrue(afterLast == StateType.Dungeon)
     },

@@ -87,16 +87,15 @@ case class LootState(
         case Some(name) => content.format("loot.groupEmpty", "monster" -> name)
         case None       => content.text("loot.empty")
       }
-      // Пока в очереди есть павшие, кнопка зовёт к следующему, а не наружу.
-      continueChoices = if (loot.queue.isEmpty) content.screen("loot.enter").choices
-                        else List(content.choice("Continue", "loot.nextLabel"))
       _ <- if (loot.items.isEmpty) {
              // выбирать нечего — только серебро/дублоны (или совсем пусто)
              val text = if (currencyLines.isEmpty) empty
                         else header + "\n\n" + currencyLines.mkString("\n")
              journal.append(GameEvent(user.userId, "loot_claimed",
                Json.obj("silver" -> silverTotal.asJson, "items" -> loot.items.map(_.name).asJson))) *>
-               renderer.show(user, Screen(text, continueChoices))
+               // В группе, пока павшие ещё есть, решать нечего — сообщение и сразу следующий.
+               (if (loot.queue.nonEmpty) renderer.show(user, Screen(text, Nil)) *> finish(user, loot, renderer).unit
+                else renderer.show(user, Screen(text, content.screen("loot.enter").choices)))
            } else {
              // серебро/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
              val preview = currencyLines ++ loot.items.map(it => itemLineWithEquipped(it, hero))

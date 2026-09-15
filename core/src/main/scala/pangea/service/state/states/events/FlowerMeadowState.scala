@@ -38,7 +38,9 @@ case class FlowerMeadowState(
     routes = Map(
       "FlowerFind"    -> Target.Run { (u, _, r) => findOne(u, r) },
       "OpenCharacter" -> Target.Run { (u, _, _) => CharacterMenu.open(heroDao, u.userId, StateType.FlowerMeadow) },
-      "LeaveMeadow"   -> Target.Run { (u, _, r) => leave(u, r) }
+      "LeaveMeadow"   -> Target.Run { (u, _, r) => r.show(u, content.screen("flowerMeadow.confirmLeave")).as(StateType.FlowerMeadow) },
+      "ConfirmLeave"  -> Target.Run { (u, _, r) => leave(u, r) },
+      "StayMeadow"    -> Target.Run { (u, _, r) => r.show(u, meadowScreen(intro = false)).as(StateType.FlowerMeadow) }
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.FlowerMeadow) }
   )
@@ -54,26 +56,28 @@ case class FlowerMeadowState(
           for {
             count <- Random.nextIntBetween(MinFlowers, MaxFlowers + 1)
             _     <- scheduleNext(user, now, MeadowScene(count, 0L))
-            _     <- renderer.show(user, meadowScreen)
+            _     <- renderer.show(user, meadowScreen(intro = true))
           } yield ()
         // Вернулись из меню персонажа: созревший цветок — сразу, иначе таймер заново.
         case Some(s) if now >= s.nextAt => findOne(user, renderer).unit
         case Some(s) =>
           scheduler.schedule(user.userId, s.nextAt, TaskKind.FlowerMeadow, StateType.FlowerMeadow, FindAction) *>
-            renderer.show(user, meadowScreen)
+            renderer.show(user, meadowScreen(intro = false))
       }
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  private def meadowScreen: Screen =
-    Screen(content.text("flowerMeadow.enter.text"), List(
+  /** Описание поляны — только при первом входе; дальше короткое «вы бродите». */
+  private def meadowScreen(intro: Boolean): Screen =
+    Screen(content.text(if (intro) "flowerMeadow.enter.text" else "flowerMeadow.waiting"), List(
       content.choice("OpenCharacter", "common.character"),
       content.choice("LeaveMeadow", "flowerMeadow.leave").copy(color = ChoiceColor.Negative)
     ))
 
-  /** Очередной цветок: ранг 98/2, вид случайный, узнан ли — по знаниям. */
+  /** Очередной цветок: ранг 98/2, вид случайный, узнан ли — по знаниям. Каждый
+    * цветок возвращает 2% от потолка энергии — поляна «лечит душу и тело». */
   private def findOne(user: User, renderer: Renderer): Task[StateType] =
     for {
       now   <- nowMs
@@ -94,8 +98,13 @@ case class FlowerMeadowState(
             added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
             slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
             lost       = if (added) "" else "\n" + content.text("common.inventoryFull")
+            maxEnergy  = hero.maxEnergy(now)
+            regained   = (maxEnergy * EnergyPctPerFlower / 100L).max(1L).min((maxEnergy - hero.fightStats.energy).max(0L))
+            _         <- ZIO.when(regained > 0L)(
+                           heroDao.updateFightStats(user.userId, hero.fightStats.copy(energy = hero.fightStats.energy + regained)))
+            energyLine = if (regained > 0L) "\n" + content.format("flowerMeadow.energy", "energy" -> regained.toString) else ""
             _         <- renderer.show(user, Screen(
-                           content.format("flowerMeadow.found", "flower" -> item.name) + lost + "\n" + slots, Nil))
+                           content.format("flowerMeadow.found", "flower" -> item.name) + energyLine + lost + "\n" + slots, Nil))
             // Странный цветок — шанс самому понять, что к чему (только пока не знаешь простых трав).
             _         <- ZIO.when(kind == MaterialKind.StrangeFlower && !lore.knows(Knowledge.FlowersRank1))(
                            insight(user, hero, lore, now, renderer))
@@ -105,7 +114,7 @@ case class FlowerMeadowState(
                        renderer.show(user, Screen(content.text("flowerMeadow.done"), Nil)).as(StateType.Dungeon)
                    else
                      scheduleNext(user, now, s.copy(left = left)) *>
-                       renderer.show(user, meadowScreen).as(StateType.FlowerMeadow)
+                       renderer.show(user, meadowScreen(intro = false)).as(StateType.FlowerMeadow)
           } yield out
       }
     } yield res
@@ -153,6 +162,9 @@ object FlowerMeadowState {
   val MaxFlowers: Int  = 6
   val MinDelayMs: Long = 2L * 60L * 1000L
   val MaxDelayMs: Long = 3L * 60L * 1000L
+
+  /** Сколько процентов потолка энергии возвращает каждый цветок. */
+  val EnergyPctPerFlower: Long = 2L
 
   val FindAction: String = """{"action":"FlowerFind"}"""
 
