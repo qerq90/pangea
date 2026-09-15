@@ -23,9 +23,11 @@ object HerbLore {
   val Treatise2Price: Long = 30000L
 
   /** Догадаться самому при странном цветке: интеллект ÷ 4 процентов. По книге —
-    * интеллект ÷ 2. Не осилил — книгу можно открыть снова через час. */
+    * интеллект ÷ 2, и каждая неудача прибавляет к следующему броску ещё 2 %. Не
+    * осилил — книгу можно открыть снова через час. */
   val InsightIntDivisor: Int   = 4
   val ReadingIntDivisor: Int   = 2
+  val ReadingFailureBonusPct: Int = 2
   val ReadingCooldownMs: Long  = 60L * 60L * 1000L
 
   def knowledgeOf(book: QuestItemKind): Option[Knowledge] = book match {
@@ -54,6 +56,8 @@ object HerbLore {
   /** Порог броска (1..100) на догадку по странному цветку. */
   def insightChance(hero: Hero, nowMs: Long): Long = hero.effectiveBaseStats(nowMs).int / InsightIntDivisor
 
-  /** Порог броска (1..100) на освоение трактата. */
-  def readingChance(hero: Hero, nowMs: Long): Long = hero.effectiveBaseStats(nowMs).int / ReadingIntDivisor
+  /** Порог броска (1..100) на освоение трактата: интеллект ÷ 2 плюс 2 % за каждую
+    * прошлую неудачу с этой книгой. */
+  def readingChance(hero: Hero, nowMs: Long, failures: Int): Long =
+    hero.effectiveBaseStats(nowMs).int / ReadingIntDivisor + failures.toLong * ReadingFailureBonusPct
 }

@@ -17,7 +17,8 @@ import io.circe.{Decoder, Encoder, HCursor}
  *  сможет на это опереться.
  *  `knowledge` — что герой умеет ([[Knowledge]], ключи); `selfTaught` — из них
  *  те, до чего дошёл сам, а не по книге; `bookCooldowns` — когда книгу можно
- *  читать снова (ключ книги → момент). */
+ *  читать снова (ключ книги → момент); `bookFailures` — сколько раз книга не
+ *  далась (каждая неудача прибавляет к следующему броску). */
 final case class LoreData(
   metElemental:   Boolean           = false,
   elementalLore:  Boolean           = false,
@@ -26,8 +27,19 @@ final case class LoreData(
   prologueBranch: Option[String]    = None,
   knowledge:      List[String]      = Nil,
   selfTaught:     List[String]      = Nil,
-  bookCooldowns:  Map[String, Long] = Map.empty
+  bookCooldowns:  Map[String, Long] = Map.empty,
+  bookFailures:   Map[String, Int]  = Map.empty
 ) {
+  def failuresOf(book: String): Int = bookFailures.getOrElse(book, 0)
+
+  /** Книга не далась: час на переварить и +1 к счёту неудач. */
+  def bookFailed(book: String, until: Long): LoreData =
+    copy(bookCooldowns = bookCooldowns.updated(book, until), bookFailures = bookFailures.updated(book, failuresOf(book) + 1))
+
+  /** Книга осилена: следы попыток больше не нужны. */
+  def bookMastered(book: String): LoreData =
+    copy(bookCooldowns = bookCooldowns - book, bookFailures = bookFailures - book)
+
   def knows(k: Knowledge): Boolean = knowledge.contains(k.entryName)
 
   def learnedAlone(k: Knowledge): Boolean = selfTaught.contains(k.entryName)
@@ -57,5 +69,6 @@ object LoreData {
       knowledge     <- c.getOrElse[List[String]]("knowledge")(Nil)
       selfTaught    <- c.getOrElse[List[String]]("selfTaught")(Nil)
       cooldowns     <- c.getOrElse[Map[String, Long]]("bookCooldowns")(Map.empty)
-    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, branch, knowledge, selfTaught, cooldowns)
+      failures      <- c.getOrElse[Map[String, Int]]("bookFailures")(Map.empty)
+    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, branch, knowledge, selfTaught, cooldowns, failures)
 }

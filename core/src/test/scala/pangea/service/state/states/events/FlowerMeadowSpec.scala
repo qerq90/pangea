@@ -183,7 +183,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(self.text.contains("Сам разобрался") && self.choices.map(_.id) == List("BuyTreatise2", "Back"))
     },
 
-    test("чтение трактата: бросок интеллект ÷ 2; неудача — час; удача — знание по книге, книга уходит") {
+    test("чтение трактата: бросок интеллект ÷ 2 (+2% за каждую неудачу); неудача — час; удача — знание по книге, книга уходит") {
       val book = QuestItemKind.item(QuestItemKind.FlowerTreatise1).copy(id = 9L)
       for {
         c   <- content
@@ -197,17 +197,21 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         _   <- TestRandom.feedInts(50)                       // 50 > 20 — не осилил
         _   <- st.action(testUser, tap("ReadTreatise"), r)
         lore1 <- loreOf(dao)
+        h1  <- dao.getHeroByUserId(userId).map(_.get)
         _   <- st.action(testUser, tap(s"${InventoryState.ItemActionPrefix}9"), r)
         _   <- st.action(testUser, tap("ReadTreatise"), r)   // ещё рано
         early <- texts(r)
         _   <- TestClock.adjust(Duration.fromMillis(HerbLore.ReadingCooldownMs + 1000L))
         _   <- st.action(testUser, tap(s"${InventoryState.ItemActionPrefix}9"), r)
-        _   <- TestRandom.feedInts(10)                       // 10 ≤ 20 — осилил
+        _   <- TestRandom.feedInts(22)                       // 22 ≤ 20 + 2 за неудачу — осилил
         _   <- st.action(testUser, tap("ReadTreatise"), r)
         lore2 <- loreOf(dao)
         all <- texts(r)
       } yield assertTrue(card.choices.map(_.id) == List("ReadTreatise", "InventoryList")) &&
               assertTrue(!lore1.knows(Knowledge.FlowersRank1) && lore1.bookCooldowns.contains(QuestItemKind.FlowerTreatise1.entryName)) &&
+              assertTrue(lore1.failuresOf(QuestItemKind.FlowerTreatise1.entryName) == 1) &&
+              assertTrue(HerbLore.readingChance(h1, 0L, 0) == 20L && HerbLore.readingChance(h1, 0L, 1) == 22L) &&
+              assertTrue(lore2.bookFailures.isEmpty) &&
               assertTrue(early.contains("Через ")) &&
               assertTrue(lore2.knows(Knowledge.FlowersRank1) && !lore2.learnedAlone(Knowledge.FlowersRank1)) &&
               assertTrue(inv.snapshot.isEmpty) &&

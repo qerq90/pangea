@@ -172,8 +172,8 @@ case class InventoryState(
       res   <- showList(user, renderer)
     } yield res
 
-  /** Трактат: бросок интеллект ÷ 2 процентов; осилил — знание и книга уходит,
-    * нет — час на переварить, потом снова. */
+  /** Трактат: бросок интеллект ÷ 2 процентов (+2 % за каждую прошлую неудачу);
+    * осилил — знание и книга уходит, нет — час на переварить, потом снова. */
   private def readTreatise(user: User, renderer: Renderer): Task[StateType] =
     for {
       now   <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
@@ -193,16 +193,14 @@ case class InventoryState(
                  else for {
                    roll <- Random.nextIntBetween(1, 101)
                    _    <- renderer.show(user, Screen(content.text("knowledge.readSpent"), Nil))
-                   _    <- if (roll <= HerbLore.readingChance(hero, now))
-                             HerbLore.writeLore(heroDao, user.userId, lore.learn(knowledge, alone = false)
-                               .copy(bookCooldowns = lore.bookCooldowns - kind.entryName)) *>
+                   _    <- if (roll <= HerbLore.readingChance(hero, now, lore.failuresOf(kind.entryName)))
+                             HerbLore.writeLore(heroDao, user.userId, lore.learn(knowledge, alone = false).bookMastered(kind.entryName)) *>
                                inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
                                renderer.show(user, Screen(
                                  content.text("knowledge.readSuccess") + "\n" +
                                    content.format("knowledge.gained", "title" -> knowledge.title), Nil))
                            else
-                             HerbLore.writeLore(heroDao, user.userId,
-                               lore.copy(bookCooldowns = lore.bookCooldowns.updated(kind.entryName, now + HerbLore.ReadingCooldownMs))) *>
+                             HerbLore.writeLore(heroDao, user.userId, lore.bookFailed(kind.entryName, now + HerbLore.ReadingCooldownMs)) *>
                                renderer.show(user, Screen(content.text("knowledge.readFailed"), Nil))
                  } yield ()
             r <- showList(user, renderer)
