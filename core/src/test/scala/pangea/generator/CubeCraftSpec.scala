@@ -100,8 +100,20 @@ object CubeCraftSpec extends ZIOSpecDefault {
         charges = 50, rng).items.headOption.flatMap(_.material)
       assertTrue(salvage(ItemSet.WildFlame).contains(MaterialKind.EverburningIron)) &&
         assertTrue(salvage(ItemSet.StoneGuard).contains(MaterialKind.MagicStone)) &&
-        // у «Охотника» материала нет — переплавлять его не во что
-        assertTrue(salvage(ItemSet.Hunter).isEmpty)
+        // три вещи «Охотника» — шкура Белого волка
+        assertTrue(salvage(ItemSet.Hunter).contains(MaterialKind.WhiteWolfHide))
+    },
+
+    test("шкура Белого волка + вещь → та же вещь в наборе «Охотник»") {
+      val helm = Item(1L, "🔵 Прочный Шлем Дворянина", 12L, Rarity.Blue, ItemType.Helmet,
+        attack = 0, accuracy = 0, energy = 0, armor = 30, defence = 3, evasion = 0)
+      val hide = MaterialGenerator.item(MaterialKind.WhiteWolfHide).copy(id = 2L)
+      val result = CubeCraft.craft(List(helm, hide), charges = 50, rng)
+      assertTrue(result.chargesUsed == 1) &&
+        assertTrue(result.items.size == 1) &&
+        assertTrue(result.items.head.set.contains(ItemSet.Hunter)) &&
+        assertTrue(result.items.head.name.endsWith(ItemSet.Hunter.title)) &&
+        assertTrue(result.items.head.armor == 30 && result.items.head.lvl == 12L && result.items.head.rarity == Rarity.Blue)
     },
 
     test("двух вещей набора мало, а вещи разных наборов не смешиваются") {

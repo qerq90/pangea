@@ -16,7 +16,7 @@ object ItemStack {
   def key(item: Item): Option[String] = item.details match {
     case ItemDetails.Gem(g)             => Some(s"gem:${g.kind.entryName}:${g.grade}")
     case ItemDetails.Material(k)        => Some(s"mat:${k.entryName}")
-    case ItemDetails.Trophy(race, kind) => Some(s"trophy:$race:${kind.entryName}:${item.lvl}")
+    case t @ ItemDetails.Trophy(race, kind, _) => Some(s"trophy:$race:${kind.entryName}:${item.lvl}:${t.coefValue}")
     case _                              => None
   }
 

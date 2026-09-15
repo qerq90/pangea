@@ -154,6 +154,8 @@ case class Item(
       // себе, чтобы экран не выглядел пустым.
       case ItemDetails.Material(k)       =>
         if (k.description.isEmpty) List(s"Материал: ${k.displayName}") else List(k.description)
+      // Клык Белого волка — трофей с историей; у обычных трофеев описания нет.
+      case ItemDetails.Trophy(_, k, _)   => if (k.description.isEmpty) Nil else List(k.description)
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines

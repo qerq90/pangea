@@ -12,6 +12,7 @@ import io.circe.{Decoder, Encoder, HCursor}
  *  `elementalLore` — куплена ли у трактирщика легенда об элементалях (тогда
  *  кнопка больше не предлагает платить).
  *  `metJoe`/`joeLore` — то же самое про Гнилого Джо.
+ *  `metWolf`/`wolfLore` — то же про Белого волка.
  *  `prologueBranch` — какой смертью герой прошёл пролог («Gnome», «Orc»,
  *  «Elf», «Human»); пишется в финале, когда раса подтверждена, — сюжет потом
  *  сможет на это опереться.
@@ -24,6 +25,8 @@ final case class LoreData(
   elementalLore:  Boolean           = false,
   metJoe:         Boolean           = false,
   joeLore:        Boolean           = false,
+  metWolf:        Boolean           = false,
+  wolfLore:       Boolean           = false,
   prologueBranch: Option[String]    = None,
   knowledge:      List[String]      = Nil,
   selfTaught:     List[String]      = Nil,
@@ -65,10 +68,13 @@ object LoreData {
       elementalLore <- c.getOrElse[Boolean]("elementalLore")(false)
       metJoe        <- c.getOrElse[Boolean]("metJoe")(false)
       joeLore       <- c.getOrElse[Boolean]("joeLore")(false)
+      metWolf       <- c.getOrElse[Boolean]("metWolf")(false)
+      wolfLore      <- c.getOrElse[Boolean]("wolfLore")(false)
       branch        <- c.getOrElse[Option[String]]("prologueBranch")(None)
       knowledge     <- c.getOrElse[List[String]]("knowledge")(Nil)
       selfTaught    <- c.getOrElse[List[String]]("selfTaught")(Nil)
       cooldowns     <- c.getOrElse[Map[String, Long]]("bookCooldowns")(Map.empty)
       failures      <- c.getOrElse[Map[String, Int]]("bookFailures")(Map.empty)
-    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, branch, knowledge, selfTaught, cooldowns, failures)
+    } yield LoreData(metElemental, elementalLore, metJoe, joeLore, metWolf, wolfLore,
+                     branch, knowledge, selfTaught, cooldowns, failures)
 }

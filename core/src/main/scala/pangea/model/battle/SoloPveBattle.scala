@@ -46,6 +46,9 @@ case class SoloPveBattle(
   bossCharges:    Int = 0,
   // Сколько раз минибосс уже поднимался после обнуления HP (Гнилой Джо).
   bossRevives:    Int = 0,
+  // Применил ли минибосс своё первое бьющее умение: у Белого волка оно бьёт
+  // вдвое, дальше двойной урон — только по шансу.
+  bossFirstSkillSpent: Boolean = false,
   // Текущая энергия моба. У рядовых мобов не расходуется (их скиллы бесплатны),
   // а элементаль тратит её на способности и восстанавливает по столько-то за раунд.
   monsterCurrentEnergy: Long = 0L,
@@ -195,6 +198,8 @@ case class SoloPveBattle(
       heroStunnedTurns     = (effects.heroStunnedTurns - 1).max(0),
       heroGroundedTurns    = (effects.heroGroundedTurns - 1).max(0),
       monsterWeakenedTurns = (effects.monsterWeakenedTurns - 1).max(0),
+      // Инстинкт волка живёт своими четырьмя ходами.
+      mobInstinctTurns     = (effects.mobInstinctTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
@@ -262,12 +267,13 @@ object SoloPveBattle {
       bossTurn       <- c.getOrElse[Int]("bossTurn")(0)
       charges             <- c.getOrElse[Int]("bossCharges")(0)
       revives             <- c.getOrElse[Int]("bossRevives")(0)
+      firstSkill          <- c.getOrElse[Boolean]("bossFirstSkillSpent")(false)
       monsterEnergy       <- c.getOrElse[Long]("monsterCurrentEnergy")(0L)
       group               <- c.getOrElse[GroupState]("group")(GroupState.empty)
       story               <- c.getOrElse[Option[String]]("story")(None)
       customName          <- c.getOrElse[Option[String]]("customName")(None)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
-                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, monsterEnergy, group,
+                         skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName)
 }

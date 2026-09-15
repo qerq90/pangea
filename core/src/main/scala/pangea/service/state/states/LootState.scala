@@ -61,7 +61,7 @@ case class LootState(
     }
 
   override def targetStates: Set[StateType] =
-    Set(StateType.Dungeon, StateType.GlobalMap, StateType.TreasureMobsFight, StateType.TreasureSchron, StateType.Loot, StateType.Girl, StateType.MarisaHunt)
+    Set(StateType.Dungeon, StateType.GlobalMap, StateType.TreasureMobsFight, StateType.TreasureSchron, StateType.Loot, StateType.Girl, StateType.MarisaHunt, StateType.FlowerMeadow)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

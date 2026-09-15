@@ -92,16 +92,16 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         t <- meadow(hero(int = 40L), LoreData.empty)
         (state, dao, inv, _, r) = t
         _     <- dao.writeSceneData(userId, MeadowScene(left = 3, nextAt = 0L).asJson)
-        // ранг 1 (50), вид 0, догадка не удалась (50 > 10), задержка
-        _     <- TestRandom.feedInts(50, 0, 50) *> TestRandom.feedLongs(120000L)
+        // волк не напал (50 > 3), ранг 1 (50), вид 0, догадка не удалась (50 > 10), задержка
+        _     <- TestRandom.feedInts(50, 50, 0, 50) *> TestRandom.feedLongs(120000L)
         _     <- state.action(testUser, tap("FlowerFind"), r)
         lore1 <- loreOf(dao)
-        // ранг 1, вид 2, догадка удалась (5 ≤ 10)
-        _     <- TestRandom.feedInts(50, 2, 5) *> TestRandom.feedLongs(120000L)
+        // без волка, ранг 1, вид 2, догадка удалась (5 ≤ 10)
+        _     <- TestRandom.feedInts(50, 50, 2, 5) *> TestRandom.feedLongs(120000L)
         _     <- state.action(testUser, tap("FlowerFind"), r)
         lore2 <- loreOf(dao)
         // теперь трава узнаётся; догадка больше не бросается
-        _     <- TestRandom.feedInts(50, 2) *> TestRandom.feedLongs(120000L)
+        _     <- TestRandom.feedInts(50, 50, 2) *> TestRandom.feedLongs(120000L)
         res   <- state.action(testUser, tap("FlowerFind"), r)
         all   <- texts(r)
         names  = inv.snapshot.map(_.name)
@@ -122,10 +122,10 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         t <- meadow(hero(), LoreData.empty.learn(Knowledge.FlowersRank1, alone = false))
         (state, dao, inv, _, r) = t
         _   <- dao.writeSceneData(userId, MeadowScene(left = 5, nextAt = 0L).asJson)
-        _   <- TestRandom.feedInts(2, 0) *> TestRandom.feedLongs(120000L)   // ранг 2, вид 0; знаний 1 ранга хватает → без броска догадки
+        _   <- TestRandom.feedInts(50, 2, 0) *> TestRandom.feedLongs(120000L)   // без волка; ранг 2, вид 0; знаний 1 ранга хватает → без броска догадки
         _   <- state.action(testUser, tap("FlowerFind"), r)
         _   <- dao.writeLoreData(userId, LoreData.empty.learn(Knowledge.FlowersRank1, alone = false).learn(Knowledge.FlowersRank2, alone = false).asJson)
-        _   <- TestRandom.feedInts(2, 0) *> TestRandom.feedLongs(120000L)
+        _   <- TestRandom.feedInts(50, 2, 0) *> TestRandom.feedLongs(120000L)
         _   <- state.action(testUser, tap("FlowerFind"), r)
         names = inv.snapshot.map(_.name)
       } yield assertTrue(names == List("Странный цветок", MaterialKind.herbsOfRank(2)(0).displayName))
@@ -139,12 +139,59 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         _     <- state.enter(testUser, r)             // ещё рано: перепланировали на 60 000
         tasks <- sched.scheduled
         _     <- TestClock.adjust(Duration.fromMillis(61000L))
-        _     <- TestRandom.feedInts(50, 1) *> TestRandom.feedLongs(120000L)
+        _     <- TestRandom.feedInts(50, 50, 1) *> TestRandom.feedLongs(120000L)
         _     <- state.enter(testUser, r)             // пора: цветок сразу
         scene <- sceneOf(dao)
       } yield assertTrue(tasks.exists(_.fireAt == 60000L)) &&
               assertTrue(inv.snapshot.size == 1) &&
               assertTrue(scene.exists(_.left == 1))
+    },
+
+    test("Белый волк (3%): цветок сорван, бой начинается сразу, первая встреча — реплика и след в знаниях; добыча вернёт на поляну") {
+      for {
+        t <- meadow(hero().copy(lvl = 9L, dungeonLevel = 7), LoreData.empty)
+        (state, dao, inv, sched, r) = t
+        _      <- dao.writeSceneData(userId, MeadowScene(left = 3, nextAt = 0L).asJson)
+        _      <- TestRandom.feedInts(3, 50, 1, 5)           // волк напал (3 ≤ 3), ранг 1, вид 1, догадка удалась (5 ≤ 10)
+        res    <- state.action(testUser, tap("FlowerFind"), r)
+        all    <- texts(r)
+        battle <- dao.readActiveBattle(userId).map(_.flatMap(_.as[pangea.model.battle.SoloPveBattle].toOption))
+        routing <- dao.readSceneData(userId).map(_.flatMap(_.as[pangea.service.state.states.LootState.LootData].toOption))
+        lore   <- loreOf(dao)
+        cancelled <- sched.cancelled
+        // вторая встреча — без реплики о первой
+        _      <- dao.writeSceneData(userId, MeadowScene(left = 1, nextAt = 0L).asJson)
+        r2     <- TestRenderer.make
+        _      <- TestRandom.feedInts(1, 50, 1)
+        _      <- state.action(testUser, tap("FlowerFind"), r2)
+        again  <- texts(r2)
+        last   <- dao.readSceneData(userId).map(_.flatMap(_.as[pangea.service.state.states.LootState.LootData].toOption))
+      } yield assertTrue(res == StateType.Battle) &&
+              assertTrue(inv.snapshot.size == 2) &&                                   // цветок всё же сорван
+              assertTrue(all.contains("услышал сзади шум") && all.contains("лабиринт его угодья")) &&
+              assertTrue(battle.exists(b => b.boss.contains(pangea.model.monster.MiniBoss.WhiteWolf) && b.monsterLvl == 2L)) && // (9−1)/4 = 2
+              assertTrue(routing.exists(_.returnState.contains(StateType.FlowerMeadow))) &&
+              assertTrue(routing.flatMap(_.eventData).flatMap(_.as[MeadowScene].toOption).contains(MeadowScene(left = 2, nextAt = 0L))) &&
+              assertTrue(lore.metWolf && lore.knows(Knowledge.FlowersRank1)) &&                 // догадка того же тика не потеряна
+              assertTrue(cancelled.contains(userId -> TaskKind.FlowerMeadow)) &&
+              assertTrue(again.contains("услышал сзади шум") && !again.contains("лабиринт его угодья")) &&
+              assertTrue(last.exists(_.returnState.isEmpty))                          // цветов не осталось — после добычи в лабиринт
+    },
+
+    test("возврат на поляну после волка: таймер ставится заново, цветок сразу не выдаётся") {
+      for {
+        t <- meadow(hero())
+        (state, dao, inv, sched, r) = t
+        _     <- dao.writeSceneData(userId, MeadowScene(left = 2, nextAt = 0L).asJson)
+        _     <- TestRandom.feedLongs(150000L)
+        _     <- state.enter(testUser, r)
+        scene <- sceneOf(dao)
+        tasks <- sched.scheduled
+        screen <- r.sentScreens.map(_.last)
+      } yield assertTrue(inv.snapshot.isEmpty) &&
+              assertTrue(scene.exists(s => s.left == 2 && s.nextAt == 150000L)) &&
+              assertTrue(tasks.exists(_.fireAt == 150000L)) &&
+              assertTrue(screen.text.contains("бродите по поляне"))
     },
 
     test("Густаво: травы сдаются все разом по цене, странные — по цене сена; Ришелье их не показывает") {

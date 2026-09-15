@@ -32,7 +32,7 @@ object CubeCraft {
   }
 
   private def isHead(i: Item): Boolean = i.details match {
-    case ItemDetails.Trophy(_, TrophyKind.Head) => true
+    case ItemDetails.Trophy(_, TrophyKind.Head, _) => true
     case _                                      => false
   }
 
@@ -123,8 +123,8 @@ object CubeCraft {
   }
 
   // 3 вещи одного набора → ингредиент этого набора. Редкость вещей не важна:
-  // в переплавку одинаково идут и синие, и фиолетовые. Наборы без ингредиента
-  // («Охотник») в рецепт не попадают — переплавлять их не во что.
+  // в переплавку одинаково идут и синие, и фиолетовые. Так добывается и шкура
+  // Белого волка — с самого волка её падает не больше одной.
   private object SetSalvage extends Recipe {
     val size = 3
 

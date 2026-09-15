@@ -49,6 +49,22 @@ sealed abstract class MiniBoss(
   /** Насколько (в п.п.) горение срезает ЕГО точность. 0 — пламя точности не мешает. */
   def burnAccuracyCutPct: Long = 0L
 
+  /** На сколько уровней героя приходится один уровень босса: у элементалей и
+   *  Джо — пять, у волка — четыре (см. [[MiniBoss.bossLvl]]). */
+  def levelDivisor: Long = MiniBoss.DefaultLevelDivisor
+
+  /** Уровень ЭТОГО босса для героя такого уровня. */
+  def bossLvl(heroLvl: Long): Long = MiniBoss.bossLvl(heroLvl, levelDivisor)
+
+  /** Стихия, которой бьют ВСЕ его атаки — и обычная, и способности: грани урона
+   *  по броне и HP двигаются как у стихии в оружии, а обычная атака ещё и
+   *  прокает её на героя. None — бьёт сталью, как все. У волка это холод. */
+  def attackElement: Option[Element] = None
+
+  /** Множитель урона, который он получает от яда и кровотечения. Зверь из плоти
+   *  и крови (волк) истекает ею на пятую часть охотнее. */
+  def dotDamageTakenMult: Double = 1.0
+
   /** Шанс (в %), что его ОБЫЧНАЯ атака подожжёт героя, и на сколько % при этом
    *  разгорается пламя. 0 — не поджигает: огонь есть только у огненного, камень
    *  и гниль бьют без него. */
@@ -76,8 +92,14 @@ object MiniBoss extends Enum[MiniBoss] {
 
   val values: IndexedSeq[MiniBoss] = findValues
 
-  /** Уровень босса: `(уровень героя − 1) / 5`, округление вниз, минимум 1. */
-  def bossLvl(heroLvl: Long): Long = ((heroLvl - 1L) / 5L).max(1L)
+  /** Сколько уровней героя даёт один уровень босса по умолчанию. */
+  val DefaultLevelDivisor: Long = 5L
+
+  /** Уровень босса: `(уровень героя − 1) / divisor`, округление вниз, минимум 1.
+   *  Элементали и Джо растут раз в пять уровней, Белый волк — раз в четыре
+   *  (см. [[MiniBoss.levelDivisor]]). */
+  def bossLvl(heroLvl: Long, divisor: Long = DefaultLevelDivisor): Long =
+    ((heroLvl - 1L) / divisor).max(1L)
 
   // ── Огненный элементаль ────────────────────────────────────────────────────────────────
   case object FireElemental extends MiniBoss("Огненный", "Огненного", Race.Elemental) {
@@ -342,6 +364,96 @@ object MiniBoss extends Enum[MiniBoss] {
 
     def ingredient: MaterialKind = MaterialKind.GhoulSkin
     def set: ItemSet             = ItemSet.Ghoul
+  }
+
+  // ── Белый волк ──────────────────────────────────────────────────────────────
+  /** Нападает на поляне цветов, без предупреждения: подготовиться к нему нельзя.
+   *  Быстрый, точный, бьёт холодом и рвёт до крови; сам же — зверь из плоти, и
+   *  яд с кровотечением берут его на пятую часть сильнее. */
+  case object WhiteWolf extends MiniBoss("Белый", "Белого", Race.Animal) {
+
+    val HpPerLvl: Long          = 1000L
+    val ArmorPerLvl: Long       = 650L
+    val AtkPerLvl: Long         = 300L
+    val EnergyPerLvl: Long      = 200L
+    val AccuracyPerLvl: Long    = 450L
+    val DefencePerLvl: Long     = 50L
+    val EvasionPerLvl: Long     = 200L
+    val EnergyRegenPerLvl: Long = 14L
+    val ExpPerLvl: Long         = 150L
+
+    /** Волк растёт раз в четыре уровня героя, а не в пять, как элементали. */
+    val LevelDivisor: Long = 4L
+
+    /** Яд и кровотечение бьют по нему на 20% сильнее. */
+    val DotDamageTakenPct: Long = 120L
+
+    // ── Способности (применяются по кругу) ──────────────────────────────────
+    /** Яростная пасть: доля атаки в урон, кровотечение при уроне по HP и цена. */
+    val FangsDamageFactor: Double = 0.5
+    val FangsBleedPct: Int        = 2
+    val FangsCostPerLvl: Long     = 7L
+
+    /** Яростные когти: то же, но слабее. */
+    val ClawsDamageFactor: Double = 0.4
+    val ClawsBleedPct: Int        = 2
+    val ClawsCostPerLvl: Long     = 7L
+
+    /** Животный инстинкт: +5% к атаке и уклонению на 4 раунда. */
+    val InstinctBoostPct: Long   = 5L
+    val InstinctTurns: Int       = 4
+    val InstinctCostPerLvl: Long = 7L
+
+    /** Смыкание пасти: четверть недостающего герою HP плюс доля атаки. Бесплатно. */
+    val JawsMissingHpPct: Long    = 25L
+    val JawsDamageFactor: Double  = 0.2
+
+    /** Первое умение в бою бьёт вдвое; дальше каждое — с таким шансом (в %). */
+    val CritChancePct: Long = 5L
+    val CritMult: Long      = 2L
+
+    // ── Добыча ───────────────────────────────────────────────────────────────
+    /** Коэффициент клыка за каждый BossLvL. */
+    val FangCoefPerLvl: Double = 6.0
+
+    def stats(bossLvl: Long): FightStats = FightStats(
+      atk      = AtkPerLvl * bossLvl,
+      hp       = HpPerLvl * bossLvl,
+      armor    = ArmorPerLvl * bossLvl,
+      defence  = DefencePerLvl * bossLvl,
+      evasion  = EvasionPerLvl * bossLvl,
+      accuracy = AccuracyPerLvl * bossLvl,
+      energy   = EnergyPerLvl * bossLvl
+    )
+
+    def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
+    def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    override def levelDivisor: Long = LevelDivisor
+
+    /** Стихии оружия волку безразличны — его слабость не в них, а в крови. */
+    def damageTakenMult(e: Element): Double = 1.0
+
+    override def dotDamageTakenMult: Double = DotDamageTakenPct / 100.0
+
+    /** Шерсть горит, как и всё живое. */
+    def immuneToBurn: Boolean = false
+
+    /** Пасть, когти, инстинкт, пропуск и смыкание пасти. */
+    def abilities: Int = 5
+
+    def plainDamageTakenMult: Double = 1.0
+
+    /** Бьёт как все: сперва броня, остаток в HP — но холодом (см. attackElement). */
+    def heroHitSplit: Option[(Double, Double)] = None
+
+    override def attackElement: Option[Element] = Some(Element.Cold)
+
+    /** Имя у него собственное — «Белый Волк», без расы. */
+    def monsterName: String = "Белый Волк"
+
+    def ingredient: MaterialKind = MaterialKind.WhiteWolfHide
+    def set: ItemSet             = ItemSet.Hunter
   }
 
   /** Минибосс по имени варианта — для восстановления из сохранённого боя. */

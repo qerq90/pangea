@@ -5,14 +5,17 @@ import io.circe.{Decoder, Encoder, HCursor, Json}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.MaterialGenerator
+import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.{Hero, Knowledge}
 import pangea.model.item.MaterialKind
+import pangea.model.monster.{MiniBoss, Monster, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
+import pangea.service.state.states.LootState
 import pangea.service.state.states.events.FlowerMeadowState._
 import pangea.service.state.{CharacterMenu, HerbLore, InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -25,7 +28,11 @@ import java.util.concurrent.TimeUnit
   * каждым таким есть шанс (интеллект ÷ 4 %) самому понять, какие цветы ценные.
   * Уйти можно в любой момент, без вопросов; «Персонаж» — обычное меню, по
   * возвращении поляна на месте: если цветок за это время «созрел», он выдаётся
-  * сразу, иначе таймер ставится заново. */
+  * сразу, иначе таймер ставится заново.
+  *
+  * С каждым сорванным цветком есть шанс (3%), что сзади подкрадётся Белый волк:
+  * подготовиться нельзя, бой начинается тут же. Добыча с него возвращает на
+  * поляну — если цветы ещё остались, таймер ставится заново. */
 case class FlowerMeadowState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
@@ -45,7 +52,8 @@ case class FlowerMeadowState(
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.FlowerMeadow) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.FlowerMeadow, StateType.HeroStats)
+  override def targetStates: Set[StateType] =
+    Set(StateType.Dungeon, StateType.FlowerMeadow, StateType.HeroStats, StateType.Battle)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -58,6 +66,9 @@ case class FlowerMeadowState(
             _     <- scheduleNext(user, now, MeadowScene(count, 0L))
             _     <- renderer.show(user, meadowScreen(intro = true))
           } yield ()
+        // Вернулись с добычи после волка: цветок сорван, таймер ставится заново.
+        case Some(s) if s.nextAt <= 0L =>
+          scheduleNext(user, now, s) *> renderer.show(user, meadowScreen(intro = false))
         // Вернулись из меню персонажа: созревший цветок — сразу, иначе таймер заново.
         case Some(s) if now >= s.nextAt => findOne(user, renderer).unit
         case Some(s) =>
@@ -77,7 +88,8 @@ case class FlowerMeadowState(
     ))
 
   /** Очередной цветок: ранг 98/2, вид случайный, узнан ли — по знаниям. Каждый
-    * цветок возвращает 2% от потолка энергии — поляна «лечит душу и тело». */
+    * цветок возвращает 2% от потолка энергии — поляна «лечит душу и тело».
+    * Бросок на волка идёт первым, а сам он нападает уже с цветком в руках. */
   private def findOne(user: User, renderer: Renderer): Task[StateType] =
     for {
       now   <- nowMs
@@ -87,6 +99,8 @@ case class FlowerMeadowState(
         case None => ZIO.succeed(StateType.Dungeon)
         case Some(s) =>
           for {
+            wolfRoll <- Random.nextIntBetween(1, 101)
+            wolf      = wolfRoll <= WolfChancePct
             rankRoll <- Random.nextIntBetween(1, 101)
             rank      = if (rankRoll <= HerbLore.RareHerbPct) 2 else 1
             pool      = MaterialKind.herbsOfRank(rank)
@@ -109,7 +123,8 @@ case class FlowerMeadowState(
             _         <- ZIO.when(kind == MaterialKind.StrangeFlower && !lore.knows(Knowledge.FlowersRank1))(
                            insight(user, hero, lore, now, renderer))
             left       = s.left - 1
-            out <- if (left <= 0)
+            out <- if (wolf) wolfAmbush(user, hero, s.copy(left = left), renderer)
+                   else if (left <= 0)
                      heroDao.writeSceneData(user.userId, Json.Null) *>
                        renderer.show(user, Screen(content.text("flowerMeadow.done"), Nil)).as(StateType.Dungeon)
                    else
@@ -118,6 +133,31 @@ case class FlowerMeadowState(
           } yield out
       }
     } yield res
+
+  /** Белый волк подкрался сзади: подготовиться нельзя — сразу бой. Первая встреча
+    * оставляет след в знаниях (и кнопку у трактирщика). Добыча вернёт на поляну,
+    * если цветы ещё остались; таймер там поставится заново (`nextAt = 0`). */
+  private def wolfAmbush(user: User, hero: Hero, scene: MeadowScene, renderer: Renderer): Task[StateType] = {
+    val wolf    = MiniBoss.WhiteWolf
+    val lvl     = wolf.bossLvl(hero.lvl)
+    val monster = Monster(0L, lvl, wolf.race, Rarity.Legendary, wolf.stats(lvl))
+    val battle  = SoloPveBattle.from(monster, hero).copy(bossKind = Some(wolf.entryName))
+    val routing =
+      if (scene.left <= 0) LootState.LootData(Nil, Nil)
+      else LootState.LootData(Nil, Nil, returnState = Some(StateType.FlowerMeadow),
+             eventData = Some(scene.copy(nextAt = 0L).asJson))
+    for {
+      _ <- scheduler.cancel(user.userId, TaskKind.FlowerMeadow)
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeSceneData(user.userId, routing.asJson)
+      _ <- renderer.show(user, Screen(content.text("flowerMeadow.wolfAmbush"), Nil))
+      // Знания читаем заново: догадка по цветку могла только что их пополнить.
+      lore <- HerbLore.readLore(heroDao, user.userId)
+      _ <- ZIO.when(!lore.metWolf)(
+             renderer.show(user, Screen(content.text("flowerMeadow.wolfFirstMeeting"), Nil)) *>
+               HerbLore.writeLore(heroDao, user.userId, lore.copy(metWolf = true)))
+    } yield StateType.Battle
+  }
 
   /** Бросок на догадку: интеллект ÷ 4 процентов. Удача — знания первого ранга, сам. */
   private def insight(user: User, hero: Hero, lore: pangea.model.hero.LoreData, now: Long, renderer: Renderer): Task[Unit] =
@@ -165,6 +205,9 @@ object FlowerMeadowState {
 
   /** Сколько процентов потолка энергии возвращает каждый цветок. */
   val EnergyPctPerFlower: Long = 2L
+
+  /** Шанс (в %), что за очередным цветком на героя нападёт Белый волк. */
+  val WolfChancePct: Int = 3
 
   val FindAction: String = """{"action":"FlowerFind"}"""
 

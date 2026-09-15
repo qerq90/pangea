@@ -3,14 +3,14 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.loot.LootGenerator
 import pangea.generator.loot.LootGenerator.LootDrop
-import pangea.model.item.{Gem => GemModel, GemKind, Item, ItemDetails, ItemType}
+import pangea.model.item.{Gem => GemModel, GemKind, Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.monster.{Race, Rarity}
 import zio.test._
 
 object LootGeneratorSpec extends ZIOSpecDefault {
 
   private def raceOf(i: Item): Option[String] = i.details match {
-    case ItemDetails.Trophy(r, _) => Some(r)
+    case ItemDetails.Trophy(r, _, _) => Some(r)
     case _                        => None
   }
 
@@ -210,6 +210,27 @@ object LootGeneratorSpec extends ZIOSpecDefault {
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
+    },
+
+    test("с Белого волка: клык (этаж встречи, коэффициент 6 × BossLvL), вещи «Охотника» обеих редкостей и шкура — не больше одной за бой") {
+      import pangea.model.monster.MiniBoss
+      val rolls = (1L to 400L).map(s => LootGenerator.rollMiniBoss(MiniBoss.WhiteWolf, 3L, 40L, Rng(s), floorLvl = 17L)._1)
+      val items = rolls.flatten.flatMap(_.itemOpt)
+      val fangs = items.filter(_.itemType == ItemType.Trophy)
+      val hides = items.filter(_.material.contains(pangea.model.item.MaterialKind.WhiteWolfHide))
+      val gear  = items.filter(_.set.contains(pangea.model.item.ItemSet.Hunter))
+      assertTrue(rolls.forall(r => r.size == 3 || r.size == 4)) &&
+      assertTrue(fangs.nonEmpty && hides.nonEmpty && gear.nonEmpty) &&
+      assertTrue(fangs.forall(f => f.lvl == 17L && f.name == TrophyKind.Fang.displayName)) &&
+      assertTrue(fangs.forall(_.details match {
+        case t: ItemDetails.Trophy => t.kind == TrophyKind.Fang && t.race == pangea.model.monster.Race.Animal.entryName && t.coefValue == 18.0
+        case _                     => false
+      })) &&
+      assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple) && gear.exists(_.rarity == pangea.model.item.Rarity.Blue)) &&
+      assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.Hunter.title))) &&
+      // с одного волка шкура — не больше одной, но со следующего может выпасть снова
+      assertTrue(rolls.forall(_.count(LootGenerator.isHide) <= 1)) &&
+      assertTrue(rolls.count(_.exists(LootGenerator.isHide)) > 1)
     },
 
     test("с каменного падают его магические камни и вещи «Каменного стража»") {

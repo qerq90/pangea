@@ -9,12 +9,12 @@ import zio.test._
 object SchronGeneratorSpec extends ZIOSpecDefault {
 
   private def kindOf(i: Item): Option[TrophyKind] = i.details match {
-    case ItemDetails.Trophy(_, k) => Some(k)
+    case ItemDetails.Trophy(_, k, _) => Some(k)
     case _                        => None
   }
 
   private def raceOf(i: Item): Option[String] = i.details match {
-    case ItemDetails.Trophy(r, _) => Some(r)
+    case ItemDetails.Trophy(r, _, _) => Some(r)
     case _                        => None
   }
 

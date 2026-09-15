@@ -166,7 +166,13 @@ case class BattleEffects(
   // Сколько ходов моб не может применить активное умение (комбо Молния+Холод).
   // Ставится с запасом в один тик: `tickBuffs` идёт в начале хода моба, поэтому
   // значение 2 гасит ровно ближайший каст — тот, что был бы ответом на комбо.
-  monsterSkillBlockedTurns: Int                    = 0
+  monsterSkillBlockedTurns: Int                    = 0,
+  // Кровотечение НА ГЕРОЕ — его оставляют пасть и когти Белого волка. Как и на
+  // мобе: не затухает, стакается, снимается любым лечением.
+  heroBleed:            Option[Bleed]              = None,
+  // Сколько ходов волк ещё «подстроился под добычу»: атака и уклонение выше
+  // (см. MiniBoss.WhiteWolf.InstinctBoostPct).
+  mobInstinctTurns:     Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
@@ -186,7 +192,8 @@ case class BattleEffects(
     monsterWeakenedTurns     = monsterWeakenedTurns,
     monsterWeakenedPct       = monsterWeakenedPct,
     monsterMaxArmorCut       = monsterMaxArmorCut,
-    monsterSkillBlockedTurns = monsterSkillBlockedTurns
+    monsterSkillBlockedTurns = monsterSkillBlockedTurns,
+    mobInstinctTurns         = mobInstinctTurns
   )
 
   /** Геройская половина: реген, горение и яд на герое, срезы, флаги наборов. Она
@@ -201,7 +208,8 @@ case class BattleEffects(
     doubleSpent          = doubleSpent,
     heroStunnedTurns     = heroStunnedTurns,
     heroGroundedTurns    = heroGroundedTurns,
-    heroPoison           = heroPoison
+    heroPoison           = heroPoison,
+    heroBleed            = heroBleed
   )
 
   /** Своя геройская половина плюс мобовая половина другого набора. */
@@ -221,7 +229,8 @@ case class BattleEffects(
       monsterWeakenedTurns     = mp.monsterWeakenedTurns,
       monsterWeakenedPct       = mp.monsterWeakenedPct,
       monsterMaxArmorCut       = mp.monsterMaxArmorCut,
-      monsterSkillBlockedTurns = mp.monsterSkillBlockedTurns
+      monsterSkillBlockedTurns = mp.monsterSkillBlockedTurns,
+      mobInstinctTurns         = mp.mobInstinctTurns
     )
   }
 
@@ -236,6 +245,9 @@ case class BattleEffects(
 
   /** Ослаблен ли урон моба горением. */
   def monsterWeakened: Boolean = monsterWeakenedTurns > 0
+
+  /** Подстроился ли волк под добычу (атака и уклонение выше). */
+  def mobInstinct: Boolean = mobInstinctTurns > 0
 }
 
 object BattleEffects {

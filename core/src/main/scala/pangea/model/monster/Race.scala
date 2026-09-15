@@ -257,12 +257,36 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
                                          |Заметки путешественника Ашалдарона о расах Пангеи""".stripMargin
   }
 
+  /** Раса Белого волка. Зверь из плоти и крови — и потому яд с кровотечением
+   *  берут его даже лучше, чем смертных (см. [[pangea.model.monster.MiniBoss.WhiteWolf]]).
+   *  В обычной генерации мобов не участвует: волк приходит сам, на поляну. */
+  case object Animal extends Race {
+    override def toString: String = "Животное"
+    val genitive: String          = "Животного"
+    val genitivePlural: String    = "животных"
+
+    override val description: String = """Животное:
+                                         |Зверь, каких в
+                                         |лабиринте водится больше, чем кажется.
+                                         |Живёт плотью и
+                                         |кровью — и умирает от них же: яд и раны
+                                         |берут его лучше, чем любого из смертных.
+                                         |Места обитания:
+                                         |Там, где есть
+                                         |добыча и где можно затаиться.
+                                         |
+                                         |Заметки путешественника Ашалдарона о расах Пангеи""".stripMargin
+  }
+
   /** Расы, на которых не действуют яд и кровотечение — им нечему течь и нечего
-   *  травить: у элементаля нет плоти, у нежити давно нет живой крови. */
-  def immuneToDots(race: Race): Boolean = bossRaces.contains(race)
+   *  травить: у элементаля нет плоти, у нежити давно нет живой крови. Зверь сюда
+   *  не входит: он из плоти, и его травят и режут как всех. */
+  def immuneToDots(race: Race): Boolean = dotImmune.contains(race)
+
+  private val dotImmune: Set[Race] = Set(Elemental, Undead)
 
   /** Расы, которые бывают только у минибоссов и в обычной игре не встречаются. */
-  val bossRaces: Set[Race] = Set(Elemental, Undead)
+  val bossRaces: Set[Race] = Set(Elemental, Undead, Animal)
 
   /** «Смертные» расы — всё, кроме боссовых. Именно ИЗ НИХ выбирают расу при
    *  создании персонажа, генерации обычных мобов, могил и заданий трактирщика:
