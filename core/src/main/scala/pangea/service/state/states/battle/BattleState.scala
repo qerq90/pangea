@@ -21,7 +21,7 @@ import pangea.service.state.states.LootState
 import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.state.{AzatData, HerbLore, MarisaQuest, NpcQuestLog, State, UserAction}
+import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -2182,15 +2182,14 @@ case class BattleState(
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong
-      // Шкура Белого волка падает один раз за всю жизнь героя.
-      lore <- HerbLore.readLore(heroDao, user.userId)
       // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
       // Группа — своя добыча с каждого павшего, по порядку гибели.
       (perMonster, rngAfter) = battle.boss match {
         case _ if storyFight => (List(battle.monsterName -> List.empty[LootGenerator.LootDrop]), Rng(seed))
         case Some(e) =>
+          // Этаж встречи нужен клыку волка: трофей считается по нему.
           val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed),
-            floorLvl = hero.dungeonLevel.toLong, hideAvailable = !lore.wolfHideDropped)
+            floorLvl = hero.dungeonLevel.toLong)
           (List(battle.monsterName -> d), r)
         case None =>
           fallen.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], Rng(seed))) { case ((acc, rng), m) =>
@@ -2261,9 +2260,6 @@ case class BattleState(
       // (если куба ещё нет и он не был куплен). Хранится флагом в azat_data.
       cubeDropped = fallen.exists(_.rarity == Rarity.Legendary.entryName) && azat.cubeAbsent
       _ <- ZIO.when(cubeDropped)(saveAzat(user, azat.copy(cube = CubeStatus.FoundInactive)))
-      // Выпала шкура — запоминаем: больше волк её не отдаст.
-      _ <- ZIO.when(perMonster.exists(_._2.exists(LootGenerator.isHide)))(
-             HerbLore.writeLore(heroDao, user.userId, lore.copy(wolfHideDropped = true)))
       _ <- heroDao.clearActiveBattle(user.userId)
       // Задание Густаво: павшие идут в счёт, пока действует его зелье.
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))

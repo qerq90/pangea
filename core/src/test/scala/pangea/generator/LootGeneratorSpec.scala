@@ -228,11 +228,9 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       })) &&
       assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple) && gear.exists(_.rarity == pangea.model.item.Rarity.Blue)) &&
       assertTrue(gear.forall(_.name.endsWith(pangea.model.item.ItemSet.Hunter.title))) &&
-      // за один бой шкура — не больше одной
+      // с одного волка шкура — не больше одной, но со следующего может выпасть снова
       assertTrue(rolls.forall(_.count(LootGenerator.isHide) <= 1)) &&
-      // шкура уже выпадала — её нет вовсе, остальное делится на троих
-      assertTrue((1L to 200L).flatMap(s => LootGenerator.rollMiniBoss(MiniBoss.WhiteWolf, 3L, 40L, Rng(s), floorLvl = 17L, hideAvailable = false)._1)
-        .forall(d => !LootGenerator.isHide(d)))
+      assertTrue(rolls.count(_.exists(LootGenerator.isHide)) > 1)
     },
 
     test("с каменного падают его магические камни и вещи «Каменного стража»") {

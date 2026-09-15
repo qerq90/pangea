@@ -123,13 +123,13 @@ object CubeCraft {
   }
 
   // 3 вещи одного набора → ингредиент этого набора. Редкость вещей не важна:
-  // в переплавку одинаково идут и синие, и фиолетовые. «Охотник» в рецепт не
-  // попадает: шкура Белого волка падает единожды, и переплавкой её не добыть.
+  // в переплавку одинаково идут и синие, и фиолетовые. Так добывается и шкура
+  // Белого волка — с самого волка её падает не больше одной.
   private object SetSalvage extends Recipe {
     val size = 3
 
     private def materialOf(set: ItemSet): Option[MaterialKind] =
-      MiniBoss.values.find(b => b.set == set && !b.ingredientOnce).map(_.ingredient)
+      MiniBoss.values.find(_.set == set).map(_.ingredient)
 
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val bySet = pool

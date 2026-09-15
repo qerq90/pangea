@@ -100,8 +100,8 @@ object CubeCraftSpec extends ZIOSpecDefault {
         charges = 50, rng).items.headOption.flatMap(_.material)
       assertTrue(salvage(ItemSet.WildFlame).contains(MaterialKind.EverburningIron)) &&
         assertTrue(salvage(ItemSet.StoneGuard).contains(MaterialKind.MagicStone)) &&
-        // шкура Белого волка падает единожды — переплавкой «Охотника» её не добыть
-        assertTrue(salvage(ItemSet.Hunter).isEmpty)
+        // три вещи «Охотника» — шкура Белого волка
+        assertTrue(salvage(ItemSet.Hunter).contains(MaterialKind.WhiteWolfHide))
     },
 
     test("шкура Белого волка + вещь → та же вещь в наборе «Охотник»") {

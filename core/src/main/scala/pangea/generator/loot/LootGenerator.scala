@@ -221,19 +221,17 @@ object LootGenerator {
     *
     * Уровень вещи берётся от уровня ГЕРОЯ с разбросом ±1: у босса свой BossLvL
     * (1..10), и вещь по нему была бы мусором. `floorLvl` — этаж встречи: по нему
-    * считается клык волка. `hideAvailable` — не выпадала ли ещё шкура волка: она
-    * падает один раз за всю жизнь героя, и не больше одной за бой. */
+    * считается клык волка. Шкура волка падает не больше одной с одного волка. */
   def rollMiniBoss(
       boss: MiniBoss,
       bossLvl: Long,
       heroLvl: Long,
       rng: Rng,
-      floorLvl: Long = 1L,
-      hideAvailable: Boolean = true
+      floorLvl: Long = 1L
   ): (List[LootDrop], Rng) = {
     val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
     val count       = (extra + bossLvl).toInt.max(1)
-    (0 until count).foldLeft((List.empty[LootDrop], r0, hideAvailable)) { case ((acc, r, hide), _) =>
+    (0 until count).foldLeft((List.empty[LootDrop], r0, true)) { case ((acc, r, hide), _) =>
       if (boss == MiniBoss.WhiteWolf) {
         val (drop, r2) = wolfDrop(boss, bossLvl, heroLvl, floorLvl, hide, r)
         (acc :+ drop, r2, hide && !isHide(drop))
@@ -252,8 +250,8 @@ object LootGenerator {
     drop.itemOpt.exists(_.material.contains(MaterialKind.WhiteWolfHide))
 
   /** С Белого волка поровну четыре вещи: клык, фиолетовая и синяя вещи
-    * «Охотника» и шкура. Если шкура уже выпадала, её четверть делится между
-    * остальными тремя — бросок идёт по укороченной шкале. */
+    * «Охотника» и шкура. Если шкура с этого волка уже выпала, её четверть
+    * делится между остальными тремя — бросок идёт по укороченной шкале. */
   private def wolfDrop(
       boss: MiniBoss,
       bossLvl: Long,

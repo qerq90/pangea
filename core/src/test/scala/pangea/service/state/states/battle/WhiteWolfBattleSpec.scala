@@ -3,7 +3,7 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{Bleed, Element, Poison, SoloPveBattle}
-import pangea.model.hero.{Hero, LoreData}
+import pangea.model.hero.Hero
 import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.stats.FightStats
@@ -115,7 +115,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       assertTrue(wolf.dotDamageTakenMult == 1.2) &&
       assertTrue(Element.values.forall(e => wolf.damageTakenMult(e) == 1.0) && wolf.plainDamageTakenMult == 1.0) &&
       assertTrue(wolf.attackElement.contains(Element.Cold) && !wolf.immuneToBurn) &&
-      assertTrue(wolf.ingredient == MaterialKind.WhiteWolfHide && wolf.set == ItemSet.Hunter && wolf.ingredientOnce)
+      assertTrue(wolf.ingredient == MaterialKind.WhiteWolfHide && wolf.set == ItemSet.Hunter)
     },
 
     test("экран боя: имя «Белый Волк» и раса «Животное»") {
@@ -260,7 +260,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
     },
 
     // ── Победа ────────────────────────────────────────────────────────────────
-    test("победа: 150 × BossLvL опыта, своя реплика, добыча ведёт обратно на поляну, шкура запоминается") {
+    test("победа: 150 × BossLvL опыта, своя реплика, добыча ведёт обратно на поляну, клык — этажом встречи") {
       val h = hero(atk = 100000L)
       val routing = LootState.LootData(Nil, Nil, returnState = Some(StateType.FlowerMeadow))
       for {
@@ -272,14 +272,12 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
         updated <- dao.getHeroByUserId(userId).map(_.get)
         log     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         loot    <- dao.readSceneData(userId).map(_.flatMap(_.as[LootState.LootData].toOption).get)
-        lore    <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
-        hideDropped = loot.items.exists(_.material.contains(MaterialKind.WhiteWolfHide))
       } yield assertTrue(out == StateType.Loot) &&
               assertTrue(updated.exp == 300L) && assertTrue(log.contains("Получено 300 опыта")) &&
               assertTrue(log.contains("Волк затих") && !log.contains("Надо посмотреть вокруг")) &&
               assertTrue(loot.returnState.contains(StateType.FlowerMeadow)) &&
               assertTrue(loot.items.nonEmpty) &&
-              assertTrue(lore.wolfHideDropped == hideDropped) &&
+              assertTrue(loot.items.count(_.material.contains(MaterialKind.WhiteWolfHide)) <= 1) &&
               // клык — этажом встречи и с коэффициентом 6 × BossLvL
               assertTrue(loot.items.filter(_.itemType == ItemType.Trophy).forall(f => f.lvl == 13L && f.name == "Клык Белого волка"))
     }

@@ -65,10 +65,6 @@ sealed abstract class MiniBoss(
    *  и крови (волк) истекает ею на пятую часть охотнее. */
   def dotDamageTakenMult: Double = 1.0
 
-  /** Ингредиент выпадает лишь однажды за всю жизнь героя и переплавкой вещей
-   *  набора не добывается (шкура волка). */
-  def ingredientOnce: Boolean = false
-
   /** Шанс (в %), что его ОБЫЧНАЯ атака подожжёт героя, и на сколько % при этом
    *  разгорается пламя. 0 — не поджигает: огонь есть только у огненного, камень
    *  и гниль бьют без него. */
@@ -458,8 +454,6 @@ object MiniBoss extends Enum[MiniBoss] {
 
     def ingredient: MaterialKind = MaterialKind.WhiteWolfHide
     def set: ItemSet             = ItemSet.Hunter
-
-    override def ingredientOnce: Boolean = true
   }
 
   /** Минибосс по имени варианта — для восстановления из сохранённого боя. */
