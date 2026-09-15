@@ -20,6 +20,10 @@ sealed trait MapZone extends EnumEntry {
   /** Описание целой карты. */
   def description: String
 
+  /** Ступень зоны: Кинэт 1 … Заброшенный Храм 6. По ней считается, сколько
+   *  ингредиентов и трав может принести клад. */
+  def tier: Int = MapZone.values.indexOf(this) + 1
+
   def mapName: String  = s"🗺 Карта клада $treasureName"
   def halfName: String = s"🗺 Половинка карты клада $treasureName"
 
