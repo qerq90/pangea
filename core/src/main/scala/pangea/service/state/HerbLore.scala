@@ -69,7 +69,8 @@ object HerbLore {
       inv     <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       obsolete = inv.items.data.filter(i => i.questItem.flatMap(knowledgeOf).exists(lore.knows))
       _       <- ZIO.foreachDiscard(obsolete)(i => inventoryRepo.removeItem(i.id, hero.id).mapError(e => new Throwable(e.toString)))
-      settled  = obsolete.flatMap(_.questItem).foldLeft(lore)((l, k) => l.bookMastered(k.entryName))
+      // Книга в сумке — значит, куплена: Густаво это помнит и после того, как она ушла.
+      settled  = obsolete.flatMap(_.questItem).foldLeft(lore)((l, k) => l.bookMastered(k.entryName).bookBought(k.entryName))
       _       <- ZIO.when(settled != lore)(writeLore(heroDao, userId, settled))
     } yield (settled, obsolete)
 

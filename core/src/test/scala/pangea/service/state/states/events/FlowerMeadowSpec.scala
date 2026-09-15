@@ -233,8 +233,9 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         r2  <- TestRenderer.make
         _   <- GustavoHerbsState(dao2, TestInventoryRepository.accepting, TestItemRepository.make, c).enter(testUser, r2)
         self <- r2.sentScreens.map(_.last)
+        bought <- loreOf(dao)
       } yield assertTrue(offer.text.contains("Пятнадцать тысяч") && offer.choices.map(_.id) == List("BuyTreatise1", "Back")) &&
-              assertTrue(h.silver == 5000L) &&
+              assertTrue(h.silver == 5000L && bought.bought(QuestItemKind.FlowerTreatise1.entryName)) &&
               assertTrue(inv.snapshot.exists(_.questItem.contains(QuestItemKind.FlowerTreatise1))) &&
               assertTrue(again.text.contains("дочитай")) &&
               assertTrue(self.text.contains("Сам разобрался") && self.choices.map(_.id) == List("BuyTreatise2", "Back"))
@@ -275,7 +276,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(all.contains("потратили время") && all.contains("Знания о цветах 1 ранга"))
     },
 
-    test("знание, добытое догадкой, делает купленный трактат лишним: книга уходит из сумки, Густаво предлагает вторую часть") {
+    test("знание, добытое догадкой, делает купленный трактат лишним: книга тихо уходит, а Густаво уверен, что её дочитали") {
       val book = QuestItemKind.item(QuestItemKind.FlowerTreatise1).copy(id = 9L)
       for {
         c     <- content
@@ -297,7 +298,9 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(!inv.snapshot.exists(_.isQuestItem)) &&                          // трактат ушёл — тихо
               assertTrue(!all.contains("больше не нужен")) &&
               assertTrue(lore.bookFailures.isEmpty && lore.bookCooldowns.isEmpty) &&       // следы чтения стёрты
-              assertTrue(gus.text.contains("Сам разобрался") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
+              assertTrue(lore.bought(QuestItemKind.FlowerTreatise1.entryName)) &&
+              assertTrue(gus.text.contains("По глазам вижу") && !gus.text.contains("Сам разобрался") &&
+                         gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
     },
 
     test("Густаво: трактат в сумке о том, что герой уже знает, выбрасывается на месте, а не считается недочитанным") {
@@ -313,7 +316,8 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         gus <- r.sentScreens.map(_.last)
       } yield assertTrue(inv.snapshot.isEmpty) &&
               assertTrue(!all.contains("больше не нужен")) &&
-              assertTrue(!gus.text.contains("дочитай") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
+              assertTrue(!gus.text.contains("дочитай") && gus.text.contains("По глазам вижу") &&
+                         gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
     },
 
     test("«Знания» в меню персонажа: пусто — так и сказано; с знанием — название и как получено") {
