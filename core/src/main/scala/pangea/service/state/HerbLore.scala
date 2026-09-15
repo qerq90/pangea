@@ -5,7 +5,8 @@ import pangea.dao.hero.HeroDao
 import pangea.model.hero.{Hero, Knowledge, LoreData}
 import pangea.model.item.{Item, MaterialKind, QuestItemKind}
 import pangea.model.user.UserId
-import zio.Task
+import pangea.repository.inventory.InventoryRepository
+import zio.{Task, ZIO}
 
 /** Травы и знания о них — общее для поляны, Густаво и инвентаря: что герой
   * узнаёт в сорванном цветке, почём Густаво берёт травы, как читается трактат. */
@@ -52,6 +53,25 @@ object HerbLore {
 
   def writeLore(heroDao: HeroDao, userId: UserId, lore: LoreData): Task[Unit] =
     heroDao.writeLoreData(userId, lore.asJson)
+
+  /** Трактаты о том, что герой уже знает, ему больше не нужны — каким бы путём
+    * знание ни пришло. Такие книги уходят из сумки, а их счёт неудач и срок
+    * «переварить» стираются; итоговые знания пишутся, если что-то изменилось.
+    * Возвращает записанные знания и выброшенные книги. */
+  def settleBooks(
+      heroDao: HeroDao,
+      inventoryRepo: InventoryRepository,
+      userId: UserId,
+      hero: Hero,
+      lore: LoreData
+  ): Task[(LoreData, List[Item])] =
+    for {
+      inv     <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      obsolete = inv.items.data.filter(i => i.questItem.flatMap(knowledgeOf).exists(lore.knows))
+      _       <- ZIO.foreachDiscard(obsolete)(i => inventoryRepo.removeItem(i.id, hero.id).mapError(e => new Throwable(e.toString)))
+      settled  = obsolete.flatMap(_.questItem).foldLeft(lore)((l, k) => l.bookMastered(k.entryName))
+      _       <- ZIO.when(settled != lore)(writeLore(heroDao, userId, settled))
+    } yield (settled, obsolete)
 
   /** Порог броска (1..100) на догадку по странному цветку. */
   def insightChance(hero: Hero, nowMs: Long): Long = hero.effectiveBaseStats(nowMs).int / InsightIntDivisor
