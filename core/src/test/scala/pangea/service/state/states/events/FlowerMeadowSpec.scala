@@ -275,6 +275,47 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(all.contains("потратили время") && all.contains("Знания о цветах 1 ранга"))
     },
 
+    test("знание, добытое догадкой, делает купленный трактат лишним: книга уходит из сумки, Густаво предлагает вторую часть") {
+      val book = QuestItemKind.item(QuestItemKind.FlowerTreatise1).copy(id = 9L)
+      for {
+        c     <- content
+        dao   <- TestHeroDao.withHero(userId, hero(int = 40L))
+        _     <- dao.writeLoreData(userId, LoreData.empty.bookFailed(QuestItemKind.FlowerTreatise1.entryName, 999L).asJson)
+        inv    = TestInventoryRepository.withItems(List(book))
+        sched <- TestScheduler.make
+        r     <- TestRenderer.make
+        state  = FlowerMeadowState(dao, inv, TestItemRepository.make, sched, c)
+        _     <- dao.writeSceneData(userId, MeadowScene(left = 3, nextAt = 0L).asJson)
+        _     <- TestRandom.feedInts(50, 50, 2, 5) *> TestRandom.feedLongs(120000L) // без волка, ранг 1, вид 2, догадка удалась
+        _     <- state.action(testUser, tap("FlowerFind"), r)
+        all   <- texts(r)
+        lore  <- loreOf(dao)
+        r2    <- TestRenderer.make
+        _     <- GustavoHerbsState(dao, inv, TestItemRepository.make, c).enter(testUser, r2)
+        gus   <- r2.sentScreens.map(_.last)
+      } yield assertTrue(lore.knows(Knowledge.FlowersRank1) && lore.learnedAlone(Knowledge.FlowersRank1)) &&
+              assertTrue(!inv.snapshot.exists(_.isQuestItem)) &&                          // трактат ушёл — тихо
+              assertTrue(!all.contains("больше не нужен")) &&
+              assertTrue(lore.bookFailures.isEmpty && lore.bookCooldowns.isEmpty) &&       // следы чтения стёрты
+              assertTrue(gus.text.contains("Сам разобрался") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
+    },
+
+    test("Густаво: трактат в сумке о том, что герой уже знает, выбрасывается на месте, а не считается недочитанным") {
+      val book = QuestItemKind.item(QuestItemKind.FlowerTreatise1).copy(id = 9L)
+      for {
+        c   <- content
+        dao <- TestHeroDao.withHero(userId, hero())
+        _   <- dao.writeLoreData(userId, LoreData.empty.learn(Knowledge.FlowersRank1, alone = true).asJson)
+        inv  = TestInventoryRepository.withItems(List(book))
+        r   <- TestRenderer.make
+        _   <- GustavoHerbsState(dao, inv, TestItemRepository.make, c).enter(testUser, r)
+        all <- texts(r)
+        gus <- r.sentScreens.map(_.last)
+      } yield assertTrue(inv.snapshot.isEmpty) &&
+              assertTrue(!all.contains("больше не нужен")) &&
+              assertTrue(!gus.text.contains("дочитай") && gus.choices.map(_.id) == List("BuyTreatise2", "Back"))
+    },
+
     test("«Знания» в меню персонажа: пусто — так и сказано; с знанием — название и как получено") {
       for {
         c   <- content

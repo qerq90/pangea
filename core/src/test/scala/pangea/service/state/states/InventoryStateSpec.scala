@@ -118,10 +118,31 @@ object InventoryStateSpec extends ZIOSpecDefault {
         screen <- renderer.sentScreens.map(_.last)
         _      <- state.action(testUser, tap("Drop"), renderer)
         left    = invRepo.snapshot
+        after  <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("Drop"), renderer)
+        _      <- state.action(testUser, tap("Drop"), renderer)
+        last   <- renderer.sentScreens.map(_.last)
       } yield assertTrue(screen.text.contains("В сумке таких: 3")) &&
               // ушёл ровно один камень из стопки
               assertTrue(left.size == 2) &&
-              assertTrue(!left.exists(_.id == 221L))
+              assertTrue(!left.exists(_.id == 221L)) &&
+              // и мы остались на карточке стопки — со следующим камнем и счётом 2
+              assertTrue(after.text.contains("В сумке таких: 2") && after.choices.exists(_.id == "Drop")) &&
+              // выбросили последний — только теперь список
+              assertTrue(invRepo.snapshot.isEmpty && !last.choices.exists(_.id == "Drop"))
+    },
+
+    test("пыль из стопки сыплется по одной, не выкидывая из карточки") {
+      val heroWithSword = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = sword))
+      val dusts = (1 to 2).map(i => dustItem(MaterialKind.RubyDust, 300L + i)).toList
+      for {
+        quad                          <- makeState(heroWithSword, dusts)
+        (state, _, invRepo, renderer)  = quad
+        _      <- state.action(testUser, selectItem(302L), renderer)
+        _      <- state.action(testUser, tap("DustWeapon"), renderer)
+        after  <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(invRepo.snapshot.size == 1) &&
+              assertTrue(after.choices.exists(_.id == "DustWeapon") && after.text.contains("Рубиновая пыль"))
     },
 
     // ── Ломка камней ─────────────────────────────────────────────────────────

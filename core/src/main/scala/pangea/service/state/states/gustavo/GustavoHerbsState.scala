@@ -38,17 +38,23 @@ case class GustavoHerbsState(
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  /** Что Густаво скажет — по знаниям героя и по книге, которая, может, уже в сумке. */
+  /** Что Густаво скажет — по знаниям героя, и только потом по книге в сумке:
+    * знание, добытое своим умом, важнее недочитанного трактата. Трактат о том,
+    * что герой уже знает, тихо уходит из сумки. */
   private def talk(user: User, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
-      lore  <- HerbLore.readLore(heroDao, user.userId)
+      lore0 <- HerbLore.readLore(heroDao, user.userId)
+      // Трактат о том, что герой уже знает, тихо уходит из сумки.
+      settled <- HerbLore.settleBooks(heroDao, inventoryRepo, user.userId, hero, lore0)
+      (lore, _) = settled
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       items  = inv.items.data
       back   = content.choice("Back", "gustavo.herbs.back")
       screen =
         if (lore.knows(Knowledge.FlowersRank2))
           Screen(content.text("gustavo.herbs.nothingMore"), List(back))
+        // Книга о ещё не известном — дочитай; о том, что и так знаешь, уже выброшена выше.
         else if (MarisaQuest.has(items, QuestItemKind.FlowerTreatise1) || MarisaQuest.has(items, QuestItemKind.FlowerTreatise2))
           Screen(content.text("gustavo.herbs.finishReading"), List(back))
         else if (lore.knows(Knowledge.FlowersRank1)) {

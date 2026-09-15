@@ -324,14 +324,30 @@ case class InventoryState(
     for {
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      _ <- inv.items.data.find(_.id == itemId) match {
-        case None => ZIO.unit
+      res <- inv.items.data.find(_.id == itemId) match {
+        case None => showList(user, renderer)
         case Some(item) =>
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil))
+            renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil)) *>
+            afterStackUse(user, hero, item, renderer)
       }
-      res <- showList(user, renderer)
     } yield res
+
+  /** Куда вернуться, потратив одну вещь: если это была стопка и в ней что-то
+    * осталось — на карточку следующей такой же (представитель стопки — последний,
+    * как в [[ItemStack.grouped]]), чтобы выбрасывать или сыпать пыль по одной,
+    * не возвращаясь всякий раз в список; иначе — в список. */
+  private def afterStackUse(user: User, hero: Hero, spent: Item, renderer: Renderer): Task[StateType] =
+    ItemStack.key(spent) match {
+      case None => showList(user, renderer)
+      case Some(k) =>
+        inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).flatMap { inv =>
+          inv.items.data.filter(i => ItemStack.key(i).contains(k)) match {
+            case Nil  => showList(user, renderer)
+            case rest => showItem(user, rest.last.id, renderer)
+          }
+        }
+    }
 
   // ── Объединение половинок карты ────────────────────────────────────────────
 
@@ -429,7 +445,7 @@ case class InventoryState(
             case None => showList(user, renderer)
             case Some((emptied, gem)) =>
               inventoryRepo.updateItem(hero.id, emptied).mapError(e => new Throwable(e.toString)) *>
-                grantDust(user, hero, gem, renderer)
+                grantDust(user, hero, gem, renderer, showList(user, renderer))
           }
         }
     }
@@ -458,13 +474,16 @@ case class InventoryState(
         case None => showList(user, renderer)
         case Some(gem) =>
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            grantDust(user, hero, gem, renderer)
+            grantDust(user, hero, gem, renderer, afterStackUse(user, hero, item, renderer))
       }
     }
 
   /** Выдаёт пыль за сломанный камень. Пыль кладётся отдельными предметами, поэтому
-    * место в сумке проверяем заранее: лучше отказать, чем потерять часть пыли. */
-  private def grantDust(user: User, hero: Hero, gem: Gem, renderer: Renderer): Task[StateType] =
+    * место в сумке проверяем заранее: лучше отказать, чем потерять часть пыли.
+    * `andThen` — куда уйти после: раскрошенный камень из стопки возвращает на
+    * карточку стопки, камень из гнезда — в список. */
+  private def grantDust(user: User, hero: Hero, gem: Gem, renderer: Renderer,
+                        andThen: => Task[StateType]): Task[StateType] =
     for {
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       count  = gem.dustYield
@@ -480,7 +499,7 @@ case class InventoryState(
           } *>
             renderer.show(user, Screen(content.format("inventory.breakGemDone",
               "gem" -> gem.displayName, "count" -> count.toString, "dust" -> gem.dust.displayName), Nil)) *>
-            showList(user, renderer)
+            andThen
     } yield res
 
   /** Общая обвязка «взять выбранный в сцене предмет и героя». */
@@ -523,7 +542,7 @@ case class InventoryState(
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
             heroDao.updateWeaponDust(user.userId, outcome.next) *>
             renderer.show(user, Screen(line, Nil)) *>
-            showList(user, renderer)
+            afterStackUse(user, hero, item, renderer)
       }
     }
 
