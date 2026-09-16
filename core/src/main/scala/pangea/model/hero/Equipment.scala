@@ -122,6 +122,7 @@ case class Equipment(
     case ItemType.Gem              => Nil
     case ItemType.Material         => Nil
     case ItemType.QuestItem        => Nil
+    case ItemType.Brew             => Nil
     case ItemType.NoItem           => Nil
   }
 }

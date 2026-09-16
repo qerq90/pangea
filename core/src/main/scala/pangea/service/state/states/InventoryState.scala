@@ -2,6 +2,10 @@ package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
+import pangea.model.item.{BrewEffect, BrewRates}
+import pangea.model.stats.StatBoost
+import pangea.model.trauma.Trauma
+import pangea.service.state.AzatData
 import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
@@ -44,6 +48,8 @@ case class InventoryState(
       "CrushGem"          -> Target.Run { (u, _,  r) => offerCrush(u, r) },
       "CrushGemDo"        -> Target.Run { (u, _,  r) => doCrush(u, r) },
       "DustWeapon"        -> Target.Run { (u, _,  r) => sprinkleDust(u, r) },
+      "DrinkBrew"         -> Target.Run { (u, _,  r) => drinkBrew(u, r) },
+      "CureTraumaPick"    -> Target.Run { (u, ua, r) => cureTrauma(u, ua, r) },
       // «Письмо Марисе»: вскрыть письмо, отправиться по карте Кельвина.
       "OpenLetter"        -> Target.Run { (u, _,  r) => openLetter(u, r) },
       "UseKelvinMap"      -> Target.Run { (u, _,  r) => useKelvinMap(u, r) },
@@ -107,6 +113,8 @@ case class InventoryState(
         case None => showList(user, renderer)
         case Some(item) if item.isQuestItem =>
           writeScene(user, scene.copy(selectedId = Some(itemId))) *> showQuestItem(user, item, renderer)
+        case Some(item) if item.brew.isDefined =>
+          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showBrew(user, item, inv.items.data, renderer)
         case Some(item) =>
           // Сколько таких же лежит в сумке — счётчик над описанием; кнопки при
           // этом трогают ровно один предмет из стопки.
@@ -133,6 +141,108 @@ case class InventoryState(
             renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
       }
     } yield res
+
+  // ── Отвары из трав ─────────────────────────────────────────────────────────
+
+  /** Карточка отвара: описание, рецепт, сколько таких в сумке; «Выпить» — только у
+    * того, что пьётся (сонный дурман ждёт своего часа, шнапс уходит Трактирщику). */
+  private def showBrew(user: User, item: Item, all: List[Item], renderer: Renderer): Task[StateType] = {
+    val kind    = item.brew.get
+    val count   = ItemStack.countOf(all, item)
+    val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + stackLine(count)
+    val choices = List(
+      Option.when(kind.drinkable)(content.choice("DrinkBrew", "brew.drink").copy(color = ChoiceColor.Positive, row = Some(0))),
+      Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
+      Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
+    ).flatten
+    renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
+  }
+
+  /** Глоток: по виду отвара. Костоправный сперва спрашивает, какую травму лечить. */
+  private def drinkBrew(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      item.brew.map(_.effect) match {
+        case Some(BrewEffect.CureTrauma) => offerCure(user, item, hero, renderer)
+        case Some(BrewEffect.RefillFlask) =>
+          hero.equipment.flask.details match {
+            case f: ItemDetails.Flask if f.charges < f.maxCharges =>
+              val refilled = hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.refilled))
+              heroDao.updateEquipment(user.userId, refilled) *>
+                consume(user, item, hero, content.format("brew.refilled", "flask" -> hero.equipment.flask.name), renderer)
+            case _: ItemDetails.Flask =>
+              renderer.show(user, Screen(content.text("brew.flaskFull"), Nil)) *> showItem(user, item.id, renderer)
+            case _ =>
+              renderer.show(user, Screen(content.text("brew.noFlask"), Nil)) *> showItem(user, item.id, renderer)
+          }
+        case Some(BrewEffect.InstantRest) =>
+          for {
+            now  <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            azat <- AzatData.load(heroDao, user.userId, now)
+            _    <- heroDao.writeAzatData(user.userId, azat.copy(instantRests = azat.instantRests + BrewRates.InstantRests).asJson)
+            res  <- consume(user, item, hero, content.format("brew.rests",
+                      "count" -> BrewRates.InstantRests.toString,
+                      "total" -> (azat.instantRests + BrewRates.InstantRests).toString), renderer)
+          } yield res
+        case Some(BrewEffect.Boost(name, buff, label)) =>
+          for {
+            now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            _   <- heroDao.updateStatBoosts(user.userId,
+                     hero.statBoosts.add(StatBoost(name, buff, now + BrewRates.BoostDurationMs), now))
+            res <- consume(user, item, hero, content.format("brew.boosted",
+                     "brew" -> item.name, "pct" -> BrewRates.BoostPct.toString, "stat" -> label), renderer)
+          } yield res
+        case _ => showItem(user, item.id, renderer)
+      }
+    }
+
+  /** Какую травму лечить: лёгкие и средние по кнопке, тяжёлые — только перечислены. */
+  private def offerCure(user: User, item: Item, hero: Hero, renderer: Renderer): Task[StateType] =
+    for {
+      now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+      active   = hero.activeTraumas(now)
+      curable  = active.filter(_.severity != Trauma.Heavy)
+      heavy    = active.filter(_.severity == Trauma.Heavy)
+      res <-
+        if (active.isEmpty)
+          renderer.show(user, Screen(content.text("brew.noTraumas"), Nil)) *> showItem(user, item.id, renderer)
+        else if (curable.isEmpty)
+          renderer.show(user, Screen(content.text("brew.onlyHeavy"), Nil)) *> showItem(user, item.id, renderer)
+        else {
+          val heavyLine = if (heavy.isEmpty) "" else "\n" + content.format("brew.heavyStay", "names" -> heavy.map(_.name).mkString(", "))
+          val choices = curable.distinct.map(t =>
+            Choice("CureTraumaPick", t.name, data = Map("trauma" -> t.name), color = ChoiceColor.Positive, row = Some(0))
+          ) :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
+          renderer.show(user, Screen(content.text("brew.whichTrauma") + heavyLine, choices)).as(StateType.Inventory)
+        }
+    } yield res
+
+  private def cureTrauma(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      for {
+        now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+        chosen = payloadField(ua, "trauma").flatMap(Trauma.byName)
+                   .filter(t => t.severity != Trauma.Heavy && hero.activeTraumas(now).contains(t))
+        res <- chosen match {
+          case None => showItem(user, item.id, renderer)
+          case Some(t) =>
+            val names = removeFirst(hero.traumaNames, t.name)
+            val until = if (names.isEmpty) None else hero.traumaUntil
+            heroDao.updateTrauma(user.userId, until, names) *>
+              consume(user, item, hero, content.format("brew.cured", "trauma" -> t.name), renderer)
+        }
+      } yield res
+    }
+
+  private def removeFirst(names: List[String], name: String): List[String] = {
+    val i = names.indexOf(name)
+    if (i < 0) names else names.patch(i, Nil, 1)
+  }
+
+  /** Отвар выпит: предмет уходит, сообщение, и — если в стопке ещё есть — обратно на карточку. */
+  private def consume(user: User, item: Item, hero: Hero, line: String, renderer: Renderer): Task[StateType] =
+    inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+      renderer.show(user, Screen(line, Nil)) *>
+      afterStackUse(user, hero, item, renderer)
 
   // ── Сюжетные предметы («Письмо Марисе») ────────────────────────────────────
 
@@ -733,6 +843,7 @@ object InventoryState {
     case ItemType.Gem              => Item.NoItem // камень не экипируется
     case ItemType.Material         => Item.NoItem // материал не экипируется
     case ItemType.QuestItem        => Item.NoItem // сюжетный предмет не экипируется
+    case ItemType.Brew             => Item.NoItem // отвар не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -760,6 +871,7 @@ object InventoryState {
     case ItemType.Gem              => eq // камень не экипируется
     case ItemType.Material         => eq // материал не экипируется
     case ItemType.QuestItem        => eq // сюжетный предмет не экипируется
+    case ItemType.Brew             => eq // отвар не экипируется
     case ItemType.NoItem           => eq
   }
 

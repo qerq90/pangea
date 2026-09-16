@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
+import pangea.model.item.{BrewKind, Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
 import pangea.model.monster.MiniBoss
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
@@ -144,6 +144,22 @@ object CubeCraft {
     }
   }
 
+  // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты
+  // перебираются по порядку BrewKind; травы одного рецепта у другого не
+  // отбираются — каждый отвар берёт ровно свою тройку.
+  private object HerbBrew extends Recipe {
+    val size = 3
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
+      BrewKind.values.iterator.map { kind =>
+        // Для каждой травы рецепта — свой предмет из пула, без повторов.
+        val picked = kind.recipe.foldLeft(Option(List.empty[Item])) {
+          case (Some(acc), herb) => pool.find(i => i.material.contains(herb) && !acc.contains(i)).map(acc :+ _)
+          case (None, _)         => None
+        }
+        picked.map(consumed => (consumed, BrewKind.item(kind), rng))
+      }.collectFirst { case Some(m) => m }
+  }
+
   // От самого длинного рецепта к самому короткому.
   private val recipes: List[Recipe] = List(
     NineHeads,                                             // 9
@@ -151,6 +167,7 @@ object CubeCraft {
     GemUpgrade,                                            // 3
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
+    HerbBrew,                                              // 3
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     SetInfusion                                            // 2
   )
