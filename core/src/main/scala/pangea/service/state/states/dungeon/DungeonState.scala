@@ -118,9 +118,10 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     val newEnergy    = (hero.fightStats.energy + (maxEn * 10 / 100L).max(1L)).min(maxEn)
     val energyBack   = newEnergy - hero.fightStats.energy
     val flask    = hero.equipment.flask
+    // Ручей — вода: наполняет только флягу целителя; кузнеца, стихийную и прочие — нет.
     val flaskDetails = flask.details match {
-      case f: pangea.model.item.ItemDetails.Flask => Some(f)
-      case _                                      => None
+      case f: pangea.model.item.ItemDetails.Flask if f.effect.refillsAtSpring => Some(f)
+      case _                                                                  => None
     }
     val hasFlask = flaskDetails.isDefined
     for {

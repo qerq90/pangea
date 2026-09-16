@@ -269,6 +269,55 @@ object FlaskBattleSpec extends ZIOSpecDefault {
               assertTrue(e2.effects.monsterBleed.contains(Bleed(FlaskRates.CoatBleedPct)))
     },
 
+    test("вампирская фляга пьёт кровь павших: 10% на +1 заряд с каждого, не выше полной; полной бросок не нужен") {
+      def kill(start: Int, roll: Int) = {
+        val h  = hero(FlaskKind.Vampiric).copy(equipment = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest,
+                   flask = flask(FlaskKind.Vampiric).copy(details = ItemDetails.Flask(FlaskKind.Vampiric.effect, start, 6))))
+        val h2 = h.copy(fightStats = h.fightStats.copy(atk = 100000L))
+        for {
+          t <- makeState(h2, SoloPveBattle.from(monster(hp = 10L), h2))
+          (state, dao, r) = t
+          // удар героя (60), сид добычи (long), бросок фляги (roll)
+          _   <- TestRandom.feedInts(60, roll) *> TestRandom.feedLongs(100L, 7L)
+          _   <- state.action(testUser, tap("Attack"), r)
+          u   <- dao.getHeroByUserId(userId).map(_.get)
+          log <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        } yield (charges(u), log)
+      }
+      for {
+        lucky   <- kill(2, 5)
+        unlucky <- kill(2, 50)
+        full    <- kill(6, 5)
+      } yield assertTrue(lucky._1 == 3 && lucky._2.contains("напилась крови: +1 заряд (3/6)")) &&
+              assertTrue(unlucky._1 == 2 && !unlucky._2.contains("напилась крови")) &&
+              assertTrue(full._1 == 6 && !full._2.contains("напилась крови"))
+    },
+
+    test("смазка из отвара держится весь бой: каждый удар по HP травит, после боя сходит вместе с пылью") {
+      val h = hero(FlaskKind.Smith).copy(weaponDust = pangea.model.hero.WeaponDust(coat = Some(pangea.model.hero.WeaponCoat.Poison)))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(), h))
+        (state, dao, r) = t
+        _  <- TestRandom.feedInts(List.fill(3)(List(60, 1, 99)).flatten: _*) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _  <- state.action(testUser, tap("Attack"), r)
+        b1 <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        _  <- state.action(testUser, tap("Attack"), r)
+        _  <- state.action(testUser, tap("Attack"), r)
+        b3 <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        // добиваем: смазка после боя должна сойти
+        k  = h.copy(fightStats = h.fightStats.copy(atk = 100000L))
+        t2 <- makeState(k, SoloPveBattle.from(monster(hp = 10L), k))
+        (state2, dao2, r2) = t2
+        _  <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L, 7L)
+        _  <- state2.action(testUser, tap("Attack"), r2)
+        u2 <- dao2.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(b1.effects.monsterPoison.exists(_.pct == Poison.OnHit - Poison.DecayPerRound)) &&
+              // три удара — три стака яда (каждый +8, тик −2)
+              assertTrue(b3.effects.monsterPoison.exists(_.pct == 3 * Poison.OnHit - 3 * Poison.DecayPerRound)) &&
+              assertTrue(b3.effects.monsterBleed.isEmpty) &&
+              assertTrue(u2.weaponDust.isEmpty)
+    },
+
     test("глоток любой фляги тратит расходник раунда: второй в том же раунде не выпить") {
       val h = hero(FlaskKind.Smith, armor = 0L)
       for {

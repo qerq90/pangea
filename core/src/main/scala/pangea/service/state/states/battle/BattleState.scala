@@ -332,10 +332,11 @@ case class BattleState(
                 monsterPoison = Some(effectsAfterPotion.monsterPoison
                   .map(p => Poison(p.pct + gemPoisonPct))
                   .getOrElse(Poison(gemPoisonPct))))
-            // Фляги яда и крови: пока оружие смазано, удар по HP травит (как
-            // отравленное оружие) либо пускает кровь — стакается с тем, что висит.
-            coatPoisons = battle.effects.heroPoisonCoat && hpDmg > 0 && newHp > 0
-            coatBleeds  = battle.effects.heroBleedCoat && hpDmg > 0 && newHp > 0
+            // Фляги яда и крови (на раунды) и смазки из отваров (на весь бой): пока
+            // оружие смазано, удар по HP травит (как отравленное оружие) либо пускает
+            // кровь — стакается с тем, что висит.
+            coatPoisons = (battle.effects.heroPoisonCoat || hero.weaponDust.poisonCoated) && hpDmg > 0 && newHp > 0
+            coatBleeds  = (battle.effects.heroBleedCoat || hero.weaponDust.bleedCoated) && hpDmg > 0 && newHp > 0
             effectsCoated =
               if (!coatPoisons) effectsAfterGem
               else effectsAfterGem.copy(
@@ -2365,6 +2366,8 @@ case class BattleState(
       _ <- heroDao.clearActiveBattle(user.userId)
       // Задание Густаво: павшие идут в счёт, пока действует его зелье.
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
+      // Вампирская фляга пьёт кровь павших: с каждого — шанс на глоток.
+      flaskRefill <- vampiricRefill(user, hero, fallen.size)
       // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе.
       kills = hero.kills + fallen.size.toLong
       _ <- heroDao.updateKills(user.userId, kills)
@@ -2394,8 +2397,26 @@ case class BattleState(
       elementalDefeated = battle.boss.exists(_ != MiniBoss.WhiteWolf),
       wolfDefeated      = battle.boss.contains(MiniBoss.WhiteWolf),
       slainCount        = fallen.size,
-      letterFound       = letterFound
+      letterFound       = letterFound,
+      flaskRefill       = flaskRefill
     )
+
+  /** Вампирская фляга: за каждого павшего — бросок на +1 заряд (FlaskRates.VampiricRefillPct),
+    * но не выше полной. Бросок не тратится, если фляга не вампирская или полна.
+    * Возвращает (сколько долила, зарядов стало, максимум), если долила. */
+  private def vampiricRefill(user: User, hero: Hero, slain: Int): Task[Option[(Int, Int, Int)]] =
+    hero.equipment.flask.details match {
+      case f @ ItemDetails.Flask(FlaskEffect.Vampiric(_, _), charges, max) if charges < max =>
+        ZIO.foldLeft((1 to slain).toList)(charges) { (cur, _) =>
+          chanceRoll(cur < max, FlaskRates.VampiricRefillPct).map(hit => if (hit) cur + 1 else cur)
+        }.flatMap { after =>
+          if (after == charges) ZIO.succeed(None)
+          else heroDao.updateEquipment(user.userId,
+                 hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.withCharges(after))))
+                 .as(Some((after - charges, after, max)))
+        }
+      case _ => ZIO.succeed(None)
+    }
 
   /** Серебро с благословением Азата — на его бонус больше. */
   private def silverScalePct(blessed: Boolean): Long =
@@ -2444,6 +2465,10 @@ case class BattleState(
       _ <- ZIO.when(outcome.wolfDefeated)(
         renderer.show(user, Screen(content.text("battle.wolf.victory"), Nil))
       )
+      _ <- ZIO.foreachDiscard(outcome.flaskRefill) { case (gained, charges, max) =>
+        renderer.show(user, Screen(content.format("battle.flaskBlood",
+          "gained" -> gained.toString, "charges" -> charges.toString, "max" -> max.toString), Nil))
+      }
     } yield ()
 
   private def loadAzat(user: User): Task[AzatState] =
@@ -2674,7 +2699,9 @@ object BattleState {
       // Сколько мобов легло в этом бою: больше одного — групповая реплика.
       slainCount: Int = 1,
       // Пятидесятый убитый оставил письмо Марисе — отдельное сообщение после победы.
-      letterFound: Boolean = false
+      letterFound: Boolean = false,
+      // Вампирская фляга напилась крови: сколько долила, стало, максимум.
+      flaskRefill: Option[(Int, Int, Int)] = None
   )
 
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),

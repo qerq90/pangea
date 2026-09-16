@@ -35,8 +35,8 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
     ZIO.succeed {
       items = items.map(item =>
         item.details match {
-          case f: pangea.model.item.ItemDetails.Flask => item.copy(details = f.refilled)
-          case _                                      => item
+          case f: pangea.model.item.ItemDetails.Flask if f.effect.refillsAtSpring => item.copy(details = f.refilled)
+          case _                                                                  => item
         })
     }
 

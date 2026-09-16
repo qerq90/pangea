@@ -80,6 +80,11 @@ case class Item(
 
   def isQuestItem: Boolean = itemType == ItemType.QuestItem
 
+  def brew: Option[BrewKind] = details match {
+    case ItemDetails.Brew(k) => Some(k)
+    case _                   => None
+  }
+
   def material: Option[MaterialKind] = details match {
     case ItemDetails.Material(k) => Some(k)
     case _                       => None
@@ -114,7 +119,7 @@ case class Item(
    *  У карт клада, камней-усилителей и материалов уровня нет — только имя. */
   def displayTitle: String =
     if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material || isQuestItem ||
-        itemType == ItemType.Flask) name
+        itemType == ItemType.Flask || itemType == ItemType.Brew) name
     else {
       val prefix = s"${rarity.emoji} "
       if (name.startsWith(prefix)) s"${rarity.emoji} [Ур.$lvl] ${name.stripPrefix(prefix)}"
@@ -159,6 +164,8 @@ case class Item(
         if (k.description.isEmpty) List(s"Материал: ${k.displayName}") else List(k.description)
       // Клык Белого волка — трофей с историей; у обычных трофеев описания нет.
       case ItemDetails.Trophy(_, k, _)   => if (k.description.isEmpty) Nil else List(k.description)
+      // Отвар: описание и рецепт — чтобы игрок помнил, из чего варил.
+      case ItemDetails.Brew(k)           => List(k.description, s"Рецепт: ${k.recipe.map(_.displayName).mkString(" + ")}")
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines

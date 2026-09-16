@@ -36,6 +36,8 @@ object FlaskRates {
   val CoatBleedPct: Int = 2
   /** Дым: сколько раундов мобы вне пары не бьют сбоку и не помогают. */
   val SmokeRounds: Int = 4
+  /** Вампирская: шанс (в %) на +1 заряд с каждого убитого моба. */
+  val VampiricRefillPct: Long = 10L
 }
 
 object FlaskKind extends Enum[FlaskKind] {

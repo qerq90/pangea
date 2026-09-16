@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, LoreData}
-import pangea.model.item.{Item, ItemDetails, ItemType}
+import pangea.model.item.{BrewKind, BrewRates, Item, ItemDetails, ItemType}
 import pangea.model.monster.Race
 import pangea.model.quest.{NpcQuest, QuestData}
 import pangea.model.state.StateType
@@ -54,6 +54,7 @@ case class InnkeeperState(
       "JoeLore"           -> Target.Run { (user, _, renderer) => offerJoeLore(user, renderer) },
       "PayJoeLore"        -> Target.Run { (user, _, renderer) => payJoeLore(user, renderer) },
       "WolfLore"          -> Target.Run { (user, _, renderer) => offerWolfLore(user, renderer) },
+      "SellSchnapps"      -> Target.Run { (user, _, renderer) => sellSchnapps(user, renderer) },
       "PayWolfLore"       -> Target.Run { (user, _, renderer) => payWolfLore(user, renderer) },
       "BackFromInnkeeper" -> Target.Goto(StateType.Tavern)
     ),
@@ -88,6 +89,12 @@ case class InnkeeperState(
       // И про Белого волка — после первой встречи на поляне.
       wolfBtn = Option.when(lore.metWolf && !lore.wolfLore)(
         content.choice("WolfLore", "innkeeper.wolfLoreLabel"))
+      // Шнапс из красавки в сумке — Трактирщик его выкупает.
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      schnapps = InnkeeperState.schnapps(inv.items.data)
+      schnappsBtn = Option.when(schnapps.nonEmpty)(
+        content.choice("SellSchnapps", "innkeeper.sellSchnappsLabel", "count" -> schnapps.size.toString))
       // Рассказ о Кинэте — награда за первое задание, дальше бесплатно.
       kinetBtn = Option.when(quests.isDone(NpcQuest.Innkeeper))(
         content.choice("KinetLore", quest.key("loreLabel")))
@@ -106,6 +113,7 @@ case class InnkeeperState(
             loreBtn,
             joeBtn,
             wolfBtn,
+            schnappsBtn,
             Some(content.choice("OpenCharacter", "common.character")),
             Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel"))
           ).flatten
@@ -220,6 +228,23 @@ case class InnkeeperState(
                  List(content.choice("BackFromLore", "innkeeper.wolfLoreDone"))))
     } yield StateType.Innkeeper
 
+  /** Шнапс уходит весь разом, по цене за бутылку (см. BrewRates.SchnappsPrice). */
+  private def sellSchnapps(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      bottles = InnkeeperState.schnapps(inv.items.data)
+      _ <- if (bottles.isEmpty) showMenu(user, renderer)
+           else {
+             val total = bottles.size.toLong * BrewRates.SchnappsPrice
+             ZIO.foreachDiscard(bottles)(b => inventoryRepo.removeItem(b.id, hero.id).mapError(e => new Throwable(e.toString))) *>
+               heroDao.updateSilver(user.userId, hero.silver + total) *>
+               renderer.show(user, Screen(content.format("innkeeper.schnappsSold",
+                 "count" -> bottles.size.toString, "silver" -> total.toString), Nil)) *>
+               showMenu(user, renderer)
+           }
+    } yield StateType.Innkeeper
+
   private def readLore(user: User): Task[LoreData] =
     heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
 
@@ -323,6 +348,9 @@ object InnkeeperState {
 
   /** Цена рассказа про Белого волка. */
   val WolfLorePrice: Long = 1500L
+
+  /** Бутылки шнапса из красавки в сумке. */
+  def schnapps(items: List[Item]): List[Item] = items.filter(_.brew.contains(BrewKind.Schnapps))
 
   /** Сколько серебра Трактирщик даёт за первый трофей. */
   val QuestSilver: Long = 100L

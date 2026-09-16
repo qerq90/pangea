@@ -462,7 +462,7 @@ case class MerchantState(
   /** Вещи на продажу: сюжетные предметы и травы Ришелье не берёт — травы несут Густаво. */
   private def inventoryItems(hero: Hero): Task[List[Item]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      .map(_.items.data.filterNot(i => i.isQuestItem || i.material.exists(_.isHerb)))
+      .map(_.items.data.filterNot(i => i.isQuestItem || i.material.exists(_.isHerb) || i.itemType == ItemType.Brew))
 
   private def currentSellPage(user: User): Task[Int] = currentSellScene(user).map(_.page)
 
@@ -551,6 +551,7 @@ object MerchantState {
       // о ценности (вечно огненное железо — серое, а стоит дороже иной вещи).
       item.itemType != ItemType.Gem &&
         item.itemType != ItemType.Material &&
+        item.itemType != ItemType.Brew &&
         s.rarities.contains(item.rarity) &&
         (s.passives || item.passive.isEmpty) &&
         (s.actives || item.activeSkill.isEmpty)

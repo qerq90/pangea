@@ -21,7 +21,10 @@ import pangea.model.item.{Gem, MaterialKind}
   * Хранится в `heroes.weapon_dust`. */
 final case class WeaponDust(
   layers:  List[MaterialKind] = Nil,
-  penalty: Boolean            = false
+  penalty: Boolean            = false,
+  // Смазка из отвара: на ближайший бой удары по HP травят или пускают кровь.
+  // Сходит вместе с пылью, когда бой кончился.
+  coat:    Option[WeaponCoat] = None
 ) {
 
   /** Слои как камни грейда 1 — в этом виде их читает [[HeroGems]]. */
@@ -33,7 +36,21 @@ final case class WeaponDust(
   /** Множитель урона героя: всполох магии и перебор с покрытием стоят четверти. */
   def damageMult: Double = if (penalty) 1.0 - WeaponDust.PenaltyPct / 100.0 else 1.0
 
-  def isEmpty: Boolean = layers.isEmpty && !penalty
+  def isEmpty: Boolean = layers.isEmpty && !penalty && coat.isEmpty
+
+  def poisonCoated: Boolean = coat.contains(WeaponCoat.Poison)
+  def bleedCoated: Boolean  = coat.contains(WeaponCoat.Bleed)
+}
+
+/** Чем смазано оружие (см. BrewEffect.Coat). */
+sealed trait WeaponCoat extends enumeratum.EnumEntry
+object WeaponCoat extends enumeratum.Enum[WeaponCoat] {
+  case object Poison extends WeaponCoat
+  case object Bleed  extends WeaponCoat
+  val values: IndexedSeq[WeaponCoat] = findValues
+
+  implicit val encoder: Encoder[WeaponCoat] = (c: WeaponCoat) => io.circe.Json.fromString(c.entryName)
+  implicit val decoder: Decoder[WeaponCoat] = (c: HCursor) => c.as[String].map(WeaponCoat.withName)
 }
 
 object WeaponDust {
@@ -70,7 +87,8 @@ object WeaponDust {
     * `weaponGems` — камни, уже вставленные в оружие: рубин в гнезде ссорится с
     * сапфировой пылью ровно так же, как рубиновая пыль, насыпанная раньше. */
   def sprinkle(dust: MaterialKind, current: WeaponDust, weaponGems: List[Gem]): Outcome =
-    if (current.layers.sizeIs >= MaxLayers) Outcome.Overload(WeaponDust(Nil, penalty = true))
+    // Перебор сбивает пыль, но не смазку: она въелась в сталь.
+    if (current.layers.sizeIs >= MaxLayers) Outcome.Overload(WeaponDust(Nil, penalty = true, coat = current.coat))
     else {
       val incoming = dust.gem.flatMap(Element.of)
       val onWeapon = (weaponGems ++ current.gems).flatMap(g => Element.of(g.kind)).toSet
@@ -87,7 +105,8 @@ object WeaponDust {
     for {
       layers  <- c.getOrElse[List[MaterialKind]]("layers")(Nil)
       penalty <- c.getOrElse[Boolean]("penalty")(false)
-    } yield WeaponDust(layers, penalty)
+      coat    <- c.getOrElse[Option[WeaponCoat]]("coat")(None)
+    } yield WeaponDust(layers, penalty, coat)
 
   implicit val meta: Meta[WeaponDust] = new Meta(pgDecoderGet, pgEncoderPut)
 }

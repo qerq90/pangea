@@ -81,6 +81,9 @@ object ItemDetails {
   /** Сюжетный предмет — какой именно (см. [[QuestItemKind]]). */
   case class Quest(kind: QuestItemKind) extends ItemDetails
 
+  /** Отвар из трав — какой именно (см. [[BrewKind]]). */
+  case class Brew(kind: BrewKind) extends ItemDetails
+
   // --- Покодечная сериализация с диспатчем по "type" ---
 
   private val weaponEnc: Encoder[Weapon]           = deriveEncoder
@@ -110,6 +113,8 @@ object ItemDetails {
   private val matDec:    Decoder[Material]         = deriveDecoder
   private val questEnc:  Encoder[Quest]            = deriveEncoder
   private val questDec:  Decoder[Quest]            = deriveDecoder
+  private val brewEnc:   Encoder[Brew]             = deriveEncoder
+  private val brewDec:   Decoder[Brew]             = deriveDecoder
 
   private def tagged(tpe: String, body: Json): Json =
     body.deepMerge(Json.obj("type" -> tpe.asJson))
@@ -126,6 +131,7 @@ object ItemDetails {
     case g: Gem         => tagged("Gem", gemEnc(g))
     case m: Material    => tagged("Material", matEnc(m))
     case q: Quest       => tagged("Quest", questEnc(q))
+    case b: Brew        => tagged("Brew", brewEnc(b))
   }
 
   implicit val decoder: Decoder[ItemDetails] = Decoder.instance { c =>
@@ -141,6 +147,7 @@ object ItemDetails {
       case "Gem"         => gemDec(c)
       case "Material"    => matDec(c)
       case "Quest"       => questDec(c)
+      case "Brew"        => brewDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))
     }
   }
