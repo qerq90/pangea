@@ -21,7 +21,8 @@ import io.circe.{Decoder, Encoder, HCursor}
  *  читать снова (ключ книги → момент); `bookFailures` — сколько раз книга не
  *  далась (каждая неудача прибавляет к следующему броску); `boughtBooks` —
  *  какие трактаты герой покупал у Густаво: тот помнит, кому что продал, и
- *  самоучку с купленной книгой считает своим учеником. */
+ *  самоучку с купленной книгой считает своим учеником; `brewed` — какие отвары
+ *  герой уже варил (за полный набор — достижение «Зельевар I»). */
 final case class LoreData(
   metElemental:   Boolean           = false,
   elementalLore:  Boolean           = false,
@@ -34,8 +35,13 @@ final case class LoreData(
   selfTaught:     List[String]      = Nil,
   bookCooldowns:  Map[String, Long] = Map.empty,
   bookFailures:   Map[String, Int]  = Map.empty,
-  boughtBooks:    List[String]      = Nil
+  boughtBooks:    List[String]      = Nil,
+  brewed:         List[String]      = Nil
 ) {
+  /** Запомнить сваренные отвары (без повторов). */
+  def brewedAlso(kinds: List[String]): LoreData =
+    copy(brewed = (brewed ++ kinds).distinct)
+
   def bought(book: String): Boolean = boughtBooks.contains(book)
 
   /** Запомнить покупку книги (повторно не записывается). */
@@ -85,6 +91,7 @@ object LoreData {
       cooldowns     <- c.getOrElse[Map[String, Long]]("bookCooldowns")(Map.empty)
       failures      <- c.getOrElse[Map[String, Int]]("bookFailures")(Map.empty)
       bought        <- c.getOrElse[List[String]]("boughtBooks")(Nil)
+      brewed        <- c.getOrElse[List[String]]("brewed")(Nil)
     } yield LoreData(metElemental, elementalLore, metJoe, joeLore, metWolf, wolfLore,
-                     branch, knowledge, selfTaught, cooldowns, failures, bought)
+                     branch, knowledge, selfTaught, cooldowns, failures, bought, brewed)
 }

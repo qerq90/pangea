@@ -74,7 +74,8 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
     } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
-  /** Броски хода: удар героя, попадание моба, прок холода у моба (50 — нет), затем `extra`. */
+  /** Броски хода: удар героя, попадание моба, прок холода у моба (50 — нет), затем `extra`.
+    * Удары волка по герою с его запасом HP мелкие — броска травмы нет. */
   private def seedTurn(extra: Int*) =
     TestRandom.feedInts(60 +: 90 +: 50 +: extra: _*) *> TestRandom.feedLongs(100L, 100L)
 
@@ -207,7 +208,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       for {
         // моб промахивается обычной атакой (1 ≤ 5% уклонения), чтобы недостача была ровно 40 000
         r <- strike(wounded, wolfBattle(wounded, turn = 4, firstSpent = true, energy = 0L),
-               TestRandom.feedInts(60, 1, 50) *> TestRandom.feedLongs(100L))
+               TestRandom.feedInts(60, 1, 50, 50) *> TestRandom.feedLongs(100L)) // крит нет, травма от приёма нет
         (u, after, log, _) = r
       } yield assertTrue(log.contains("вгрызться в вашу шею! Вы получили 10120 урона!")) && // 40 000 × 25% + 600 × 0,2
               assertTrue(u.fightStats.hp == maxHp - 40000L - 10120L) &&

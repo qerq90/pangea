@@ -25,7 +25,7 @@ object BrewEffect {
   final case class Sellable(price: Long) extends BrewEffect
 }
 
-/** Отвары из трав первого ранга: три травы в кубе Азата → один отвар. Лежит в
+/** Отвары из трав первого ранга: три травы в кубе Азата → две порции. Лежит в
  *  инвентаре как [[ItemType.Brew]], складывается в стопку, пьётся с карточки
  *  предмета. Все числа — здесь ([[BrewRates]] — те, что читаются в конструкторах). */
 sealed abstract class BrewKind(
@@ -58,6 +58,8 @@ object BrewRates {
   val SchnappsPrice: Long = 400L
   /** Бодрящий сбор: сколько быстрых отдыхов даёт. */
   val InstantRests: Int = 5
+  /** Сколько порций даёт один рецепт в кубе. */
+  val Portions: Int = 2
 }
 
 object BrewKind extends Enum[BrewKind] {
@@ -124,6 +126,10 @@ object BrewKind extends Enum[BrewKind] {
     BrewEffect.Coat(WeaponCoat.Bleed, RefillSource.Bleed))
 
   val values: IndexedSeq[BrewKind] = findValues
+
+  /** Отвары первого ранга — все из трав первого ранга; за полный набор
+   *  сваренных даётся «Зельевар I» (см. Achievement.Brewer1). */
+  val rank1: IndexedSeq[BrewKind] = values
 
   /** Отвар, который варится из этого набора трав (порядок не важен), если такой есть. */
   def forHerbs(herbs: List[MaterialKind]): Option[BrewKind] =

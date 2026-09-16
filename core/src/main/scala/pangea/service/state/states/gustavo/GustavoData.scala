@@ -12,7 +12,7 @@ final case class GustavoData(healCooldownUntil: Option[Long], freeBoostsUsed: Li
 object GustavoData {
   val empty: GustavoData = GustavoData(None, Nil)
 
-  val HealCooldownMs:  Long = 30L * 60L * 1000L // лечение: раз в 30 минут
+  val HealCooldownMs:  Long = 60L * 60L * 1000L // лечение: раз в час
   val BoostDurationMs: Long = 60L * 60L * 1000L // баф характеристики: час
   val CostPerLevel:    Long = 100L              // цена зелья = CostPerLevel × уровень
   val FlaskRefillCostPerCharge: Long = 25L      // фляга: 25 серебра за каждый недостающий глоток

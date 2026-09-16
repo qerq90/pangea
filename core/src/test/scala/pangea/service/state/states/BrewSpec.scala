@@ -9,7 +9,7 @@ import pangea.model.item._
 import pangea.model.state.StateType
 import pangea.model.trauma.Trauma
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.UserAction
+import pangea.service.state.{HerbLore, UserAction}
 import pangea.service.state.states.tavern.InnkeeperState
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
@@ -54,13 +54,26 @@ object BrewSpec extends ZIOSpecDefault {
       val boneSetter = List(herb(MaterialKind.Nettle, 1L), herb(MaterialKind.Chamomile, 2L), herb(MaterialKind.Calendula, 3L))
       val result     = CubeCraft.craft(boneSetter, charges = 5, rng)
       val all        = BrewKind.values.map(k => CubeCraft.craft(k.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng))
-      assertTrue(result.chargesUsed == 1 && result.items.size == 1) &&
-        assertTrue(result.items.head.brew.contains(BrewKind.BoneSetter)) &&
+      // один рецепт — две порции, заряд один
+      assertTrue(result.chargesUsed == 1 && result.items.size == 2) &&
+        assertTrue(result.items.forall(_.brew.contains(BrewKind.BoneSetter))) &&
         assertTrue(result.items.head.itemType == ItemType.Brew && !ItemType.equippable.contains(ItemType.Brew)) &&
         // все восемь рецептов варятся
         assertTrue(all.zip(BrewKind.values).forall { case (r, k) => r.chargesUsed == 1 && r.items.head.brew.contains(k) }) &&
         // рецепты не совпадают между собой
         assertTrue(BrewKind.values.map(_.recipe.toSet).distinct.size == BrewKind.values.size)
+    },
+
+    test("травы под три разных отвара в одной куче → три разных отвара, а не три одинаковых") {
+      val rng  = Rng(7L)
+      val kinds = List[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater, BrewKind.Invigorating)
+      val pool  = kinds.zipWithIndex.flatMap { case (k, i) => k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) } }
+      val result = CubeCraft.craft(pool, charges = 50, rng)
+      // и все десять рецептов разом
+      val all    = BrewKind.rank1.toList.zipWithIndex.flatMap { case (k, i) => k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) } }
+      val allRes = CubeCraft.craft(all, charges = 50, rng)
+      assertTrue(result.chargesUsed == 3 && result.items.size == 6 && result.items.flatMap(_.brew).toSet == kinds.toSet) &&
+        assertTrue(allRes.chargesUsed == BrewKind.rank1.size && allRes.items.flatMap(_.brew).toSet == BrewKind.rank1.toSet)
     },
 
     test("не по рецепту (две травы, чужой набор) — куб гудит; шесть трав — два отвара") {
@@ -71,7 +84,8 @@ object BrewSpec extends ZIOSpecDefault {
         List(herb(MaterialKind.Nettle, 1L), herb(MaterialKind.Chamomile, 2L), herb(MaterialKind.Calendula, 3L),
              herb(MaterialKind.Sage, 4L), herb(MaterialKind.Chamomile, 5L), herb(MaterialKind.Nettle, 6L)), charges = 5, rng)
       assertTrue(two.chargesUsed == 0 && wrong.chargesUsed == 0) &&
-        assertTrue(six.chargesUsed == 2 && six.items.flatMap(_.brew).toSet == Set[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater))
+        assertTrue(six.chargesUsed == 2 && six.items.size == 4 &&
+                   six.items.flatMap(_.brew).toSet == Set[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater))
     },
 
     // ── Инвентарь ─────────────────────────────────────────────────────────────
@@ -244,6 +258,49 @@ object BrewSpec extends ZIOSpecDefault {
       } yield assertTrue(log.contains("Травм нет") && inv.snapshot.size == 1) &&
               assertTrue(log2.contains("Все ваши травмы тяжёлые") && inv2.snapshot.size == 1) &&
               assertTrue(h2.traumaNames == List(Trauma.SplitSkull.name))
+    },
+
+    // ── Достижение ────────────────────────────────────────────────────────────
+    test("«Зельевар I»: сварил по одному каждый отвар первого ранга → достижение и +2 к интеллекту, один раз") {
+      import pangea.model.hero.{Achievement, AzatState, CubeStatus}
+      import pangea.service.state.states.temple.CubeState
+      def cubeWith(items: List[Item], h: Hero) =
+        for {
+          dao <- TestHeroDao.withHero(userId, h)
+          _   <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 50, cubeItems = items).asJson)
+          r   <- TestRenderer.make
+          c   <- ZIO.attempt(SceneContent.load())
+        } yield (CubeState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c), dao, r)
+      def herbsFor(k: BrewKind) = k.recipe.zipWithIndex.map { case (h, j) => herb(h, (j + 1).toLong) }
+      // травы под все рецепты, кроме последнего, одной кучей — куб сварит их за одну активацию
+      val allButLast = BrewKind.rank1.init.toList.zipWithIndex.flatMap { case (k, i) =>
+        k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) }
+      }
+      for {
+        t <- cubeWith(allButLast, baseHero)
+        (state, dao, r) = t
+        _     <- state.action(testUser, tap("CubeActivate"), r)
+        h1    <- dao.getHeroByUserId(userId).map(_.get)
+        lore1 <- HerbLore.readLore(dao, userId)
+        // последний рецепт — и достижение
+        azat  <- dao.readAzatData(userId).map(_.flatMap(_.as[AzatState].toOption).get)
+        _     <- dao.writeAzatData(userId, azat.copy(cubeItems = herbsFor(BrewKind.rank1.last)).asJson)
+        _     <- state.action(testUser, tap("CubeActivate"), r)
+        h2    <- dao.getHeroByUserId(userId).map(_.get)
+        log   <- texts(r)
+        // повторная варка достижение не дублирует
+        _     <- dao.writeAzatData(userId, azat.copy(cubeItems = herbsFor(BrewKind.rank1.last)).asJson)
+        _     <- state.action(testUser, tap("CubeActivate"), r)
+        h3    <- dao.getHeroByUserId(userId).map(_.get)
+        log3  <- texts(r)
+        intBefore = h1.effectiveBaseStats(0L).int
+        intAfter  = h2.effectiveBaseStats(0L).int
+      } yield assertTrue(lore1.brewed.size == BrewKind.rank1.size - 1 && !h1.hasAchievement(Achievement.Brewer1)) &&
+              assertTrue(h2.hasAchievement(Achievement.Brewer1)) &&
+              assertTrue(log.contains("достижение «Зельевар I»") && log.contains("+2 к интеллекту")) &&
+              assertTrue(intAfter == intBefore + 2L) &&
+              assertTrue(h3.achievements.count(_ == Achievement.Brewer1.entryName) == 1 &&
+                         log3.split("Зельевар I").length == 2)
     },
 
     // ── Трактирщик ────────────────────────────────────────────────────────────

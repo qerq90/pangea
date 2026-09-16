@@ -15,6 +15,16 @@ object Achievement extends Enum[Achievement] {
   /** Оставил Марису посреди материка с пустыми руками. */
   case object Scoundrel extends Achievement("Мерзавец", "+5% к наносимому и получаемому урону в бою")
 
+  /** Сварил в кубе хотя бы по разу каждый отвар первого ранга. */
+  case object Brewer1 extends Achievement("Зельевар I", "+2 к интеллекту")
+
+  /** Сколько интеллекта прибавляет «Зельевар I». */
+  val BrewerIntBonus: Long = 2L
+
+  /** Плоская прибавка к интеллекту от достижений героя. */
+  def intBonus(hero: Hero): Long =
+    if (hero.hasAchievement(Brewer1)) BrewerIntBonus else 0L
+
   /** Сколько процентов сверху к серебру, выпадающему в лабиринте. */
   val SaviorSilverBonusPct: Long = 10L
 
