@@ -172,7 +172,12 @@ case class BattleEffects(
   heroBleed:            Option[Bleed]              = None,
   // Сколько ходов волк ещё «подстроился под добычу»: атака и уклонение выше
   // (см. MiniBoss.WhiteWolf.InstinctBoostPct).
-  mobInstinctTurns:     Int                        = 0
+  mobInstinctTurns:     Int                        = 0,
+  // Вампирская фляга: сколько ударов по HP ещё лечат героя (FlaskRates.VampiricPct).
+  heroVampiricHits:     Int                        = 0,
+  // Фляга отравы: сколько раундов оружие ещё смазано — удары по HP травят и
+  // пускают кровь (FlaskRates.VenomBleedPct).
+  heroVenomTurns:       Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
@@ -209,7 +214,9 @@ case class BattleEffects(
     heroStunnedTurns     = heroStunnedTurns,
     heroGroundedTurns    = heroGroundedTurns,
     heroPoison           = heroPoison,
-    heroBleed            = heroBleed
+    heroBleed            = heroBleed,
+    heroVampiricHits     = heroVampiricHits,
+    heroVenomTurns       = heroVenomTurns
   )
 
   /** Своя геройская половина плюс мобовая половина другого набора. */
@@ -248,6 +255,9 @@ case class BattleEffects(
 
   /** Подстроился ли волк под добычу (атака и уклонение выше). */
   def mobInstinct: Boolean = mobInstinctTurns > 0
+
+  /** Смазано ли оружие героя отравой. */
+  def heroVenom: Boolean = heroVenomTurns > 0
 }
 
 object BattleEffects {

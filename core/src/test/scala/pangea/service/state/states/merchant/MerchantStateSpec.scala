@@ -157,6 +157,29 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(hero.exists(_.silver == 100L + 48L))
     },
 
+    test("фляга продаётся по фиксированной цене редкости: синяя — 400, легендарная — 1000; серая идёт в хлам") {
+      val blue   = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Smith, Rarity.Blue).copy(id = 8L)
+      val orange = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Smoke, Rarity.Orange).copy(id = 9L)
+      val gray   = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Vigor, Rarity.Gray).copy(id = 10L)
+      def select(id: Long) = UserAction("", Some(s"""{"action":"${MerchantState.SellItemPrefix}$id"}"""))
+      for {
+        t <- makeState(richHero.copy(silver = 0L), items = List(blue, orange, gray))
+        (state, heroDao, invRepo, renderer) = t
+        _     <- state.action(testUser, tap("Sell"), renderer)
+        _     <- state.action(testUser, select(8L), renderer)
+        blueScr <- renderer.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("ConfirmSellItem"), renderer)
+        _     <- state.action(testUser, tap("Sell"), renderer)
+        _     <- state.action(testUser, select(9L), renderer)
+        orangeScr <- renderer.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("ConfirmSellItem"), renderer)
+        _     <- state.action(testUser, tap("SellJunk"), renderer)
+        hero  <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(blueScr.text.contains("Цена продажи: 400") && orangeScr.text.contains("Цена продажи: 1000")) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&                       // серая ушла хламом за 100
+              assertTrue(hero.exists(_.silver == 400L + 1000L + 100L))
+    },
+
     test("SellJunk продаёт только серое/белое снаряжение, не трогая трофеи и камни (даже Серой редкости)") {
       val junkHelmet = Item(1L, "Ржавый шлем", 1L, Rarity.Gray, ItemType.Helmet,
         attack = 0, accuracy = 0, energy = 0, armor = 2, defence = 0, evasion = 0)

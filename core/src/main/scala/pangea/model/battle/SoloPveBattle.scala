@@ -200,6 +200,8 @@ case class SoloPveBattle(
       monsterWeakenedTurns = (effects.monsterWeakenedTurns - 1).max(0),
       // Инстинкт волка живёт своими четырьмя ходами.
       mobInstinctTurns     = (effects.mobInstinctTurns - 1).max(0),
+      // Отрава на оружии героя сходит за свои раунды.
+      heroVenomTurns       = (effects.heroVenomTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
