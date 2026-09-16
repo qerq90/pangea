@@ -149,6 +149,46 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("На его место встаёт"))
     },
 
+    test("добивание ударом восстанавливает энергию за раунд — и когда в пару встаёт следующий") {
+      // Интеллект 10, ловкость 10 → +15 энергии за раунд; макс. энергии у героя хватает.
+      val h = hero(atk = 100000L).copy(fightStats = hero().fightStats.copy(energy = 0L, atk = 100000L))
+      for {
+        t <- makeState(h, group(10L, 1000L))
+        (state, dao, r) = t
+        _       <- quietRound(99)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- dao.getHeroByUserId(userId).map(_.get)
+        t2 <- makeState(h, group(10L))
+        (state2, dao2, r2) = t2
+        _       <- quietRound()
+        result  <- state2.action(testUser, tap("Attack"), r2)
+        solo    <- dao2.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(after.fightStats.energy == 15L) &&
+              assertTrue(result == StateType.Loot && solo.fightStats.energy == 15L)
+    },
+
+    test("глоток фляги раунд не завершает: сосед сбоку не бьёт, подкрепление не идёт, раунд не растёт") {
+      val flask = Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
+      val h = hero().copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask))
+      for {
+        t <- makeState(h, group(1000L, 1000L))
+        (state, dao, r) = t
+        _       <- TestRandom.feedInts(99, 1) // если бы сосед ходил: попадание и подкрепление (1 ≤ 2 — пришло бы)
+        _       <- state.action(testUser, tap("UseFlask"), r)
+        after   <- battleOf(dao)
+        u       <- dao.getHeroByUserId(userId).map(_.get)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        // пустая фляга — тоже не ход
+        _       <- state.action(testUser, tap("UseFlask"), r)
+        again   <- battleOf(dao)
+      } yield assertTrue(u.fightStats.hp == h.effectiveMaxHp(0L) && after.consumableUsedThisRound) && // полон, никто не ударил
+              assertTrue(!screens.contains("атаковал вас сбоку") && !screens.contains("прибежал сородич")) &&
+              assertTrue(after.group.round == 0 && after.group.others.size == 1) &&
+              assertTrue(again.group.round == 0 && again.group.others.size == 1)
+    },
+
     test("последний моб пал — это победа, добыча за всех") {
       for {
         t <- makeState(hero(atk = 100000L), group(10L))

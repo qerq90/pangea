@@ -243,7 +243,7 @@ case class BattleState(
   /** Continue без изменения состояния — только сообщение (неготовый скилл, пустая
     * фляга и т.п.): ход не тратится, экран перерисовывается. */
   private def cont(hero: Hero, battle: SoloPveBattle, msg: String): Task[TurnResult] =
-    ZIO.succeed(TurnResult(hero, battle, Vector(msg), Outcome.Continue))
+    ZIO.succeed(TurnResult(hero, battle, Vector(msg), Outcome.Continue, endsRound = false))
 
   // ── Ход игрока: базовая атака ───────────────────────────────────────────────
 
@@ -368,7 +368,7 @@ case class BattleState(
               else log2
             log4 = (log3 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
             r <-
-              if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Victory))
+              if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs))
               else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Death))
               else monsterPhase(thornedHero, thornedBattle, nowMs, log4, skip)
           } yield r
@@ -1373,17 +1373,7 @@ case class BattleState(
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
       // выше максимума. «Сосредоточенность» множит реген на 1.1. Пока герой жив.
-      finalHeroWithEnergy =
-        if (heroAlive) {
-          val b        = heroFedByBleed.effectiveBaseStats(nowMs)
-          // «Сосредоточенность» (пассивка) и черепа в оружии множат реген энергии,
-          // а «Охотник» (порог 4) удваивает вклад именно ловкости.
-          val agiPart  = 0.5 * b.agi * heroFedByBleed.sets.agiEnergyRegenMult
-          val regen    = ((b.int + agiPart) * heroFedByBleed.passives.energyRegenMult * heroFedByBleed.gems.energyRegenMult).toLong.max(1L)
-          val maxEn    = heroFedByBleed.maxEnergy(nowMs)
-          val newEn    = (heroFedByBleed.fightStats.energy + regen).min(maxEn)
-          heroFedByBleed.copy(fightStats = heroFedByBleed.fightStats.copy(energy = newEn))
-        } else heroFedByBleed
+      finalHeroWithEnergy = if (heroAlive) regainEnergy(heroFedByBleed, nowMs) else heroFedByBleed
 
       // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
       // порядке) каст моба, тик яда моба, тик регена героя — только непустые.
@@ -1401,6 +1391,25 @@ case class BattleState(
         else if (tickedBattle.monsterCurrentHp <= 0) Outcome.Victory
         else Outcome.Continue
     } yield TurnResult(finalHeroWithEnergy, tickedBattle, monsterLog, outcome)
+
+  /** Реген энергии героя в конце раунда: +(Интеллект + 0.5·Ловкость), не меньше
+    * 1 и не выше максимума. «Сосредоточенность» (пассивка) и черепа в оружии
+    * множат реген, а «Охотник» (порог 4) удваивает вклад именно ловкости. Одна
+    * точка на оба конца раунда: после хода моба и на добивании, когда до хода
+    * моба не дошло. */
+  private def regainEnergy(hero: Hero, nowMs: Long): Hero = {
+    val b       = hero.effectiveBaseStats(nowMs)
+    val agiPart = 0.5 * b.agi * hero.sets.agiEnergyRegenMult
+    val regen   = ((b.int + agiPart) * hero.passives.energyRegenMult * hero.gems.energyRegenMult).toLong.max(1L)
+    val maxEn   = hero.maxEnergy(nowMs)
+    hero.copy(fightStats = hero.fightStats.copy(energy = (hero.fightStats.energy + regen).min(maxEn)))
+  }
+
+  /** Победа ударом или умением героя: раунд кончился без хода моба, но энергия
+    * за него всё равно восстанавливается — и в бою 1 на 1, и в группе, где на
+    * место павшего встаёт следующий. */
+  private def victoryByHero(hero: Hero, battle: SoloPveBattle, log: Vector[String], nowMs: Long): TurnResult =
+    TurnResult(regainEnergy(hero, nowMs), battle, log, Outcome.Victory)
 
   /** Тик эффектов ГЕРОЯ в конце раунда: реген лечит на `pct`% макс.HP и слабеет.
     * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку
@@ -1602,7 +1611,7 @@ case class BattleState(
     // вернуть пару на место, а уже потом базовая атака по активному.
     val next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] =
       if (!aimSide) (h, b, lines) =>
-        if (b.monsterCurrentHp <= 0) ZIO.succeed(TurnResult(h, b, lines, Outcome.Victory))
+        if (b.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(h, b, lines, nowMs))
         else playerStrike(h, b, nowMs, lines, skip)
       else (h, b, lines) => {
         val back = b.moveHeroTo(homePos)
@@ -1785,11 +1794,12 @@ case class BattleState(
               val lines = (Vector(msg) ++ cutLine) ++ qhLog
               // Бой берём из расчёта лечения — в нём уже потраченное горение.
               TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats),
-                healedBattle.copy(consumableUsedThisRound = consumed), lines, Outcome.Continue)
+                healedBattle.copy(consumableUsedThisRound = consumed), lines, Outcome.Continue, endsRound = false)
             case FlaskEffect.AddBuff(buff, rounds) =>
               val timedBuff = buff.copy(turnsLeft = Some(rounds))
               val newBattle = usedBattle.copy(heroBattleState = usedBattle.heroBattleState.add(timedBuff))
-              TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog, Outcome.Continue)
+              TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog,
+                Outcome.Continue, endsRound = false)
           }
         }
       case _ =>
@@ -1811,7 +1821,8 @@ case class BattleState(
           val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
           val battle1   = battle.copy(consumableUsedThisRound = consumed)
           val (newStats, newBattle, msg) = applyPotion(hero, battle1, b.potion, nowMs)
-          TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg) ++ qhLog, Outcome.Continue)
+          TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg) ++ qhLog,
+            Outcome.Continue, endsRound = false)
         }
       case _ =>
         cont(hero, battle, content.text("battle.noBelt"))
@@ -1954,7 +1965,7 @@ case class BattleState(
     * копят энергию и лечат соседей. Раны на них (яд, кровь, огонь) тикают как у
     * всех; кого добило — уходит в павшие. */
   private def sideMobsPhase(res: TurnResult, nowMs: Long): Task[TurnResult] =
-    if (res.outcome != Outcome.Continue || !res.battle.isGroup) ZIO.succeed(res)
+    if (res.outcome != Outcome.Continue || !res.battle.isGroup || !res.endsRound) ZIO.succeed(res)
     else {
       val n = res.battle.group.others.size
       // Павший выше по строю смыкает ряды: следующий моб стоит уже на его индексе.
@@ -2098,7 +2109,7 @@ case class BattleState(
     * изменений), сюда не доходит. Порядок: подкрепление → перемешивание каждый
     * четвёртый раунд → отложенный Таран, чтобы перемешивание его не съело. */
   private def endRound(before: SoloPveBattle, res: TurnResult): Task[TurnResult] =
-    if (res.outcome != Outcome.Continue || res.battle == before || res.battle.boss.isDefined) ZIO.succeed(res)
+    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle == before || res.battle.boss.isDefined) ZIO.succeed(res)
     else {
       val b0 = res.battle.copy(group = res.battle.group.copy(round = res.battle.group.round + 1))
       for {
@@ -2587,7 +2598,11 @@ object BattleState {
       outcome: Outcome,
       // Что делали мобы вне пары: удары сбоку, лечение врага, подкрепление,
       // перемешивание. Идёт игроку ОТДЕЛЬНЫМ сообщением после лога раунда.
-      sideLog: Vector[String] = Vector.empty
+      sideLog: Vector[String] = Vector.empty,
+      // Был ли это ход, за которым идёт конец раунда: атака, умение, бегство.
+      // Глоток фляги или зелья и «ничего не случилось» (умение не готово, фляга
+      // пуста) раунд не завершают — мобы вне пары не ходят, подкрепление не идёт.
+      endsRound: Boolean = true
   )
 
   /** Текущее число зарядов надетой фляги (0, если фляга не надета). */
