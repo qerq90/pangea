@@ -113,7 +113,8 @@ case class Item(
    *
    *  У карт клада, камней-усилителей и материалов уровня нет — только имя. */
   def displayTitle: String =
-    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material || isQuestItem) name
+    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material || isQuestItem ||
+        itemType == ItemType.Flask) name
     else {
       val prefix = s"${rarity.emoji} "
       if (name.startsWith(prefix)) s"${rarity.emoji} [Ур.$lvl] ${name.stripPrefix(prefix)}"
@@ -149,6 +150,8 @@ case class Item(
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
+      // Фляга: что делает глоток и сколько его осталось. Уровня у неё нет.
+      case ItemDetails.Flask(effect, c, m) => List(effect.describe, s"🧪 Заряды: $c/$m")
       // Название материала уже стоит заголовком предмета, повторять его строкой
       // «Материал: …» незачем — она остаётся только у тех, кому нечего сказать о
       // себе, чтобы экран не выглядел пустым.

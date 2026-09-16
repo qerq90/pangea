@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemStack, ItemType, Rarity}
+import pangea.model.item.{FlaskKind, Item, ItemStack, ItemType, Rarity}
 import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -448,9 +448,11 @@ case class MerchantState(
     (price, next)
   }
 
-  // (lvl(снаряжения) + 5) × 1.2 × R(редкость) — продажа дешевле покупки
+  // (lvl(снаряжения) + 5) × 1.2 × R(редкость) — продажа дешевле покупки.
+  // Фляга к уровню не привязана: у неё своя цена по редкости (см. FlaskKind.priceFor).
   private def sellPrice(item: Item): Long =
-    ((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L)
+    if (item.itemType == ItemType.Flask) FlaskKind.priceFor(item.rarity)
+    else ((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L)
 
   /** Сколько дублонов Ришелье платит за предмет; 0 — обычная продажа за серебро.
     * Пока золотом он выкупает только материалы (см. [[MaterialKind.doubloonPrice]]). */

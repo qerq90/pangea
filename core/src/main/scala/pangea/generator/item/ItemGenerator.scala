@@ -253,6 +253,9 @@ object ItemGenerator {
         val (potion, next) = rng.pick(PotionKind.values.toList)
         val cap            = ItemDetails.Belt.capacityFor(item.rarity)
         (item.copy(details = ItemDetails.Belt(potion, cap, cap)), next)
+      // Фляга в обычной генерации не участвует (см. FlaskGenerator), но по типу
+      // её могут собрать заново — вид тогда случайный, заряды по редкости.
+      case ItemType.Flask => FlaskGenerator.reroll(item, rng)
       case _ => applyPassive(item, rng)
     }
 }

@@ -10,7 +10,7 @@ import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupStat
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.NpcQuest
-import pangea.model.item.{FlaskEffect, ItemDetails, PassiveKind, PotionKind}
+import pangea.model.item.{FlaskEffect, FlaskRates, ItemDetails, PassiveKind, PotionKind}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
@@ -326,12 +326,25 @@ case class BattleState(
             // Изумруд в оружии: при уроне по HP пассивно накладывает/стакает яд.
             gemPoisonPct = hero.gems.weaponPoisonPct
             gemPoisons   = gemPoisonPct > 0 && hpDmg > 0 && newHp > 0
-            effects =
+            effectsAfterGem =
               if (!gemPoisons) effectsAfterPotion
               else effectsAfterPotion.copy(
                 monsterPoison = Some(effectsAfterPotion.monsterPoison
                   .map(p => Poison(p.pct + gemPoisonPct))
                   .getOrElse(Poison(gemPoisonPct))))
+            // Фляги яда и крови: пока оружие смазано, удар по HP травит (как
+            // отравленное оружие) либо пускает кровь — стакается с тем, что висит.
+            coatPoisons = battle.effects.heroPoisonCoat && hpDmg > 0 && newHp > 0
+            coatBleeds  = battle.effects.heroBleedCoat && hpDmg > 0 && newHp > 0
+            effectsCoated =
+              if (!coatPoisons) effectsAfterGem
+              else effectsAfterGem.copy(
+                monsterPoison = Some(effectsAfterGem.monsterPoison.map(_.stacked).getOrElse(Poison.onHit)))
+            effects =
+              if (!coatBleeds) effectsCoated
+              else effectsCoated.copy(
+                monsterBleed = Some(effectsCoated.monsterBleed.map(_.stackedWith(FlaskRates.CoatBleedPct))
+                                 .getOrElse(Bleed(FlaskRates.CoatBleedPct))))
             // «Упырь» (порог 6): шанс, что удар по HP пустит цели кровь. Бросок
             // не тратится, если набора нет, — детерминизм боевых тестов.
             setBleeds <- chanceRoll(
@@ -346,11 +359,15 @@ case class BattleState(
             maxHp      = hero.effectiveMaxHp(nowMs)
             vamp       = if (hero.gems.vampirismPct > 0 && hpDmg > 0) (hpDmg * hero.gems.vampirismPct / 100L).max(0L) else 0L
             setSteal   = if (hero.sets.lifestealPct > 0 && hpDmg > 0) (hpDmg * hero.sets.lifestealPct / 100L).max(0L) else 0L
-            healedHero = if (vamp + setSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal).min(maxHp))) else hero
+            // Вампирская фляга: удар по HP лечит и тратит один из её ударов.
+            flaskBite  = battle.effects.heroVampiricHits > 0 && hpDmg > 0
+            flaskSteal = if (flaskBite) (hpDmg * FlaskRates.VampiricPct / 100L).max(0L) else 0L
+            healedHero = if (vamp + setSteal + flaskSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal + flaskSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
+            effectsFed = if (!flaskBite) effectsBled else effectsBled.copy(heroVampiricHits = effectsBled.heroVampiricHits - 1)
             hitBattle = battle
               .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
-              .withEffects(effectsBled)
+              .withEffects(effectsFed)
             // Проки стихий оружия (30% каждый) — только если моб жив после удара.
             elemResult <- if (newHp > 0) resolveElementProcs(hero, hitBattle)
                           else ZIO.succeed((hitBattle, Vector.empty[String]))
@@ -361,7 +378,7 @@ case class BattleState(
             (thornedHero, thornedBattle, thornsLine) = thornsResult
             log1 = log :+ (attackLine + dotIndicators(thornedBattle))
             log2 =
-              if (poisonsNow || gemPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
+              if (poisonsNow || gemPoisons || coatPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
               else log1
             log3 =
               if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
@@ -1046,95 +1063,99 @@ case class BattleState(
           if (e == Element.Fire) Element.ProcChancePct + hero.sets.igniteChanceBonusPct
           else Element.ProcChancePct
         Random.nextIntBetween(1, 101).map(roll => e -> (roll <= chance))
-      }.map { rolls =>
-        val fired      = rolls.collect { case (e, true) => e }.toSet
-        val maxHp      = battle.monsterStats.hp
-        val maxArmor   = MonsterSkill.monsterMaxArmor(battle)
-        val fireAir    = fired(Element.Fire) && fired(Element.Air)
-        val lightCold  = fired(Element.Lightning) && fired(Element.Cold)
+      }.map(rolls => applyProcs(battle, rolls.collect { case (e, true) => e }.toSet))
+  }
 
-        var b   = battle
-        var log = Vector.empty[String]
+  /** Применяет сработавшие проки стихий `fired` к мобу: сперва комбо, затем
+    * одиночные. Чистая функция — ею же пользуется стихийная фляга, у которой прок
+    * гарантирован. */
+  private def applyProcs(battle: SoloPveBattle, fired: Set[Element]): (SoloPveBattle, Vector[String]) = {
+    val maxHp      = battle.monsterStats.hp
+    val maxArmor   = MonsterSkill.monsterMaxArmor(battle)
+    val fireAir    = fired(Element.Fire) && fired(Element.Air)
+    val lightCold  = fired(Element.Lightning) && fired(Element.Cold)
 
-        // Комбо Огонь+Воздух: мгновенный урон 30% макс.HP + текущий % горения, горение → 2%.
-        if (fireAir) {
-          val burnPct = b.effects.monsterBurn.map(_.pct).getOrElse(0)
-          val dmg     = (maxHp.toDouble * (30 + burnPct) / 100.0).toLong.max(0L)
-          b = b.copy(
-            monsterCurrentHp = (b.monsterCurrentHp - dmg).max(0L),
-            effects = b.effects.copy(monsterBurn = Some(Burn(Burn.Initial)))
-          )
-          log = log :+ content.format("battle.comboFireAir", "damage" -> dmg.toString)
-        }
+    var b   = battle
+    var log = Vector.empty[String]
 
-        // Комбо Молния+Холод: -10% макс.брони (не переходит в HP) и застрявшее
-        // умение — ближайший каст моб пропускает целиком. Одиночные проки обеих
-        // стихий при этом ОСТАЮТСЯ: комбо идёт им в довесок, а не вместо них.
-        if (lightCold) {
-          val armorCut = (maxArmor.toDouble * BattleState.ComboArmorCutPct / 100.0).toLong.max(0L)
-          b = b.copy(
-            monsterCurrentArmor = (b.monsterCurrentArmor - armorCut).max(0L),
-            effects = b.effects.copy(monsterSkillBlockedTurns = BattleState.ComboSkillBlockTurns)
-          )
-          log = log :+ content.text("battle.comboLightningCold")
-        }
+    // Комбо Огонь+Воздух: мгновенный урон 30% макс.HP + текущий % горения, горение → 2%.
+    if (fireAir) {
+      val burnPct = b.effects.monsterBurn.map(_.pct).getOrElse(0)
+      val dmg     = (maxHp.toDouble * (30 + burnPct) / 100.0).toLong.max(0L)
+      b = b.copy(
+        monsterCurrentHp = (b.monsterCurrentHp - dmg).max(0L),
+        effects = b.effects.copy(monsterBurn = Some(Burn(Burn.Initial)))
+      )
+      log = log :+ content.format("battle.comboFireAir", "damage" -> dmg.toString)
+    }
 
-        // Одиночные проки стихий — идут своим чередом, в том числе после комбо.
-        if (fired(Element.Cold)) {
-          b = b.copy(effects = b.effects.copy(
-            monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
-          log = log :+ Element.Cold.procText
-          // Огненного элементаля прок Холода вдобавок сковывает: шипы молчат,
-          // его атаки перестают поджигать, точность срезана, и одна собранная
-          // сфера гаснет. Каменному холод ничего сверх обычного не делает.
-          if (b.boss.contains(MiniBoss.FireElemental)) {
-            val orbsLeft = (b.bossCharges - 1).max(0)
-            if (b.bossCharges > 0)
-              log = log :+ content.format("battle.elemental.orbDestroyed", "orbs" -> orbsLeft.toString)
-            b = b.copy(
-              bossCharges = orbsLeft,
-              effects          = b.effects.copy(chilledTurns = MiniBoss.FireElemental.ChilledTurns))
-          }
-        }
-        if (fired(Element.Fire) && !fireAir) {
-          val burn = b.effects.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)
-          b = b.copy(effects = b.effects.copy(monsterBurn = Some(burn)))
-          log = log :+ Element.Fire.procText
-          // Каменный элементаль от пламени плывёт: бьёт слабее, теряет валун и
-          // часть ПОТОЛКА брони (текущая при этом остаётся какая была).
-          if (b.boss.contains(MiniBoss.StoneElemental)) {
-            val left = (b.bossCharges - 1).max(0)
-            if (b.bossCharges > 0)
-              log = log :+ content.format("battle.elemental.boulderMelted", "boulders" -> left.toString)
-            b = b.copy(
-              bossCharges = left,
-              effects = b.effects.copy(
-                monsterWeakenedTurns = MiniBoss.StoneElemental.BurnedTurns,
-                monsterWeakenedPct   = MiniBoss.StoneElemental.BurnedDamageCutPct,
-                monsterMaxArmorCut   = b.effects.monsterMaxArmorCut + MiniBoss.StoneElemental.BurnedMaxArmorCut))
-            log = log :+ content.format("battle.elemental.stoneMelts",
-                    "pct" -> MiniBoss.StoneElemental.BurnedDamageCutPct.toString,
-                    "turns" -> MiniBoss.StoneElemental.BurnedTurns.toString,
-                    "armor" -> MiniBoss.StoneElemental.BurnedMaxArmorCut.toString)
-          }
-        }
-        if (fired(Element.Air) && !fireAir) {
-          b = b.copy(effects = b.effects.copy(airBoostTurns = Element.Air.ProcTurns))
-          log = log :+ Element.Air.procText
-        }
-        if (fired(Element.Lightning)) {
-          // Выжиг энергии: снимаем долю от ПОТОЛКА, поэтому эффект не зависит от
-          // того, сколько моб успел накопить, и одинаково чувствуется на любом
-          // уровне. Умение, на которое он копил, откладывается. Строка одна: и
-          // про сам разряд, и про сожжённую энергию.
-          val burned = (b.monsterStats.energy * Element.LightningEnergyBurnPct / 100L).max(1L)
-          val left   = (b.monsterCurrentEnergy - burned).max(0L)
-          val lost   = b.monsterCurrentEnergy - left
-          b = b.copy(monsterCurrentEnergy = left)
-          log = log :+ content.format("battle.lightningBurn", "energy" -> lost.toString)
-        }
-        (b, log)
+    // Комбо Молния+Холод: -10% макс.брони (не переходит в HP) и застрявшее
+    // умение — ближайший каст моб пропускает целиком. Одиночные проки обеих
+    // стихий при этом ОСТАЮТСЯ: комбо идёт им в довесок, а не вместо них.
+    if (lightCold) {
+      val armorCut = (maxArmor.toDouble * BattleState.ComboArmorCutPct / 100.0).toLong.max(0L)
+      b = b.copy(
+        monsterCurrentArmor = (b.monsterCurrentArmor - armorCut).max(0L),
+        effects = b.effects.copy(monsterSkillBlockedTurns = BattleState.ComboSkillBlockTurns)
+      )
+      log = log :+ content.text("battle.comboLightningCold")
+    }
+
+    // Одиночные проки стихий — идут своим чередом, в том числе после комбо.
+    if (fired(Element.Cold)) {
+      b = b.copy(effects = b.effects.copy(
+        monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
+      log = log :+ Element.Cold.procText
+      // Огненного элементаля прок Холода вдобавок сковывает: шипы молчат,
+      // его атаки перестают поджигать, точность срезана, и одна собранная
+      // сфера гаснет. Каменному холод ничего сверх обычного не делает.
+      if (b.boss.contains(MiniBoss.FireElemental)) {
+        val orbsLeft = (b.bossCharges - 1).max(0)
+        if (b.bossCharges > 0)
+          log = log :+ content.format("battle.elemental.orbDestroyed", "orbs" -> orbsLeft.toString)
+        b = b.copy(
+          bossCharges = orbsLeft,
+          effects          = b.effects.copy(chilledTurns = MiniBoss.FireElemental.ChilledTurns))
       }
+    }
+    if (fired(Element.Fire) && !fireAir) {
+      val burn = b.effects.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)
+      b = b.copy(effects = b.effects.copy(monsterBurn = Some(burn)))
+      log = log :+ Element.Fire.procText
+      // Каменный элементаль от пламени плывёт: бьёт слабее, теряет валун и
+      // часть ПОТОЛКА брони (текущая при этом остаётся какая была).
+      if (b.boss.contains(MiniBoss.StoneElemental)) {
+        val left = (b.bossCharges - 1).max(0)
+        if (b.bossCharges > 0)
+          log = log :+ content.format("battle.elemental.boulderMelted", "boulders" -> left.toString)
+        b = b.copy(
+          bossCharges = left,
+          effects = b.effects.copy(
+            monsterWeakenedTurns = MiniBoss.StoneElemental.BurnedTurns,
+            monsterWeakenedPct   = MiniBoss.StoneElemental.BurnedDamageCutPct,
+            monsterMaxArmorCut   = b.effects.monsterMaxArmorCut + MiniBoss.StoneElemental.BurnedMaxArmorCut))
+        log = log :+ content.format("battle.elemental.stoneMelts",
+                "pct" -> MiniBoss.StoneElemental.BurnedDamageCutPct.toString,
+                "turns" -> MiniBoss.StoneElemental.BurnedTurns.toString,
+                "armor" -> MiniBoss.StoneElemental.BurnedMaxArmorCut.toString)
+      }
+    }
+    if (fired(Element.Air) && !fireAir) {
+      b = b.copy(effects = b.effects.copy(airBoostTurns = Element.Air.ProcTurns))
+      log = log :+ Element.Air.procText
+    }
+    if (fired(Element.Lightning)) {
+      // Выжиг энергии: снимаем долю от ПОТОЛКА, поэтому эффект не зависит от
+      // того, сколько моб успел накопить, и одинаково чувствуется на любом
+      // уровне. Умение, на которое он копил, откладывается. Строка одна: и
+      // про сам разряд, и про сожжённую энергию.
+      val burned = (b.monsterStats.energy * Element.LightningEnergyBurnPct / 100L).max(1L)
+      val left   = (b.monsterCurrentEnergy - burned).max(0L)
+      val lost   = b.monsterCurrentEnergy - left
+      b = b.copy(monsterCurrentEnergy = left)
+      log = log :+ content.format("battle.lightningBurn", "energy" -> lost.toString)
+    }
+    (b, log)
   }
 
   /** Умения, которые моб может применить прямо сейчас: доступные его расе,
@@ -1800,6 +1821,72 @@ case class BattleState(
               val newBattle = usedBattle.copy(heroBattleState = usedBattle.heroBattleState.add(timedBuff))
               TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog,
                 Outcome.Continue, endsRound = false)
+
+            // Фляга кузнеца: чинит броню до потолка.
+            case FlaskEffect.ArmorPercent(pct) =>
+              val maxArmor = hero.effectiveMaxArmor(nowMs)
+              val newArmor = (hero.fightStats.armor + (maxArmor * pct / 100L).max(1L)).min(maxArmor).max(hero.fightStats.armor)
+              val msg = content.format("battle.flaskArmor",
+                "armor" -> (newArmor - hero.fightStats.armor).toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString)
+              TurnResult(hero.copy(equipment = newEquipment, fightStats = hero.fightStats.copy(armor = newArmor)),
+                usedBattle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
+
+            // Фляга бодрости: энергия до потолка.
+            case FlaskEffect.EnergyPercent(pct) =>
+              val maxEn = hero.maxEnergy(nowMs)
+              val newEn = (hero.fightStats.energy + (maxEn * pct / 100L).max(1L)).min(maxEn).max(hero.fightStats.energy)
+              val msg = content.format("battle.flaskEnergy",
+                "energy" -> (newEn - hero.fightStats.energy).toString, "cur" -> newEn.toString, "max" -> maxEn.toString)
+              TurnResult(hero.copy(equipment = newEquipment, fightStats = hero.fightStats.copy(energy = newEn)),
+                usedBattle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
+
+            // Стихийная фляга: урона нет, прок стихии — гарантирован. Иммунитеты
+            // цели в силе: огненного элементаля пламя не берёт, элементалю и
+            // нежити прок ложится как обычный (см. withEffects).
+            case FlaskEffect.Splash(element) =>
+              val (procced, procLog) = applyProcs(usedBattle, Set(element))
+              val guarded = procced.withEffects(procced.effects)
+              val head = content.format("battle.flaskSplash", "flask" -> flask.name)
+              val lines =
+                if (element == Element.Fire && guarded.boss.exists(_.immuneToBurn))
+                  Vector(head, content.text("battle.flaskSplashImmune"))
+                else Vector(head) ++ procLog
+              TurnResult(hero.copy(equipment = newEquipment), guarded, lines ++ qhLog, Outcome.Continue, endsRound = false)
+
+            // Фляга очищения: всё вредное с героя долой — раны, дебафы, срез защиты.
+            case FlaskEffect.Cleanse =>
+              val cleaned = usedBattle.effects.copy(
+                heroBurn = None, heroPoison = None, heroBleed = None,
+                heroStunnedTurns = 0, heroGroundedTurns = 0, heroColdDefenceCut = 0)
+              TurnResult(hero.copy(equipment = newEquipment), usedBattle.copy(effects = cleaned),
+                Vector(content.text("battle.flaskCleanse")) ++ qhLog, Outcome.Continue, endsRound = false)
+
+            // Дымная фляга: мобы вне пары на несколько раундов теряют из виду и
+            // героя, и друг друга. Запас в один тик — см. BattleEffects.heroSmokeTurns.
+            case FlaskEffect.Smoke(rounds) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroSmokeTurns = rounds + 1)),
+                Vector(content.format("battle.flaskSmoke", "rounds" -> rounds.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
+
+            // Вампирская фляга: следующие удары по HP лечат (см. playerStrike).
+            case FlaskEffect.Vampiric(hits, pct) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroVampiricHits = hits)),
+                Vector(content.format("battle.flaskVampiric", "hits" -> hits.toString, "pct" -> pct.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
+
+            // Фляги яда и крови: оружие смазано на несколько раундов (см. playerStrike).
+            case FlaskEffect.PoisonCoat(rounds) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroPoisonCoatTurns = rounds)),
+                Vector(content.format("battle.flaskPoisonCoat", "rounds" -> rounds.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
+            case FlaskEffect.BleedCoat(rounds) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroBleedCoatTurns = rounds)),
+                Vector(content.format("battle.flaskBleedCoat", "rounds" -> rounds.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
           }
         }
       case _ =>
@@ -1968,6 +2055,7 @@ case class BattleState(
     if (res.outcome != Outcome.Continue || !res.battle.isGroup || !res.endsRound) ZIO.succeed(res)
     else {
       val n = res.battle.group.others.size
+      val smokeLine = if (res.battle.effects.heroInSmoke) Vector(content.text("battle.flaskSmokeHolds")) else Vector.empty[String]
       // Павший выше по строю смыкает ряды: следующий моб стоит уже на его индексе.
       ZIO.foldLeft((0 until n).toList)((res.hero, res.battle, Vector.empty[String], 0)) {
         case ((h, b, log, fallen), i) =>
@@ -1978,7 +2066,7 @@ case class BattleState(
           }
       }.map { case (h, b, log, _) =>
         val outcome = if (h.fightStats.hp <= 0) Outcome.Death else Outcome.Continue
-        res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ log)
+        res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ smokeLine ++ log)
       }
     }
 
@@ -1986,7 +2074,10 @@ case class BattleState(
     * место — соседнее. */
   private def freeMobTurn(hero: Hero, battle: SoloPveBattle, idx: Int, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] = {
     val slot       = battle.group.others(idx)
-    val reachesHero = battle.group.inReach(battle.group.posOf(idx))
+    // В дыму (дымная фляга) мобы вне пары не видят ни героя, ни друг друга:
+    // ни удара сбоку, ни лечения соседу — только раны тикают и энергия копится.
+    val smoke       = battle.effects.heroInSmoke
+    val reachesHero = !smoke && battle.group.inReach(battle.group.posOf(idx))
     // Временный бой: этот моб — «активный», геройская половина эффектов та же.
     val tmp0 = battle.withActive(slot)
     val tmp  = tmp0.copy(effects = tickSlotEffects(tmp0.effects))
@@ -2009,7 +2100,7 @@ case class BattleState(
       (h1, t1, log1) = struck
       // 2) умение: раненому соседу — лечение, себе — что по карману, герою — урон
       casted <-
-        if (h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
+        if (smoke || h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
           ZIO.succeed((h1, t1, battle, Vector.empty[String]))
         else allyAid(h1, t1, battle, idx, nowMs).flatMap {
           case Some((t2, b2, line)) => ZIO.succeed((h1, t2, b2, Vector(line)))

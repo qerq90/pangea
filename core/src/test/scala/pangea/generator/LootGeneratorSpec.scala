@@ -19,6 +19,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     case LootDrop.Trophy(_)       => "trophy"
     case LootDrop.MapHalf(_)      => "mapHalf"
     case LootDrop.Gem(_)          => "gem"
+    case LootDrop.Flask(_)        => "flask"
     case LootDrop.Silver(_, true) => "silverPile"
     case LootDrop.Silver(_, _)    => "silverSmall"
     case LootDrop.Doubloons(_)    => "doubloons"
@@ -151,6 +152,28 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(tiers.forall { tier =>
         (1L to 3000L).forall(s => LootGenerator.roll(tier, Race.Orc, 30L, Rng(s))._1.nonEmpty)
       })
+    },
+
+    // ── Фляги ─────────────────────────────────────────────────────────────────
+    test("фляга падает у всех тиров с весом 1% (за счёт экипировки), уровня 1, любой из семей") {
+      import pangea.model.item.{FlaskKind, ItemDetails => ID}
+      val common = catRatePct(Rarity.Common, "flask")
+      val leg    = catRatePct(Rarity.Legendary, "flask")
+      val flasks = (1L to 20000L).iterator
+        .flatMap(s => LootGenerator.roll(Rarity.Legendary, Race.Orc, 30L, Rng(s))._1)
+        .collect { case LootDrop.Flask(i) => i }.toList
+      val kinds = flasks.flatMap(f => f.details match { case ID.Flask(e, _, _) => FlaskKind.ofEffect(e); case _ => None }).toSet
+      // у обычных первый слот 30% × 1% ≈ 0,3%; у легендарных два гарантированных слота ≈ 2%
+      assertTrue(common > 0.1 && common < 0.6) && assertTrue(leg > 1.2 && leg < 3.0) &&
+      assertTrue(flasks.nonEmpty && flasks.forall(f => f.itemType == ItemType.Flask && f.lvl == 1L)) &&
+      assertTrue(kinds == FlaskKind.values.toSet) &&
+      // заряды по редкости, фляга полна
+      assertTrue(flasks.forall(f => f.details match {
+        case ID.Flask(_, c, m) => c == m && m == FlaskKind.chargesFor(f.rarity)
+        case _                 => false
+      })) &&
+      assertTrue(flasks.map(_.rarity).toSet.contains(pangea.model.item.Rarity.Gray) &&
+                 flasks.map(_.rarity).toSet.contains(pangea.model.item.Rarity.Orange))
     },
 
     // ── Дроп с элементаля ─────────────────────────────────────────────────────

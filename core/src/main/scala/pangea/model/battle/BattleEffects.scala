@@ -172,7 +172,17 @@ case class BattleEffects(
   heroBleed:            Option[Bleed]              = None,
   // Сколько ходов волк ещё «подстроился под добычу»: атака и уклонение выше
   // (см. MiniBoss.WhiteWolf.InstinctBoostPct).
-  mobInstinctTurns:     Int                        = 0
+  mobInstinctTurns:     Int                        = 0,
+  // Вампирская фляга: сколько ударов по HP ещё лечат героя (FlaskRates.VampiricPct).
+  heroVampiricHits:     Int                        = 0,
+  // Фляги яда и крови: сколько раундов оружие ещё смазано — удары по HP травят
+  // либо пускают кровь (FlaskRates.CoatBleedPct).
+  heroPoisonCoatTurns:  Int                        = 0,
+  heroBleedCoatTurns:   Int                        = 0,
+  // Дымная фляга: сколько ходов мобы вне пары не видят ни героя, ни друг друга.
+  // Ставится с запасом в один тик, как monsterSkillBlockedTurns: `tickBuffs`
+  // идёт в начале хода моба, до фазы соседей.
+  heroSmokeTurns:       Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
@@ -209,7 +219,11 @@ case class BattleEffects(
     heroStunnedTurns     = heroStunnedTurns,
     heroGroundedTurns    = heroGroundedTurns,
     heroPoison           = heroPoison,
-    heroBleed            = heroBleed
+    heroBleed            = heroBleed,
+    heroVampiricHits     = heroVampiricHits,
+    heroPoisonCoatTurns  = heroPoisonCoatTurns,
+    heroBleedCoatTurns   = heroBleedCoatTurns,
+    heroSmokeTurns       = heroSmokeTurns
   )
 
   /** Своя геройская половина плюс мобовая половина другого набора. */
@@ -248,6 +262,13 @@ case class BattleEffects(
 
   /** Подстроился ли волк под добычу (атака и уклонение выше). */
   def mobInstinct: Boolean = mobInstinctTurns > 0
+
+  /** Смазано ли оружие героя ядом / кровью. */
+  def heroPoisonCoat: Boolean = heroPoisonCoatTurns > 0
+  def heroBleedCoat: Boolean  = heroBleedCoatTurns > 0
+
+  /** Прячет ли дым героя от мобов вне пары. */
+  def heroInSmoke: Boolean = heroSmokeTurns > 0
 }
 
 object BattleEffects {
