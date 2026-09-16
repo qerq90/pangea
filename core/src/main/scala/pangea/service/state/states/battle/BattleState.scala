@@ -911,22 +911,25 @@ case class BattleState(
       )
   }
 
-  /** Удар моба по HP может оставить травму: с любого урона по HP — 1%, а удар,
-    * снявший больше половины ПОТОЛКА HP, — наверняка. Считается по каждому удару
-    * и приёму отдельно; яд, кровь и огонь — не удары. Мёртвому травму не
-    * добавляем (её даст смерть), и не дублируем ту, что приём выдал сам (смерч,
-    * широкий удар Джо). Бросок не тратится, если урона по HP не было. */
+  /** Удар моба по HP может оставить травму. Мелкие удары (до 5% потолка HP) не в
+    * счёт; ощутимый — 1%; сокрушительный (больше половины потолка) — 50%.
+    * Считается по каждому удару и приёму отдельно; яд, кровь и огонь — не удары.
+    * Мёртвому травму не добавляем (её даст смерть), и не дублируем ту, что приём
+    * выдал сам (смерч, широкий удар Джо). Бросок не тратится, если удар был
+    * мелким или ушёл в броню. */
   private def hitTrauma(before: Hero, after: Hero, nowMs: Long): Task[(Hero, Option[String])] = {
     val lost = before.fightStats.hp - after.fightStats.hp
-    if (lost <= 0L || after.fightStats.hp <= 0L || after.traumaNames != before.traumaNames) ZIO.succeed((after, None))
+    // Потолок — эффективный максимум, но не ниже того, что было: HP выше потолка
+    // (сошёл баф, сменилась вещь) не должно делать каждый удар сокрушительным.
+    val ceiling = after.effectiveMaxHp(nowMs).max(before.fightStats.hp)
+    if (lost * 100L <= ceiling * BattleState.HitTraumaMinPct || after.fightStats.hp <= 0L ||
+        after.traumaNames != before.traumaNames) ZIO.succeed((after, None))
     else {
-      // Потолок — эффективный максимум, но не ниже того, что было: HP выше потолка
-      // (сошёл баф, сменилась вещь) не должно делать каждый удар сокрушительным.
-      val ceiling  = after.effectiveMaxHp(nowMs).max(before.fightStats.hp)
       val crushing = lost * 100L > ceiling * BattleState.HitTraumaCrushPct
-      chanceRoll(!crushing, BattleState.HitTraumaChancePct).flatMap { unlucky =>
-        if (crushing) giveTrauma(after, nowMs, "battle.hitTraumaCrush").map { case (h, l) => (h, Some(l)) }
-        else if (unlucky) giveTrauma(after, nowMs, "battle.hitTrauma").map { case (h, l) => (h, Some(l)) }
+      val chance   = if (crushing) BattleState.HitTraumaCrushChancePct else BattleState.HitTraumaChancePct
+      val key      = if (crushing) "battle.hitTraumaCrush" else "battle.hitTrauma"
+      chanceRoll(active = true, chance).flatMap { hit =>
+        if (hit) giveTrauma(after, nowMs, key).map { case (h, l) => (h, Some(l)) }
         else ZIO.succeed((after, None))
       }
     }
@@ -2857,10 +2860,13 @@ object BattleState {
       bonusPct    = 0L
     )
 
-  /** Травма от удара моба: шанс (в %) с любого урона по HP и порог (в % от
-    * потолка HP), сверх которого один удар оставляет травму наверняка. */
-  val HitTraumaChancePct: Long = 1L
-  val HitTraumaCrushPct: Long  = 50L
+  /** Травма от удара моба: удар должен снять больше `HitTraumaMinPct` потолка
+    * HP, чтобы вообще считаться; тогда шанс `HitTraumaChancePct`; удар сверх
+    * `HitTraumaCrushPct` потолка — сокрушительный, шанс `HitTraumaCrushChancePct`. */
+  val HitTraumaMinPct: Long         = 5L
+  val HitTraumaChancePct: Long      = 1L
+  val HitTraumaCrushPct: Long       = 50L
+  val HitTraumaCrushChancePct: Long = 50L
 
   /** Сколько процентов ПОТОЛКА брони срезает комбо Молния+Холод. */
   val ComboArmorCutPct: Long = 10L

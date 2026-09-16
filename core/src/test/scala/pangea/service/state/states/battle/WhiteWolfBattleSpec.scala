@@ -74,10 +74,10 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
     } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
 
-  /** Броски хода: удар героя, попадание моба, прок холода у моба (50 — нет), травма
-    * от удара (50 — нет), затем `extra`, и травма от приёма (50 — нет). */
+  /** Броски хода: удар героя, попадание моба, прок холода у моба (50 — нет), затем `extra`.
+    * Удары волка по герою с его запасом HP мелкие — броска травмы нет. */
   private def seedTurn(extra: Int*) =
-    TestRandom.feedInts(60 +: 90 +: 50 +: 50 +: (extra :+ 50): _*) *> TestRandom.feedLongs(100L, 100L)
+    TestRandom.feedInts(60 +: 90 +: 50 +: extra: _*) *> TestRandom.feedLongs(100L, 100L)
 
   private def strike(h: Hero, battle: SoloPveBattle, seed: ZIO[Any, Nothing, Unit]) =
     for {

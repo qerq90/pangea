@@ -14,8 +14,9 @@ import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
 
-/** Травма от удара моба: 1% с любого урона по HP, наверняка — если один удар
- *  снял больше половины потолка HP. Бросок не тратится, когда урон ушёл в броню. */
+/** Травма от удара моба: мелкие удары (до 5% потолка HP) не в счёт, ощутимый —
+ *  1%, сокрушительный (больше половины потолка) — 50%. Бросок не тратится, когда
+ *  удар мелкий или ушёл в броню. */
 object HitTraumaSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
@@ -53,39 +54,41 @@ object HitTraumaSpec extends ZIOSpecDefault {
 
   override def spec = suite("Травма от удара")(
 
-    test("удар по HP: бросок 1 — травма, 50 — нет; травма лёгкая и держится 8 часов") {
-      val h = hero(hp = 100000L)
+    test("ощутимый удар по HP (больше 5% потолка): бросок 1 — травма, 50 — нет; травма лёгкая и держится 8 часов") {
+      val h = hero(hp = 100000L) // потолок 120 000: удар ~10 000 ощутим, но не сокрушителен
       for {
         // герой попал (60), моб попал (99), травма (1 → да), индекс травмы (0), подкрепление нет (99)
-        hurt <- round(h, SoloPveBattle.from(monster(20L), h), 60, 99, 1, 0, 99)
-        safe <- round(h, SoloPveBattle.from(monster(20L), h), 60, 99, 50, 99)
+        hurt <- round(h, SoloPveBattle.from(monster(10000L), h), 60, 99, 1, 0, 99)
+        safe <- round(h, SoloPveBattle.from(monster(10000L), h), 60, 99, 50, 99)
       } yield assertTrue(hurt._1.traumaNames == List(Trauma.light.head.name) && hurt._1.traumaUntil.isDefined) &&
               assertTrue(hurt._2.contains("Удар пришёлся неудачно — вы получили травму")) &&
               assertTrue(safe._1.traumaNames.isEmpty && !safe._2.contains("травму"))
     },
 
-    test("сокрушительный удар по живому герою: травма сразу, с репликой") {
+    test("сокрушительный удар (больше половины потолка) — травма с шансом 50%") {
       val h = hero(hp = 30000L, vit = 10L) // порог = половина от 30 000
       for {
-        r <- round(h, SoloPveBattle.from(monster(20000L), h), 60, 99, 0, 99)
-        (u, log) = r
-      } yield assertTrue(u.fightStats.hp > 0L && u.traumaNames.size == 1) &&
-              assertTrue(log.contains("Удар был сокрушительным — вы получили травму"))
+        hurt <- round(h, SoloPveBattle.from(monster(20000L), h), 60, 99, 50, 0, 99)
+        safe <- round(h, SoloPveBattle.from(monster(20000L), h), 60, 99, 51, 99)
+      } yield assertTrue(hurt._1.fightStats.hp > 0L && hurt._1.traumaNames.size == 1) &&
+              assertTrue(hurt._2.contains("Удар был сокрушительным — вы получили травму")) &&
+              assertTrue(safe._1.traumaNames.isEmpty && !safe._2.contains("травму"))
     },
 
-    test("удар в броню травмы не даёт и бросок не тратит: подкрепление читает следующий int") {
-      val h = hero(hp = 100000L, armor = 100000L)
+    test("мелкий удар (до 5% потолка) и удар в броню травмы не дают и бросок не тратят") {
+      val soft    = hero(hp = 100000L)                    // 20 урона от потолка 120 000 — пустяк
+      val armored = hero(hp = 100000L, armor = 100000L)   // всё ушло в броню
       for {
-        // герой попал, моб попал (в броню), подкрепление = 1 (≤ 2 — пришёл бы, будь это его бросок)
-        r <- round(h, SoloPveBattle.from(monster(20L), h), 60, 99, 1, 99)
-        (u, log) = r
-      } yield assertTrue(u.traumaNames.isEmpty && !log.contains("травму")) &&
-              assertTrue(log.contains("прибежал сородич")) // бросок 1 ушёл подкреплению, а не травме
+        // герой попал, моб попал, подкрепление = 1 (≤ 2 — пришёл бы, будь это его бросок)
+        a <- round(soft, SoloPveBattle.from(monster(20L), soft), 60, 99, 1, 99)
+        b <- round(armored, SoloPveBattle.from(monster(10000L), armored), 60, 99, 1, 99)
+      } yield assertTrue(a._1.traumaNames.isEmpty && !a._2.contains("травму") && a._2.contains("прибежал сородич")) &&
+              assertTrue(b._1.traumaNames.isEmpty && !b._2.contains("травму") && b._2.contains("прибежал сородич"))
     },
 
     test("удар сбоку в группе тоже может оставить травму") {
       val h = hero(hp = 100000L)
-      val b = SoloPveBattle.fromGroup(List(monster(20L), monster(20L)), h, Nil)
+      val b = SoloPveBattle.fromGroup(List(monster(10000L), monster(10000L)), h, Nil)
       for {
         // герой попал (60), активный промахнулся (1), сосед попал (99), травма от соседа (1), индекс (0), подкрепление (99)
         r <- round(h, b, 60, 1, 99, 1, 0, 99)

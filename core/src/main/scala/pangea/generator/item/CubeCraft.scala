@@ -144,20 +144,45 @@ object CubeCraft {
     }
   }
 
-  // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты
-  // перебираются по порядку BrewKind; травы одного рецепта у другого не
-  // отбираются — каждый отвар берёт ровно свою тройку.
+  // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты делят
+  // травы между собой, поэтому жадный «первый подходящий» сварил бы три
+  // костоправных из трав, сложенных под три разных отвара. Вместо этого по
+  // травам в кубе строится план: наибольшее число отваров, при равенстве — как
+  // можно больше разных; каждое применение забирает первый шаг плана, а остаток
+  // пула на следующем шаге даёт тот же план без него.
   private object HerbBrew extends Recipe {
     val size = 3
-    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
-      BrewKind.values.iterator.map { kind =>
-        // Для каждой травы рецепта — свой предмет из пула, без повторов.
-        val picked = kind.recipe.foldLeft(Option(List.empty[Item])) {
-          case (Some(acc), herb) => pool.find(i => i.material.contains(herb) && !acc.contains(i)).map(acc :+ _)
-          case (None, _)         => None
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
+      val herbs  = pool.flatMap(i => i.material.filter(_.isHerb))
+      val counts = herbs.groupBy(identity).view.mapValues(_.size).toMap
+      bestPlan(counts).headOption.map { kind =>
+        val consumed = kind.recipe.foldLeft(List.empty[Item]) { (acc, herb) =>
+          acc :+ pool.find(i => i.material.contains(herb) && !acc.contains(i)).get
         }
-        picked.map(consumed => (consumed, BrewKind.item(kind), rng))
-      }.collectFirst { case Some(m) => m }
+        (consumed, BrewKind.item(kind), rng)
+      }
+    }
+
+    /** Лучший план варки из этих трав: больше отваров, при равенстве — больше
+      * разных видов, при равенстве — по порядку BrewKind. Пул мал, состояний по
+      * счётчикам трав немного — поиск с памятью. */
+    private def bestPlan(counts: Map[MaterialKind, Int]): List[BrewKind] = {
+      val memo = scala.collection.mutable.Map.empty[Map[MaterialKind, Int], List[BrewKind]]
+      def better(a: List[BrewKind], b: List[BrewKind]): Boolean =
+        a.size > b.size || (a.size == b.size && a.distinct.size > b.distinct.size)
+      def go(c: Map[MaterialKind, Int]): List[BrewKind] = memo.getOrElseUpdate(c, {
+        BrewKind.values.toList.foldLeft(List.empty[BrewKind]) { (best, kind) =>
+          val need = kind.recipe.groupBy(identity).view.mapValues(_.size).toMap
+          if (!need.forall { case (h, n) => c.getOrElse(h, 0) >= n }) best
+          else {
+            val rest = need.foldLeft(c) { case (m, (h, n)) => m.updated(h, m(h) - n) }.filter(_._2 > 0)
+            val plan = kind :: go(rest)
+            if (better(plan, best)) plan else best
+          }
+        }
+      })
+      go(counts)
+    }
   }
 
   // От самого длинного рецепта к самому короткому.

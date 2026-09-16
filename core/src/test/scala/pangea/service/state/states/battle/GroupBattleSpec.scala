@@ -221,8 +221,8 @@ object GroupBattleSpec extends ZIOSpecDefault {
       for {
         t <- makeState(hero(), group(1000L)) // один моб без энергии — умений не будет
         (state, dao, r) = t
-        // герой, моб, травма от удара (50 — нет), подкрепление = 1 (≤ 2 — пришёл)
-        _       <- TestRandom.feedInts(60, 99, 50, 1) *> TestRandom.feedLongs(100L, 100L, 7L, 10L)
+        // герой, моб, подкрепление = 1 (≤ 2 — пришёл)
+        _       <- TestRandom.feedInts(60, 99, 1) *> TestRandom.feedLongs(100L, 100L, 7L, 10L)
         _       <- state.action(testUser, tap("Attack"), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
