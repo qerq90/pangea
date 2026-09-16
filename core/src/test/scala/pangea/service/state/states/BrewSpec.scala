@@ -54,8 +54,9 @@ object BrewSpec extends ZIOSpecDefault {
       val boneSetter = List(herb(MaterialKind.Nettle, 1L), herb(MaterialKind.Chamomile, 2L), herb(MaterialKind.Calendula, 3L))
       val result     = CubeCraft.craft(boneSetter, charges = 5, rng)
       val all        = BrewKind.values.map(k => CubeCraft.craft(k.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng))
-      assertTrue(result.chargesUsed == 1 && result.items.size == 1) &&
-        assertTrue(result.items.head.brew.contains(BrewKind.BoneSetter)) &&
+      // один рецепт — две порции, заряд один
+      assertTrue(result.chargesUsed == 1 && result.items.size == 2) &&
+        assertTrue(result.items.forall(_.brew.contains(BrewKind.BoneSetter))) &&
         assertTrue(result.items.head.itemType == ItemType.Brew && !ItemType.equippable.contains(ItemType.Brew)) &&
         // все восемь рецептов варятся
         assertTrue(all.zip(BrewKind.values).forall { case (r, k) => r.chargesUsed == 1 && r.items.head.brew.contains(k) }) &&
@@ -71,7 +72,7 @@ object BrewSpec extends ZIOSpecDefault {
       // и все десять рецептов разом
       val all    = BrewKind.rank1.toList.zipWithIndex.flatMap { case (k, i) => k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) } }
       val allRes = CubeCraft.craft(all, charges = 50, rng)
-      assertTrue(result.chargesUsed == 3 && result.items.flatMap(_.brew).toSet == kinds.toSet) &&
+      assertTrue(result.chargesUsed == 3 && result.items.size == 6 && result.items.flatMap(_.brew).toSet == kinds.toSet) &&
         assertTrue(allRes.chargesUsed == BrewKind.rank1.size && allRes.items.flatMap(_.brew).toSet == BrewKind.rank1.toSet)
     },
 
@@ -83,7 +84,8 @@ object BrewSpec extends ZIOSpecDefault {
         List(herb(MaterialKind.Nettle, 1L), herb(MaterialKind.Chamomile, 2L), herb(MaterialKind.Calendula, 3L),
              herb(MaterialKind.Sage, 4L), herb(MaterialKind.Chamomile, 5L), herb(MaterialKind.Nettle, 6L)), charges = 5, rng)
       assertTrue(two.chargesUsed == 0 && wrong.chargesUsed == 0) &&
-        assertTrue(six.chargesUsed == 2 && six.items.flatMap(_.brew).toSet == Set[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater))
+        assertTrue(six.chargesUsed == 2 && six.items.size == 4 &&
+                   six.items.flatMap(_.brew).toSet == Set[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater))
     },
 
     // ── Инвентарь ─────────────────────────────────────────────────────────────

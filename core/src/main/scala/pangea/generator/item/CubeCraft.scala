@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{BrewKind, Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
+import pangea.model.item.{BrewKind, BrewRates, Gem, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, TrophyKind}
 import pangea.model.monster.MiniBoss
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
@@ -29,6 +29,8 @@ object CubeCraft {
     def size: Int
     /** Попытаться забрать из пула ингредиенты и произвести результат. */
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)]
+    /** Сколько одинаковых результатов даёт одно применение (отвары идут по две порции). */
+    def portions: Int = 1
   }
 
   private def isHead(i: Item): Boolean = i.details match {
@@ -152,6 +154,7 @@ object CubeCraft {
   // пула на следующем шаге даёт тот же план без него.
   private object HerbBrew extends Recipe {
     val size = 3
+    override def portions: Int = BrewRates.Portions
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val herbs  = pool.flatMap(i => i.material.filter(_.isHerb))
       val counts = herbs.groupBy(identity).view.mapValues(_.size).toMap
@@ -209,7 +212,7 @@ object CubeCraft {
         recipe.tryMatch(pool, r) match {
           case Some((consumed, result, r2)) =>
             pool = removeEach(pool, consumed)
-            results = results :+ result
+            results = results ++ List.fill(recipe.portions)(result)
             r = r2
             remaining -= 1
           case None => continue = false
