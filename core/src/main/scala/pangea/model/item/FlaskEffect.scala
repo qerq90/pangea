@@ -18,9 +18,10 @@ sealed trait FlaskEffect {
     case FlaskEffect.EnergyPercent(_) => "Бодрость"
     case FlaskEffect.Splash(e)        => FlaskKind.splashShort(e)
     case FlaskEffect.Cleanse          => "Очищение"
-    case FlaskEffect.Smoke            => "Дым"
+    case FlaskEffect.Smoke(_)         => "Дым"
     case FlaskEffect.Vampiric(_, _)   => "Вампир"
-    case FlaskEffect.Venom(_)         => "Отрава"
+    case FlaskEffect.PoisonCoat(_)    => "Яд"
+    case FlaskEffect.BleedCoat(_)     => "Кровь"
   }
 
   /** Описание для инвентаря. */
@@ -31,9 +32,10 @@ sealed trait FlaskEffect {
     case FlaskEffect.EnergyPercent(pct) => s"Глоток: +$pct% макс. энергии."
     case FlaskEffect.Splash(e)          => s"Плеснуть во врага: ${FlaskKind.splashText(e)}"
     case FlaskEffect.Cleanse            => "Глоток: снимает с вас горение, яд, кровотечение и все дебафы."
-    case FlaskEffect.Smoke              => "Разбить о землю: побег без ответного удара, из группы не окружат."
+    case FlaskEffect.Smoke(rounds)      => s"Разбить о землю: $rounds раунда дым прячет вас от мобов вне пары — они не бьют сбоку и не помогают друг другу."
     case FlaskEffect.Vampiric(hits, pct) => s"Глоток: следующие $hits удара по HP лечат вас на $pct% нанесённого урона."
-    case FlaskEffect.Venom(rounds)      => s"Смазать оружие: $rounds раундов удары по HP травят врага и пускают ему кровь."
+    case FlaskEffect.PoisonCoat(rounds) => s"Смазать оружие: $rounds раундов удары по HP травят врага."
+    case FlaskEffect.BleedCoat(rounds)  => s"Смазать оружие: $rounds раундов удары по HP пускают врагу кровь."
   }
 }
 
@@ -50,12 +52,14 @@ object FlaskEffect {
   case class Splash(element: Element)               extends FlaskEffect
   /** Фляга очищения: снимает с героя всё вредное. */
   case object Cleanse                               extends FlaskEffect
-  /** Дымная фляга: побег без ответного удара. */
-  case object Smoke                                 extends FlaskEffect
+  /** Дымная фляга: `rounds` раундов мобы вне пары не бьют сбоку и не помогают. */
+  case class Smoke(rounds: Int)                     extends FlaskEffect
   /** Вампирская фляга: `hits` ударов по HP лечат на `percent` урона. */
   case class Vampiric(hits: Int, percent: Int)      extends FlaskEffect
-  /** Фляга отравы: `rounds` раундов удары по HP травят и пускают кровь. */
-  case class Venom(rounds: Int)                     extends FlaskEffect
+  /** Фляга яда: `rounds` раундов удары по HP травят. */
+  case class PoisonCoat(rounds: Int)                extends FlaskEffect
+  /** Фляга крови: `rounds` раундов удары по HP пускают кровь. */
+  case class BleedCoat(rounds: Int)                 extends FlaskEffect
 
   implicit val healPercentEncoder: Encoder[HealPercent]     = deriveEncoder
   implicit val healPercentDecoder: Decoder[HealPercent]     = deriveDecoder
@@ -67,10 +71,14 @@ object FlaskEffect {
   implicit val energyDecoder:      Decoder[EnergyPercent]   = deriveDecoder
   implicit val splashEncoder:      Encoder[Splash]          = deriveEncoder
   implicit val splashDecoder:      Decoder[Splash]          = deriveDecoder
+  implicit val smokeEncoder:       Encoder[Smoke]           = deriveEncoder
+  implicit val smokeDecoder:       Decoder[Smoke]           = deriveDecoder
   implicit val vampiricEncoder:    Encoder[Vampiric]        = deriveEncoder
   implicit val vampiricDecoder:    Decoder[Vampiric]        = deriveDecoder
-  implicit val venomEncoder:       Encoder[Venom]           = deriveEncoder
-  implicit val venomDecoder:       Decoder[Venom]           = deriveDecoder
+  implicit val poisonCoatEncoder:  Encoder[PoisonCoat]      = deriveEncoder
+  implicit val poisonCoatDecoder:  Decoder[PoisonCoat]      = deriveDecoder
+  implicit val bleedCoatEncoder:   Encoder[BleedCoat]       = deriveEncoder
+  implicit val bleedCoatDecoder:   Decoder[BleedCoat]       = deriveDecoder
 
   implicit val encoder: Encoder[FlaskEffect] = deriveEncoder
   implicit val decoder: Decoder[FlaskEffect] = deriveDecoder

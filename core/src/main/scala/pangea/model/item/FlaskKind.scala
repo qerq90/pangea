@@ -30,10 +30,12 @@ object FlaskRates {
   /** Вампирская: сколько ударов по HP и на сколько % урона они лечат. */
   val VampiricHits: Int = 3
   val VampiricPct: Int  = 30
-  /** Отрава: сколько раундов оружие смазано и на сколько % пускает кровь за удар
+  /** Яд и кровь: сколько раундов оружие смазано; кровь — на сколько % за удар
    *  (яд стакается как от отравленного оружия — см. `Poison.OnHit`). */
-  val VenomRounds: Int   = 5
-  val VenomBleedPct: Int = 2
+  val CoatRounds: Int   = 5
+  val CoatBleedPct: Int = 2
+  /** Дым: сколько раундов мобы вне пары не бьют сбоку и не помогают. */
+  val SmokeRounds: Int = 4
 }
 
 object FlaskKind extends Enum[FlaskKind] {
@@ -46,9 +48,10 @@ object FlaskKind extends Enum[FlaskKind] {
   case object Lightning extends FlaskKind("Грозовая фляга",  FlaskEffect.Splash(Element.Lightning))
   case object Air       extends FlaskKind("Ветреная фляга",  FlaskEffect.Splash(Element.Air))
   case object Cleansing extends FlaskKind("Фляга очищения",  FlaskEffect.Cleanse)
-  case object Smoke     extends FlaskKind("Дымная фляга",    FlaskEffect.Smoke)
+  case object Smoke     extends FlaskKind("Дымная фляга",    FlaskEffect.Smoke(FlaskRates.SmokeRounds))
   case object Vampiric  extends FlaskKind("Вампирская фляга", FlaskEffect.Vampiric(FlaskRates.VampiricHits, FlaskRates.VampiricPct))
-  case object Venom     extends FlaskKind("Фляга отравы",    FlaskEffect.Venom(FlaskRates.VenomRounds))
+  case object Poison    extends FlaskKind("Фляга яда",       FlaskEffect.PoisonCoat(FlaskRates.CoatRounds))
+  case object Bleeding  extends FlaskKind("Фляга крови",     FlaskEffect.BleedCoat(FlaskRates.CoatRounds))
 
   val values: IndexedSeq[FlaskKind] = findValues
 
@@ -56,9 +59,10 @@ object FlaskKind extends Enum[FlaskKind] {
    *  стихийная, потом какая именно стихия. */
   val elemental: List[FlaskKind] = List(Fire, Cold, Lightning, Air)
 
-  /** Семьи для равновероятного выбора при дропе: восемь, стихийные считаются одной. */
+  /** Семьи для равновероятного выбора при дропе: девять, стихийные считаются одной. */
   val families: List[List[FlaskKind]] =
-    List(List(Healer), List(Smith), List(Vigor), elemental, List(Cleansing), List(Smoke), List(Vampiric), List(Venom))
+    List(List(Healer), List(Smith), List(Vigor), elemental, List(Cleansing), List(Smoke), List(Vampiric),
+         List(Poison), List(Bleeding))
 
   /** Запас зарядов по редкости. */
   def chargesFor(rarity: Rarity): Int = rarity match {

@@ -332,15 +332,19 @@ case class BattleState(
                 monsterPoison = Some(effectsAfterPotion.monsterPoison
                   .map(p => Poison(p.pct + gemPoisonPct))
                   .getOrElse(Poison(gemPoisonPct))))
-            // Фляга отравы: пока оружие смазано, удар по HP травит (как отравленное
-            // оружие) и пускает кровь — оба стакаются с тем, что уже висит.
-            venomNow = battle.effects.heroVenom && hpDmg > 0 && newHp > 0
-            effects =
-              if (!venomNow) effectsAfterGem
+            // Фляги яда и крови: пока оружие смазано, удар по HP травит (как
+            // отравленное оружие) либо пускает кровь — стакается с тем, что висит.
+            coatPoisons = battle.effects.heroPoisonCoat && hpDmg > 0 && newHp > 0
+            coatBleeds  = battle.effects.heroBleedCoat && hpDmg > 0 && newHp > 0
+            effectsCoated =
+              if (!coatPoisons) effectsAfterGem
               else effectsAfterGem.copy(
-                monsterPoison = Some(effectsAfterGem.monsterPoison.map(_.stacked).getOrElse(Poison.onHit)),
-                monsterBleed  = Some(effectsAfterGem.monsterBleed.map(_.stackedWith(FlaskRates.VenomBleedPct))
-                                  .getOrElse(Bleed(FlaskRates.VenomBleedPct))))
+                monsterPoison = Some(effectsAfterGem.monsterPoison.map(_.stacked).getOrElse(Poison.onHit)))
+            effects =
+              if (!coatBleeds) effectsCoated
+              else effectsCoated.copy(
+                monsterBleed = Some(effectsCoated.monsterBleed.map(_.stackedWith(FlaskRates.CoatBleedPct))
+                                 .getOrElse(Bleed(FlaskRates.CoatBleedPct))))
             // «Упырь» (порог 6): шанс, что удар по HP пустит цели кровь. Бросок
             // не тратится, если набора нет, — детерминизм боевых тестов.
             setBleeds <- chanceRoll(
@@ -374,7 +378,7 @@ case class BattleState(
             (thornedHero, thornedBattle, thornsLine) = thornsResult
             log1 = log :+ (attackLine + dotIndicators(thornedBattle))
             log2 =
-              if (poisonsNow || gemPoisons || venomNow) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
+              if (poisonsNow || gemPoisons || coatPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
               else log1
             log3 =
               if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
@@ -1857,10 +1861,13 @@ case class BattleState(
               TurnResult(hero.copy(equipment = newEquipment), usedBattle.copy(effects = cleaned),
                 Vector(content.text("battle.flaskCleanse")) ++ qhLog, Outcome.Continue, endsRound = false)
 
-            // Дымная фляга: побег без ответного удара; бой закроет commit.
-            case FlaskEffect.Smoke =>
-              TurnResult(hero.copy(equipment = newEquipment), usedBattle,
-                Vector(content.text("battle.flaskSmoke")) ++ qhLog, Outcome.Fled)
+            // Дымная фляга: мобы вне пары на несколько раундов теряют из виду и
+            // героя, и друг друга. Запас в один тик — см. BattleEffects.heroSmokeTurns.
+            case FlaskEffect.Smoke(rounds) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroSmokeTurns = rounds + 1)),
+                Vector(content.format("battle.flaskSmoke", "rounds" -> rounds.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
 
             // Вампирская фляга: следующие удары по HP лечат (см. playerStrike).
             case FlaskEffect.Vampiric(hits, pct) =>
@@ -1869,11 +1876,16 @@ case class BattleState(
                 Vector(content.format("battle.flaskVampiric", "hits" -> hits.toString, "pct" -> pct.toString)) ++ qhLog,
                 Outcome.Continue, endsRound = false)
 
-            // Фляга отравы: оружие смазано на несколько раундов (см. playerStrike).
-            case FlaskEffect.Venom(rounds) =>
+            // Фляги яда и крови: оружие смазано на несколько раундов (см. playerStrike).
+            case FlaskEffect.PoisonCoat(rounds) =>
               TurnResult(hero.copy(equipment = newEquipment),
-                usedBattle.copy(effects = usedBattle.effects.copy(heroVenomTurns = rounds)),
-                Vector(content.format("battle.flaskVenom", "rounds" -> rounds.toString)) ++ qhLog,
+                usedBattle.copy(effects = usedBattle.effects.copy(heroPoisonCoatTurns = rounds)),
+                Vector(content.format("battle.flaskPoisonCoat", "rounds" -> rounds.toString)) ++ qhLog,
+                Outcome.Continue, endsRound = false)
+            case FlaskEffect.BleedCoat(rounds) =>
+              TurnResult(hero.copy(equipment = newEquipment),
+                usedBattle.copy(effects = usedBattle.effects.copy(heroBleedCoatTurns = rounds)),
+                Vector(content.format("battle.flaskBleedCoat", "rounds" -> rounds.toString)) ++ qhLog,
                 Outcome.Continue, endsRound = false)
           }
         }
@@ -2043,6 +2055,7 @@ case class BattleState(
     if (res.outcome != Outcome.Continue || !res.battle.isGroup || !res.endsRound) ZIO.succeed(res)
     else {
       val n = res.battle.group.others.size
+      val smokeLine = if (res.battle.effects.heroInSmoke) Vector(content.text("battle.flaskSmokeHolds")) else Vector.empty[String]
       // Павший выше по строю смыкает ряды: следующий моб стоит уже на его индексе.
       ZIO.foldLeft((0 until n).toList)((res.hero, res.battle, Vector.empty[String], 0)) {
         case ((h, b, log, fallen), i) =>
@@ -2053,7 +2066,7 @@ case class BattleState(
           }
       }.map { case (h, b, log, _) =>
         val outcome = if (h.fightStats.hp <= 0) Outcome.Death else Outcome.Continue
-        res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ log)
+        res.copy(hero = h, battle = b, outcome = outcome, sideLog = res.sideLog ++ smokeLine ++ log)
       }
     }
 
@@ -2061,7 +2074,10 @@ case class BattleState(
     * место — соседнее. */
   private def freeMobTurn(hero: Hero, battle: SoloPveBattle, idx: Int, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] = {
     val slot       = battle.group.others(idx)
-    val reachesHero = battle.group.inReach(battle.group.posOf(idx))
+    // В дыму (дымная фляга) мобы вне пары не видят ни героя, ни друг друга:
+    // ни удара сбоку, ни лечения соседу — только раны тикают и энергия копится.
+    val smoke       = battle.effects.heroInSmoke
+    val reachesHero = !smoke && battle.group.inReach(battle.group.posOf(idx))
     // Временный бой: этот моб — «активный», геройская половина эффектов та же.
     val tmp0 = battle.withActive(slot)
     val tmp  = tmp0.copy(effects = tickSlotEffects(tmp0.effects))
@@ -2084,7 +2100,7 @@ case class BattleState(
       (h1, t1, log1) = struck
       // 2) умение: раненому соседу — лечение, себе — что по карману, герою — урон
       casted <-
-        if (h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
+        if (smoke || h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
           ZIO.succeed((h1, t1, battle, Vector.empty[String]))
         else allyAid(h1, t1, battle, idx, nowMs).flatMap {
           case Some((t2, b2, line)) => ZIO.succeed((h1, t2, b2, Vector(line)))
@@ -2546,14 +2562,9 @@ case class BattleState(
     // (Пояс — только если несёт зелье); row 3 — Сбежать. Места под заглушки (доп.
     // слот, стиль атаки, сменить цель) пока скрыты.
     val flaskCharges = BattleState.flaskCharges(hero)
-    // Подпись — по виду фляги: игроку важно знать, что именно он сейчас выпьет.
-    val flaskLabel = hero.equipment.flask.details match {
-      case f: ItemDetails.Flask => f.effect.shortLabel
-      case _                    => "Фляга"
-    }
     val flaskButton = pangea.engine.Choice(
       "UseFlask",
-      s"🧪 $flaskLabel ($flaskCharges)",
+      s"🧪 Фляга ($flaskCharges)",
       color =
         if (flaskCharges <= 0) pangea.engine.ChoiceColor.Negative
         else pangea.engine.ChoiceColor.Primary,

@@ -7,7 +7,6 @@ import pangea.model.battle.{Bleed, Burn, Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{FlaskKind, FlaskRates, Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
-import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -82,17 +81,17 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       assertTrue(FlaskKind.rarityWeights.map(_._2).sum == 100) &&
       assertTrue(orange.displayTitle == "🟠 Фляга кузнеца" && !orange.displayTitle.contains("Ур.")) &&
       assertTrue(orange.statsLines.exists(_.contains("+25% макс. брони")) && orange.statsLines.exists(_.contains("Заряды: 10/10"))) &&
-      assertTrue(FlaskKind.families.size == 8 && FlaskKind.elemental.size == 4)
+      assertTrue(FlaskKind.families.size == 9 && FlaskKind.elemental.size == 4)
     },
 
-    test("кнопка боя подписана видом фляги") {
-      val h = hero(FlaskKind.Venom)
+    test("кнопка боя — просто «Фляга» с зарядами, какой бы вид ни был надет") {
+      val h = hero(FlaskKind.Poison)
       for {
         t <- makeState(h, SoloPveBattle.from(monster(), h))
         (state, _, r) = t
         _      <- state.enter(testUser, r)
         screen <- r.sentScreens.map(_.last)
-      } yield assertTrue(screen.choices.exists(_.label == "🧪 Отрава (6)"))
+      } yield assertTrue(screen.choices.exists(_.label == "🧪 Фляга (6)"))
     },
 
     test("фляга кузнеца чинит броню на 25% потолка, не выше потолка") {
@@ -161,17 +160,38 @@ object FlaskBattleSpec extends ZIOSpecDefault {
               assertTrue(log.contains("Фляга очищения"))
     },
 
-    test("дымная фляга: побег без ответного удара, бой закрыт, из группы не окружают") {
-      val h = hero(FlaskKind.Smoke)
+    test("дымная фляга: 4 раунда сосед не бьёт сбоку и не лечит; активный бьёт как обычно; на пятый дым рассеялся") {
+      val h = hero(FlaskKind.Smoke, hp = 50000L)
+      // Активный ранен и без энергии; сосед цел и с энергией — без дыма он бьёт сбоку и лечит активного.
+      val healer = monster().copy(fightStats = monster().fightStats.copy(energy = pangea.model.skill.MonsterEnergy.maxEnergy(10L)))
+      val b = SoloPveBattle.fromGroup(List(monster(), healer), h, List(0L, pangea.model.skill.MonsterEnergy.maxEnergy(10L)))
+      val wounded = b.copy(monsterCurrentHp = 50000L)
+      // раунд в дыму: герой попадает (60), активный бьёт (99), подкрепления нет (99); сосед бросков не делает
+      val quiet = List(60, 99, 99)
       for {
-        r <- use(h, SoloPveBattle.fromGroup(List(monster(), monster(), monster()), h, Nil), "UseFlask")
-        (u, after, log, out, _) = r
-      } yield assertTrue(out == StateType.Dungeon) &&
-              assertTrue(after.isEmpty) &&
-              assertTrue(u.fightStats.hp == 50000L) && // ни удара в спину, ни удара сбоку
-              assertTrue(log.contains("в дыму вы уходите") && log.contains("успешно сбежали")) &&
-              assertTrue(!log.contains("окружает")) &&
-              assertTrue(charges(u) == 5)
+        t <- makeState(h, wounded)
+        (state, dao, r) = t
+        _   <- TestRandom.feedInts(List.fill(4)(quiet).flatten: _*) *> TestRandom.feedLongs(List.fill(8)(100L): _*)
+        _   <- state.action(testUser, tap("UseFlask"), r)
+        b0  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        _   <- ZIO.foreachDiscard(1 to 4)(_ => state.action(testUser, tap("Attack"), r))
+        b4  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        u4  <- dao.getHeroByUserId(userId).map(_.get)
+        log4 <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        // пятый раунд: сосед снова видит — бьёт сбоку (99) и лечит активного
+        _   <- TestRandom.feedInts(60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _   <- state.action(testUser, tap("Attack"), r)
+        b5  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        log5 <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(b0.effects.heroSmokeTurns == FlaskRates.SmokeRounds + 1 && log4.contains("Дымная фляга разбивается")) &&
+              assertTrue(log4.contains("Дым держится")) &&
+              assertTrue(!log4.contains("атаковал вас сбоку") && !log4.contains("ударил сбоку") && !log4.contains("исцелил")) &&
+              // активный моб в паре всё это время бил
+              assertTrue(u4.fightStats.hp < 50000L && log4.contains("наносит")) &&
+              // дым ещё держится на последнем тике, после пятого раунда — рассеялся
+              assertTrue(b4.effects.heroSmokeTurns == 1 && b5.effects.heroSmokeTurns == 0) &&
+              assertTrue(log5.contains("атаковал вас сбоку") && log5.contains("исцелил")) &&
+              assertTrue(b5.monsterCurrentHp > b4.monsterCurrentHp) // активного подлечили
     },
 
     test("вампирская фляга: три удара по HP лечат на 30% урона, четвёртый — нет; в броню удар не считается") {
@@ -205,42 +225,48 @@ object FlaskBattleSpec extends ZIOSpecDefault {
               assertTrue(log.contains("Вампиризм: восстановлено"))
     },
 
-    test("фляга отравы: пока оружие смазано, удары по HP травят и пускают кровь; сошла — не пускают") {
-      val h = hero(FlaskKind.Venom)
-      val b = SoloPveBattle.from(monster(), h)
-      // Яд и кровь считаются от макс.HP и за пять раундов добьют любого моба,
-      // поэтому механика — на трёх ударах, а срок — на отраве с последним раундом.
-      val seed = TestRandom.feedInts(List.fill(3)(List(60, 1, 99)).flatten: _*) *> TestRandom.feedLongs(List.fill(3)(100L): _*)
-      val lastRound = b.copy(effects = b.effects.copy(heroVenomTurns = 1))
+    test("фляга яда: пока оружие смазано, удары по HP травят; фляга крови — пускают кровь; сошла — нет") {
+      val hp = hero(FlaskKind.Poison)
+      val hb = hero(FlaskKind.Bleeding)
+      // Яд и кровь считаются от макс.HP, поэтому механика — на трёх ударах, срок — на смазке с последним раундом.
+      def seed(rounds: Int) = TestRandom.feedInts(List.fill(rounds)(List(60, 1, 99)).flatten: _*) *> TestRandom.feedLongs(List.fill(rounds)(100L): _*)
       for {
-        t <- makeState(h, b)
-        (state, dao, r) = t
-        _   <- seed
-        _   <- state.action(testUser, tap("UseFlask"), r)
-        b0  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        _   <- state.action(testUser, tap("Attack"), r)
-        b1  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        _   <- state.action(testUser, tap("Attack"), r)
-        _   <- state.action(testUser, tap("Attack"), r)
-        b3  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        log <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-        // отрава на последнем раунде: этот удар ещё режет, следующий — уже нет
-        t2 <- makeState(h, lastRound)
-        (state2, dao2, r2) = t2
-        _   <- TestRandom.feedInts(60, 1, 99, 60, 1, 99) *> TestRandom.feedLongs(100L, 100L)
-        _   <- state2.action(testUser, tap("Attack"), r2)
-        e1  <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        _   <- state2.action(testUser, tap("Attack"), r2)
-        e2  <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-      } yield assertTrue(b0.effects.heroVenomTurns == 5 && log.contains("оружие смазано")) &&
-              // после первого удара: яд стакнут и уже отработал тик (−2), кровь 2%
-              assertTrue(b1.effects.monsterPoison.exists(_.pct == Poison.OnHit - Poison.DecayPerRound)) &&
-              assertTrue(b1.effects.monsterBleed.contains(Bleed(FlaskRates.VenomBleedPct))) &&
-              assertTrue(b1.effects.heroVenomTurns == 4 && log.contains("отравлен")) &&
-              // три удара — три порции крови
-              assertTrue(b3.effects.monsterBleed.contains(Bleed(3 * FlaskRates.VenomBleedPct)) && b3.effects.heroVenomTurns == 2) &&
-              assertTrue(e1.effects.monsterBleed.contains(Bleed(FlaskRates.VenomBleedPct)) && e1.effects.heroVenomTurns == 0) &&
-              assertTrue(e2.effects.monsterBleed.contains(Bleed(FlaskRates.VenomBleedPct)))
+        tp <- makeState(hp, SoloPveBattle.from(monster(), hp))
+        (sp, dp, rp) = tp
+        _   <- seed(3)
+        _   <- sp.action(testUser, tap("UseFlask"), rp)
+        p0  <- dp.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        _   <- sp.action(testUser, tap("Attack"), rp)
+        p1  <- dp.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        plog <- rp.sentScreens.map(_.map(_.text).mkString("\n"))
+        tb <- makeState(hb, SoloPveBattle.from(monster(), hb))
+        (sb, db, rb) = tb
+        _   <- seed(3)
+        _   <- sb.action(testUser, tap("UseFlask"), rb)
+        _   <- sb.action(testUser, tap("Attack"), rb)
+        _   <- sb.action(testUser, tap("Attack"), rb)
+        _   <- sb.action(testUser, tap("Attack"), rb)
+        b3  <- db.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        blog <- rb.sentScreens.map(_.map(_.text).mkString("\n"))
+        // смазка кровью на последнем раунде: этот удар ещё режет, следующий — уже нет
+        base  = SoloPveBattle.from(monster(), hb)
+        te <- makeState(hb, base.copy(effects = base.effects.copy(heroBleedCoatTurns = 1)))
+        (se, de, re) = te
+        _   <- seed(2)
+        _   <- se.action(testUser, tap("Attack"), re)
+        e1  <- de.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        _   <- se.action(testUser, tap("Attack"), re)
+        e2  <- de.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(p0.effects.heroPoisonCoatTurns == 5 && plog.contains("Фляга яда")) &&
+              // после первого удара: яд стакнут и уже отработал тик (−2), крови нет
+              assertTrue(p1.effects.monsterPoison.exists(_.pct == Poison.OnHit - Poison.DecayPerRound)) &&
+              assertTrue(p1.effects.monsterBleed.isEmpty && p1.effects.heroPoisonCoatTurns == 4 && plog.contains("отравлен")) &&
+              // кровь: три удара — три порции, яда нет
+              assertTrue(blog.contains("Фляга крови")) &&
+              assertTrue(b3.effects.monsterBleed.contains(Bleed(3 * FlaskRates.CoatBleedPct)) && b3.effects.monsterPoison.isEmpty) &&
+              assertTrue(b3.effects.heroBleedCoatTurns == 2) &&
+              assertTrue(e1.effects.monsterBleed.contains(Bleed(FlaskRates.CoatBleedPct)) && e1.effects.heroBleedCoatTurns == 0) &&
+              assertTrue(e2.effects.monsterBleed.contains(Bleed(FlaskRates.CoatBleedPct)))
     },
 
     test("глоток любой фляги тратит расходник раунда: второй в том же раунде не выпить") {
