@@ -330,6 +330,28 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(screens.exists(_.text.contains("полная")))
       },
 
+      test("вампирскую флягу Густаво не заправляет: «сама напьётся», серебро не списано; флягу кузнеца — заправляет") {
+        val vampiric = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Vampiric, pangea.model.item.Rarity.Blue)
+          .copy(details = ItemDetails.Flask(FlaskEffect.Vampiric(3, 30), charges = 1, maxCharges = 6))
+        val smith = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Smith, pangea.model.item.Rarity.Blue)
+          .copy(details = ItemDetails.Flask(FlaskEffect.ArmorPercent(25), charges = 1, maxCharges = 6))
+        for {
+          t <- env(heroWithFlask(vampiric))
+          (heroDao, renderer, content) = t
+          _       <- GustavoFlaskState(heroDao, content).enter(testUser, renderer)
+          _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
+          h       <- heroDao.getHeroByUserId(userId).map(_.get)
+          screens <- renderer.sentScreens
+          t2 <- env(heroWithFlask(smith))
+          (heroDao2, renderer2, content2) = t2
+          _       <- GustavoFlaskState(heroDao2, content2).action(testUser, tap("Refill"), renderer2)
+          h2      <- heroDao2.getHeroByUserId(userId).map(_.get)
+        } yield assertTrue(h.silver == 5000L && flaskCharges(h.equipment.flask).contains(1)) &&
+                assertTrue(screens.forall(s => !s.choices.exists(_.id == "Refill"))) &&
+                assertTrue(screens.exists(_.text.contains("сама напьётся"))) &&
+                assertTrue(flaskCharges(h2.equipment.flask).contains(6) && h2.silver == 5000L - 125L)
+      },
+
       test("Refill без фляги → «фляги нет», серебро не списано") {
         for {
           t <- env(hero())

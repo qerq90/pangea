@@ -10,6 +10,23 @@ import pangea.model.battle.{Buff, Element}
  *  делит с зельем пояса правило «один расходник за раунд». */
 sealed trait FlaskEffect {
 
+  /** Чем эта фляга заправляется (см. [[RefillSource]]). */
+  def refillSource: RefillSource = this match {
+    case FlaskEffect.HealPercent(_) | FlaskEffect.AddBuff(_, _)                                     => RefillSource.Water
+    case FlaskEffect.ArmorPercent(_) | FlaskEffect.EnergyPercent(_) | FlaskEffect.Splash(_) |
+         FlaskEffect.Cleanse                                                                        => RefillSource.Alchemy
+    case FlaskEffect.Smoke(_)                                                                       => RefillSource.Sleep
+    case FlaskEffect.Vampiric(_, _)                                                                 => RefillSource.Blood
+    case FlaskEffect.PoisonCoat(_)                                                                  => RefillSource.Poison
+    case FlaskEffect.BleedCoat(_)                                                                   => RefillSource.Bleed
+  }
+
+  /** Ручей наполняет только воду — флягу целителя. */
+  def refillsAtSpring: Boolean = refillSource == RefillSource.Water
+
+  /** Густаво заправляет всё, кроме вампирской: та пьёт кровь сама. */
+  def refillsAtGustavo: Boolean = refillSource != RefillSource.Blood
+
   /** Короткая подпись для кнопки боя: «🧪 Кузнец (3)». */
   def shortLabel: String = this match {
     case FlaskEffect.HealPercent(_)   => "Целитель"
@@ -37,6 +54,19 @@ sealed trait FlaskEffect {
     case FlaskEffect.PoisonCoat(rounds) => s"Смазать оружие: $rounds раундов удары по HP травят врага."
     case FlaskEffect.BleedCoat(rounds)  => s"Смазать оружие: $rounds раундов удары по HP пускают врагу кровь."
   }
+}
+
+/** Чем заправляется фляга. Ручей — только вода; отвары — по своему источнику
+ *  (см. BrewEffect.RefillFlask); Густаво — всё, кроме крови; кровь фляга берёт
+ *  сама — с убитых, по шансу (см. FlaskRates.VampiricRefillPct). */
+sealed trait RefillSource
+object RefillSource {
+  case object Water   extends RefillSource
+  case object Alchemy extends RefillSource
+  case object Sleep   extends RefillSource
+  case object Blood   extends RefillSource
+  case object Poison  extends RefillSource
+  case object Bleed   extends RefillSource
 }
 
 object FlaskEffect {

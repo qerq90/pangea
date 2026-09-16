@@ -86,32 +86,99 @@ object BrewSpec extends ZIOSpecDefault {
         _     <- state.action(testUser, selectItem(12L), r)
         booze <- r.sentScreens.map(_.last)
       } yield assertTrue(water.text.contains("Живая вода") && water.text.contains("Рецепт: Шалфей + Ромашка + Крапива")) &&
-              assertTrue(water.choices.map(_.id) == List("DrinkBrew", "Drop", "InventoryList")) &&
+              // фляги нет — заправлять нечего, кнопки нет
+              assertTrue(water.choices.map(_.id) == List("Drop", "InventoryList")) &&
               assertTrue(dope.text.contains("Сонный дурман") && dope.text.contains("валят с ног быка")) &&
-              assertTrue(!dope.choices.exists(_.id == "DrinkBrew") && !booze.choices.exists(_.id == "DrinkBrew")) &&
+              assertTrue(dope.choices.map(_.id) == List("Drop", "InventoryList") && booze.choices.map(_.id) == List("Drop", "InventoryList")) &&
               assertTrue(booze.text.contains("400 серебра"))
     },
 
-    test("живая вода заправляет флягу; полную — не тратится; без фляги — не тратится") {
+    test("живая вода заправляет флягу целителя; полную — не тратится; без фляги — не тратится") {
       val withFlask = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask(charges = 1)))
       for {
         t <- inventory(withFlask, List(brew(BrewKind.LivingWater, 10L), brew(BrewKind.LivingWater, 11L)))
         (state, dao, inv, r) = t
         _   <- state.action(testUser, selectItem(11L), r)
-        _   <- state.action(testUser, tap("DrinkBrew"), r)
+        _   <- state.action(testUser, tap("RefillByBrew"), r)
         h1  <- dao.getHeroByUserId(userId).map(_.get)
         after <- r.sentScreens.map(_.last)
-        _   <- state.action(testUser, tap("DrinkBrew"), r)   // фляга уже полна
+        _   <- state.action(testUser, tap("RefillByBrew"), r)   // фляга уже полна
         log <- texts(r)
         t2 <- inventory(baseHero, List(brew(BrewKind.LivingWater, 10L)))
         (state2, _, inv2, r2) = t2
         _   <- state2.action(testUser, selectItem(10L), r2)
-        _   <- state2.action(testUser, tap("DrinkBrew"), r2)
+        _   <- state2.action(testUser, tap("RefillByBrew"), r2)
         log2 <- texts(r2)
       } yield assertTrue(h1.equipment.flask.details == ItemDetails.Flask(FlaskEffect.HealPercent(25), 6, 6)) &&
-              assertTrue(inv.snapshot.size == 1 && after.choices.exists(_.id == "DrinkBrew")) && // остались на карточке стопки
+              assertTrue(inv.snapshot.size == 1 && after.choices.exists(_.id == "RefillByBrew")) && // остались на карточке стопки
               assertTrue(log.contains("полна до краёв") && log.contains("и так полна") && inv.snapshot.size == 1) &&
               assertTrue(log2.contains("Фляги нет") && inv2.snapshot.size == 1)
+    },
+
+    test("живая вода заправляет флягу кузнеца, но не дымную; дымную заправляет сонный дурман; кнопка только по толку") {
+      def flaskOf(kind: FlaskKind) = pangea.generator.item.FlaskGenerator.item(kind, Rarity.Blue).copy(id = 1L).copy(
+        details = ItemDetails.Flask(kind.effect, 1, 6))
+      def withFlask(kind: FlaskKind) = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = flaskOf(kind)))
+      for {
+        t <- inventory(withFlask(FlaskKind.Smith), List(brew(BrewKind.LivingWater, 10L), brew(BrewKind.SleepingDope, 11L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(11L), r)
+        dope  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, selectItem(10L), r)
+        water <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("RefillByBrew"), r)
+        h     <- dao.getHeroByUserId(userId).map(_.get)
+        t2 <- inventory(withFlask(FlaskKind.Smoke), List(brew(BrewKind.LivingWater, 10L), brew(BrewKind.SleepingDope, 11L)))
+        (state2, dao2, inv2, r2) = t2
+        _     <- state2.action(testUser, selectItem(10L), r2)
+        water2 <- r2.sentScreens.map(_.last)
+        _     <- state2.action(testUser, tap("RefillByBrew"), r2)   // не по толку — не тратится
+        _     <- state2.action(testUser, selectItem(11L), r2)
+        dope2 <- r2.sentScreens.map(_.last)
+        _     <- state2.action(testUser, tap("RefillByBrew"), r2)
+        h2    <- dao2.getHeroByUserId(userId).map(_.get)
+        log2  <- texts(r2)
+      } yield assertTrue(!dope.choices.exists(_.id == "RefillByBrew") && water.choices.exists(_.id == "RefillByBrew")) &&
+              assertTrue(h.equipment.flask.details == ItemDetails.Flask(FlaskKind.Smith.effect, 6, 6) && inv.snapshot.map(_.id) == List(11L)) &&
+              assertTrue(!water2.choices.exists(_.id == "RefillByBrew") && dope2.choices.exists(_.id == "RefillByBrew")) &&
+              assertTrue(log2.contains("такую флягу не заправить")) &&
+              assertTrue(h2.equipment.flask.details == ItemDetails.Flask(FlaskKind.Smoke.effect, 6, 6) && inv2.snapshot.map(_.id) == List(10L))
+    },
+
+    test("ядовитая и кровавая смазки: мажут оружие на ближайший бой и заправляют флягу своего толка") {
+      val poisonFlask = pangea.generator.item.FlaskGenerator.item(FlaskKind.Poison, Rarity.Blue).copy(id = 1L,
+        details = ItemDetails.Flask(FlaskKind.Poison.effect, 2, 6))
+      val armed = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = poisonFlask,
+        weapon = Item(50L, "Меч", 1L, Rarity.Gray, ItemType.Weapon, attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)))
+      for {
+        t <- inventory(armed, List(brew(BrewKind.VenomSalve, 10L), brew(BrewKind.VenomSalve, 11L), brew(BrewKind.BloodSalve, 12L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(11L), r)
+        card  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CoatWeapon"), r)
+        h1    <- dao.getHeroByUserId(userId).map(_.get)
+        _     <- state.action(testUser, tap("RefillByBrew"), r)      // остались на карточке стопки — вторая мазь идёт во флягу
+        h2    <- dao.getHeroByUserId(userId).map(_.get)
+        left   = inv.snapshot.map(_.id)
+        _     <- state.action(testUser, selectItem(12L), r)
+        blood <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CoatWeapon"), r)
+        h3    <- dao.getHeroByUserId(userId).map(_.get)
+        log   <- texts(r)
+        // без оружия мазать нечего
+        t2 <- inventory(baseHero, List(brew(BrewKind.BloodSalve, 12L)))
+        (state2, dao2, inv2, r2) = t2
+        _     <- state2.action(testUser, selectItem(12L), r2)
+        _     <- state2.action(testUser, tap("CoatWeapon"), r2)
+        h4    <- dao2.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(card.choices.map(_.id) == List("CoatWeapon", "RefillByBrew", "Drop", "InventoryList")) &&
+              assertTrue(h1.weaponDust.coat.contains(pangea.model.hero.WeaponCoat.Poison) && log.contains("смазано ядом")) &&
+              assertTrue(h2.equipment.flask.details == ItemDetails.Flask(FlaskKind.Poison.effect, 6, 6)) &&
+              assertTrue(left == List(12L)) &&
+              // кровавая: фляга яда ей не по толку — кнопки заправки нет, мажет поверх яда
+              assertTrue(blood.choices.map(_.id) == List("CoatWeapon", "Drop", "InventoryList")) &&
+              assertTrue(h3.weaponDust.coat.contains(pangea.model.hero.WeaponCoat.Bleed) && log.contains("кровавой мазью")) &&
+              assertTrue(h4.weaponDust.coat.isEmpty && inv2.snapshot.size == 1)
     },
 
     test("бодрящий сбор даёт +5 быстрых отдыхов") {

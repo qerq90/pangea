@@ -41,6 +41,9 @@ case class GustavoFlaskState(
       _ <- if (!hasFlask(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskNone"),
                List(content.choice("Back", "gustavo.offerBack"))))
+           else if (!refillable(flask))
+             renderer.show(user, Screen(content.text("gustavo.supplies.flaskBlood"),
+               List(content.choice("Back", "gustavo.offerBack"))))
            else if (isFull(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskFull"),
                List(content.choice("Back", "gustavo.offerBack"))))
@@ -63,6 +66,8 @@ case class GustavoFlaskState(
       price = flaskRefillCost(hero)
       _ <- if (!hasFlask(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskNone"), back))
+           else if (!refillable(flask))
+             renderer.show(user, Screen(content.text("gustavo.supplies.flaskBlood"), back))
            else if (isFull(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskFull"), back))
            else if (hero.silver < price)
@@ -78,6 +83,9 @@ case class GustavoFlaskState(
         "charges" -> flaskDetails(flask).map(_.maxCharges).getOrElse(0).toString), back))
 
   private def hasFlask(flask: Item): Boolean = flaskDetails(flask).isDefined
+
+  /** Вампирскую Густаво не заправляет: она пьёт кровь сама. */
+  private def refillable(flask: Item): Boolean = flaskDetails(flask).exists(_.effect.refillsAtGustavo)
 
   private def isFull(flask: Item): Boolean =
     flaskDetails(flask).exists(f => f.charges == f.maxCharges)

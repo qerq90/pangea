@@ -3,6 +3,7 @@ package pangea.model.item
 import enumeratum._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
+import pangea.model.hero.WeaponCoat
 import pangea.model.stats.ParamsBuff
 
 /** Что делает отвар, когда его пьют из инвентаря. */
@@ -10,8 +11,10 @@ sealed trait BrewEffect
 object BrewEffect {
   /** Снимает одну травму на выбор — лёгкую или среднюю; тяжёлые не берёт. */
   case object CureTrauma extends BrewEffect
-  /** Заправляет надетую флягу целиком. */
-  case object RefillFlask extends BrewEffect
+  /** Заправляет надетую флягу целиком — если она из этих источников. */
+  final case class RefillFlask(sources: Set[RefillSource]) extends BrewEffect
+  /** Смазка оружия на ближайший бой (яд или кровь); заодно заправляет флягу того же толка. */
+  final case class Coat(coat: WeaponCoat, refills: RefillSource) extends BrewEffect
   /** Быстрые отдыхи: столько в запас (BrewRates.InstantRests). */
   case object InstantRest extends BrewEffect
   /** Часовой баф к базовой характеристике; `name` — идентичность в StatBoosts. */
@@ -31,10 +34,17 @@ sealed abstract class BrewKind(
   val description: String,
   val effect:      BrewEffect
 ) extends EnumEntry {
-  /** Можно ли выпить с карточки. */
+  /** Пьётся ли с карточки (кнопка «Выпить»). Заправка и смазка — свои кнопки. */
   def drinkable: Boolean = effect match {
-    case BrewEffect.Inert | BrewEffect.Sellable(_) => false
-    case _                                         => true
+    case BrewEffect.CureTrauma | BrewEffect.InstantRest | BrewEffect.Boost(_, _, _) => true
+    case _                                                                           => false
+  }
+
+  /** Какие фляги заправляет. */
+  def refills: Set[RefillSource] = effect match {
+    case BrewEffect.RefillFlask(sources) => sources
+    case BrewEffect.Coat(_, source)      => Set(source)
+    case _                               => Set.empty
   }
 }
 
@@ -62,8 +72,8 @@ object BrewKind extends Enum[BrewKind] {
   case object LivingWater extends BrewKind(
     "Живая вода",
     List(Sage, Chamomile, Nettle),
-    "Прозрачная, чуть горчащая на языке. Один флакон заправляет надетую флягу до краёв — хоть посреди лабиринта.",
-    BrewEffect.RefillFlask)
+    "Прозрачная, чуть горчащая на языке. Один флакон заправляет до краёв флягу целителя, кузнеца, бодрости, очищения или стихийную — хоть посреди лабиринта.",
+    BrewEffect.RefillFlask(Set(RefillSource.Water, RefillSource.Alchemy)))
 
   case object Invigorating extends BrewKind(
     "Бодрящий сбор",
@@ -92,14 +102,26 @@ object BrewKind extends Enum[BrewKind] {
   case object SleepingDope extends BrewKind(
     "Сонный дурман",
     List(Belladonna, Chamomile, Valerian),
-    "Тёмная тягучая настойка. Пары одной капли валят с ног быка. Пить самому — глупо; но кто-нибудь наверняка захочет её купить или подлить.",
-    BrewEffect.Inert)
+    "Тёмная тягучая настойка. Пары одной капли валят с ног быка. Пить самому — глупо; зато дымная фляга заправляется ею до краёв. А кто-нибудь наверняка захочет её купить или подлить.",
+    BrewEffect.RefillFlask(Set(RefillSource.Sleep)))
 
   case object Schnapps extends BrewKind(
     "Шнапс из красавки",
     List(Belladonna, Wormwood, Calendula),
     s"Крепкий, дурманящий, с ягодным послевкусием. Пить его не стоит, а вот Трактирщик берёт по ${BrewRates.SchnappsPrice} серебра за бутылку.",
     BrewEffect.Sellable(BrewRates.SchnappsPrice))
+
+  case object VenomSalve extends BrewKind(
+    "Ядовитая смазка",
+    List(Belladonna, Wormwood, Nettle),
+    "Тёмная маслянистая мазь с запахом красавки. Смазать клинок — и в ближайшем бою каждый удар по HP травит врага; заодно заправляет флягу яда до краёв.",
+    BrewEffect.Coat(WeaponCoat.Poison, RefillSource.Poison))
+
+  case object BloodSalve extends BrewKind(
+    "Кровавая смазка",
+    List(Nettle, Sage, Wormwood),
+    "Едкая мазь, от которой не затягиваются раны. Смазать клинок — и в ближайшем бою каждый удар по HP пускает врагу кровь; заодно заправляет флягу крови до краёв.",
+    BrewEffect.Coat(WeaponCoat.Bleed, RefillSource.Bleed))
 
   val values: IndexedSeq[BrewKind] = findValues
 

@@ -10,7 +10,7 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
-import pangea.model.hero.{Equipment, Hero, WeaponDust}
+import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
 import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
 import pangea.model.quest.{Difficulty, NpcQuest}
@@ -49,6 +49,8 @@ case class InventoryState(
       "CrushGemDo"        -> Target.Run { (u, _,  r) => doCrush(u, r) },
       "DustWeapon"        -> Target.Run { (u, _,  r) => sprinkleDust(u, r) },
       "DrinkBrew"         -> Target.Run { (u, _,  r) => drinkBrew(u, r) },
+      "RefillByBrew"      -> Target.Run { (u, _,  r) => refillByBrew(u, r) },
+      "CoatWeapon"        -> Target.Run { (u, _,  r) => coatWeapon(u, r) },
       "CureTraumaPick"    -> Target.Run { (u, ua, r) => cureTrauma(u, ua, r) },
       // «Письмо Марисе»: вскрыть письмо, отправиться по карте Кельвина.
       "OpenLetter"        -> Target.Run { (u, _,  r) => openLetter(u, r) },
@@ -144,36 +146,66 @@ case class InventoryState(
 
   // ── Отвары из трав ─────────────────────────────────────────────────────────
 
-  /** Карточка отвара: описание, рецепт, сколько таких в сумке; «Выпить» — только у
-    * того, что пьётся (сонный дурман ждёт своего часа, шнапс уходит Трактирщику). */
-  private def showBrew(user: User, item: Item, all: List[Item], renderer: Renderer): Task[StateType] = {
-    val kind    = item.brew.get
-    val count   = ItemStack.countOf(all, item)
-    val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + stackLine(count)
-    val choices = List(
-      Option.when(kind.drinkable)(content.choice("DrinkBrew", "brew.drink").copy(color = ChoiceColor.Positive, row = Some(0))),
-      Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
-      Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
-    ).flatten
-    renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
-  }
+  /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
+    * «Выпить» у того, что пьётся; «Заправить флягу», если надетая фляга такого
+    * толка; «Смазать оружие» у смазок. Шнапс уходит Трактирщику, кнопок у него нет. */
+  private def showBrew(user: User, item: Item, all: List[Item], renderer: Renderer): Task[StateType] =
+    getHero(user).flatMap { hero =>
+      val kind    = item.brew.get
+      val count   = ItemStack.countOf(all, item)
+      val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + stackLine(count)
+      val flaskFits = hero.equipment.flask.details match {
+        case f: ItemDetails.Flask => kind.refills.contains(f.effect.refillSource)
+        case _                    => false
+      }
+      val coats = kind.effect match { case BrewEffect.Coat(_, _) => true; case _ => false }
+      val choices = List(
+        Option.when(kind.drinkable)(content.choice("DrinkBrew", "brew.drink").copy(color = ChoiceColor.Positive, row = Some(0))),
+        Option.when(coats)(content.choice("CoatWeapon", "brew.coat").copy(color = ChoiceColor.Positive, row = Some(0))),
+        Option.when(flaskFits)(content.choice("RefillByBrew", "brew.refill").copy(color = ChoiceColor.Positive, row = Some(0))),
+        Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
+        Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
+      ).flatten
+      renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
+    }
+
+  /** Заправить надетую флягу отваром: только флягу своего толка и только неполную. */
+  private def refillByBrew(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      (item.brew, hero.equipment.flask.details) match {
+        case (Some(kind), f: ItemDetails.Flask) if !kind.refills.contains(f.effect.refillSource) =>
+          renderer.show(user, Screen(content.text("brew.wrongFlask"), Nil)) *> showItem(user, item.id, renderer)
+        case (Some(_), f: ItemDetails.Flask) if f.charges >= f.maxCharges =>
+          renderer.show(user, Screen(content.text("brew.flaskFull"), Nil)) *> showItem(user, item.id, renderer)
+        case (Some(_), f: ItemDetails.Flask) =>
+          val refilled = hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.refilled))
+          heroDao.updateEquipment(user.userId, refilled) *>
+            consume(user, item, hero, content.format("brew.refilled", "flask" -> hero.equipment.flask.name), renderer)
+        case _ =>
+          renderer.show(user, Screen(content.text("brew.noFlask"), Nil)) *> showItem(user, item.id, renderer)
+      }
+    }
+
+  /** Смазать оружие: на ближайший бой удары по HP травят или пускают кровь.
+    * Новая смазка сменяет прежнюю; без оружия мазать нечего. */
+  private def coatWeapon(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      item.brew.map(_.effect) match {
+        case Some(BrewEffect.Coat(coat, _)) if hero.equipment.weapon.itemType == ItemType.NoItem =>
+          renderer.show(user, Screen(content.text("brew.noWeapon"), Nil)) *> showItem(user, item.id, renderer)
+        case Some(BrewEffect.Coat(coat, _)) =>
+          val key = coat match { case WeaponCoat.Poison => "brew.coatedPoison"; case WeaponCoat.Bleed => "brew.coatedBleed" }
+          heroDao.updateWeaponDust(user.userId, hero.weaponDust.copy(coat = Some(coat))) *>
+            consume(user, item, hero, content.format(key, "weapon" -> hero.equipment.weapon.name), renderer)
+        case _ => showItem(user, item.id, renderer)
+      }
+    }
 
   /** Глоток: по виду отвара. Костоправный сперва спрашивает, какую травму лечить. */
   private def drinkBrew(user: User, renderer: Renderer): Task[StateType] =
     withSelected(user, renderer) { (item, hero) =>
       item.brew.map(_.effect) match {
         case Some(BrewEffect.CureTrauma) => offerCure(user, item, hero, renderer)
-        case Some(BrewEffect.RefillFlask) =>
-          hero.equipment.flask.details match {
-            case f: ItemDetails.Flask if f.charges < f.maxCharges =>
-              val refilled = hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.refilled))
-              heroDao.updateEquipment(user.userId, refilled) *>
-                consume(user, item, hero, content.format("brew.refilled", "flask" -> hero.equipment.flask.name), renderer)
-            case _: ItemDetails.Flask =>
-              renderer.show(user, Screen(content.text("brew.flaskFull"), Nil)) *> showItem(user, item.id, renderer)
-            case _ =>
-              renderer.show(user, Screen(content.text("brew.noFlask"), Nil)) *> showItem(user, item.id, renderer)
-          }
         case Some(BrewEffect.InstantRest) =>
           for {
             now  <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))

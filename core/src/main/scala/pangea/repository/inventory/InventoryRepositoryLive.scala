@@ -59,8 +59,9 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
       inventory <- inventoryDao.get(heroId).orElseFail(InventoryRepoError.CantFindInventory)
       refilled   = inventory.items.data.map(item =>
                      item.details match {
-                       case f: pangea.model.item.ItemDetails.Flask => item.copy(details = f.refilled)
-                       case _                                      => item
+                       // Ручей наполняет только воду (см. FlaskEffect.refillsAtSpring).
+                       case f: pangea.model.item.ItemDetails.Flask if f.effect.refillsAtSpring => item.copy(details = f.refilled)
+                       case _                                                                  => item
                      })
       _         <- inventoryDao.update(inventory.withItems(refilled)).orElseFail(InventoryRepoError.CantUpdateInventory)
     } yield ()
