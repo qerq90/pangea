@@ -125,6 +125,10 @@ object BrewKind extends Enum[BrewKind] {
 
   val values: IndexedSeq[BrewKind] = findValues
 
+  /** Отвары первого ранга — все из трав первого ранга; за полный набор
+   *  сваренных даётся «Зельевар I» (см. Achievement.Brewer1). */
+  val rank1: IndexedSeq[BrewKind] = values
+
   /** Отвар, который варится из этого набора трав (порядок не важен), если такой есть. */
   def forHerbs(herbs: List[MaterialKind]): Option[BrewKind] =
     values.find(k => k.recipe.sorted(Ordering.by[MaterialKind, String](_.entryName)) ==

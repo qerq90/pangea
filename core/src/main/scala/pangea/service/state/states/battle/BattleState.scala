@@ -894,7 +894,7 @@ case class BattleState(
   /** Травма от смерча — та же механика, что и при смерти: прогресс по тирам
     * (лёгкие → средние → тяжёлые), уже полученные исключаются. Пишется сразу,
     * потому что `commit` сохраняет только экипировку и боевые статы. */
-  private def giveTrauma(hero: Hero, nowMs: Long): Task[(Hero, String)] = {
+  private def giveTrauma(hero: Hero, nowMs: Long, key: String = "battle.elemental.orbTrauma"): Task[(Hero, String)] = {
     val existing = if (hero.traumaActive(nowMs)) hero.traumaNames else Nil
     val pool     = TraumaRoll.pool(existing)
     val until    = nowMs + TraumaRoll.DurationMs
@@ -907,8 +907,29 @@ case class BattleState(
         _     <- heroDao.updateTrauma(hero.userId, Some(until), names)
       } yield (
         hero.copy(traumaUntil = Some(until), traumaNames = names),
-        content.format("battle.elemental.orbTrauma", "traumaName" -> trauma.name)
+        content.format(key, "traumaName" -> trauma.name)
       )
+  }
+
+  /** Удар моба по HP может оставить травму: с любого урона по HP — 1%, а удар,
+    * снявший больше половины ПОТОЛКА HP, — наверняка. Считается по каждому удару
+    * и приёму отдельно; яд, кровь и огонь — не удары. Мёртвому травму не
+    * добавляем (её даст смерть), и не дублируем ту, что приём выдал сам (смерч,
+    * широкий удар Джо). Бросок не тратится, если урона по HP не было. */
+  private def hitTrauma(before: Hero, after: Hero, nowMs: Long): Task[(Hero, Option[String])] = {
+    val lost = before.fightStats.hp - after.fightStats.hp
+    if (lost <= 0L || after.fightStats.hp <= 0L || after.traumaNames != before.traumaNames) ZIO.succeed((after, None))
+    else {
+      // Потолок — эффективный максимум, но не ниже того, что было: HP выше потолка
+      // (сошёл баф, сменилась вещь) не должно делать каждый удар сокрушительным.
+      val ceiling  = after.effectiveMaxHp(nowMs).max(before.fightStats.hp)
+      val crushing = lost * 100L > ceiling * BattleState.HitTraumaCrushPct
+      chanceRoll(!crushing, BattleState.HitTraumaChancePct).flatMap { unlucky =>
+        if (crushing) giveTrauma(after, nowMs, "battle.hitTraumaCrush").map { case (h, l) => (h, Some(l)) }
+        else if (unlucky) giveTrauma(after, nowMs, "battle.hitTrauma").map { case (h, l) => (h, Some(l)) }
+        else ZIO.succeed((after, None))
+      }
+    }
   }
 
   /** ЕДИНАЯ точка активного исцеления героя — всё, чем он лечит себя сам:
@@ -1344,10 +1365,11 @@ case class BattleState(
               ticked
             )
           )
-      (hpAfterAtk, armorAfterAtk, mobLine, battleAfterAtk) = atkResult
-      heroAfterAtk = hero.copy(fightStats =
-        hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk)
-      )
+      (hpAfterAtk, armorAfterAtk, mobLine0, battleAfterAtk) = atkResult
+      // Удар по HP может оставить травму — сразу за строкой удара.
+      struckTrauma <- hitTrauma(hero, hero.copy(fightStats = hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk)), nowMs)
+      (heroAfterAtk, strikeTraumaLine) = struckTrauma
+      mobLine = strikeTraumaLine.fold(mobLine0)(l => mobLine0 + "\n" + l)
 
       // 2) Умение моба оплачивается ЭНЕРГИЕЙ, а не броском кубика: моб берёт самое
       // дорогое из того, что сейчас по карману, применимо и доступно его расе, и
@@ -1365,7 +1387,11 @@ case class BattleState(
         else if (battleAfterAtk.boss.isDefined)
           bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
         else mobSkillCast(heroAfterAtk, battleAfterAtk, nowMs)
-      (finalBattle, finalHero, castLine) = castResult
+      (finalBattle, finalHero0, castLine0) = castResult
+      // Приём по HP — тоже может оставить травму.
+      castTrauma <- hitTrauma(heroAfterAtk, finalHero0, nowMs)
+      (finalHero, castTraumaLine) = castTrauma
+      castLine = castTraumaLine.fold(castLine0)(l => (if (castLine0.isEmpty) "" else castLine0 + "\n") + l)
 
       // 3) Конец раунда: тик статус-эффектов. Стадии героя и монстра — раздельные,
       // каждая со своей строкой. Применяются только пока герой жив.
@@ -2023,11 +2049,14 @@ case class BattleState(
             // атака в бою: та же баффовая броня, тот же порог 6 «Каменного стража».
             parting     = bossDamageTaken(hero, battle, reducedDamage)
             (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, parting)
-            hero2       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
+            hero1       = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
+            partTrauma <- hitTrauma(hero, hero1, nowMs)
+            (hero2, traumaLine) = partTrauma
             mobLine     = content.format("battle.mobHit", "damage" -> parting.toString, "monster" -> battle.monsterName)
+            lines       = Vector(mobLine) ++ traumaLine.toVector
           } yield
-            if (newHp <= 0) TurnResult(hero2, battle, Vector(mobLine), Outcome.Death)
-            else TurnResult(hero2, battle, Vector(mobLine), Outcome.Fled)
+            if (newHp <= 0) TurnResult(hero2, battle, lines, Outcome.Death)
+            else TurnResult(hero2, battle, lines, Outcome.Fled)
         } else
           ZIO.succeed(TurnResult(hero, battle, Vector.empty, Outcome.Fled))
     } yield result
@@ -2098,7 +2127,10 @@ case class BattleState(
               }
             else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
         } yield out
-      (h1, t1, log1) = struck
+      (h0, t1, log0) = struck
+      sideTrauma <- hitTrauma(hero, h0, nowMs)
+      (h1, sideTraumaLine) = sideTrauma
+      log1 = log0 ++ sideTraumaLine.toVector
       // 2) умение: раненому соседу — лечение, себе — что по карману, герою — урон
       casted <-
         if (smoke || h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
@@ -2111,7 +2143,10 @@ case class BattleState(
             }
             else selfAid(h1, t1, nowMs).map { case (t2, line) => (h1, t2, battle, if (line.isEmpty) Vector.empty else Vector(line)) }
         }
-      (h2, t2, b2, log2) = casted
+      (h2raw, t2, b2, log2raw) = casted
+      castSideTrauma <- hitTrauma(h1, h2raw, nowMs)
+      (h2, castSideLine) = castSideTrauma
+      log2 = log2raw ++ castSideLine.toVector
       // 3) конец хода этого моба: энергия и тик ран
       withEnergy = t2.copy(monsterCurrentEnergy =
         (t2.monsterCurrentEnergy + MonsterEnergy.regen(t2.monsterLvl, t2.rarity)).min(t2.monsterStats.energy))
@@ -2821,6 +2856,11 @@ object BattleState {
       attackerInt = attackerPower,
       bonusPct    = 0L
     )
+
+  /** Травма от удара моба: шанс (в %) с любого урона по HP и порог (в % от
+    * потолка HP), сверх которого один удар оставляет травму наверняка. */
+  val HitTraumaChancePct: Long = 1L
+  val HitTraumaCrushPct: Long  = 50L
 
   /** Сколько процентов ПОТОЛКА брони срезает комбо Молния+Холод. */
   val ComboArmorCutPct: Long = 10L

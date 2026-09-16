@@ -172,7 +172,8 @@ case class Hero(
       agi = (b.applyAgi(baseStats.agi) * statBoosts.agiFactor(nowMs)).toLong.max(1L),
       vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L),
       str = (b.applyStr(baseStats.str) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
-      int = (b.applyInt(baseStats.int) * (1.0 - p.intPct) * statBoosts.intFactor(nowMs)).toLong.max(1L)
+      // Достижения дают плоскую прибавку к базе — до расы, травм и зелий.
+      int = (b.applyInt(baseStats.int + Achievement.intBonus(this)) * (1.0 - p.intPct) * statBoosts.intFactor(nowMs)).toLong.max(1L)
     )
   }
 

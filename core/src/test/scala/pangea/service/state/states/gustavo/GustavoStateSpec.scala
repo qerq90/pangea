@@ -156,7 +156,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(screens.exists(_.text.contains("шутник")))
       },
 
-      test("BuyPotion на кулдауне → сообщение про 30 минут, серебро не списано") {
+      test("BuyPotion на кулдауне → сообщение про час, серебро не списано") {
         for {
           t <- env(hurtHero)
           (heroDao, renderer, content) = t
@@ -166,7 +166,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(h.exists(_.silver == 5000L)) &&
                 assertTrue(h.exists(_.traumaNames.nonEmpty)) &&
-                assertTrue(screens.exists(_.text.contains("30 минут")))
+                assertTrue(screens.exists(_.text.contains("раз в час")))
       },
 
       test("Back → GustavoState") {

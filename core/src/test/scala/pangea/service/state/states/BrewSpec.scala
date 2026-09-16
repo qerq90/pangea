@@ -9,7 +9,7 @@ import pangea.model.item._
 import pangea.model.state.StateType
 import pangea.model.trauma.Trauma
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.UserAction
+import pangea.service.state.{HerbLore, UserAction}
 import pangea.service.state.states.tavern.InnkeeperState
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
@@ -244,6 +244,50 @@ object BrewSpec extends ZIOSpecDefault {
       } yield assertTrue(log.contains("Травм нет") && inv.snapshot.size == 1) &&
               assertTrue(log2.contains("Все ваши травмы тяжёлые") && inv2.snapshot.size == 1) &&
               assertTrue(h2.traumaNames == List(Trauma.SplitSkull.name))
+    },
+
+    // ── Достижение ────────────────────────────────────────────────────────────
+    test("«Зельевар I»: сварил по одному каждый отвар первого ранга → достижение и +2 к интеллекту, один раз") {
+      import pangea.model.hero.{Achievement, AzatState, CubeStatus}
+      import pangea.service.state.states.temple.CubeState
+      def cubeWith(items: List[Item], h: Hero) =
+        for {
+          dao <- TestHeroDao.withHero(userId, h)
+          _   <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 50, cubeItems = items).asJson)
+          r   <- TestRenderer.make
+          c   <- ZIO.attempt(SceneContent.load())
+        } yield (CubeState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c), dao, r)
+      def herbsFor(k: BrewKind) = k.recipe.zipWithIndex.map { case (h, j) => herb(h, (j + 1).toLong) }
+      for {
+        t <- cubeWith(Nil, baseHero)
+        (state, dao, r) = t
+        // варим по рецепту за раз: в общей куче куб брал бы первый рецепт снова и снова
+        _     <- ZIO.foreachDiscard(BrewKind.rank1.init) { k =>
+                   dao.readAzatData(userId).map(_.flatMap(_.as[AzatState].toOption).get).flatMap(a =>
+                     dao.writeAzatData(userId, a.copy(cubeItems = herbsFor(k)).asJson)) *>
+                     state.action(testUser, tap("CubeActivate"), r)
+                 }
+        h1    <- dao.getHeroByUserId(userId).map(_.get)
+        lore1 <- HerbLore.readLore(dao, userId)
+        // последний рецепт — и достижение
+        azat  <- dao.readAzatData(userId).map(_.flatMap(_.as[AzatState].toOption).get)
+        _     <- dao.writeAzatData(userId, azat.copy(cubeItems = herbsFor(BrewKind.rank1.last)).asJson)
+        _     <- state.action(testUser, tap("CubeActivate"), r)
+        h2    <- dao.getHeroByUserId(userId).map(_.get)
+        log   <- texts(r)
+        // повторная варка достижение не дублирует
+        _     <- dao.writeAzatData(userId, azat.copy(cubeItems = herbsFor(BrewKind.rank1.last)).asJson)
+        _     <- state.action(testUser, tap("CubeActivate"), r)
+        h3    <- dao.getHeroByUserId(userId).map(_.get)
+        log3  <- texts(r)
+        intBefore = h1.effectiveBaseStats(0L).int
+        intAfter  = h2.effectiveBaseStats(0L).int
+      } yield assertTrue(lore1.brewed.size == BrewKind.rank1.size - 1 && !h1.hasAchievement(Achievement.Brewer1)) &&
+              assertTrue(h2.hasAchievement(Achievement.Brewer1)) &&
+              assertTrue(log.contains("достижение «Зельевар I»") && log.contains("+2 к интеллекту")) &&
+              assertTrue(intAfter == intBefore + 2L) &&
+              assertTrue(h3.achievements.count(_ == Achievement.Brewer1.entryName) == 1 &&
+                         log3.split("Зельевар I").length == 2)
     },
 
     // ── Трактирщик ────────────────────────────────────────────────────────────

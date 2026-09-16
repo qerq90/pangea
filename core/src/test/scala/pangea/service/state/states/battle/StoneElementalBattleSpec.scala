@@ -81,8 +81,9 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
   /** Броски одного хода: удар героя, попадание моба, затем `extra` (проки стихий,
     * бросок травмы). Подавать ТОЛЬКО одним вызовом: повторный feedInts кладёт
     * значения в НАЧАЛО очереди. Два long — разбросы урона героя и моба. */
+  // Удар камня всегда достаёт HP, поэтому за ним идёт бросок травмы от удара (50 — нет).
   private def seedTurn(extra: Int*) =
-    TestRandom.feedInts(60 +: 90 +: extra: _*) *> TestRandom.feedLongs(100L, 100L)
+    TestRandom.feedInts(60 +: 90 +: 50 +: extra: _*) *> TestRandom.feedLongs(100L, 100L)
 
   private def strike(h: Hero, battle: SoloPveBattle, seed: ZIO[Any, Nothing, Unit]) =
     for {

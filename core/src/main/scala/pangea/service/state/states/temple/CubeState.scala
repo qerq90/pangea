@@ -7,15 +7,15 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.CubeCraft
-import pangea.model.hero.{AzatState, Hero}
-import pangea.model.item.{Item, ItemStack}
+import pangea.model.hero.{Achievement, AzatState, Hero}
+import pangea.model.item.{BrewKind, Item, ItemStack}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.temple.CubeState._
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.service.state.{AzatData, HerbLore, MarisaQuest, State, UserAction}
 import java.util.concurrent.TimeUnit
 import zio.{Random, Task, ZIO}
 
@@ -206,6 +206,17 @@ case class CubeState(
       _ <- saveAzat(user, azat.copy(cubeItems = persisted, cubeCharges = azat.cubeCharges - result.chargesUsed))
       msgKey = if (result.anyApplied) "cube.activated" else "cube.nothing"
       _ <- renderer.show(user, Screen(content.text(msgKey), Nil))
+      // Сваренные отвары идут в счёт «Зельевара I»: по одному каждого — достижение.
+      brewedNow = result.items.filter(_.id <= 0L).flatMap(_.brew).map(_.entryName)
+      _ <- ZIO.when(brewedNow.nonEmpty) {
+             for {
+               lore   <- HerbLore.readLore(heroDao, user.userId)
+               updated = lore.brewedAlso(brewedNow)
+               _      <- HerbLore.writeLore(heroDao, user.userId, updated)
+               _      <- ZIO.when(BrewKind.rank1.forall(k => updated.brewed.contains(k.entryName)))(
+                           MarisaQuest.grant(heroDao, content, user, hero, Achievement.Brewer1, renderer))
+             } yield ()
+           }
       _ <- showMenu(user, renderer)
     } yield ()
 
