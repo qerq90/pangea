@@ -8,7 +8,7 @@ import pangea.model.squad.{AllyKind, AllyRates, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -38,12 +38,14 @@ case class MercenariesState(heroDao: HeroDao, inventoryRepo: InventoryRepository
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
-  /** Кто за столом: не в отряде и не в отлучке. Вернувшихся сперва встречаем. */
+  /** Кто за столом: не в отряде и не в отлучке. Отработавшие свой день сперва
+    * уходят, вернувшихся по свитку — встречаем. */
   private def showList(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now  <- nowMs
-      hero <- getHero(user)
-      back  = hero.squad.returned(now)
+      now   <- nowMs
+      hero0 <- getHero(user)
+      hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
+      back   = hero.squad.returned(now)
       _    <- ZIO.foreachDiscard(back) { k =>
                 renderer.show(user, Screen(content.format("mercenaries.returned",
                   "name" -> k.name, "line" -> content.text(s"mercenaries.${key(k)}.returned")), Nil))
@@ -81,7 +83,7 @@ case class MercenariesState(heroDao: HeroDao, inventoryRepo: InventoryRepository
         else pay(user, hero, kind).flatMap {
           case Some(refusal) => renderer.show(user, Screen(refusal, Nil)) *> showCard(user, kind, renderer)
           case None =>
-            heroDao.updateSquad(user.userId, hero.squad.hire(kind, hero.lvl)) *>
+            heroDao.updateSquad(user.userId, hero.squad.hire(kind, hero.lvl, now)) *>
               renderer.show(user, Screen(content.format("mercenaries.hired", "name" -> kind.name), Nil)) *>
               showList(user, renderer)
         }

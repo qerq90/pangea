@@ -12,7 +12,8 @@ import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
+import pangea.model.schedule.TaskKind
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer, TestScheduler}
 import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
@@ -79,17 +80,127 @@ object AllyBattleSpec extends ZIOSpecDefault {
 
   override def spec = suite("Бой с отрядом")(
 
-    test("строй двухрядный: герой и союзник слева по позициям, мобы справа по местам") {
+    test("строй двухрядный: герой и союзник слева по позициям, мобы справа по местам; «Атака» с двумя целями спрашивает, в кого") {
       for {
         t <- makeState(hero(), group(hero(), 1000L, 1000L))
-        (state, _, r) = t
+        (state, dao, r) = t
         _       <- state.enter(testUser, r)
         screens <- r.sentScreens
         first    = screens.head.text
         buttons  = screens.last.choices.map(_.label)
+        _       <- state.action(testUser, tap("Attack"), r)
+        ask     <- r.sentScreens.map(_.last)
+        targets  = ask.choices.filter(_.id == "Attack").map(_.data("target"))
+        same    <- battleOf(dao)
       } yield assertTrue(first.contains("1. 🟢 Вы VS 🔴")) &&
               assertTrue(first.contains("2. 🔵 Йорген Кремень ❤ 100% 🧥 100% VS 🔴")) &&
-              assertTrue(buttons.contains("⚔ Место 2"))
+              assertTrue(buttons.contains("Атака") && !buttons.exists(_.startsWith("⚔ Место"))) &&
+              assertTrue(ask.text == "🎯 Атака — в кого?" && targets == List("1", "2")) &&
+              assertTrue(ask.choices.exists(_.id == "CancelTarget")) &&
+              assertTrue(same.monsterCurrentHp == 1000L && same.group.round == 0)   // ход не потрачен
+    },
+
+    test("обычная встреча: моб появляется на месте 1, где бы ни стоял герой; герой на 2 бьёт его как соседа, дерётся с ним союзник на 1") {
+      val h = hero(heroPos = 2, allies = List(ally(pos = 1)))
+      val b = SoloPveBattle.from(monster(1000L), h)
+      for {
+        t <- makeState(h, b)
+        (state, dao, r) = t
+        _       <- state.enter(testUser, r)
+        entry   <- r.sentScreens
+        // удар героя по месту 1 (единственная цель — без вопроса); ответа пары нет;
+        // союзник на 1 бьёт моба напротив + прок; моб бьёт союзника; подкрепление
+        _       <- TestRandom.feedInts(60, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleOf(dao)
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        a        = after.group.allies.head
+      } yield assertTrue(b.group.activePos == 1 && !b.group.paired && b.group.attackTargets == List(1)) &&
+              assertTrue(entry.head.text.contains("1. 🔵 Йорген Кремень ❤ 100% 🧥 100% VS 🔴")) &&
+              assertTrue(entry.head.text.contains("2. 🟢 Вы VS ⚪")) &&
+              assertTrue(entry.last.text.contains("Напротив вас никого нет")) &&
+              assertTrue(entry.last.choices.exists(_.label == "Атака")) &&
+              assertTrue(screens.contains("Вы наносите") && !screens.contains("атаковал вас сбоку")) &&
+              assertTrue(after.monsterCurrentHp < 1000L && !after.group.paired && after.group.activePos == 1) &&
+              assertTrue(updated.fightStats.hp == 500000L && a.armor < 1500L)
+    },
+
+    test("герой убил своего моба: занятый союзником сосед к нему не шагает — напротив пусто, соседа бьёт по кнопке и добивает") {
+      val h = hero(atk = 100000L)
+      for {
+        t <- makeState(h, group(h, 10L, 1000L))
+        (state, dao, r) = t
+        // герой добил активного (ответа нет); союзник бьёт моба напротив + прок; моб бьёт союзника; подкрепление
+        _       <- TestRandom.feedInts(60, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        first   <- state.action(testUser, aimed("Attack", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens
+        log      = screens.map(_.text).mkString("\n")
+        _       <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+        second  <- state.action(testUser, tap("Attack"), r)
+      } yield assertTrue(first == StateType.Battle) &&
+              assertTrue(log.contains("К вам никто не шагает")) &&
+              assertTrue(!after.group.paired && after.group.activePos == 2 && after.group.slain.size == 1) &&
+              assertTrue(after.group.attackTargets == List(2)) &&
+              assertTrue(screens.last.text.contains("Напротив вас никого нет") && screens.last.text.contains("против последней цели")) &&
+              assertTrue(screens.last.choices.exists(_.label == "Атака")) &&
+              assertTrue(second == StateType.Loot)
+    },
+
+    test("свободный моб (напротив него нет союзника) в конце раунда шагает к герою") {
+      val h = hero(heroPos = 2, allies = List(ally(pos = 3)))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        (state, dao, r) = t
+        // удар по месту 1; союзнику на 3 бить некого; моб с места 1 бьёт героя сбоку; подкрепление
+        _       <- TestRandom.feedInts(60, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(screens.contains("атаковал вас сбоку") && screens.contains("шагает к вам")) &&
+              assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2)
+    },
+
+    test("бить некого, союзники впереди — вместо «Атаки» кнопка «Переместиться»: герой меняется местами с союзником, ход кончается") {
+      val h = hero(heroPos = 3, allies = List(ally(pos = 1), ally(AllyKind.Gnome, pos = 2)))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        (state, dao, r) = t
+        _       <- state.enter(testUser, r)
+        entry   <- r.sentScreens.map(_.last)
+        _       <- state.action(testUser, tap("Move"), r)
+        ask     <- r.sentScreens.map(_.last)
+        // герой встал на 1 — в пару с мобом, тот отвечает; Йорген на 3 бить некого; Брамбл на 2 достаёт моба как
+        // соседа + прок; подкрепление
+        _       <- TestRandom.feedInts(99, 60, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        result  <- state.action(testUser, aimed("MoveTo", 1), r)
+        after   <- battleOf(dao)
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(entry.choices.exists(_.label == "Переместиться") && !entry.choices.exists(_.label == "Атака")) &&
+              assertTrue(ask.text.contains("с кем?") && ask.choices.filter(_.id == "MoveTo").map(_.label) == List("1. Йорген Кремень", "2. Брамбл Медноус")) &&
+              assertTrue(result == StateType.Battle && screens.contains("Вы меняетесь местами: Йорген Кремень")) &&
+              assertTrue(after.group.heroPos == 1 && after.group.paired && after.group.allyAt(3).exists(_.kind == AllyKind.Human)) &&
+              assertTrue(screens.contains("⚔ Брамбл Медноус бьёт") && !screens.contains("⚔ Йорген Кремень бьёт")) &&
+              assertTrue(updated.fightStats.hp < 500000L)   // моб в паре ответил герою
+    },
+
+    test("бить некого и союзников нет — «Ждать»: герой пропускает удар, раунд идёт") {
+      val h = hero(heroPos = 3, allies = Nil)
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        (state, dao, r) = t
+        _       <- state.enter(testUser, r)
+        entry   <- r.sentScreens.map(_.last)
+        // моб с места 1 героя на 3 не достаёт; подкрепления нет; моб свободен — в конце раунда шагает к герою
+        _       <- TestRandom.feedInts(99) *> TestRandom.feedLongs(100L)
+        result  <- state.action(testUser, tap("Wait"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(entry.choices.exists(_.label == "Ждать") && !entry.choices.exists(_.label == "Атака")) &&
+              assertTrue(result == StateType.Battle && screens.contains("Вы выжидаете") && screens.contains("шагает к вам")) &&
+              assertTrue(after.group.paired && after.group.heroPos == 3)
     },
 
     test("союзник бьёт врага напротив и добивает его — павший ждёт добычи, бой идёт") {
@@ -98,7 +209,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // герой попал, моб в паре ответил; союзник попал (добил — прока нет); подкрепления нет
         _       <- TestRandom.feedInts(60, 99, 60, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
-        result  <- state.action(testUser, tap("Attack"), r)
+        result  <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(result == StateType.Battle) &&
@@ -127,14 +238,102 @@ object AllyBattleSpec extends ZIOSpecDefault {
       for {
         t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
         (state, dao, r) = t
-        // герой; моб; удар союзника + прок; выбор умения (1 из [быстрый, дробящий]); дробящий + прок; подкрепление
-        _       <- TestRandom.feedInts(60, 99, 60, 99, 1, 60, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
+        // герой; моб; удар союзника + прок; выбор умения (1 из [быстрый, дробящий]); дробящий (без броска
+        // на попадание — умения не мажут) + прок; подкрепление
+        _       <- TestRandom.feedInts(60, 99, 60, 99, 1, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
         _       <- state.action(testUser, tap("Attack"), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         a        = after.group.allies.head
-      } yield assertTrue(screens.contains("бьёт плашмя прямо по голове, нанеся 80 урона")) &&
+      } yield assertTrue(screens.contains("⚔ Йорген Кремень бьёт Орк раб на 300 урона.")) &&   // 200 × 1,1 (огонь по HP) + 80 плашмя
+              assertTrue(!screens.contains("плашмя") && screens.linesIterator.count(_.startsWith("⚔ Йорген")) == 1) &&
               assertTrue(a.energy == 1000L - 160L + 70L)
+    },
+
+    test("герой обнулён при живом отряде — не смерть: бой идёт без него по таймеру, отряд добивает — герой приходит в себя с 1 HP") {
+      val h = hero(hp = 1L, allies = List(ally(pos = 2)))
+      for {
+        dao      <- TestHeroDao.withHero(userId, h)
+        _        <- dao.writeActiveBattle(userId, group(h, 1000L, 10L).asJson)
+        r        <- TestRenderer.make
+        sch      <- TestScheduler.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content, sch)
+        // герой попал; моб в паре попал и обнулил его (травмы нет — герой уже на нуле)
+        _        <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
+        down     <- state.action(testUser, aimed("Attack", 1), r)
+        b1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        sched    <- sch.scheduled
+        scr1     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        // кнопки лежащего героя ничего не делают — только экран
+        _        <- state.action(testUser, aimed("Attack", 1), r)
+        same     <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        // тик 1: союзник бьёт соседа (10 HP) — добил, прока нет; моб в паре лежащего героя не трогает; подкрепление
+        _        <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        t1       <- state.action(testUser, tap("SquadTick"), r)
+        b2       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        // тик 2: союзнику напротив никого — бьёт моба в паре (сосед) + прок; накопил 70 энергии —
+        // быстрый удар (единственный по карману, индекс 0) + прок; подкрепление
+        _        <- TestRandom.feedInts(60, 99, 0, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        t2       <- state.action(testUser, tap("SquadTick"), r)
+        b3       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+        // моба почти нет — тик 3 добивает: победа, герой приходит в себя
+        _        <- dao.writeActiveBattle(userId, b3.copy(monsterCurrentHp = 1L).asJson)
+        _        <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+        t3       <- state.action(testUser, tap("SquadTick"), r)
+        updated  <- dao.getHeroByUserId(userId).map(_.get)
+        scr      <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(down == StateType.Battle && b1.group.heroDown) &&
+              assertTrue(sched.exists(s => s.kind == TaskKind.SquadFight && s.expectedState == StateType.Battle && s.fireAt == 30000L)) &&
+              assertTrue(scr1.contains("оседаете на землю") && scr1.contains("Отряд дерётся за вас")) &&
+              assertTrue(same == b1) &&
+              assertTrue(t1 == StateType.Battle && b2.group.slain.size == 1 && b2.group.others.isEmpty) &&
+              assertTrue(t2 == StateType.Battle && b3.monsterCurrentHp < 1000L && b3.group.heroDown) &&
+              assertTrue(t3 == StateType.Loot && updated.fightStats.hp == 1L) &&
+              assertTrue(scr.contains("отряд отбился, и вы приходите в себя"))
+    },
+
+    test("герой лежит, а последний союзник уходит по свитку — смерть, отложенная до этого момента") {
+      val h = hero(hp = 1L, allies = List(ally(pos = 2, hp = Some(1L), armor = Some(0L))))
+      for {
+        t <- makeState(h, group(h, 1000L, 1000L))
+        (state, dao, r) = t
+        // герой попал; моб обнулил героя — герой падает, отряд жив
+        _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
+        down    <- state.action(testUser, aimed("Attack", 1), r)
+        // тик: союзник бьёт соседа + прок; сосед обнуляет союзника (свиток); подкрепление
+        _       <- TestRandom.feedInts(60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        result  <- state.action(testUser, tap("SquadTick"), r)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(down == StateType.Battle && result == StateType.Death) &&
+              assertTrue(screens.contains("оседаете на землю") && screens.contains("Последний из отряда"))
+    },
+
+    test("сюжетный бой (squad = false) идёт без отряда: герой один, на месте 1") {
+      val h = hero(heroPos = 2, allies = List(ally(pos = 1)))
+      val b = SoloPveBattle.from(monster(1000L), h, squad = false)
+      val g = SoloPveBattle.fromGroup(List(monster(1000L), monster(1000L)), h, Nil, squad = false)
+      assertTrue(b.group.allies.isEmpty && b.group.heroPos == 1 && b.group.paired) &&
+      assertTrue(g.group.allies.isEmpty && g.group.heroPos == 1 && g.group.paired && g.group.places == List(2))
+    },
+
+    test("позиции после боя сохраняются в отряде вместе с позицией героя, найм не сбрасывается") {
+      val until = 777_777L
+      val h = hero(atk = 100000L, allies = List(ally(pos = 2).copy(hiredUntil = until)))
+      for {
+        t <- makeState(h, group(h, 10L, 1000L))
+        (state, dao, r) = t
+        _       <- state.action(testUser, tap("Move"), r)
+        // герой на 2 (в пару с мобом 2), Йорген на 1 (напротив моб 1); моб 2 отвечает; Йорген добивает моба 1
+        // (10 HP, прока нет); подкрепление
+        _       <- TestRandom.feedInts(99, 60, 99) *> TestRandom.feedLongs(100L, 100L)
+        _       <- state.action(testUser, aimed("MoveTo", 2), r)
+        // бежим: окружать некому, моб в паре бьёт в спину
+        _       <- TestRandom.feedInts(99) *> TestRandom.feedLongs(100L)
+        fled    <- state.action(testUser, tap("ConfirmFlee"), r)
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(fled == StateType.Dungeon) &&
+              assertTrue(updated.squad.heroPos == 2 && updated.squad.allyAt(1).exists(a => a.kind == AllyKind.Human && a.hiredUntil == until))
     },
 
     test("раненому доступны фляга и починка: второй вариант — фляга на 30% HP") {
@@ -159,7 +358,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // герой; моб в паре; союзник + прок; моб № 2 бьёт союзника; подкрепление
         _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         updated <- dao.getHeroByUserId(userId).map(_.get)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
@@ -177,7 +376,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         t <- makeState(h, group(h, 1000L, 1000L))
         (state, dao, r) = t
         _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         // бежим: окружения нет (99 > 5%)
@@ -200,14 +399,14 @@ object AllyBattleSpec extends ZIOSpecDefault {
         // раунд: герой добил активного (ответа нет), к нему шагнул № 2 (союзнику напротив —
         // никого); союзник бьёт активного как соседа + прок; подкрепления нет. Раунд 2: герой добивает.
         _       <- TestRandom.feedInts(60, 60, 99, 99, 60) *> TestRandom.feedLongs(100L, 100L, 100L)
-        first   <- state.action(testUser, tap("Attack"), r)
+        first   <- state.action(testUser, aimed("Attack", 1), r)
         second  <- state.action(testUser, tap("Attack"), r)
         updated <- dao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(first == StateType.Battle && second == StateType.Loot) &&
               assertTrue(updated.squad.allyAt(2).exists(a => a.kind == AllyKind.Human && a.energy == 70L))
     },
 
-    test("герой бьёт соседа кнопкой «⚔ Место 2»: урон мобу на месте 2, отвечает моб в паре") {
+    test("герой бьёт соседа, выбрав место 2: урон мобу на месте 2, отвечает моб в паре") {
       for {
         t <- makeState(hero(), group(hero(), 1000L, 1000L))
         (state, dao, r) = t

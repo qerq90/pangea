@@ -103,13 +103,23 @@ object SlainMonster {
 }
 
 /** Групповая часть боя. Мобы стоят в строю по местам 1, 2, …; герой стоит на
-  * месте `heroPos` — напротив него активный моб, живущий в полях
-  * [[SoloPveBattle]]. Павший освобождает место, и оно остаётся пустым — строй
-  * не смыкается (пустоты — задел под тактику). Здесь — всё остальное:
+  * месте `heroPos`. Активный моб — тот, что живёт в полях [[SoloPveBattle]], —
+  * стоит на месте `activePos`. Совпало с местом героя — они в паре: герой бьёт
+  * его по умолчанию, он отвечает герою. Не совпало (у героя напротив пусто:
+  * своего он убил, а свободных мобов нет, или обычная встреча началась не на
+  * его месте) — активный просто хранится в полях и ходит как моб вне пары.
+  * Павший освобождает место, и оно остаётся пустым — строй не смыкается
+  * (пустоты — задел под тактику). Здесь — всё остальное:
   *
   *  - `others`  — мобы на прочих местах (без активного), `places` — их места,
   *    список в список;
-  *  - `heroPos` — место героя (и активного моба), с единицы;
+  *  - `heroPos` — место героя, с единицы; `activePos` — место активного моба;
+  *  - `lastTarget` — по кому герой бил последним: когда напротив пусто, экран
+  *    боя считает его шансы против этой цели;
+  *  - `heroDown` — герой обнулён, но отряд ещё на ногах: бой идёт без него,
+  *    раунд за раундом по таймеру, а его смерть отложена до исхода;
+  *  - `queue` — кому не хватило места в строю (больше [[GroupState.MaxMonsters]]):
+  *    ждут за спинами и входят, как только место освободится;
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
   *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
@@ -128,12 +138,30 @@ final case class GroupState(
   heroPos:     Int                = 1,
   places:      List[Int]          = Nil,
   allies:      List[BattleAlly]   = Nil,
-  alliesGone:  List[String]       = Nil
+  alliesGone:  List[String]       = Nil,
+  activePos:   Int                = 1,
+  lastTarget:  Option[MonsterSlot] = None,
+  heroDown:    Boolean            = false,
+  queue:       List[MonsterSlot]  = Nil
 ) {
   def isGroup: Boolean = others.nonEmpty
 
-  /** Есть ли строй, который стоит показать: мобы вне пары или союзники. */
-  def hasFormation: Boolean = isGroup || allies.nonEmpty
+  /** Активный моб стоит напротив героя. */
+  def paired: Boolean = activePos == heroPos
+
+  /** Есть ли строй, который стоит показать: мобы вне пары, союзники или
+    * пустота напротив героя. */
+  def hasFormation: Boolean = isGroup || allies.nonEmpty || !paired
+
+  /** Стоит ли на месте `pos` какой-нибудь моб — активный или вне пары. */
+  def hasMonster(pos: Int): Boolean = pos == activePos || occupied(pos)
+
+  /** Моб на месте `pos` никем из союзников не занят. */
+  def freeAt(pos: Int): Boolean = allyAt(pos).forall(!_.alive)
+
+  /** По кому герой может ударить: моб в паре и соседи, слева направо. */
+  def attackTargets: List[Int] =
+    ((if (paired) List(heroPos) else Nil) ++ neighbourPositions).sorted
 
   /** Союзник на позиции `pos`. */
   def allyAt(pos: Int): Option[BattleAlly] = allies.find(_.position == pos)
@@ -152,7 +180,7 @@ final case class GroupState(
   def aliveCount: Int = 1 + others.count(_.alive)
 
   /** Сколько мест в строю — до самого дальнего занятого (пустые между — тоже места). */
-  def size: Int = (heroPos :: places).max
+  def size: Int = (heroPos :: activePos :: places).max
 
   /** Место моба `others(idx)`. */
   def posOf(idx: Int): Int = places(idx)
@@ -166,11 +194,12 @@ final case class GroupState(
   /** Стоит ли на месте `pos` моб вне пары. */
   def occupied(pos: Int): Boolean = idxOf(pos) >= 0
 
-  /** Достаёт ли герой до моба на месте `pos`: соседнее место, и там кто-то есть. */
-  def inReach(pos: Int): Boolean = pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach && occupied(pos)
+  /** Достаёт ли герой до моба на месте `pos`: соседнее место, и там кто-то
+    * есть — моб вне пары или активный, стоящий не напротив героя. */
+  def inReach(pos: Int): Boolean = pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach && hasMonster(pos)
 
-  /** Занятые места по соседству с героем, слева направо. */
-  def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(occupied)
+  /** Занятые мобами места по соседству с героем, слева направо. */
+  def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(hasMonster)
 
   /** Мобы с их местами, список в список. */
   def entries: List[(Int, MonsterSlot)] = places.zip(others)
@@ -203,6 +232,13 @@ object GroupState {
   /** Шанс (в %), что в начале раунда к мобу прибежит сородич. */
   val ReinforcementChancePct: Long = 2L
 
+  /** Призыв в конце первого раунда: легендарный зовёт 2–3 сородичей 3–4 ранга
+    * (редкий/мифический), мифический — 1–3 сородичей 1–3 ранга. */
+  val LegendarySummonMin: Int = 2
+  val LegendarySummonMax: Int = 3
+  val MythicalSummonMin: Int  = 1
+  val MythicalSummonMax: Int  = 3
+
   /** Каждый свободный моб добавляет столько процентов к шансу, что он не даст сбежать. */
   val SurroundPctPerFreeMob: Long = 5L
 
@@ -219,5 +255,9 @@ object GroupState {
       places      <- c.getOrElse[List[Int]]("places")(others.indices.map(i => if (i < heroPos - 1) i + 1 else i + 2).toList)
       allies      <- c.getOrElse[List[BattleAlly]]("allies")(Nil)
       gone        <- c.getOrElse[List[String]]("alliesGone")(Nil)
-    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone)
+      activePos   <- c.getOrElse[Int]("activePos")(heroPos)
+      lastTarget  <- c.getOrElse[Option[MonsterSlot]]("lastTarget")(None)
+      heroDown    <- c.getOrElse[Boolean]("heroDown")(false)
+      queue       <- c.getOrElse[List[MonsterSlot]]("queue")(Nil)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone, activePos, lastTarget, heroDown, queue)
 }

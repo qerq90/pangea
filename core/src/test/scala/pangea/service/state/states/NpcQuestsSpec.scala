@@ -245,7 +245,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           r   <- TestRenderer.make
           c   <- content
           _   <- TestRandom.feedInts(60, 99, 60) *> TestRandom.feedLongs(100L, 100L)
-          _   <- BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c).action(testUser, tap("Attack"), r)
+          _   <- BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c).action(testUser, tapWith("Attack", "target", "1"), r)
           res <- BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c).action(testUser, tap("Attack"), r)
           q   <- quests(dao)
         } yield assertTrue(res == StateType.Loot) &&

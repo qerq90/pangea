@@ -41,7 +41,7 @@ object SilverVeinStateSpec extends ZIOSpecDefault {
 
     test("Брамбл в отряде: добыча 8 минут вместо 15 и его реплика перед экраном жилы") {
       val base  = TestFixtures.hero(userId).copy(dungeonLevel = 10, lvl = 10L)
-      val withG = base.copy(squad = Squad.empty.hire(AllyKind.Gnome, 10L))
+      val withG = base.copy(squad = Squad.empty.hire(AllyKind.Gnome, 10L, 0L))
       for {
         plain <- makeStateWith(base)
         (ps, psch, pr) = plain

@@ -2,6 +2,7 @@ package pangea.model.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.model.monster.{Monster, Race, Rarity}
+import pangea.model.squad.{Ally, AllyKind, Squad}
 import pangea.model.stats.FightStats
 import pangea.model.user.UserId
 import pangea.test.TestFixtures
@@ -133,12 +134,73 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.reorderMonsters(List(0, 0, 1)) == b)
     },
 
+    test("моб обычной встречи встаёт на место 1, где бы ни стоял герой: герой на 2 — пара пуста, цель у него одна — сосед") {
+      val h2 = hero.copy(squad = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
+      val b  = SoloPveBattle.from(trio.head, h2)
+      val b3 = SoloPveBattle.from(trio.head, hero.copy(squad = Squad(heroPos = 3)))
+      assertTrue(b.group.activePos == 1 && b.group.heroPos == 2 && !b.group.paired && b.unpaired) &&
+      assertTrue(b.monsterAt(1).exists(_.currentHp == 100L) && b.monsterAt(2).isEmpty && b.pairedMonster.isEmpty) &&
+      assertTrue(b.group.attackTargets == List(1) && b.group.inReach(1) && b.group.hasFormation) &&
+      assertTrue(b3.group.attackTargets.isEmpty)                                   // с места 3 до места 1 не достать
+    },
+
+    test("группа: мобы по местам 1, 2, 3; в паре — тот, что на месте героя") {
+      val h2 = hero.copy(squad = Squad(heroPos = 2))
+      val b  = SoloPveBattle.fromGroup(trio, h2, Nil)
+      assertTrue(b.group.paired && b.group.activePos == 2 && b.monsterCurrentHp == 200L) &&
+      assertTrue(b.group.others.map(_.currentHp) == List(100L, 300L) && b.group.places == List(1, 3)) &&
+      assertTrue(b.group.attackTargets == List(1, 2, 3))
+    },
+
+    test("engage разворачивает соседа в поля, не двигая ни героя, ни мобов; повтор возвращает всё назад") {
+      val b = SoloPveBattle.fromGroup(trio, hero, Nil)
+      val e = b.engage(3)
+      assertTrue(e.group.heroPos == 1 && e.group.activePos == 3 && e.monsterCurrentHp == 300L) &&
+      assertTrue(e.group.others.map(_.currentHp) == List(200L, 100L) && e.group.places == List(2, 1)) &&
+      assertTrue(e.monstersInOrder.map(_.currentHp) == List(100L, 200L, 300L)) &&
+      assertTrue(e.engage(1) == b) && assertTrue(b.engage(1) == b && b.engage(9) == b)
+    },
+
+    test("павший активный: к герою шагает ближайший свободный, а занятый союзником — нет; никого свободного — пара пуста") {
+      val ally2 = Ally(AllyKind.Human, 2, 10L, 10L, 0L)
+      val h     = hero.copy(squad = Squad(heroPos = 1, allies = List(ally2)))
+      val dead  = SoloPveBattle.fromGroup(trio, h, Nil).copy(monsterCurrentHp = 0L)
+      val nxt   = dead.promoteNext.get
+      val stuck = SoloPveBattle.fromGroup(trio.take(2), h, Nil).copy(monsterCurrentHp = 0L).promoteNext.get
+      assertTrue(nxt.group.paired && nxt.monsterCurrentHp == 300L) &&                 // № 3 свободен — шагнул, № 2 занят
+      assertTrue(nxt.group.others.map(_.currentHp) == List(200L) && nxt.group.places == List(2)) &&
+      assertTrue(!stuck.group.paired && stuck.group.activePos == 2 && stuck.monsterCurrentHp == 200L) &&
+      assertTrue(stuck.group.others.isEmpty && stuck.group.slain.size == 1 && stuck.group.attackTargets == List(2))
+    },
+
+    test("pullFree: освободившийся моб шагает к герою — сам активный или ближайший из строя") {
+      val h2    = hero.copy(squad = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
+      val solo  = SoloPveBattle.from(trio.head, h2)                     // моб на 1 занят союзником
+      val freed = solo.copy(group = solo.group.copy(allies = Nil))      // союзник ушёл — моб свободен
+      // герой на 4, союзник на 3: в начале боя свободный моб с места 1 сразу шагает к герою
+      val h4    = hero.copy(squad = Squad(heroPos = 4, allies = List(Ally(AllyKind.Human, 3, 10L, 10L, 0L))))
+      val far   = SoloPveBattle.fromGroup(trio, h4, Nil)
+      // а если в полях занятый союзником № 3, а свободные — № 1 и № 2, к герою идёт ближний, второй
+      val stuck = far.engage(3).copy(group = far.engage(3).group.copy(activePos = 3))
+      val fixed = stuck.copy(group = stuck.group.copy(places = List(2, 1)))
+      val pulled = fixed.pullFree.get
+      assertTrue(solo.pullFree.isEmpty) &&
+      assertTrue(freed.pullFree.exists(b => b.group.paired && b.group.activePos == 2)) &&
+      assertTrue(far.group.paired && far.monsterCurrentHp == 100L && far.group.places == List(2, 3)) &&
+      assertTrue(!fixed.group.paired && fixed.monsterCurrentHp == 300L && fixed.group.others.map(_.currentHp) == List(200L, 100L)) &&
+      assertTrue(pulled.group.paired && pulled.monsterCurrentHp == 200L && pulled.group.places.sorted == List(1, 3)) &&
+      assertTrue(pulled.pullFree.isEmpty)
+    },
+
     test("группа переживает сериализацию, а старая запись без группы читается как 1 на 1") {
       val b    = SoloPveBattle.fromGroup(trio, hero, List(1L, 2L, 3L))
       val back = b.asJson.as[SoloPveBattle].toOption.get
       val old  = SoloPveBattle.from(trio.head, hero).asJson.hcursor.downField("group").delete.top.get
+      val noPos = b.asJson.hcursor.downField("group").downField("activePos").delete.top.get
       assertTrue(back == b) &&
-      assertTrue(old.as[SoloPveBattle].toOption.exists(!_.isGroup))
+      assertTrue(old.as[SoloPveBattle].toOption.exists(!_.isGroup)) &&
+      // без activePos (старая запись) активный стоит на месте героя
+      assertTrue(noPos.as[SoloPveBattle].toOption.exists(_.group.paired))
     }
   )
 }

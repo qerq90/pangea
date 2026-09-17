@@ -158,7 +158,7 @@ object StatesMap {
             journal,
             content
           ),
-          Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content),
+          Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content, scheduler),
           Death  -> DeathState(heroDao, inventoryRepo, content),
           Rest   -> RestState(heroDao, scheduler, content),
           Inventory -> InventoryState(

@@ -88,7 +88,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         t <- makeState(hero(), group(1000L, 1000L, 1000L))
         (state, _, r) = t
         _       <- quietRound(99, 99)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         screens <- r.sentScreens.map(_.map(_.text))
         summary  = screens.find(_.contains("VS")).getOrElse("")
       } yield assertTrue(summary.linesIterator.count(_.contains("🔴")) == 3) &&
@@ -114,7 +114,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // герой попал, активный промахнулся (1), сосед попал (10), подкрепление нет
         _       <- TestRandom.feedInts(60, 1, 10, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         updated <- dao.getHeroByUserId(userId).map(_.get)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(updated.fightStats.hp < 100000L) &&
@@ -139,7 +139,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         t <- makeState(hero(atk = 100000L), group(10L, 1000L))
         (state, dao, r) = t
         _       <- quietRound(99)
-        result  <- state.action(testUser, tap("Attack"), r)
+        result  <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(result == StateType.Battle) &&
@@ -156,7 +156,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         t <- makeState(h, group(10L, 1000L))
         (state, dao, r) = t
         _       <- quietRound(99)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- dao.getHeroByUserId(userId).map(_.get)
         t2 <- makeState(h, group(10L))
         (state2, dao2, r2) = t2
@@ -208,7 +208,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         t <- makeState(hero(), b)
         (state, dao, r) = t
         _       <- quietRound(99)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(screens.contains("исцелил вашего врага")) &&
@@ -223,7 +223,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // герой, моб, подкрепление = 1 (≤ 2 — пришёл)
         _       <- TestRandom.feedInts(60, 99, 1) *> TestRandom.feedLongs(100L, 100L, 7L, 10L)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(after.isGroup) &&
@@ -237,7 +237,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         t <- makeState(hero(), ten)
         (state, dao, r) = t
         _     <- quietRound(99, 1)
-        _     <- state.action(testUser, tap("Attack"), r)
+        _     <- state.action(testUser, aimed("Attack", 1), r)
         after <- battleOf(dao)
       } yield assertTrue(after.group.aliveCount == 10) &&
               assertTrue(after.group.others.size == 9)
@@ -251,7 +251,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // герой попал, активный мимо (1), сосед слева попал (10), сосед справа попал (10), подкрепления нет
         _       <- TestRandom.feedInts(60, 1, 10, 10, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
-        _       <- state.action(testUser, tap("Attack"), r)
+        _       <- state.action(testUser, aimed("Attack", 2), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(screens.linesIterator.count(_.contains("атаковал вас сбоку")) == 2) &&
@@ -274,7 +274,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
           t <- makeState(hero(), b)
           (state, dao, r) = t
           _       <- TestRandom.setSeed(seed) *> quietRound(99, 99, 99)
-          _       <- state.action(testUser, tap("Attack"), r)
+          _       <- state.action(testUser, aimed("Attack", 1), r)
           after   <- battleOf(dao)
           screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
           lineUp   = after.monstersInOrder
@@ -348,6 +348,73 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(labels.forall(_.length <= pangea.engine.Choice.MaxLabelLength)) &&
               assertTrue(labels.head == "1. Отмеченный тьмой Гоблин ❤ 100%") &&
               assertTrue(chief.name == "Отмеченный тьмой Хобгоблин — предводитель банды")
+    },
+
+    test("легендарный в конце первого раунда зовёт 2–3 сородичей 3–4 ранга") {
+      val boss = Monster(0L, lvl, Race.Orc, Rarity.Legendary,
+        FightStats(atk = 20, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      for {
+        t <- makeState(hero(), SoloPveBattle.from(boss, hero()))
+        (state, dao, r) = t
+        // герой попал, моб ответил; подкрепления нет; зов: трое — мифический, редкий, мифический; стартовая энергия 5%
+        _       <- TestRandom.feedInts(60, 99, 99, 3, 1, 0, 1) *> TestRandom.feedLongs(100L, 100L, 5L, 5L, 5L)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(screens.contains("трубит — на зов сбегаются сородичи")) &&
+              assertTrue(after.group.others.map(_.rarity) == List(Rarity.Mythical, Rarity.Rare, Rarity.Mythical).map(_.entryName)) &&
+              assertTrue(after.group.others.forall(m => m.race == Race.Orc.entryName && m.lvl == hero().dungeonLevel.toLong)) &&
+              assertTrue(after.group.places == List(2, 3, 4) && after.group.queue.isEmpty && after.group.round == 1)
+    },
+
+    test("павший в первом же раунде вожак сородичей не зовёт") {
+      val chief = Monster(0L, lvl, Race.Orc, Rarity.Mythical,
+        FightStats(atk = 20, hp = 10, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      val eight = List.fill(8)(monster(1000L))
+      val h     = hero(atk = 100000L)
+      for {
+        t <- makeState(h, SoloPveBattle.fromGroup(chief :: eight, h, Nil))
+        (state, dao, r) = t
+        // герой добил вожака (ответа нет), в пару шагнул сосед; дальние сбоку не достают; подкрепления нет.
+        // Зовут только те, кто стоит в строю в конце раунда, — павший вожак не трубит
+        _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
+        noCall  <- battleOf(dao)
+      } yield assertTrue(noCall.group.slain.size == 1 && noCall.group.others.size == 7 && noCall.group.queue.isEmpty)
+    },
+
+    test("мифический выжил первый раунд — зовёт; одиннадцатому и дальше места нет, они ждут за строем") {
+      val chief = Monster(0L, lvl, Race.Orc, Rarity.Mythical,
+        FightStats(atk = 20, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      val eight = List.fill(8)(monster(1000L))
+      for {
+        t <- makeState(hero(), SoloPveBattle.fromGroup(chief :: eight, hero(), Nil))
+        (state, dao, r) = t
+        // герой попал, вожак ответил; сосед на месте 2 бьёт сбоку; подкрепления нет (9 в строю);
+        // зов: трое 1–3 ранга — обычный, необычный, редкий; место есть только одному
+        _       <- TestRandom.feedInts(60, 99, 99, 99, 3, 0, 1, 2) *> TestRandom.feedLongs(100L, 100L, 100L, 5L, 5L, 5L)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.group.aliveCount == 10 && after.group.others.size == 9) &&
+              assertTrue(after.group.others.last.rarity == Rarity.Common.entryName &&
+                         after.group.queue.map(_.rarity) == List(Rarity.Uncommon, Rarity.Rare).map(_.entryName)) &&
+              assertTrue(screens.contains("Ещё 2 не находят места и ждут за строем")) &&
+              assertTrue(screens.contains("… и ещё 2 ждут за строем."))
+    },
+
+    test("очередь: место освободилось — следующий выходит из-за спин; строй пуст, а очередь нет — победы нет") {
+      val slot = SoloPveBattle.fromGroup(List(monster(500L)), hero(), Nil).activeSlot
+      val full = (1 to 9).foldLeft(group(1000L))((b, _) => b.withReinforcement(slot))   // 10 в строю
+      val withQueue = full.admit(slot.copy(currentHp = 777L)).admit(slot.copy(currentHp = 888L))
+      val freed = withQueue.sideFallen(0).admitQueued
+      val lone  = group(10L).copy(group = group(10L).group.copy(queue = List(slot.copy(currentHp = 777L)))).copy(monsterCurrentHp = 0L)
+      val next  = lone.promoteNext
+      assertTrue(full.group.aliveCount == 10 && !full.hasRoom) &&
+      assertTrue(withQueue.group.others.size == 9 && withQueue.group.queue.map(_.currentHp) == List(777L, 888L)) &&
+      assertTrue(freed._2.map(_.currentHp) == List(777L) && freed._1.group.queue.map(_.currentHp) == List(888L)) &&
+      assertTrue(freed._1.group.others.exists(_.currentHp == 777L)) &&
+      assertTrue(next.exists(b => b.monsterCurrentHp == 777L && b.group.queue.isEmpty && b.group.slain.size == 1))
     },
 
     test("лечащее умение цели не спрашивает — ход идёт сразу") {
@@ -434,7 +501,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         (state, dao, r) = t
         // раунд 1: №1 пал, №2 встал в пару, подкрепления нет; раунд 2: №2 пал
         _       <- TestRandom.feedInts(60, 99, 60) *> TestRandom.feedLongs(100L, 100L)
-        first   <- state.action(testUser, tap("Attack"), r)
+        first   <- state.action(testUser, aimed("Attack", 1), r)
         second  <- state.action(testUser, tap("Attack"), r)
         updated <- dao.getHeroByUserId(userId).map(_.get)
         loot    <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption).get)
@@ -465,7 +532,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
         (state, _, r) = t
         // герой попал, активный мимо (1), сосед попал (10) и добил
         _       <- TestRandom.feedInts(60, 1, 10) *> TestRandom.feedLongs(100L, 100L)
-        result  <- state.action(testUser, tap("Attack"), r)
+        result  <- state.action(testUser, aimed("Attack", 1), r)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(result == StateType.Death) &&
               assertTrue(screens.contains("атаковал вас сбоку"))

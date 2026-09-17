@@ -14,7 +14,7 @@ import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{CharacterMenu, InstantRest, State, UserAction}
+import pangea.service.state.{CharacterMenu, InstantRest, SquadDuty, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -54,7 +54,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
       now      <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero     <- getHero(user)
+      hero0    <- getHero(user)
+      // Отработавшие свой день наёмники уходят здесь же, на пороге этажа.
+      hero     <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
       tracking <- readTracking(user)
       // Пока идёт выслеживание тьмы — герой заперт в нём: никаких других
       // действий, только экран ожидания с единственной кнопкой «идти по следу».

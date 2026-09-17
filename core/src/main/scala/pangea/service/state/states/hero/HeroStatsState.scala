@@ -6,7 +6,7 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.service.state.{AzatData, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State {
@@ -43,10 +43,11 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero <- getHero(user)
-      azat <- AzatData.load(heroDao, user.userId, now)
-      _    <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now), azat.instantRests))
+      now   <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero0 <- getHero(user)
+      hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
+      azat  <- AzatData.load(heroDao, user.userId, now)
+      _     <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now), azat.instantRests))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

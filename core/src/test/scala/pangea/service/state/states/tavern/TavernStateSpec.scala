@@ -3,6 +3,7 @@ package pangea.service.state.states.tavern
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.schedule.TaskKind
+import pangea.model.squad.{AllyKind, AllyRates, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -42,6 +43,20 @@ object TavernStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.head.choices.map(_.id).contains("RentRoom")) &&
               assertTrue(screens.head.choices.map(_.id).contains("QuestBoard")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Innkeeper"))
+    },
+
+    test("на пороге таверны отработавший наёмник уходит с репликой, отряд сохраняется без него") {
+      val withAlly = richHero.copy(lvl = 10L, squad = Squad.empty.hire(AllyKind.Gnome, 10L, 0L))
+      for {
+        triple <- makeState(withAlly)
+        (state, heroDao, renderer) = triple
+        _       <- TestClock.adjust(zio.Duration.fromMillis(AllyRates.HireMs))
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(screens.head.text.contains("Брамбл Медноус отработал свой день")) &&
+              assertTrue(hero.squad.isEmpty && hero.squad.isAway(AllyKind.Gnome, AllyRates.HireMs)) &&
+              assertTrue(screens.last.choices.map(_.id).contains("Mercenaries"))
     },
 
     test("продавец карт в таверне → кнопка «Подозрительный человек» над «Персонаж»") {

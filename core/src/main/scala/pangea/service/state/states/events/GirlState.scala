@@ -115,7 +115,8 @@ case class GirlState(
                       .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
       routing = LootData(Nil, Nil, returnState = Some(StateType.Girl),
                   eventData = Some(scene.copy(step = Step.AfterFight).asJson))
-      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(mobs, hero, energies).asJson)
+      // Сюжетная драка в таверне — без отряда.
+      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(mobs, hero, energies, squad = false).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format("girl.fightStart", "race" -> race.genitivePlural), Nil))
     } yield StateType.Battle
@@ -271,7 +272,7 @@ case class GirlState(
       hero <- getHero(user)
       mob   = MonsterGenerator.generateOfRaceAndRarity(hero.dungeonLevel, BrotherRace, BrotherRarity)
       pct  <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
-      _    <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.from(mob, hero).withStartEnergy(pct).asJson)
+      _    <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.from(mob, hero, squad = false).withStartEnergy(pct).asJson)
       _    <- heroDao.writeSceneData(user.userId, LootData(Nil, Nil, returnState = Some(StateType.GlobalMap)).asJson)
       _    <- renderer.show(user, Screen(content.text("girl.brotherFight"), Nil))
     } yield StateType.Battle
