@@ -3,6 +3,7 @@ package pangea.service.state.states.events
 import io.circe.Json
 import pangea.engine.SceneContent
 import pangea.model.item.{GemKind, MaterialKind}
+import pangea.model.squad.{AllyKind, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -27,7 +28,38 @@ object SilverVeinStateSpec extends ZIOSpecDefault {
       state      = SilverVeinState(heroDao, scheduler, content)
     } yield (state, heroDao, renderer)
 
+  private def makeStateWith(hero: pangea.model.hero.Hero) =
+    for {
+      heroDao   <- TestHeroDao.withHero(userId, hero)
+      scheduler <- TestScheduler.make
+      renderer  <- TestRenderer.make
+      content   <- ZIO.attempt(SceneContent.load())
+      state      = SilverVeinState(heroDao, scheduler, content)
+    } yield (state, scheduler, renderer)
+
   override def spec = suite("SilverVeinState")(
+
+    test("Брамбл в отряде: добыча 8 минут вместо 15 и его реплика перед экраном жилы") {
+      val base  = TestFixtures.hero(userId).copy(dungeonLevel = 10, lvl = 10L)
+      val withG = base.copy(squad = Squad.empty.hire(AllyKind.Gnome, 10L))
+      for {
+        plain <- makeStateWith(base)
+        (ps, psch, pr) = plain
+        _      <- ps.enter(testUser, pr)
+        pSched <- psch.scheduled
+        pScr   <- pr.sentScreens
+        gnome <- makeStateWith(withG)
+        (gs, gsch, gr) = gnome
+        _      <- gs.enter(testUser, gr)
+        gSched <- gsch.scheduled
+        gScr   <- gr.sentScreens
+      } yield assertTrue(SilverVeinState.durationFor(base) == 15L * 60L * 1000L) &&
+              assertTrue(SilverVeinState.durationFor(withG) == 8L * 60L * 1000L) &&
+              assertTrue(pSched.head.fireAt == 15L * 60L * 1000L && gSched.head.fireAt == 8L * 60L * 1000L) &&
+              assertTrue(gScr.head.text.contains("Давай помогу дружище. Вдвоём быстрее управимся!")) &&
+              assertTrue(!pScr.exists(_.text.contains("Вдвоём быстрее"))) &&
+              assertTrue(gScr.last.text.contains("8мин"))
+    },
 
     test("DroppableGemKinds не содержит Череп (Надколотый череп не должен выпадать из жилы)") {
       assertTrue(!SilverVeinState.DroppableGemKinds.contains(GemKind.Skull)) &&

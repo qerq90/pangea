@@ -92,9 +92,10 @@ case class SoloPveBattle(
       heroPos = pos))
   }
 
-  /** Активный моб пал, а в группе есть ещё: записать его в павшие, его место
-    * пустеет, и герой шагает к ближайшему живому (при равном расстоянии —
-    * правее). Если шагать не к кому — None, это победа. Отложенный Таран сгорает. */
+  /** Активный моб пал, а в группе есть ещё: записать его в павшие, и к герою
+    * шагает ближайший живой (при равном расстоянии — правее); его прежнее
+    * место пустеет. Герой с места не сходит — у отряда позиции свои. Если
+    * шагать некому — None, это победа. Отложенный Таран сгорает. */
   def promoteNext: Option[SoloPveBattle] =
     if (group.others.isEmpty) None
     else {
@@ -106,8 +107,7 @@ case class SoloPveBattle(
         others      = group.others.patch(idx, Nil, 1),
         places      = group.places.patch(idx, Nil, 1),
         slain       = group.slain :+ slainActive,
-        pendingMove = None,
-        heroPos     = group.places(idx))))
+        pendingMove = None)))
     }
 
   /** Моб вне пары `others(idx)` пал — в павшие, строй смыкается. */
@@ -235,7 +235,10 @@ object SoloPveBattle {
     monsterCurrentArmor = monster.fightStats.armor,
     monsterMarked       = monster.marked,
     skillSlots          = hero.activeSkillSlots,
-    monsterCurrentEnergy = monster.fightStats.energy
+    monsterCurrentEnergy = monster.fightStats.energy,
+    // Отряд встаёт по своим позициям; активный моб — напротив героя.
+    group = GroupState(heroPos = hero.squad.heroPos,
+      allies = hero.squad.inOrder.map(BattleAlly.of(_, hero.lvl)))
   )
 
   /** Бой против группы: первый моб в паре, остальные — слотами под номерами 2+.
@@ -247,8 +250,10 @@ object SoloPveBattle {
         m.fightStats.armor, m.marked, e, BattleEffects.empty)
     }
     val head = from(monsters.head, hero).copy(monsterCurrentEnergy = energies.head)
-    head.copy(group = GroupState(others = slots.tail, originRace = Some(monsters.head.race.entryName),
-      places = (2 to monsters.size).toList))
+    // Остальные — по местам подряд, минуя место героя.
+    val places = (1 to monsters.size + 1).filter(_ != head.group.heroPos).take(monsters.size - 1).toList
+    head.copy(group = head.group.copy(others = slots.tail, originRace = Some(monsters.head.race.entryName),
+      places = places))
   }
 
   implicit val encoder: Encoder[SoloPveBattle] = deriveEncoder

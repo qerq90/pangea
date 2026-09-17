@@ -73,17 +73,17 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.monsterAt(3).exists(_.currentHp == 300L))
     },
 
-    test("павший активный уходит в slain, его место пустеет, герой шагает к ближайшему (при равенстве — правее)") {
+    test("павший активный уходит в slain, к герою шагает ближайший (при равенстве — правее), его место пустеет; герой стоит") {
       val b    = SoloPveBattle.fromGroup(trio, hero, Nil).copy(monsterCurrentHp = 0L)
       val nxt  = b.promoteNext.get
       val edge = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(3).copy(monsterCurrentHp = 0L).promoteNext.get
       val mid  = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(2).copy(monsterCurrentHp = 0L).promoteNext.get
-      assertTrue(nxt.monsterCurrentHp == 200L && nxt.group.heroPos == 2) &&
-      assertTrue(nxt.placesInOrder.map(_._2.map(_.currentHp)) == List(None, Some(200L), Some(300L))) &&
+      assertTrue(nxt.monsterCurrentHp == 200L && nxt.group.heroPos == 1) &&
+      assertTrue(nxt.placesInOrder.map(_._2.map(_.currentHp)) == List(Some(200L), None, Some(300L))) &&
       assertTrue(nxt.group.slain.size == 1) &&
       assertTrue(nxt.group.slain.head.race == Race.Orc.entryName) &&
-      assertTrue(edge.group.heroPos == 2 && edge.monsterCurrentHp == 200L) &&
-      assertTrue(mid.group.heroPos == 3 && mid.monsterCurrentHp == 300L)   // равные — правее
+      assertTrue(edge.group.heroPos == 3 && edge.monsterCurrentHp == 200L) &&
+      assertTrue(mid.group.heroPos == 2 && mid.monsterCurrentHp == 300L)   // равные — правее
     },
 
     test("последнему мобу заменить себя некем — это победа") {

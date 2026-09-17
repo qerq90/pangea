@@ -6,7 +6,8 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState}
+import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState}
+import pangea.model.squad.{AllyKind, AllySkill}
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.NpcQuest
@@ -47,7 +48,7 @@ case class BattleState(
 
   private val branch = new Branch(
     routes = Map(
-      "Attack"      -> Target.Run((u, _, r) => resolve(u, r)(attackTurn)),
+      "Attack"      -> Target.Run((u, ua, r) => resolve(u, r)(attackTurn(BattleState.parseTarget(ua)))),
       "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r)(flaskTurn)),
       "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
@@ -105,7 +106,11 @@ case class BattleState(
       // каждый четвёртый раунд и отложенный Таран. Ход, который не был ходом
       // (навык не готов и т.п.), группу не двигает.
       promoted = promoteAfterKill(risen)
-      sided   <- sideMobsPhase(promoted, now)
+      // Союзники бьют после ответа активного моба; добили активного — снова
+      // продвигаем следующего к герою.
+      allied  <- allyPhase(promoted)
+      promoted2 = promoteAfterKill(allied)
+      sided   <- sideMobsPhase(promoted2, now)
       ended   <- endRound(battle, sided)
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
@@ -205,6 +210,10 @@ case class BattleState(
     val res     = ghoulFeast(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+    // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
+    val persistSquad =
+      ZIO.when(res.hero.squad.nonEmpty || res.battle.group.alliesGone.nonEmpty)(
+        heroDao.updateSquad(user.userId, squadAfterBattle(res.hero, res.battle, nowMs)))
     // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
     val clearDust =
       ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
@@ -213,7 +222,7 @@ case class BattleState(
     // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
     // показываем, пока бой идёт и в нём больше одного моба; удары сбоку — и
     // тогда, когда они добили героя, иначе смерть придёт без объяснения.
-    val standing  = if (res.outcome == Outcome.Continue && res.battle.isGroup) groupLines(res.battle) else Vector.empty
+    val standing  = if (res.outcome == Outcome.Continue && res.battle.group.hasFormation) groupLines(res.battle) else Vector.empty
     val groupMsg  = (res.sideLog ++ standing).mkString("\n")
     val showGroup = ZIO.when(groupMsg.nonEmpty && (res.outcome == Outcome.Continue || res.outcome == Outcome.Death))(
       renderer.show(user, Screen(groupMsg, Nil)))
@@ -226,15 +235,15 @@ case class BattleState(
             .as(StateType.Battle)
       case Outcome.Victory =>
         for {
-          outcome <- (persistHero *> clearDust *> applyVictory(user, res.hero, res.battle)).uninterruptible
+          outcome <- (persistHero *> persistSquad *> clearDust *> applyVictory(user, res.hero, res.battle)).uninterruptible
           _       <- showLog
           _       <- showVictory(user, outcome, renderer)
         } yield StateType.Loot
       case Outcome.Death =>
-        (persistHero *> clearDust).uninterruptible *> showLog *> showGroup *>
+        (persistHero *> persistSquad *> clearDust).uninterruptible *> showLog *> showGroup *>
           renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
       case Outcome.Fled =>
-        (persistHero *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
+        (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
           showLog *>
           renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
     }
@@ -247,8 +256,23 @@ case class BattleState(
 
   // ── Ход игрока: базовая атака ───────────────────────────────────────────────
 
-  private def attackTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
-    playerStrike(hero, battle, nowMs, Vector.empty, Set.empty)
+  /** Базовая атака: по мобу в паре либо, если указано место соседа в
+    * досягаемости, по нему — через временный шаг героя, как у умений. После
+    * удара по соседу герой возвращается, и ответ идёт от моба в паре. */
+  private def attackTurn(target: Option[Int])(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    target.filter(battle.group.inReach) match {
+      case None => playerStrike(hero, battle, nowMs, Vector.empty, Set.empty)
+      case Some(pos) =>
+        val homePos = battle.group.heroPos
+        playerStrike(hero, battle.moveHeroTo(pos), nowMs, Vector.empty, Set.empty, retaliate = false).flatMap { res =>
+          val back = res.battle.moveHeroTo(homePos)
+          if (res.battle.monsterCurrentHp <= 0L) {
+            val fallen = back.sideFallen(back.group.idxOf(pos))
+            monsterPhase(res.hero, fallen, nowMs,
+              res.log :+ content.format("battle.group.sideSlain", "monster" -> res.battle.monsterName), Set.empty)
+          } else monsterPhase(res.hero, back, nowMs, res.log, Set.empty)
+        }
+    }
 
   /** Базовая атака игрока. `log` — уже накопленные строки хода (например, строка
     * применённого скилла, после которого идёт базовая атака). `skipSlots`
@@ -264,7 +288,10 @@ case class BattleState(
       nowMs: Long,
       log: Vector[String],
       skip: Set[Long],
-      isRepeat: Boolean = false
+      isRepeat: Boolean = false,
+      // false — только удар, без ответа моба: вызывающий сам решит, кто отвечает
+      // (удар по соседу возвращает героя в пару, и отвечает моб оттуда).
+      retaliate: Boolean = true
   ): Task[TurnResult] = {
     // Реген пассивок «Целебный»/«Самовосстанавливающийся» учитывается перед атакой.
     val hero = if (isRepeat) hero0 else hero0.withCombatRegen(nowMs)
@@ -386,7 +413,8 @@ case class BattleState(
               else log2
             log4 = (log3 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
             r <-
-              if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs))
+              if (!retaliate) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Continue))
+              else if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs))
               else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Death))
               else monsterPhase(thornedHero, thornedBattle, nowMs, log4, skip)
           } yield r
@@ -400,7 +428,8 @@ case class BattleState(
             .flatMap { repeats =>
               if (repeats)
                 playerStrike(hero, battle, nowMs, missLog :+ content.text("battle.hunterRepeat"), skip,
-                  isRepeat = true)
+                  isRepeat = true, retaliate = retaliate)
+              else if (!retaliate) ZIO.succeed(TurnResult(hero, battle, missLog, Outcome.Continue))
               else monsterPhase(hero, battle, nowMs, missLog, skip)
             }
         }
@@ -1584,25 +1613,42 @@ case class BattleState(
 
   /** Спрашивать ли цель: рядом с героем кто-то стоит, умение готово и бьёт. */
   private def needsTarget(hero: Hero, battle: SoloPveBattle, itemId: Long): Boolean =
-    battle.group.neighbourPositions.nonEmpty &&
-      battle.slotByItem(itemId).exists(slot =>
-        slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero) &&
-          BattleState.dealsDamage(slot.skill.effect))
+    battle.slotByItem(itemId).exists { slot =>
+      val ready = slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero)
+      ready && (
+        (BattleState.dealsDamage(slot.skill.effect) && battle.group.neighbourPositions.nonEmpty) ||
+        (BattleState.supports(slot.skill.effect) && battle.group.allies.exists(_.alive)))
+    }
 
   /** Экран выбора цели: моб напротив и соседи по местам, с их полосками.
     * Подпись кнопки ограничена по длине, поэтому имя — короткое (у отмеченного
     * тьмой — только раса), а что всё равно не влезло, срезается. */
   private def targetScreen(battle: SoloPveBattle, itemId: Long): Screen = {
-    val skillLabel = battle.slotByItem(itemId).map(_.skill.label).getOrElse("")
-    val positions  = (battle.group.heroPos :: battle.group.neighbourPositions).sorted
-    val targets    = positions.zipWithIndex.flatMap { case (pos, i) =>
-      battle.monsterAt(pos).map(m => pangea.engine.Choice(
-        id    = s"Skill_$itemId",
-        label = pangea.engine.Choice.fit(
-          content.format("battle.group.targetLabel", "n" -> pos.toString, "monster" -> m.shortName, "hp" -> m.hpPct.toString)),
-        data  = Map("target" -> pos.toString),
-        row   = Some(i)))
-    }
+    val slot       = battle.slotByItem(itemId)
+    val skillLabel = slot.map(_.skill.label).getOrElse("")
+    val support    = slot.exists(s => BattleState.supports(s.skill.effect))
+    val targets    =
+      if (support) {
+        // Лечение и броня: себе или союзнику — по позициям отряда.
+        val me = pangea.engine.Choice(s"Skill_$itemId", content.text("battle.group.targetSelf"),
+          data = Map("target" -> battle.group.heroPos.toString), row = Some(0))
+        me :: battle.group.allies.filter(_.alive).sortBy(_.position).zipWithIndex.map { case (a, i) =>
+          pangea.engine.Choice(s"Skill_$itemId",
+            pangea.engine.Choice.fit(content.format("battle.group.targetAlly",
+              "n" -> a.position.toString, "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString)),
+            data = Map("target" -> a.position.toString), row = Some(i + 1))
+        }
+      } else {
+        val positions = (battle.group.heroPos :: battle.group.neighbourPositions).sorted
+        positions.zipWithIndex.flatMap { case (pos, i) =>
+          battle.monsterAt(pos).map(m => pangea.engine.Choice(
+            id    = s"Skill_$itemId",
+            label = pangea.engine.Choice.fit(
+              content.format("battle.group.targetLabel", "n" -> pos.toString, "monster" -> m.shortName, "hp" -> m.hpPct.toString)),
+            data  = Map("target" -> pos.toString),
+            row   = Some(i)))
+        }
+      }
     val cancel = pangea.engine.Choice("CancelTarget", content.text("battle.group.cancelTarget"),
       color = pangea.engine.ChoiceColor.Negative, row = Some(targets.size))
     Screen(content.format("battle.group.chooseTarget", "skill" -> skillLabel), targets :+ cancel)
@@ -1718,6 +1764,20 @@ case class BattleState(
           val line: Long => String = dealt =>
             tmpl.replaceFirst("\\{\\}", dealt.toString).replaceFirst("\\{\\}", hpLost.toString)
           dealSkillDamage(woundedHero, bumped, raw, line, next)
+
+        // Лечение и броня по союзнику: то же число, но в его потолки; «Заслон»
+        // союзнику даёт только броню — бафа защиты у него нет.
+        case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _)
+            if target != homePos && aimed.group.allyAt(target).exists(_.alive) =>
+          val ally  = aimed.group.allyAt(target).get
+          val heals = slot.skill.effect == Skill.Effect.Heal
+          val full  = if (heals) (raw * hero.passives.healMult).toLong.max(1L) else raw
+          val (updated, gained) =
+            if (heals) { val nh = (ally.hp + full).min(ally.stats.hp); (ally.copy(hp = nh), nh - ally.hp) }
+            else       { val na = (ally.armor + full).min(ally.stats.armor); (ally.copy(armor = na), na - ally.armor) }
+          val line = content.format("battle.group.supportAlly", "name" -> ally.name,
+            "skill" -> slot.skill.label, "amount" -> gained.toString, "what" -> (if (heals) "HP" else "брони"))
+          playerStrike(hero, bumped.copy(group = bumped.group.updateAlly(ally.kind)(_ => updated)), nowMs, Vector(line), skip)
 
         case Skill.Effect.Heal =>
           // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
@@ -2079,6 +2139,164 @@ case class BattleState(
           log = res.log :+ content.format("battle.group.fell", "monster" -> fallen, "next" -> next.monsterName))
     }
 
+  // ── Союзники ────────────────────────────────────────────────────────────────
+
+  /** Союзники ходят после ответа активного моба, по позициям. Каждый бьёт врага
+    * напротив, а если там пусто — ближайшего в досягаемости (сперва моба в паре
+    * с героем), стихией своего оружия; сверху — случайное умение из тех, на что
+    * хватает энергии и что к месту. Добитый уходит в павшие — и это засчитывается
+    * герою. Энергия копится в конце хода. */
+  private def allyPhase(res: TurnResult): Task[TurnResult] =
+    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.group.allies.isEmpty) ZIO.succeed(res)
+    else
+      ZIO.foldLeft(res.battle.group.allies.sortBy(_.position))((res.battle, Vector.empty[String])) {
+        case ((b, log), a0) =>
+          b.group.allies.find(_.kind == a0.kind).filter(_.alive) match {
+            case None    => ZIO.succeed((b, log))
+            case Some(a) => allyTurn(a, b).map { case (b2, lines) => (b2, log ++ lines) }
+          }
+      }.map { case (b, log) =>
+        val outcome = if (b.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
+        res.copy(battle = b, outcome = outcome, log = res.log ++ log)
+      }
+
+  /** Кого бьёт союзник: напротив, затем моб в паре с героем, затем сосед. */
+  private def allyTarget(a: BattleAlly, battle: SoloPveBattle): Option[Int] =
+    List(a.position, battle.group.heroPos, a.position - 1, a.position + 1).distinct
+      .filter(p => math.abs(p - a.position) <= GroupState.Reach)
+      .find(p => battle.monsterAt(p).exists(_.alive))
+
+  private def allyTurn(a: BattleAlly, battle: SoloPveBattle): Task[(SoloPveBattle, Vector[String])] =
+    for {
+      // 1) обычная атака по цели
+      struck <- allyTarget(a, battle) match {
+        case None      => ZIO.succeed((battle, Vector.empty[String]))
+        case Some(pos) => allyHits(a, battle, pos, a.stats.atk, crushing = false, "battle.ally.hit", "battle.ally.miss")
+      }
+      (b1, log1) = struck
+      // 2) случайное умение из тех, что по карману и к месту
+      a1 = b1.group.allies.find(_.kind == a.kind).getOrElse(a)
+      target2 = allyTarget(a1, b1)
+      options = AllySkill.values.toList.filter { s =>
+        s.cost(a1.lvl) <= a1.energy && (s match {
+          case AllySkill.QuickStrike | AllySkill.CrushingStrike => target2.isDefined
+          case AllySkill.HealingFlask    => a1.hp < a1.stats.hp
+          case AllySkill.EmergencyRepair => a1.armor < a1.stats.armor
+        })
+      }
+      casted <-
+        if (options.isEmpty) ZIO.succeed((b1, Vector.empty[String]))
+        else Random.nextIntBetween(0, options.size).flatMap { i =>
+          val skill = options(i)
+          val paid  = b1.copy(group = b1.group.updateAlly(a1.kind)(x => x.copy(energy = x.energy - skill.cost(a1.lvl))))
+          skill match {
+            case AllySkill.QuickStrike =>
+              allyHits(a1, paid, target2.get, (a1.stats.atk * AllySkill.QuickStrikeFactor).toLong.max(1L),
+                crushing = false, "battle.ally.quickStrike", "battle.ally.miss")
+            case AllySkill.CrushingStrike =>
+              allyHits(a1, paid, target2.get, (a1.stats.atk * AllySkill.CrushingStrikeFactor).toLong.max(1L),
+                crushing = true, "battle.ally.crushingStrike", "battle.ally.miss")
+            case AllySkill.HealingFlask =>
+              val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
+              val newHp = (a1.hp + heal).min(a1.stats.hp)
+              ZIO.succeed((paid.copy(group = paid.group.updateAlly(a1.kind)(_.copy(hp = newHp))),
+                Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
+            case AllySkill.EmergencyRepair =>
+              val fix = (a1.stats.armor * AllySkill.RepairPct / 100L).max(1L)
+              val newArmor = (a1.armor + fix).min(a1.stats.armor)
+              ZIO.succeed((paid.copy(group = paid.group.updateAlly(a1.kind)(_.copy(armor = newArmor))),
+                Vector(content.format("battle.ally.emergencyRepair", "name" -> a1.name, "armor" -> (newArmor - a1.armor).toString))))
+          }
+        }
+      (b2, log2) = casted
+      // 3) энергия копится
+      b3 = b2.copy(group = b2.group.updateAlly(a.kind)(x =>
+             x.copy(energy = (x.energy + x.kind.energyRegen(x.lvl)).min(x.stats.energy))))
+    } yield (b3, log1 ++ log2)
+
+  /** Удар союзника по мобу на месте `pos`: бросок на попадание против уклонения
+    * моба, разброс ±20%, защита моба (кроме дробящего — тот идёт прямо в HP),
+    * сопротивление минибосса стихии, грани стихии по броне и HP, прок стихии
+    * 30%. Моб вне пары правится через временную пару. Добитый — в павшие. */
+  private def allyHits(
+      a: BattleAlly, battle: SoloPveBattle, pos: Int, raw: Long, crushing: Boolean, hitKey: String, missKey: String
+  ): Task[(SoloPveBattle, Vector[String])] = {
+    val active = pos == battle.group.heroPos
+    val idx    = battle.group.idxOf(pos)
+    val tmp    = if (active) battle else battle.withActive(battle.group.others(idx))
+    val elem   = a.kind.element
+    for {
+      hitRoll <- Random.nextIntBetween(1, 101)
+      dodge    = mobDodgeChance(a.stats.accuracy, tmp)
+      out <-
+        if (hitRoll <= dodge) ZIO.succeed((battle, Vector(content.format(missKey, "name" -> a.name, "monster" -> tmp.monsterName))))
+        else for {
+          spread <- Random.nextLongBetween(80L, 121L)
+          base    = (raw * spread / 100L).max(1L)
+          resist  = tmp.boss.map(_.damageTakenMult(elem)).getOrElse(1.0)
+          dmg     = (base * resist).toLong.max(1L)
+          (armorDmg, hpDmg) = if (crushing) (0L, dmg) else {
+            val cut       = (dmg * (1.0 - BattleState.defenceReduction(effectiveMonsterDefence(tmp), 0L, a.stats.atk))).toLong.max(1L)
+            val rawArmor  = math.min(tmp.monsterCurrentArmor, cut)
+            val rawHp     = cut - rawArmor
+            val aDmg      = math.min(tmp.monsterCurrentArmor, (rawArmor * elem.armorMult).toLong).max(0L)
+            val lightning = if (elem == Element.Lightning) (aDmg * Element.Lightning.ArmorToHpFrac).toLong else 0L
+            (aDmg, ((rawHp * elem.hpMult).toLong + lightning).max(0L))
+          }
+          newHp    = (tmp.monsterCurrentHp - hpDmg).max(0L)
+          hit      = tmp.copy(monsterCurrentHp = newHp, monsterCurrentArmor = tmp.monsterCurrentArmor - armorDmg)
+          line     = content.format(hitKey, "name" -> a.name, "monster" -> tmp.monsterName, "damage" -> (armorDmg + hpDmg).toString)
+          procRoll <- if (newHp > 0L) Random.nextIntBetween(1, 101) else ZIO.succeed(100)
+          (procced, procLog) = if (newHp > 0L && procRoll <= Element.ProcChancePct) applyProcs(hit, Set(elem)) else (hit, Vector.empty[String])
+          guarded  = procced.withEffects(procced.effects)
+          // обратно: активный — как есть, слот — в строй; добитый слот — в павшие
+          result =
+            if (active) (guarded, Vector(line) ++ procLog)
+            else {
+              val restored = battle.copy(group = battle.group.copy(others = battle.group.others.updated(idx, guarded.activeSlot)))
+              if (guarded.monsterCurrentHp <= 0L)
+                (restored.sideFallen(idx), Vector(line) ++ procLog :+ content.format("battle.ally.slew", "name" -> a.name, "monster" -> tmp.monsterName))
+              else (restored, Vector(line) ++ procLog)
+            }
+        } yield result
+    } yield out
+  }
+
+  /** Моб вне пары бьёт союзника напротив: бросок против уклонения союзника, урон
+    * с разбросом, защита союзника, стихия удара моба по граням, броня — потом HP.
+    * Обнулённый союзник уходит по свитку. Умений против союзников мобы не
+    * применяют — только удар. */
+  private def mobStrikesAlly(a: BattleAlly, tmp: SoloPveBattle): Task[(SoloPveBattle, Vector[String])] =
+    for {
+      hitRoll <- Random.nextIntBetween(1, 101)
+      dodge    = BattleState.dodgeChance(0L, a.stats.evasion, a.stats.defence, tmp.monsterStats.accuracy)
+      out <-
+        if (hitRoll <= dodge) ZIO.succeed((tmp, Vector(content.format("battle.ally.mobMiss", "monster" -> tmp.monsterName, "name" -> a.name))))
+        else for {
+          spread <- Random.nextLongBetween(80L, 121L)
+          raw      = (monsterAttack(tmp) * spread / 100L).max(1L)
+          reduced  = (raw * (1.0 - BattleState.damageReduction(a.stats.defence, 0L, tmp.monsterStats.atk, 0L))).toLong.max(1L)
+          (armorMult, hpMult) = powderSplit(tmp).getOrElse((1.0, 1.0))
+          rawArmor = math.min(a.armor, reduced)
+          armorDmg = (rawArmor * armorMult).toLong.min(a.armor).max(0L)
+          hpDmg    = ((reduced - rawArmor) * hpMult).toLong.max(0L)
+          hurt     = a.copy(armor = a.armor - armorDmg, hp = (a.hp - hpDmg).max(0L))
+          line     = content.format("battle.ally.mobHit", "monster" -> tmp.monsterName, "name" -> a.name, "damage" -> (armorDmg + hpDmg).toString)
+          result   =
+            if (hurt.alive) (tmp.copy(group = tmp.group.updateAlly(a.kind)(_ => hurt)), Vector(line))
+            else (tmp.copy(group = tmp.group.withoutAlly(a.kind)),
+                  Vector(line, content.format("battle.ally.scroll", "name" -> a.name)))
+        } yield result
+    } yield out
+
+  /** Отряд после боя: состояние союзников из боя, ушедшие по свитку — в отлучку. */
+  private def squadAfterBattle(hero: Hero, battle: SoloPveBattle, nowMs: Long): pangea.model.squad.Squad = {
+    val synced = battle.group.allies.foldLeft(hero.squad) { (s, a) =>
+      s.update(a.kind)(_ => a.toAlly)
+    }
+    battle.group.alliesGone.flatMap(AllyKind.withNameOption).foldLeft(synced)((s, k) => s.sentAway(k, nowMs))
+  }
+
   /** Ход мобов вне пары. Сосед героя (номер 2) достаёт его сбоку: обычная
     * атака, а поверх — умение, как у моба в паре; лечащее умение он отдаёт
     * раненому соседу, если сам цел. Мобы дальше по строю героя не достают —
@@ -2110,14 +2328,17 @@ case class BattleState(
     // В дыму (дымная фляга) мобы вне пары не видят ни героя, ни друг друга:
     // ни удара сбоку, ни лечения соседу — только раны тикают и энергия копится.
     val smoke       = battle.effects.heroInSmoke
-    val reachesHero = !smoke && battle.group.inReach(battle.group.posOf(idx))
+    // Напротив стоит союзник — моб занят им и до героя не тянется.
+    val facing      = if (smoke) None else battle.group.allyAt(battle.group.posOf(idx)).filter(_.alive)
+    val reachesHero = !smoke && facing.isEmpty && battle.group.inReach(battle.group.posOf(idx))
     // Временный бой: этот моб — «активный», геройская половина эффектов та же.
     val tmp0 = battle.withActive(slot)
     val tmp  = tmp0.copy(effects = tickSlotEffects(tmp0.effects))
     for {
-      // 1) удар сбоку — только если достаёт
+      // 1) удар сбоку — только если достаёт; союзника напротив — вместо героя
       struck <-
-        if (!reachesHero) ZIO.succeed((hero, tmp, Vector.empty[String]))
+        if (facing.isDefined) mobStrikesAlly(facing.get, tmp).map { case (t2, lines) => (hero, t2, lines) }
+        else if (!reachesHero) ZIO.succeed((hero, tmp, Vector.empty[String]))
         else for {
           hitRoll <- Random.nextIntBetween(1, 101)
           dodge    = playerDodgeChance(hero, tmp, nowMs)
@@ -2157,7 +2378,9 @@ case class BattleState(
       log3 = log1 ++ log2 ++ (if (dotLine.isEmpty) Vector.empty else Vector(dotLine))
       // 4) обратно в строй — или в павшие, если раны добили
       afterSlot = ticked.activeSlot
-      merged = b2.copy(effects = ticked.effects.withMonsterPart(b2.effects))
+      // Союзники правились во временном бою (удар по стоящему напротив) — забираем их оттуда.
+      merged = b2.copy(effects = ticked.effects.withMonsterPart(b2.effects),
+                       group = b2.group.copy(allies = ticked.group.allies, alliesGone = ticked.group.alliesGone))
       result =
         if (afterSlot.alive)
           (h2, merged.copy(group = merged.group.copy(others = merged.group.others.updated(idx, afterSlot))), log3)
@@ -2273,7 +2496,10 @@ case class BattleState(
         // Таран: герой шагает на место, куда таранил; мобы остаются где стояли
         rammed = b2.group.pendingMove match {
           case Some(pos) if b2.group.occupied(pos) =>
-            val b = b2.moveHeroTo(pos)
+            val moved = b2.moveHeroTo(pos)
+            // Союзник, стоявший на этой позиции, встаёт на прежнюю позицию героя.
+            val b = moved.copy(group = moved.group.copy(allies = moved.group.allies.map(a =>
+              if (a.position == pos) a.copy(position = b2.group.heroPos) else a)))
             (b.copy(group = b.group.copy(pendingMove = None)),
              Vector(content.format("battle.group.ram", "pos" -> pos.toString, "monster" -> b.monsterName)))
           case _ => (b2.copy(group = b2.group.copy(pendingMove = None)), Vector.empty[String])
@@ -2282,15 +2508,29 @@ case class BattleState(
       } yield res.copy(battle = b3, sideLog = res.sideLog ++ log1 ++ log2 ++ log3)
     }
 
-  /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. */
+  /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. С
+    * отрядом строй двухрядный: слева герой и союзники по позициям, справа мобы. */
   private def groupLines(battle: SoloPveBattle): Vector[String] =
-    battle.placesInOrder.map {
-      case (pos, Some(m)) =>
-        val key = if (pos == battle.group.heroPos) "battle.group.lineHero" else "battle.group.lineFree"
-        content.format(key, "n" -> pos.toString, "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
-      case (pos, None) =>
-        content.format("battle.group.lineEmpty", "n" -> pos.toString)
-    }.toVector
+    if (battle.group.allies.isEmpty)
+      battle.placesInOrder.map {
+        case (pos, Some(m)) =>
+          val key = if (pos == battle.group.heroPos) "battle.group.lineHero" else "battle.group.lineFree"
+          content.format(key, "n" -> pos.toString, "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
+        case (pos, None) =>
+          content.format("battle.group.lineEmpty", "n" -> pos.toString)
+      }.toVector
+    else
+      (1 to battle.group.rows).toVector.map { pos =>
+        val left =
+          if (pos == battle.group.heroPos) content.text("battle.group.sideHero")
+          else battle.group.allyAt(pos).map(a => content.format("battle.group.sideAlly",
+                 "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString))
+            .getOrElse(content.text("battle.group.sideNone"))
+        val right = battle.monsterAt(pos).map(m => content.format("battle.group.sideMonster",
+            "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString))
+          .getOrElse(content.text("battle.group.sideNone"))
+        content.format("battle.group.lineRow", "n" -> pos.toString, "left" -> left, "right" -> right)
+      }
 
   // ── Победа ──────────────────────────────────────────────────────────────────
 
@@ -2525,7 +2765,7 @@ case class BattleState(
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
-      _ <- ZIO.when(battle.isGroup)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
+      _ <- ZIO.when(battle.group.hasFormation)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
       _ <- renderer.show(
         user,
         buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now)
@@ -2643,8 +2883,11 @@ case class BattleState(
         row = Some(2)
       )
     }
+    // Соседи в досягаемости — отдельные кнопки атаки по месту.
+    val sideAttacks = battle.group.neighbourPositions.map(pos =>
+      pangea.engine.Choice("Attack", s"⚔ Место $pos", data = Map("target" -> pos.toString), row = Some(1)))
     val mainButtons =
-      List(pangea.engine.Choice("Attack", "Атака", row = Some(1)), flaskButton) ++
+      (List(pangea.engine.Choice("Attack", "Атака", row = Some(1))) ++ sideAttacks ++ List(flaskButton)) ++
         beltButton.toList ++
         List(
           pangea.engine.Choice(
@@ -2799,6 +3042,12 @@ object BattleState {
   def parseTarget(ua: pangea.service.state.UserAction): Option[Int] =
     ua.payload.flatMap(p =>
       io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("target")).flatMap(_.toIntOption))
+
+  /** Лечит ли умение или чинит броню — такое можно отдать союзнику. */
+  def supports(effect: Skill.Effect): Boolean = effect match {
+    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) => true
+    case _                                                                             => false
+  }
 
   /** Бьёт ли умение по врагу — таким в группе нужна цель. */
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {

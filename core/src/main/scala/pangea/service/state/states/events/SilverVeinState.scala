@@ -3,11 +3,12 @@ package pangea.service.state.states.events
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
-import pangea.model.hero.Achievement
+import pangea.model.hero.{Achievement, Hero}
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
 import pangea.model.item.{Gem, GemKind, Item, MaterialKind}
 import pangea.model.schedule.TaskKind
+import pangea.model.squad.AllyKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
@@ -43,10 +44,14 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now <- nowMs
-      _   <- heroDao.writeSceneData(user.userId, Json.obj(StartedAtKey -> now.asJson))
-      _   <- scheduler.schedule(user.userId, now + HarvestDurationMs, TaskKind.Harvest, StateType.SilverVein, HarvestAction)
-      _   <- showVein(user, renderer)
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- heroDao.writeSceneData(user.userId, Json.obj(StartedAtKey -> now.asJson))
+      _    <- scheduler.schedule(user.userId, now + durationFor(hero), TaskKind.Harvest, StateType.SilverVein, HarvestAction)
+      // Брамбл в отряде — берётся за кирку, и дело идёт вдвое быстрее.
+      _    <- ZIO.when(hero.squad.has(AllyKind.Gnome))(
+                renderer.show(user, Screen(content.text("silverVein.gnomeHelps"), Nil)))
+      _    <- showVein(user, renderer)
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -55,10 +60,12 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
   private def showVein(user: User, renderer: Renderer): Task[Unit] =
     for {
       now     <- nowMs
+      hero    <- getHero(user)
       started <- startedAt(user)
+      total    = durationFor(hero)
       // При повторном входе на экран (например, после CancelLeaveVein) показываем
       // реальный остаток времени до конца добычи, а не полную длительность.
-      remaining = started.map(s => (HarvestDurationMs - (now - s)).max(0L)).getOrElse(HarvestDurationMs)
+      remaining = started.map(s => (total - (now - s)).max(0L)).getOrElse(total)
       _       <- renderer.show(user, Screen(
                    content.format("silverVein.enter.text", "duration" -> formatRemaining(remaining)),
                    content.screen("silverVein.enter").choices))
@@ -69,12 +76,14 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
   private def leaveVein(user: User, renderer: Renderer): Task[StateType] =
     for {
       now     <- nowMs
+      hero    <- getHero(user)
       started <- startedAt(user)
+      total    = durationFor(hero)
       result <- started match {
         case None => harvest(user, renderer)
-        case Some(start) if now - start >= HarvestDurationMs => harvest(user, renderer)
+        case Some(start) if now - start >= total => harvest(user, renderer)
         case Some(start) =>
-          val remaining = formatRemaining(HarvestDurationMs - (now - start))
+          val remaining = formatRemaining(total - (now - start))
           renderer.show(user, Screen(
             content.format("silverVein.confirmLeave.text", "remaining" -> remaining),
             content.screen("silverVein.confirmLeave").choices)).as(StateType.SilverVein)
@@ -154,6 +163,11 @@ case class SilverVeinState(heroDao: HeroDao, scheduler: Scheduler, content: Scen
 
 object SilverVeinState {
   val HarvestDurationMs: Long = 15L * 60L * 1000L
+  /** С Брамблом в отряде добыча идёт быстрее. */
+  val GnomeHarvestDurationMs: Long = 8L * 60L * 1000L
+
+  def durationFor(hero: Hero): Long =
+    if (hero.squad.has(AllyKind.Gnome)) GnomeHarvestDurationMs else HarvestDurationMs
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
   val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы

@@ -118,6 +118,8 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
     val textKey  = if (postDeath) "rest.revived" else "rest.done"
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn))
+      // Отряд отдыхал вместе с героем.
+      _ <- heroDao.updateSquad(user.userId, hero.squad.restored(hero.lvl))
       _ <- heroDao.writeSceneData(user.userId, Json.Null)
       _ <- scheduler.cancel(user.userId, TaskKind.Revive)
       _ <- renderer.show(user, Screen(content.text(textKey), Nil))

@@ -33,7 +33,9 @@ case class Hero(
   // Сколько мобов герой убил за всю жизнь — сюжет по нему отсчитывает вехи.
   kills: Long = 0L,
   // Достижения (ключи [[Achievement]]) — разовые и навсегда, со своими бонусами.
-  achievements: List[String] = Nil
+  achievements: List[String] = Nil,
+  // Отряд: наёмники-союзники и позиция героя в строю (см. Squad).
+  squad: pangea.model.squad.Squad = pangea.model.squad.Squad.empty
 ) {
   def hasAchievement(a: Achievement): Boolean = achievements.contains(a.entryName)
 

@@ -38,6 +38,7 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
       "CancelLeaveRoom" -> Target.Run { (user, _, renderer) => showRoom(user, renderer).as(StateType.Tavern) },
       "QuestBoard"      -> Target.Goto(StateType.QuestBoard),
       "Innkeeper"       -> Target.Goto(StateType.Innkeeper),
+      "Mercenaries"     -> Target.Goto(StateType.Mercenaries),
       "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Tavern) },
       "SuspiciousMan"   -> Target.Goto(StateType.CardSeller),
       "LeaveTavern"     -> Target.Goto(StateType.GlobalMap)
@@ -71,6 +72,7 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
             byId("RentRoom").copy(row = Some(0)),
             byId("QuestBoard").copy(color = ChoiceColor.Positive, row = Some(1)),
             byId("Innkeeper").copy(color = ChoiceColor.Positive, row = Some(1)),
+            byId("Mercenaries").copy(row = Some(0)),
             byId("OpenCharacter").copy(row = Some(charRow)),
             byId("LeaveTavern").copy(color = ChoiceColor.Negative, row = Some(leaveRow))
           )
@@ -120,6 +122,8 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
                val maxArmor = healed.effectiveMaxArmor(now)
                val maxEn    = healed.maxEnergy(now)
                heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn)) *>
+                 // Отряд отсыпался в той же комнате.
+                 heroDao.updateSquad(user.userId, hero.squad.restored(hero.lvl)) *>
                  heroDao.updateTrauma(user.userId, None, Nil) *>
                  heroDao.writeSceneData(user.userId, Json.Null) *>
                  scheduler.cancel(user.userId, TaskKind.TavernHeal) *>
