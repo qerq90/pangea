@@ -159,8 +159,8 @@ case class LootState(
   private def itemLine(item: Item): String =
     if (item.itemType == ItemType.Trophy)
       s"🎁 ${item.displayTitle} (трофей)" // у трофеев нет редкости — кружка в заголовке не будет
-    else if (item.itemType == ItemType.Gem)
-      s"🎁 ${item.displayTitle}" // описание грани камня при выпадении не показываем — только в инвентаре
+    else if (item.itemType == ItemType.Gem || item.itemType == ItemType.Material)
+      s"🎁 ${item.displayTitle}" // описания камня, ингредиента и пыли при выпадении не показываем — только в инвентаре
     else {
       val lines = item.statsLines
       val tail  = if (lines.isEmpty) "" else "\n" + lines.mkString("\n")
