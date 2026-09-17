@@ -2732,7 +2732,18 @@ case class BattleState(
             more   = b0.withReinforcement(slot)
             joined = more.copy(group = more.group.copy(originRace = Some(b0.reinforcementRace)))
           } yield (joined, Vector(content.text("battle.group.reinforcement")))
-        (b1, log1) = withMore
+        (b1a, log1a) = withMore
+        // призыв: в конце первого раунда легендарные и мифические зовут сородичей
+        // (сюжетный бой — нет); кому не хватило места — в очередь за строем
+        summoned <-
+          if (b1a.group.round != 1 || b1a.story.isDefined) ZIO.succeed((b1a, Vector.empty[String]))
+          else ZIO.foldLeft(b1a.monstersInOrder.filter(m => BattleState.summons(Rarity.withName(m.rarity))))((b1a, Vector.empty[String])) {
+            case ((b, log), caller) => summonKin(b, caller, res.hero.dungeonLevel).map { case (b2, line) => (b2, log :+ line) }
+          }
+        (b1b, log1b) = summoned
+        // очередь: освободилось место — из-за спин выходят следующие
+        (b1, entered) = b1b.admitQueued
+        log1 = log1a ++ log1b ++ entered.map(m => content.format("battle.group.fromQueue", "monster" -> m.name)).toVector
         // перемешивание: каждый четвёртый раунд, если есть кого мешать. Группу
         // берём у УЖЕ перемешанного боя — иначе новый активный встанет поверх
         // старого строя, один моб пропадёт, а другой задвоится.
@@ -2764,9 +2775,42 @@ case class BattleState(
       } yield res.copy(battle = b3, sideLog = res.sideLog ++ log1 ++ log2 ++ log3)
     }
 
+  /** Призыв сородичей: легендарный зовёт 2–3 третьего–четвёртого ранга,
+    * мифический — 1–3 первого–третьего. Той же расы, уровня этажа, со
+    * стартовой энергией как у подкрепления. Кому не хватило места — в очередь. */
+  private def summonKin(battle: SoloPveBattle, caller: MonsterSlot, dungeonLevel: Int): Task[(SoloPveBattle, String)] = {
+    val (nMin, nMax, ranks) = Rarity.withName(caller.rarity) match {
+      case Rarity.Legendary => (GroupState.LegendarySummonMin, GroupState.LegendarySummonMax, List(Rarity.Rare, Rarity.Mythical))
+      case _                => (GroupState.MythicalSummonMin, GroupState.MythicalSummonMax, List(Rarity.Common, Rarity.Uncommon, Rarity.Rare))
+    }
+    val race = Race.withName(caller.race)
+    for {
+      n   <- Random.nextIntBetween(nMin, nMax + 1)
+      kin <- ZIO.foreach((1 to n).toList) { _ =>
+               for {
+                 i   <- Random.nextIntBetween(0, ranks.size)
+                 pct <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+                 m    = MonsterGenerator.generateOfRaceAndRarity(dungeonLevel, race, ranks(i))
+               } yield MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
+                        m.fightStats.armor, m.marked, MonsterEnergy.startEnergy(m.lvl, m.rarity, pct), BattleEffects.empty)
+             }
+    } yield {
+      val joined = kin.foldLeft(battle)(_ admit _)
+      val waiting = joined.group.queue.size - battle.group.queue.size
+      val line = content.format("battle.group.summon", "monster" -> caller.name, "kin" -> kin.map(_.name).mkString(", "))
+      (joined, if (waiting > 0) line + " " + content.format("battle.group.summonQueued", "n" -> waiting.toString) else line)
+    }
+  }
+
   /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. С
     * отрядом строй двухрядный: слева герой и союзники по позициям, справа мобы. */
-  private def groupLines(battle: SoloPveBattle): Vector[String] =
+  private def groupLines(battle: SoloPveBattle): Vector[String] = {
+    val queued = if (battle.group.queue.isEmpty) Vector.empty
+                 else Vector(content.format("battle.group.queueLine", "n" -> battle.group.queue.size.toString))
+    formationLines(battle) ++ queued
+  }
+
+  private def formationLines(battle: SoloPveBattle): Vector[String] =
     if (battle.group.allies.isEmpty && battle.group.paired)
       battle.placesInOrder.map {
         case (pos, Some(m)) =>
@@ -3254,6 +3298,9 @@ object BattleState {
 
   /** Удар союзника: бой после него, кого бил, сколько снял, добил ли соседа. */
   final case class AllyBlow(battle: SoloPveBattle, target: Option[String], damage: Long, slew: Boolean)
+
+  /** Кто зовёт сородичей в конце первого раунда. */
+  def summons(rarity: Rarity): Boolean = rarity == Rarity.Legendary || rarity == Rarity.Mythical
 
   /** Раунд боя без героя — каждые полминуты. */
   val SquadTickMs: Long = 30L * 1000L

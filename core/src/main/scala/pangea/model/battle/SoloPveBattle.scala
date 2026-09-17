@@ -125,7 +125,8 @@ case class SoloPveBattle(
     * напротив героя пусто. Герой с места не сходит — у отряда позиции свои.
     * Если мобов больше нет — None, это победа. Отложенный Таран сгорает. */
   def promoteNext: Option[SoloPveBattle] =
-    if (group.others.isEmpty) None
+    if (group.others.isEmpty && group.queue.isEmpty) None
+    else if (group.others.isEmpty) admitQueued._1.promoteNext   // строй пуст, но за ним ждут — входят и шагают
     else {
       val all  = group.places.indices.toList
       val free = all.filter(i => group.freeAt(group.places(i)))
@@ -174,6 +175,19 @@ case class SoloPveBattle(
   /** Подкрепление встаёт на первое свободное место за строем. */
   def withReinforcement(slot: MonsterSlot): SoloPveBattle =
     copy(group = group.copy(others = group.others :+ slot, places = group.places :+ (group.size + 1)))
+
+  /** Есть ли место в строю ещё для одного. */
+  def hasRoom: Boolean = group.aliveCount < GroupState.MaxMonsters
+
+  /** Пришедший встаёт в строй, если есть место, иначе — в очередь за ним. */
+  def admit(slot: MonsterSlot): SoloPveBattle =
+    if (hasRoom) withReinforcement(slot) else copy(group = group.copy(queue = group.queue :+ slot))
+
+  /** Из очереди в строй — сколько влезет. Возвращает бой и вошедших. */
+  def admitQueued: (SoloPveBattle, List[MonsterSlot]) =
+    group.queue.foldLeft((copy(group = group.copy(queue = Nil)), List.empty[MonsterSlot])) { case ((b, in), s) =>
+      if (b.hasRoom) (b.withReinforcement(s), in :+ s) else (b.copy(group = b.group.copy(queue = b.group.queue :+ s)), in)
+    }
 
   /** Перемешать всех живых мобов по занятым местам: любой может оказаться
     * напротив героя, сам герой с места не сходит, пустые места пустыми и

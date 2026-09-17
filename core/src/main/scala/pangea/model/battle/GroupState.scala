@@ -118,6 +118,8 @@ object SlainMonster {
   *    боя считает его шансы против этой цели;
   *  - `heroDown` — герой обнулён, но отряд ещё на ногах: бой идёт без него,
   *    раунд за раундом по таймеру, а его смерть отложена до исхода;
+  *  - `queue` — кому не хватило места в строю (больше [[GroupState.MaxMonsters]]):
+  *    ждут за спинами и входят, как только место освободится;
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
   *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
@@ -139,7 +141,8 @@ final case class GroupState(
   alliesGone:  List[String]       = Nil,
   activePos:   Int                = 1,
   lastTarget:  Option[MonsterSlot] = None,
-  heroDown:    Boolean            = false
+  heroDown:    Boolean            = false,
+  queue:       List[MonsterSlot]  = Nil
 ) {
   def isGroup: Boolean = others.nonEmpty
 
@@ -229,6 +232,13 @@ object GroupState {
   /** Шанс (в %), что в начале раунда к мобу прибежит сородич. */
   val ReinforcementChancePct: Long = 2L
 
+  /** Призыв в конце первого раунда: легендарный зовёт 2–3 сородичей 3–4 ранга
+    * (редкий/мифический), мифический — 1–3 сородичей 1–3 ранга. */
+  val LegendarySummonMin: Int = 2
+  val LegendarySummonMax: Int = 3
+  val MythicalSummonMin: Int  = 1
+  val MythicalSummonMax: Int  = 3
+
   /** Каждый свободный моб добавляет столько процентов к шансу, что он не даст сбежать. */
   val SurroundPctPerFreeMob: Long = 5L
 
@@ -248,5 +258,6 @@ object GroupState {
       activePos   <- c.getOrElse[Int]("activePos")(heroPos)
       lastTarget  <- c.getOrElse[Option[MonsterSlot]]("lastTarget")(None)
       heroDown    <- c.getOrElse[Boolean]("heroDown")(false)
-    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone, activePos, lastTarget, heroDown)
+      queue       <- c.getOrElse[List[MonsterSlot]]("queue")(Nil)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone, activePos, lastTarget, heroDown, queue)
 }

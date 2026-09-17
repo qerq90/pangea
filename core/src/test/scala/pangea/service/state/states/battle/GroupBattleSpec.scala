@@ -350,6 +350,73 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(chief.name == "Отмеченный тьмой Хобгоблин — предводитель банды")
     },
 
+    test("легендарный в конце первого раунда зовёт 2–3 сородичей 3–4 ранга") {
+      val boss = Monster(0L, lvl, Race.Orc, Rarity.Legendary,
+        FightStats(atk = 20, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      for {
+        t <- makeState(hero(), SoloPveBattle.from(boss, hero()))
+        (state, dao, r) = t
+        // герой попал, моб ответил; подкрепления нет; зов: трое — мифический, редкий, мифический; стартовая энергия 5%
+        _       <- TestRandom.feedInts(60, 99, 99, 3, 1, 0, 1) *> TestRandom.feedLongs(100L, 100L, 5L, 5L, 5L)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(screens.contains("трубит — на зов сбегаются сородичи")) &&
+              assertTrue(after.group.others.map(_.rarity) == List(Rarity.Mythical, Rarity.Rare, Rarity.Mythical).map(_.entryName)) &&
+              assertTrue(after.group.others.forall(m => m.race == Race.Orc.entryName && m.lvl == hero().dungeonLevel.toLong)) &&
+              assertTrue(after.group.places == List(2, 3, 4) && after.group.queue.isEmpty && after.group.round == 1)
+    },
+
+    test("павший в первом же раунде вожак сородичей не зовёт") {
+      val chief = Monster(0L, lvl, Race.Orc, Rarity.Mythical,
+        FightStats(atk = 20, hp = 10, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      val eight = List.fill(8)(monster(1000L))
+      val h     = hero(atk = 100000L)
+      for {
+        t <- makeState(h, SoloPveBattle.fromGroup(chief :: eight, h, Nil))
+        (state, dao, r) = t
+        // герой добил вожака (ответа нет), в пару шагнул сосед; дальние сбоку не достают; подкрепления нет.
+        // Зовут только те, кто стоит в строю в конце раунда, — павший вожак не трубит
+        _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
+        noCall  <- battleOf(dao)
+      } yield assertTrue(noCall.group.slain.size == 1 && noCall.group.others.size == 7 && noCall.group.queue.isEmpty)
+    },
+
+    test("мифический выжил первый раунд — зовёт; одиннадцатому и дальше места нет, они ждут за строем") {
+      val chief = Monster(0L, lvl, Race.Orc, Rarity.Mythical,
+        FightStats(atk = 20, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      val eight = List.fill(8)(monster(1000L))
+      for {
+        t <- makeState(hero(), SoloPveBattle.fromGroup(chief :: eight, hero(), Nil))
+        (state, dao, r) = t
+        // герой попал, вожак ответил; сосед на месте 2 бьёт сбоку; подкрепления нет (9 в строю);
+        // зов: трое 1–3 ранга — обычный, необычный, редкий; место есть только одному
+        _       <- TestRandom.feedInts(60, 99, 99, 99, 3, 0, 1, 2) *> TestRandom.feedLongs(100L, 100L, 100L, 5L, 5L, 5L)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.group.aliveCount == 10 && after.group.others.size == 9) &&
+              assertTrue(after.group.others.last.rarity == Rarity.Common.entryName &&
+                         after.group.queue.map(_.rarity) == List(Rarity.Uncommon, Rarity.Rare).map(_.entryName)) &&
+              assertTrue(screens.contains("Ещё 2 не находят места и ждут за строем")) &&
+              assertTrue(screens.contains("… и ещё 2 ждут за строем."))
+    },
+
+    test("очередь: место освободилось — следующий выходит из-за спин; строй пуст, а очередь нет — победы нет") {
+      val slot = SoloPveBattle.fromGroup(List(monster(500L)), hero(), Nil).activeSlot
+      val full = (1 to 9).foldLeft(group(1000L))((b, _) => b.withReinforcement(slot))   // 10 в строю
+      val withQueue = full.admit(slot.copy(currentHp = 777L)).admit(slot.copy(currentHp = 888L))
+      val freed = withQueue.sideFallen(0).admitQueued
+      val lone  = group(10L).copy(group = group(10L).group.copy(queue = List(slot.copy(currentHp = 777L)))).copy(monsterCurrentHp = 0L)
+      val next  = lone.promoteNext
+      assertTrue(full.group.aliveCount == 10 && !full.hasRoom) &&
+      assertTrue(withQueue.group.others.size == 9 && withQueue.group.queue.map(_.currentHp) == List(777L, 888L)) &&
+      assertTrue(freed._2.map(_.currentHp) == List(777L) && freed._1.group.queue.map(_.currentHp) == List(888L)) &&
+      assertTrue(freed._1.group.others.exists(_.currentHp == 777L)) &&
+      assertTrue(next.exists(b => b.monsterCurrentHp == 777L && b.group.queue.isEmpty && b.group.slain.size == 1))
+    },
+
     test("лечащее умение цели не спрашивает — ход идёт сразу") {
       val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
       for {
