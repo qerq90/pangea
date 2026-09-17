@@ -116,6 +116,8 @@ object SlainMonster {
   *  - `heroPos` — место героя, с единицы; `activePos` — место активного моба;
   *  - `lastTarget` — по кому герой бил последним: когда напротив пусто, экран
   *    боя считает его шансы против этой цели;
+  *  - `heroDown` — герой обнулён, но отряд ещё на ногах: бой идёт без него,
+  *    раунд за раундом по таймеру, а его смерть отложена до исхода;
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
   *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
@@ -136,7 +138,8 @@ final case class GroupState(
   allies:      List[BattleAlly]   = Nil,
   alliesGone:  List[String]       = Nil,
   activePos:   Int                = 1,
-  lastTarget:  Option[MonsterSlot] = None
+  lastTarget:  Option[MonsterSlot] = None,
+  heroDown:    Boolean            = false
 ) {
   def isGroup: Boolean = others.nonEmpty
 
@@ -244,5 +247,6 @@ object GroupState {
       gone        <- c.getOrElse[List[String]]("alliesGone")(Nil)
       activePos   <- c.getOrElse[Int]("activePos")(heroPos)
       lastTarget  <- c.getOrElse[Option[MonsterSlot]]("lastTarget")(None)
-    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone, activePos, lastTarget)
+      heroDown    <- c.getOrElse[Boolean]("heroDown")(false)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone, activePos, lastTarget, heroDown)
 }

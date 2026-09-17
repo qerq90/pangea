@@ -282,8 +282,9 @@ case class SoloPveBattle(
 object SoloPveBattle {
   /** Сборка боя из моба и героя: статы/hp/броня берутся с моба, слоты активных
    *  навыков отдаёт сам герой (`hero.activeSkillSlots`). Единая точка входа в
-   *  бой для всех событий. */
-  def from(monster: Monster, hero: Hero): SoloPveBattle = SoloPveBattle(
+   *  бой для всех событий. `squad = false` — сюжетный бой, в который отряд не
+   *  берут: герой один, на месте 1. */
+  def from(monster: Monster, hero: Hero, squad: Boolean = true): SoloPveBattle = SoloPveBattle(
     monsterLvl          = monster.lvl,
     monsterRace         = monster.race.entryName,
     monsterRarity       = monster.rarity.entryName,
@@ -295,20 +296,22 @@ object SoloPveBattle {
     monsterCurrentEnergy = monster.fightStats.energy,
     // Отряд встаёт по своим позициям; моб обычной встречи всегда появляется
     // на месте 1, где бы ни стоял герой.
-    group = GroupState(heroPos = hero.squad.heroPos, activePos = 1,
-      allies = hero.squad.inOrder.map(BattleAlly.of(_, hero.lvl)))
+    group =
+      if (squad) GroupState(heroPos = hero.squad.heroPos, activePos = 1,
+        allies = hero.squad.inOrder.map(BattleAlly.of(_, hero.lvl)))
+      else GroupState()
   )
 
   /** Бой против группы: мобы встают по местам 1, 2, … подряд; в паре с героем
     * — тот, что на его месте, а если там пусто — свободный (см. `settle`).
     * Раса первого запоминается — подкрепление приходит такой же. */
-  def fromGroup(monsters: List[Monster], hero: Hero, startEnergies: List[Long]): SoloPveBattle = {
+  def fromGroup(monsters: List[Monster], hero: Hero, startEnergies: List[Long], squad: Boolean = true): SoloPveBattle = {
     val energies = startEnergies.padTo(monsters.size, 0L)
     val slots = monsters.zip(energies).map { case (m, e) =>
       MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
         m.fightStats.armor, m.marked, e, BattleEffects.empty)
     }
-    val head = from(monsters.head, hero).copy(monsterCurrentEnergy = energies.head)
+    val head = from(monsters.head, hero, squad).copy(monsterCurrentEnergy = energies.head)
     head.copy(group = head.group.copy(others = slots.tail, originRace = Some(monsters.head.race.entryName),
       places = (2 to monsters.size).toList)).settle
   }

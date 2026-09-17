@@ -145,7 +145,8 @@ case class MarisaHuntState(
       base  = MonsterGenerator.generateOfRaceAndRarity(MarisaQuest.CollectorLevel, MarisaQuest.CollectorRace, MarisaQuest.CollectorRarity)
       mob   = MarisaQuest.collector(base)
       pct  <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
-      battle = SoloPveBattle.from(mob, hero).withStartEnergy(pct)
+      // Сюжетный бой — без отряда.
+      battle = SoloPveBattle.from(mob, hero, squad = false).withStartEnergy(pct)
                  .copy(story = Some(MarisaQuest.CollectorStory), customName = Some(content.text("marisa.hunt.collectorName")))
       routing = LootData(Nil, Nil, returnState = Some(StateType.MarisaHunt), eventData = Some(p.copy(step = Step.AfterFight).asJson))
       _    <- heroDao.writeActiveBattle(user.userId, battle.asJson)

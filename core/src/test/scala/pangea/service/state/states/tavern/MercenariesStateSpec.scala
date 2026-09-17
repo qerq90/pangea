@@ -46,7 +46,7 @@ object MercenariesStateSpec extends ZIOSpecDefault {
         card     = screens.last
       } yield assertTrue(list.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Human", "Murloc", "Gnome")) &&
               assertTrue(list.choices.exists(_.id == "BackFromMercs")) &&
-              assertTrue(card.text.contains("Плюх, мурлок, ловкач.")) &&
+              assertTrue(card.text.contains("«Плюх. Плюх тут кружки мыл")) &&
               assertTrue(card.text.contains("сегодня я возьму с тебя 2 флаконов!")) &&
               assertTrue(card.choices.exists(c => c.id == "MercHire" && c.data.get("kind").contains("Murloc")))
     },
@@ -97,8 +97,27 @@ object MercenariesStateSpec extends ZIOSpecDefault {
         card <- renderer.sentScreens.map(_.last.text)
         _    <- state.action(testUser, pick("MercHire", AllyKind.Gnome), renderer)
         hero <- dao.getHeroByUserId(userId).map(_.get)
-      } yield assertTrue(card.contains("выходит 1")) &&
+      } yield assertTrue(card.contains("бутылок: 1.")) &&
               assertTrue(hero.squad.has(AllyKind.Gnome) && inv.snapshot.isEmpty)
+    },
+
+    test("наёмник отработал 12 часов: у стола уходит с репликой, его нет; через 12 часов снова здесь — без реплики о свитке") {
+      for {
+        t <- makeState(baseHero.copy(silver = 5000L))
+        (state, dao, _, renderer) = t
+        _     <- state.action(testUser, pick("MercHire", AllyKind.Human), renderer)
+        _     <- TestClock.adjust(zio.Duration.fromMillis(12L * 60L * 60L * 1000L))
+        _     <- state.enter(testUser, renderer)
+        scr   <- renderer.sentScreens
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        _     <- TestClock.adjust(zio.Duration.fromMillis(12L * 60L * 60L * 1000L))
+        _     <- state.enter(testUser, renderer)
+        all   <- renderer.sentScreens
+      } yield assertTrue(scr.exists(_.text.contains("Йорген Кремень отработал свой день"))) &&
+              assertTrue(!hero.squad.has(AllyKind.Human) && hero.squad.offDuty.contains("Human")) &&
+              assertTrue(scr.last.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Murloc", "Gnome")) &&
+              assertTrue(all.last.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Human", "Murloc", "Gnome")) &&
+              assertTrue(!all.exists(_.text.contains("снова в таверне")))
     },
 
     test("в отлучке — за столом нет; вернулся — реплика о свитке один раз и снова нанимается") {

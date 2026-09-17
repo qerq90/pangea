@@ -9,7 +9,7 @@ import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{CharacterMenu, State, UserAction}
+import pangea.service.state.{CharacterMenu, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -54,8 +54,9 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
       case Some(_) => showRoom(user, renderer)
       case None =>
         for {
-          now  <- nowMs
-          hero <- getHero(user)
+          now   <- nowMs
+          hero0 <- getHero(user)
+          hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
           // «Раз в час» ролл продавца карт (лениво, с почасовым гейтом внутри).
           seller <- CardSeller.rollAndLoad(heroDao, user.userId, now)
           text = content.format("tavern.menu.text",

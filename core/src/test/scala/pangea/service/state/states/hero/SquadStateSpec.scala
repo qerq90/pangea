@@ -24,7 +24,7 @@ object SquadStateSpec extends ZIOSpecDefault {
 
   private val lvl = 10L
   private val baseHero: Hero = TestFixtures.hero(userId, state = StateType.HeroStats).copy(lvl = lvl,
-    squad = Squad.empty.hire(AllyKind.Human, lvl).hire(AllyKind.Gnome, lvl))
+    squad = Squad.empty.hire(AllyKind.Human, lvl, 0L).hire(AllyKind.Gnome, lvl, 0L))
 
   private def makeState(hero: Hero) =
     for {

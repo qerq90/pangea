@@ -39,7 +39,7 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
 
     test("Плюх в отряде: раскопки 5 минут вместо 10 и его реплика перед экраном") {
       val base  = TestFixtures.hero(userId).copy(dungeonLevel = 20, lvl = 10L)
-      val withM = base.copy(squad = Squad.empty.hire(AllyKind.Murloc, 10L))
+      val withM = base.copy(squad = Squad.empty.hire(AllyKind.Murloc, 10L, 0L))
       for {
         t <- makeStateWith(withM)
         (state, renderer, scheduler) = t

@@ -6,7 +6,7 @@ import pangea.model.hero.Hero
 import pangea.model.squad.{AllyKind, AllyRates}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 /** «Отряд» в меню персонажа: строй с позициями, карточка союзника — его
@@ -36,7 +36,14 @@ case class SquadState(heroDao: HeroDao, content: SceneContent) extends State {
 
   /** Строй: позиции 1..4, на каждой герой, союзник или пусто. */
   private def showList(user: User, renderer: Renderer): Task[Unit] =
-    getHero(user).flatMap { hero =>
+    for {
+      now   <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+      hero0 <- getHero(user)
+      hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
+      _     <- showLines(user, hero, renderer)
+    } yield ()
+
+  private def showLines(user: User, hero: Hero, renderer: Renderer): Task[Unit] = {
       val lines = (1 to AllyRates.Positions).map { pos =>
         if (pos == hero.squad.heroPos) content.format("squad.lineHero", "n" -> pos.toString)
         else hero.squad.allyAt(pos) match {
@@ -52,7 +59,7 @@ case class SquadState(heroDao: HeroDao, content: SceneContent) extends State {
       }
       val back = content.choice("BackFromSquad", "squad.back").copy(row = Some(2))
       renderer.show(user, Screen(content.text("squad.title") + "\n" + lines.mkString("\n"), buttons :+ back))
-    }
+  }
 
   /** Карточка союзника: статы на уровень героя, текущее состояние, позиция, кнопки. */
   private def showAlly(user: User, kind: AllyKind, renderer: Renderer): Task[Unit] =
