@@ -21,6 +21,8 @@ object FlaskBattleSpec extends ZIOSpecDefault {
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+  private def aimed(key: String, target: Int): UserAction =
+    UserAction("", Some(s"""{"action":"$key","target":"$target"}"""))
 
   private def flask(kind: FlaskKind, rarity: ItemRarity = ItemRarity.Blue): Item =
     FlaskGenerator.item(kind, rarity).copy(id = 7L)
@@ -174,13 +176,13 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         _   <- TestRandom.feedInts(List.fill(4)(quiet).flatten: _*) *> TestRandom.feedLongs(List.fill(8)(100L): _*)
         _   <- state.action(testUser, tap("UseFlask"), r)
         b0  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        _   <- ZIO.foreachDiscard(1 to 4)(_ => state.action(testUser, tap("Attack"), r))
+        _   <- ZIO.foreachDiscard(1 to 4)(_ => state.action(testUser, aimed("Attack", 1), r))
         b4  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         u4  <- dao.getHeroByUserId(userId).map(_.get)
         log4 <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         // пятый раунд: сосед снова видит — бьёт сбоку (99) и лечит активного
         _   <- TestRandom.feedInts(60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
-        _   <- state.action(testUser, tap("Attack"), r)
+        _   <- state.action(testUser, aimed("Attack", 1), r)
         b5  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         log5 <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(b0.effects.heroSmokeTurns == FlaskRates.SmokeRounds + 1 && log4.contains("Дымная фляга разбивается")) &&

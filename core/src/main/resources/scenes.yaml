@@ -1425,6 +1425,7 @@ heroStats:
 battle:
   enter:
     text: "👹 {monster}\nРаса: {monsterRace}\n❤ {monsterHp}/{monsterMax}{monsterPoison}  🧥 {monsterArmor}/{monsterMaxArmor}\n⚔ {monsterAtk}  🛡 {monsterReduction}\n🎯 {mobHit}  💨 {monsterDodge}\n⚡ {monsterEnergy}/{monsterMaxEnergy}\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}{heroArmorRegen}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
+    noPair: "⚪ Напротив вас никого нет.\nПоказатели — против последней цели: {monster}.\n\n🧙 Вы:\n❤ {heroHp}/{heroMax}{heroRegen}  🧥 {heroArmor}/{heroMaxArmor}{heroArmorRegen}\n⚡ {heroEnergy}/{heroMaxEnergy}\n⚔ {heroAtk}  🛡 {heroReduction}\n🎯 {heroHit}  💨 {heroDodge}"
     choices:
       Attack: "Атаковать"
       UseFlask: "Использовать флягу"
@@ -1533,9 +1534,17 @@ battle:
     healedAlly: "💉 {monster} исцелил вашего врага на {hp} HP!"
     repairedAlly: "🔧 {monster} восстановил броню вашего врага на {armor}!"
     fell: "☠ {monster} пал. На его место встаёт {next}."
+    fellNoStep: "☠ {monster} пал. К вам никто не шагает — остальные заняты вашими союзниками."
+    steps: "👣 {monster} освободился и шагает к вам."
+    noTarget: "Бить некого: напротив пусто, а соседи вам не по руке."
+    targetGone: "Этой цели там уже нет."
+    waitLabel: "Ждать"
+    waited: "⏳ Вы выжидаете, держа оружие наготове."
+    attackLabel: "Атака"
     sideFell: "☠ {monster} пал, не дойдя до вас."
     reinforcement: "🐾 На звуки битвы прибежал сородич вашего врага."
     shuffle: "🔀 Ряды смешались — теперь против вас {monster}."
+    shuffleNoPair: "🔀 Ряды смешались."
     ram: "🛡 Таран сработал: вы шагнули на место {pos}, против вас {monster}."
     surround: "⛓ Группа {race} окружает вас и навязывает вам продолжение боя."
     sideSlain: "☠ {monster} пал."
@@ -2051,11 +2060,9 @@ socketing:
 squad:
   title: "Отряд. Позиция в строю — против какого врага стоять."
   lineHero: "{n}. Вы"
-  lineAlly: "{n}. {name} — HP {hp}/{maxHp}, броня {armor}/{maxArmor}"
+  lineAlly: "{n}. {name} — ❤ {hp}/{maxHp}  🧥 {armor}/{maxArmor}"
   lineEmpty: "{n}. — пусто —"
-  card: "{name} ({race}, {element}) — позиция {pos}.
-HP {hp}/{maxHp}, броня {armor}/{maxArmor}, энергия {energy}/{maxEnergy}.
-Атака {atk}, точность {accuracy}, защита {defence}, уклонение {evasion}."
+  card: "{name}\n{race}, стихия {element} — позиция {pos}\n\n ❤ {hp}/{maxHp}  🧥 Броня {armor}/{maxArmor}  ⚡ Энергия {energy}/{maxEnergy}\n ⚔ Атк {atk}  🛡 Защ {defence}\n 🎯 Точн {accuracy}  👁 Укл {evasion}"
   posHero: "вы"
   posFree: "пусто"
   moveLabel: "На {n} ({who})"

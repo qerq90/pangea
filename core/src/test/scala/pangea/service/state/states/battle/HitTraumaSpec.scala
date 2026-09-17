@@ -21,7 +21,8 @@ object HitTraumaSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
-  private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+  /** Атака по мобу в паре (в группе кнопка «Атака» без цели спросит, в кого). */
+  private def attackPair: UserAction = UserAction("", Some("""{"action":"Attack","target":"1"}"""))
 
   /** Герой бьёт без промаха; потолок HP = vit × 24. */
   private def hero(hp: Long, armor: Long = 0L, vit: Long = 5000L): Hero =
@@ -47,7 +48,7 @@ object HitTraumaSpec extends ZIOSpecDefault {
       t <- makeState(h, b)
       (state, dao, r) = t
       _   <- TestRandom.feedInts(ints: _*) *> TestRandom.feedLongs(100L, 100L)
-      _   <- state.action(testUser, tap("Attack"), r)
+      _   <- state.action(testUser, attackPair, r)
       u   <- dao.getHeroByUserId(userId).map(_.get)
       log <- r.sentScreens.map(_.map(_.text).mkString("\n"))
     } yield (u, log)
