@@ -2497,7 +2497,8 @@ case class BattleState(
         rammed = b2.group.pendingMove match {
           case Some(pos) if b2.group.occupied(pos) =>
             val moved = b2.moveHeroTo(pos)
-            // Союзник, стоявший на этой позиции, встаёт на прежнюю позицию героя.
+            // Таран бьёт только мобов; союзник, стоявший напротив таранённого,
+            // уступает позицию герою и встаёт на его прежнюю.
             val b = moved.copy(group = moved.group.copy(allies = moved.group.allies.map(a =>
               if (a.position == pos) a.copy(position = b2.group.heroPos) else a)))
             (b.copy(group = b.group.copy(pendingMove = None)),

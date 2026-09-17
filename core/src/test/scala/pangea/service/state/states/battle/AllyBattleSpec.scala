@@ -241,17 +241,34 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("«Малое исцеление» — Йорген Кремень: +"))
     },
 
-    test("Таран на позицию союзника: герой встаёт туда, союзник — на прежнее место героя") {
+    test("Таран по мобу на месте 2 (напротив него — союзник): герой встаёт на 2, союзник — на 1; целью Таран берёт только мобов") {
       val h = heroWithSkills(hero(), Skill.SweepingStrike, Skill.Ram)
       for {
         t <- makeState(h, group(h, 1000L, 2000L))
         (state, dao, r) = t
+        _       <- state.action(testUser, tap("Skill_202"), r)
+        ask     <- r.sentScreens.map(_.last)
+        targets  = ask.choices.filter(_.id == "Skill_202").map(_.data("target"))
+        _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
+        _       <- state.action(testUser, aimed("Skill_202", 2), r)
+        after   <- battleOf(dao)
+      } yield assertTrue(targets == List("1", "2")) &&
+              assertTrue(after.group.heroPos == 2 && after.monsterStats.hp == 2000L) &&
+              assertTrue(after.group.allies.head.position == 1) &&
+              assertTrue(after.group.others.head.stats.hp == 1000L && after.group.places == List(1))
+    },
+
+    test("Таран по мобу на месте 2, когда союзника напротив него нет: герой на 2, союзник остаётся на 3") {
+      val h = heroWithSkills(hero(allies = List(ally(pos = 3))), Skill.SweepingStrike, Skill.Ram)
+      for {
+        t <- makeState(h, group(h, 1000L, 2000L))
+        (state, dao, r) = t
+        // таран; ответ моба в паре; союзник (напротив пусто, сосед — место 2) + прок; моб № 2 бьёт героя сбоку; подкрепление
         _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
         _       <- state.action(testUser, aimed("Skill_202", 2), r)
         after   <- battleOf(dao)
       } yield assertTrue(after.group.heroPos == 2) &&
-              assertTrue(after.group.allies.head.position == 1) &&
-              assertTrue(after.monsterStats.hp == 2000L)
+              assertTrue(after.group.allies.head.position == 3)
     },
 
     test("минибосс: союзник на позиции 2 бьёт босса как соседа") {
