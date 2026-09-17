@@ -65,6 +65,19 @@ object LootStateSpec extends ZIOSpecDefault {
               assertTrue(!screens.exists(_.text.contains("В гнезде")))
     },
 
+    test("enter с ингредиентом минибосса и пылью → только названия, без описаний") {
+      val iron = pangea.generator.item.MaterialGenerator.item(pangea.model.item.MaterialKind.EverburningIron)
+      val dust = pangea.generator.item.MaterialGenerator.item(pangea.model.item.MaterialKind.RubyDust)
+      for {
+        t <- makeState(LootData(items = List(iron, dust), silvers = Nil))
+        (state, renderer, _, _) = t
+        _       <- state.enter(testUser, renderer)
+        text    <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(text.contains(iron.name) && text.contains(dust.name)) &&
+              assertTrue(!text.contains(pangea.model.item.MaterialKind.EverburningIron.description)) &&
+              assertTrue(!text.contains(pangea.model.item.MaterialKind.RubyDust.description))
+    },
+
     test("enter только с серебром → серебро начислено, кнопка Continue, без Take/Leave") {
       for {
         t <- makeState(LootData(items = Nil, silvers = List(50L)))
