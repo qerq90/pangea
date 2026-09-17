@@ -89,6 +89,8 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object FlowerMeadow     extends StateType // поляна цветов: сбор трав по таймеру
   case object Knowledge        extends StateType // знания героя (меню персонажа)
   case object GustavoHerbs     extends StateType // Густаво: рассказ о травах и трактаты
+  case object Squad            extends StateType // отряд героя (меню персонажа)
+  case object Mercenaries      extends StateType // наёмники в таверне
 
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход

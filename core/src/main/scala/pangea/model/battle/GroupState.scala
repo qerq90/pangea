@@ -3,7 +3,39 @@ package pangea.model.battle
 import io.circe.generic.semiauto.deriveEncoder
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.model.monster.{Monster, Race, Rarity}
+import pangea.model.squad.{Ally, AllyKind}
 import pangea.model.stats.FightStats
+
+/** Союзник в бою: позиция в строю (напротив места врага с тем же номером),
+  * текущее состояние и потолки на этот бой. Эффектов на союзниках нет. */
+final case class BattleAlly(kind: AllyKind, position: Int, hp: Long, armor: Long, energy: Long, stats: FightStats, lvl: Long) {
+  def name: String  = kind.name
+  def alive: Boolean = hp > 0L
+  def hpPct: Long    = if (stats.hp <= 0L) 0L else hp * 100L / stats.hp
+  def armorPct: Long = if (stats.armor <= 0L) 0L else armor * 100L / stats.armor
+
+  /** Обратно в отряд — с тем, что осталось. */
+  def toAlly: Ally = Ally(kind, position, hp, armor, energy)
+}
+
+object BattleAlly {
+  def of(a: Ally, lvl: Long): BattleAlly = {
+    val c = a.clamped(lvl)
+    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.kind.stats(lvl), lvl)
+  }
+
+  implicit val encoder: Encoder[BattleAlly] = deriveEncoder
+  implicit val decoder: Decoder[BattleAlly] = (c: HCursor) =>
+    for {
+      kind     <- c.get[AllyKind]("kind")
+      position <- c.get[Int]("position")
+      hp       <- c.get[Long]("hp")
+      armor    <- c.get[Long]("armor")
+      energy   <- c.get[Long]("energy")
+      stats    <- c.get[FightStats]("stats")
+      lvl      <- c.getOrElse[Long]("lvl")(1L)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl)
+}
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее
   * состояние, включая эффекты на нём (яд, кровь, огонь, порошок, дебафы). Когда
@@ -81,7 +113,10 @@ object SlainMonster {
   *  - `slain`   — павшие, в порядке гибели, для выдачи добычи после победы;
   *  - `round`   — сколько раундов прошло (каждый четвёртый — перемешивание);
   *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
-  *  - `originRace` — раса первого моба: подкрепление приходит той же расы.
+  *  - `originRace` — раса первого моба: подкрепление приходит той же расы;
+  *  - `allies`  — союзники героя по своим позициям (см. [[BattleAlly]]);
+  *  - `alliesGone` — кто ушёл по свитку за этот бой (виды): после боя они
+  *    выбывают из отряда на сутки.
   *
   * Обычный бой 1 на 1 — это группа из одного: `others` пуст. */
 final case class GroupState(
@@ -91,9 +126,27 @@ final case class GroupState(
   pendingMove: Option[Int]        = None,
   originRace:  Option[String]     = None,
   heroPos:     Int                = 1,
-  places:      List[Int]          = Nil
+  places:      List[Int]          = Nil,
+  allies:      List[BattleAlly]   = Nil,
+  alliesGone:  List[String]       = Nil
 ) {
   def isGroup: Boolean = others.nonEmpty
+
+  /** Есть ли строй, который стоит показать: мобы вне пары или союзники. */
+  def hasFormation: Boolean = isGroup || allies.nonEmpty
+
+  /** Союзник на позиции `pos`. */
+  def allyAt(pos: Int): Option[BattleAlly] = allies.find(_.position == pos)
+
+  /** Строй для показа — до самого дальнего занятого места по обеим сторонам. */
+  def rows: Int = (size :: allies.map(_.position)).max
+
+  def updateAlly(kind: AllyKind)(f: BattleAlly => BattleAlly): GroupState =
+    copy(allies = allies.map(a => if (a.kind == kind) f(a) else a))
+
+  /** Союзник ушёл по свитку. */
+  def withoutAlly(kind: AllyKind): GroupState =
+    copy(allies = allies.filterNot(_.kind == kind), alliesGone = alliesGone :+ kind.entryName)
 
   /** Сколько мобов ещё на ногах, включая активного. */
   def aliveCount: Int = 1 + others.count(_.alive)
@@ -164,5 +217,7 @@ object GroupState {
       heroPos     <- c.getOrElse[Int]("heroPos")(1)
       // Без мест (старая запись) — строй сплошной: слева от героя, потом справа.
       places      <- c.getOrElse[List[Int]]("places")(others.indices.map(i => if (i < heroPos - 1) i + 1 else i + 2).toList)
-    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places)
+      allies      <- c.getOrElse[List[BattleAlly]]("allies")(Nil)
+      gone        <- c.getOrElse[List[String]]("alliesGone")(Nil)
+    } yield GroupState(others, slain, round, pendingMove, originRace, heroPos, places, allies, gone)
 }

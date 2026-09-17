@@ -11,6 +11,7 @@ import pangea.model.hero.Hero
 import pangea.model.item.{Gem, GemKind, Item}
 import pangea.model.monster.Race
 import pangea.model.schedule.TaskKind
+import pangea.model.squad.AllyKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
@@ -45,10 +46,14 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now <- nowMs
-      _   <- heroDao.writeSceneData(user.userId, TreasureDigProgress(now).asJson)
-      _   <- scheduler.schedule(user.userId, now + DigDurationMs, TaskKind.SchronDig, StateType.TreasureDig, DigAction)
-      _   <- showDig(user, renderer)
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- heroDao.writeSceneData(user.userId, TreasureDigProgress(now).asJson)
+      _    <- scheduler.schedule(user.userId, now + durationFor(hero), TaskKind.SchronDig, StateType.TreasureDig, DigAction)
+      // Плюх в отряде — роет сам, лапами, и вдвое быстрее.
+      _    <- ZIO.when(hero.squad.has(AllyKind.Murloc))(
+                renderer.show(user, Screen(content.text("treasureDig.murlocHelps"), Nil)))
+      _    <- showDig(user, renderer)
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -57,8 +62,10 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
   private def showDig(user: User, renderer: Renderer): Task[Unit] =
     for {
       now     <- nowMs
+      hero    <- getHero(user)
       started <- startedAt(user)
-      remaining = started.map(s => (DigDurationMs - (now - s)).max(0L)).getOrElse(DigDurationMs)
+      total    = durationFor(hero)
+      remaining = started.map(s => (total - (now - s)).max(0L)).getOrElse(total)
       _       <- renderer.show(user, Screen(
                    content.format("treasureDig.enter.text", "duration" -> formatRemaining(remaining)),
                    content.screen("treasureDig.enter").choices))
@@ -69,12 +76,14 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
   private def leaveDig(user: User, renderer: Renderer): Task[StateType] =
     for {
       now     <- nowMs
+      hero    <- getHero(user)
       started <- startedAt(user)
+      total    = durationFor(hero)
       result <- started match {
         case None => digDone(user, renderer)
-        case Some(start) if now - start >= DigDurationMs => digDone(user, renderer)
+        case Some(start) if now - start >= total => digDone(user, renderer)
         case Some(start) =>
-          val remaining = formatRemaining(DigDurationMs - (now - start))
+          val remaining = formatRemaining(total - (now - start))
           renderer.show(user, Screen(
             content.format("treasureDig.confirmLeave.text", "remaining" -> remaining),
             content.screen("treasureDig.confirmLeave").choices)).as(StateType.TreasureDig)
@@ -176,6 +185,11 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
 
 object TreasureDigState {
   val DigDurationMs: Long = 10L * 60L * 1000L
+  /** С Плюхом в отряде раскопки идут вдвое быстрее. */
+  val MurlocDigDurationMs: Long = 5L * 60L * 1000L
+
+  def durationFor(hero: Hero): Long =
+    if (hero.squad.has(AllyKind.Murloc)) MurlocDigDurationMs else DigDurationMs
   val DoubloonMin: Int    = 1
   val DoubloonMax: Int    = 2
   val SkullDropChancePct: Int = 40 // шанс найти череп при раскопке трупа/могилы

@@ -2,6 +2,7 @@ package pangea.service.state.states.events.treasure
 
 import pangea.engine.SceneContent
 import pangea.model.schedule.TaskKind
+import pangea.model.squad.{AllyKind, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -25,7 +26,32 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
       state      = TreasureDigState(heroDao, scheduler, content)
     } yield (state, renderer, heroDao, scheduler)
 
+  private def makeStateWith(hero: pangea.model.hero.Hero) =
+    for {
+      renderer  <- TestRenderer.make
+      heroDao   <- TestHeroDao.withHero(userId, hero)
+      scheduler <- TestScheduler.make
+      content   <- ZIO.attempt(SceneContent.load())
+      state      = TreasureDigState(heroDao, scheduler, content)
+    } yield (state, renderer, scheduler)
+
   override def spec = suite("TreasureDigState")(
+
+    test("Плюх в отряде: раскопки 5 минут вместо 10 и его реплика перед экраном") {
+      val base  = TestFixtures.hero(userId).copy(dungeonLevel = 20, lvl = 10L)
+      val withM = base.copy(squad = Squad.empty.hire(AllyKind.Murloc, 10L))
+      for {
+        t <- makeStateWith(withM)
+        (state, renderer, scheduler) = t
+        _     <- state.enter(testUser, renderer)
+        sched <- scheduler.scheduled
+        scr   <- renderer.sentScreens
+      } yield assertTrue(TreasureDigState.durationFor(base) == 10L * 60L * 1000L) &&
+              assertTrue(TreasureDigState.durationFor(withM) == 5L * 60L * 1000L) &&
+              assertTrue(sched.head.fireAt == 5L * 60L * 1000L) &&
+              assertTrue(scr.head.text.contains("Плюх копать быстро!")) &&
+              assertTrue(scr.last.text.contains("5мин"))
+    },
 
     test("enter → планирует SchronDig, пишет прогресс в scene_data, показывает экран раскопок с «Уйти»") {
       for {

@@ -43,6 +43,7 @@ object InstantRest {
               val maxEn    = hero.maxEnergy(nowMs)
               heroDao.updateFightStats(user.userId,
                 hero.fightStats.copy(hp = maxHp, armor = maxArmor, energy = maxEn)) *>
+                heroDao.updateSquad(user.userId, hero.squad.restored(hero.lvl)) *>
                 AzatData.save(heroDao, user.userId, azat.copy(instantRests = left)) *>
                 // Снимаем возможное пробуждение и чистим сцену отдыха: герой уже бодр.
                 scheduler.cancel(user.userId, TaskKind.Revive) *>

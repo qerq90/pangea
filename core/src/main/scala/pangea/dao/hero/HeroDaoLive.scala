@@ -100,6 +100,9 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def updateKills(userId: UserId, kills: Long): Task[Unit] =
     Queries.updateKills(userId, kills).update.run.transact(xa).unit
 
+  override def updateSquad(userId: UserId, squad: pangea.model.squad.Squad): Task[Unit] =
+    Queries.updateSquad(userId, squad.asJson).update.run.transact(xa).unit
+
   override def updateAchievements(userId: UserId, achievements: List[String]): Task[Unit] =
     Queries.updateAchievements(userId, achievements).update.run.transact(xa).unit
 

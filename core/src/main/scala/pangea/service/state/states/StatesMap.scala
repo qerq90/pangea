@@ -48,6 +48,8 @@ import pangea.model.state.StateType.{
   Girl,
   FlowerMeadow,
   Knowledge,
+  Squad,
+  Mercenaries,
   GustavoHerbs,
   MarisaSearch,
   MarisaHunt,
@@ -94,10 +96,11 @@ import pangea.service.state.states.gustavo.{
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
-import pangea.service.state.states.hero.{HeroStatsState, KnowledgeState, SkillsState}
+import pangea.service.state.states.hero.{HeroStatsState, KnowledgeState, SkillsState, SquadState}
 import pangea.service.state.states.tavern.{
   CardSellerState,
   InnkeeperState,
+  MercenariesState,
   QuestBoardState,
   TavernState
 }
@@ -167,6 +170,7 @@ object StatesMap {
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
           Skills    -> SkillsState(heroDao, content),
           Knowledge -> KnowledgeState(heroDao, content),
+          Squad -> SquadState(heroDao, content),
           ElementalLair -> ElementalLairState(heroDao, content),
           RottenJoe     -> RottenJoeState(heroDao, content),
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
@@ -193,6 +197,7 @@ object StatesMap {
           ),
           QuestBoard        -> QuestBoardState(heroDao, content),
           Innkeeper         -> InnkeeperState(heroDao, inventoryRepo, content),
+          Mercenaries       -> MercenariesState(heroDao, inventoryRepo, content),
           SilverVein        -> SilverVeinState(heroDao, scheduler, content),
           TreasureMobs      -> TreasureMobsState(heroDao, content),
           TreasureMobsFight -> TreasureMobsFightState(heroDao, content),
