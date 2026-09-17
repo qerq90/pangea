@@ -137,15 +137,25 @@ object GroupStateSpec extends ZIOSpecDefault {
     test("моб обычной встречи встаёт на место 1, где бы ни стоял герой: герой на 2 — пара пуста, цель у него одна — сосед") {
       val h2 = hero.copy(squad = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
       val b  = SoloPveBattle.from(trio.head, h2)
-      val b3 = SoloPveBattle.from(trio.head, hero.copy(squad = Squad(heroPos = 3)))
+      val b3 = SoloPveBattle.from(trio.head, hero.copy(squad = Squad(heroPos = 3,
+                 allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L), Ally(AllyKind.Gnome, 2, 10L, 10L, 0L)))))
       assertTrue(b.group.activePos == 1 && b.group.heroPos == 2 && !b.group.paired && b.unpaired) &&
       assertTrue(b.monsterAt(1).exists(_.currentHp == 100L) && b.monsterAt(2).isEmpty && b.pairedMonster.isEmpty) &&
       assertTrue(b.group.attackTargets == List(1) && b.group.inReach(1) && b.group.hasFormation) &&
       assertTrue(b3.group.attackTargets.isEmpty)                                   // с места 3 до места 1 не достать
     },
 
+    test("в начале боя пустоты в отряде схлопываются: герой один — на месте 1, в паре с мобом") {
+      val stale = hero.copy(squad = Squad(heroPos = 2))
+      val b     = SoloPveBattle.from(trio.head, stale)
+      val gap   = hero.copy(squad = Squad(heroPos = 3, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
+      val g     = SoloPveBattle.from(trio.head, gap)
+      assertTrue(b.group.heroPos == 1 && b.group.paired) &&
+      assertTrue(g.group.heroPos == 2 && g.group.allyAt(1).isDefined && g.group.rows == 2)
+    },
+
     test("группа: мобы по местам 1, 2, 3; в паре — тот, что на месте героя") {
-      val h2 = hero.copy(squad = Squad(heroPos = 2))
+      val h2 = hero.copy(squad = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
       val b  = SoloPveBattle.fromGroup(trio, h2, Nil)
       assertTrue(b.group.paired && b.group.activePos == 2 && b.monsterCurrentHp == 200L) &&
       assertTrue(b.group.others.map(_.currentHp) == List(100L, 300L) && b.group.places == List(1, 3)) &&
@@ -177,17 +187,18 @@ object GroupStateSpec extends ZIOSpecDefault {
       val h2    = hero.copy(squad = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L))))
       val solo  = SoloPveBattle.from(trio.head, h2)                     // моб на 1 занят союзником
       val freed = solo.copy(group = solo.group.copy(allies = Nil))      // союзник ушёл — моб свободен
-      // герой на 4, союзник на 3: в начале боя свободный моб с места 1 сразу шагает к герою
-      val h4    = hero.copy(squad = Squad(heroPos = 4, allies = List(Ally(AllyKind.Human, 3, 10L, 10L, 0L))))
-      val far   = SoloPveBattle.fromGroup(trio, h4, Nil)
-      // а если в полях занятый союзником № 3, а свободные — № 1 и № 2, к герою идёт ближний, второй
-      val stuck = far.engage(3).copy(group = far.engage(3).group.copy(activePos = 3))
-      val fixed = stuck.copy(group = stuck.group.copy(places = List(2, 1)))
+      // герой на 3 за двумя союзниками: в начале боя он в паре с мобом на своём месте
+      val h3    = hero.copy(squad = Squad(heroPos = 3,
+                    allies = List(Ally(AllyKind.Human, 1, 10L, 10L, 0L), Ally(AllyKind.Gnome, 2, 10L, 10L, 0L))))
+      val base  = SoloPveBattle.fromGroup(trio, h3, Nil)
+      // а если герой отошёл на 4 (Таран назад не бывает — это модельный случай), в полях занятый союзником
+      // № 3, а свободные — № 1 и № 2: к герою идёт ближний, второй
+      val fixed = base.copy(group = base.group.copy(heroPos = 4, allies = List(BattleAlly.of(Ally(AllyKind.Human, 3, 10L, 10L, 0L), 1L))))
       val pulled = fixed.pullFree.get
       assertTrue(solo.pullFree.isEmpty) &&
       assertTrue(freed.pullFree.exists(b => b.group.paired && b.group.activePos == 2)) &&
-      assertTrue(far.group.paired && far.monsterCurrentHp == 100L && far.group.places == List(2, 3)) &&
-      assertTrue(!fixed.group.paired && fixed.monsterCurrentHp == 300L && fixed.group.others.map(_.currentHp) == List(200L, 100L)) &&
+      assertTrue(base.group.paired && base.monsterCurrentHp == 300L && base.group.places.sorted == List(1, 2)) &&
+      assertTrue(!fixed.group.paired && fixed.monsterCurrentHp == 300L && fixed.group.others.map(_.currentHp).sorted == List(100L, 200L)) &&
       assertTrue(pulled.group.paired && pulled.monsterCurrentHp == 200L && pulled.group.places.sorted == List(1, 3)) &&
       assertTrue(pulled.pullFree.isEmpty)
     },

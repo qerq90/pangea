@@ -308,11 +308,14 @@ object SoloPveBattle {
     monsterMarked       = monster.marked,
     skillSlots          = hero.activeSkillSlots,
     monsterCurrentEnergy = monster.fightStats.energy,
-    // Отряд встаёт по своим позициям; моб обычной встречи всегда появляется
-    // на месте 1, где бы ни стоял герой.
+    // Отряд встаёт по своим позициям без пустот (герой один — на месте 1); моб
+    // обычной встречи всегда появляется на месте 1, где бы ни стоял герой.
     group =
-      if (squad) GroupState(heroPos = hero.squad.heroPos, activePos = 1,
-        allies = hero.squad.inOrder.map(BattleAlly.of(_, hero.lvl)))
+      if (squad) {
+        val formation = hero.squad.compact
+        GroupState(heroPos = formation.heroPos, activePos = 1,
+          allies = formation.inOrder.map(BattleAlly.of(_, hero.lvl)))
+      }
       else GroupState()
   )
 

@@ -85,14 +85,27 @@ final case class Squad(
     val gone = allies.filter(_.expired(nowMs)).map(_.kind)
     if (gone.isEmpty) (this, Nil)
     else (copy(allies = allies.filterNot(_.expired(nowMs)),
-               offDuty = offDuty ++ gone.map(k => k.entryName -> (nowMs + AllyRates.OffDutyMs))), gone)
+               offDuty = offDuty ++ gone.map(k => k.entryName -> (nowMs + AllyRates.OffDutyMs))).compact, gone)
   }
 
-  def dismiss(kind: AllyKind): Squad = copy(allies = allies.filterNot(_.kind == kind))
+  def dismiss(kind: AllyKind): Squad = copy(allies = allies.filterNot(_.kind == kind)).compact
 
   /** Союзник ушёл по свитку: из отряда — вон, вернётся через сутки. */
   def sentAway(kind: AllyKind, nowMs: Long): Squad =
     dismiss(kind).copy(away = away.updated(kind.entryName, nowMs + AllyRates.AwayMs))
+
+  /** Пустые позиции схлопываются: герой и союзники в прежнем порядке встают на
+    * 1, 2, … — герой один всегда на 1, а не на месте, оставшемся от ушедших. */
+  def compact: Squad = {
+    val order = (None +: allies.map(Some(_))).sortBy {
+      case None    => heroPos
+      case Some(a) => a.position
+    }
+    val placed = order.zipWithIndex.map { case (who, i) => who -> (i + 1) }
+    copy(
+      heroPos = placed.collectFirst { case (None, p) => p }.getOrElse(1),
+      allies  = placed.collect { case (Some(a), p) => a.copy(position = p) })
+  }
 
   /** Переставить союзника на позицию `pos`: занята другим — меняются местами,
     * занята героем — герой встаёт на его прежнюю. */
