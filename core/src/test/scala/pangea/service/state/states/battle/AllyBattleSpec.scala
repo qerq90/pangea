@@ -148,18 +148,18 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(second == StateType.Loot)
     },
 
-    test("свободный моб (напротив него нет союзника) в конце раунда шагает к герою") {
-      val h = hero(heroPos = 2, allies = List(ally(pos = 3)))
+    test("освободившийся моб (союзник напротив ушёл по свитку) в конце раунда шагает к герою") {
+      val h = hero(heroPos = 2, allies = List(ally(pos = 1, hp = Some(1L), armor = Some(0L))))
       for {
         t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
         (state, dao, r) = t
-        // удар по месту 1; союзнику на 3 бить некого; моб с места 1 бьёт героя сбоку; подкрепление
-        _       <- TestRandom.feedInts(60, 99, 99) *> TestRandom.feedLongs(100L, 100L)
+        // удар по месту 1; союзник на 1 бьёт моба напротив + прок; моб обнуляет союзника (свиток); подкрепление
+        _       <- TestRandom.feedInts(60, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
         _       <- state.action(testUser, tap("Attack"), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-      } yield assertTrue(screens.contains("атаковал вас сбоку") && screens.contains("шагает к вам")) &&
-              assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2)
+      } yield assertTrue(screens.contains("воспользовался свитком") && screens.contains("шагает к вам")) &&
+              assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2 && after.group.allies.isEmpty)
     },
 
     test("бить некого, союзники впереди — вместо «Атаки» кнопка «Переместиться»: герой меняется местами с союзником, ход кончается") {
@@ -186,10 +186,12 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(updated.fightStats.hp < 500000L)   // моб в паре ответил герою
     },
 
-    test("бить некого и союзников нет — «Ждать»: герой пропускает удар, раунд идёт") {
-      val h = hero(heroPos = 3, allies = Nil)
+    test("бить некого и союзников уже нет (ушли по свиткам) — «Ждать»: герой пропускает удар, раунд идёт") {
+      // Герой стоял третьим за двумя союзниками; оба ушли по свиткам — один против моба на месте 1.
+      val h = hero(heroPos = 3, allies = List(ally(pos = 1), ally(AllyKind.Gnome, pos = 2)))
+      val b = SoloPveBattle.from(monster(100000L), h)
       for {
-        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        t <- makeState(h, b.copy(group = b.group.copy(allies = Nil, alliesGone = List("Human", "Gnome"))))
         (state, dao, r) = t
         _       <- state.enter(testUser, r)
         entry   <- r.sentScreens.map(_.last)
@@ -457,17 +459,18 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.others.head.stats.hp == 1000L && after.group.places == List(1))
     },
 
-    test("Таран по мобу на месте 2, когда союзника напротив него нет: герой на 2, союзник остаётся на 3") {
-      val h = heroWithSkills(hero(allies = List(ally(pos = 3))), Skill.SweepingStrike, Skill.Ram)
+    test("Таран по мобу на месте 3, когда союзника напротив него нет: герой на 3, союзник остаётся на 1") {
+      val h = heroWithSkills(hero(heroPos = 2, allies = List(ally(pos = 1))), Skill.SweepingStrike, Skill.Ram)
       for {
-        t <- makeState(h, group(h, 1000L, 2000L))
+        t <- makeState(h, group(h, 1000L, 2000L, 3000L))
         (state, dao, r) = t
-        // таран; ответ моба в паре; союзник (напротив пусто, сосед — место 2) + прок; моб № 2 бьёт героя сбоку; подкрепление
-        _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
-        _       <- state.action(testUser, aimed("Skill_202", 2), r)
+        // таран (разброс); базовая атака по паре; ответ пары; союзник бьёт моба № 1 + прок; моб № 1 бьёт
+        // союзника; моб № 3 бьёт героя сбоку; подкрепление
+        _       <- TestRandom.feedInts(60, 99, 60, 99, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L, 100L, 100L)
+        _       <- state.action(testUser, aimed("Skill_202", 3), r)
         after   <- battleOf(dao)
-      } yield assertTrue(after.group.heroPos == 2) &&
-              assertTrue(after.group.allies.head.position == 3)
+      } yield assertTrue(after.group.heroPos == 3 && after.group.paired && after.monsterStats.hp == 3000L) &&
+              assertTrue(after.group.allies.head.position == 1)
     },
 
     test("минибосс: союзник на позиции 2 бьёт босса как соседа") {

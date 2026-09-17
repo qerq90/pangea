@@ -90,6 +90,21 @@ object SquadSpec extends ZIOSpecDefault {
       assertTrue(AllyRates.HireMs == 12L * 60L * 60L * 1000L && AllyRates.OffDutyMs == AllyRates.HireMs)
     },
 
+    test("пустые позиции схлопываются: ушли двое — герой один встаёт на 1; порядок оставшихся сохраняется") {
+      val three = Squad(heroPos = 2, allies = List(Ally(AllyKind.Human, 1, 1L, 1L, 1L, 9L), Ally(AllyKind.Gnome, 4, 1L, 1L, 1L, 9L)))
+      val alone = three.dismiss(AllyKind.Human).dismiss(AllyKind.Gnome)
+      val one   = three.dismiss(AllyKind.Human)
+      val (expired, gone) = three.copy(allies = three.allies.map(_.copy(hiredUntil = 0L))).expire(1L)
+      val away  = three.sentAway(AllyKind.Human, 0L)
+      assertTrue(alone.heroPos == 1 && alone.isEmpty) &&
+      assertTrue(one.heroPos == 1 && one.allyAt(2).exists(_.kind == AllyKind.Gnome)) &&
+      assertTrue(gone.size == 2 && expired.heroPos == 1) &&
+      assertTrue(away.heroPos == 1 && away.allyAt(2).exists(_.kind == AllyKind.Gnome)) &&
+      assertTrue(three.compact.heroPos == 2 && three.compact.allyAt(1).exists(_.kind == AllyKind.Human) &&
+                 three.compact.allyAt(3).exists(_.kind == AllyKind.Gnome)) &&
+      assertTrue(Squad(heroPos = 4).compact == Squad(heroPos = 1))
+    },
+
     test("отряд переживает сериализацию, а пустая запись читается как пустой отряд") {
       val s    = Squad(heroPos = 2, allies = List(Ally(AllyKind.Gnome, 1, 10L, 20L, 30L)), away = Map("Human" -> 5L))
       val back = s.asJson.as[Squad].toOption
