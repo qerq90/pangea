@@ -1,5 +1,6 @@
 package pangea.service.state.states.battle
 
+import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
@@ -89,10 +90,28 @@ case class BattleState(
       ua: UserAction,
       renderer: Renderer
   ): Task[StateType] =
-    getBattle(user).flatMap { battle =>
-      // Герой обнулён — ходит только таймер отряда; кнопки лишь показывают, как дела.
-      if (battle.group.heroDown && !BattleState.parseAction(ua).contains("SquadTick")) showDown(user, battle, renderer)
-      else branch.act(user, ua, renderer)
+    heroDao.readActiveBattle(user.userId).flatMap {
+      case None       => recover(user, renderer)
+      case Some(json) =>
+        ZIO.fromEither(json.as[SoloPveBattle]).flatMap { battle =>
+          // Герой обнулён — ходит только таймер отряда; кнопки лишь показывают, как дела.
+          if (battle.group.heroDown && !BattleState.parseAction(ua).contains("SquadTick")) showDown(user, battle, renderer)
+          else branch.act(user, ua, renderer)
+        }
+    }
+
+  /** Герой числится в бою, а боя нет. Так бывает, когда победа уже записана
+    * (бой очищен, опыт начислен, добыча в scene_data), а переход к экрану
+    * добычи не состоялся — оборвалась отправка сообщений, перезапуск между
+    * записью и переходом, — либо бой сняли снаружи. Раньше это была ошибка
+    * «пропишите /home» на каждое нажатие. Теперь: добыча ждёт — ведём к ней,
+    * иначе — тихо в лабиринт. */
+  private def recover(user: User, renderer: Renderer): Task[StateType] =
+    heroDao.readSceneData(user.userId).flatMap { scene =>
+      val won = scene.flatMap(_.as[LootState.LootData].toOption).exists(_.won)
+      if (won) ZIO.succeed(StateType.Loot)
+      else heroDao.writeSceneData(user.userId, Json.Null) *>
+        renderer.show(user, Screen(content.text("battle.interrupted"), Nil)).as(StateType.Dungeon)
     }
 
   // ── Оболочка I/O: читаем всё → считаем ход → пишем всё ──────────────────────
@@ -3070,7 +3089,8 @@ case class BattleState(
         returnState = lootReturn,
         eventData = prev.flatMap(_.eventData),
         monsterName = Option.when(fallen.size > 1)(first.monsterName),
-        queue = lootByMonster.tail
+        queue = lootByMonster.tail,
+        won = true
       )
       // Первый поверженный легендарный моб роняет квестовый «Неактивный куб Азата»
       // (если куба ещё нет и он не был куплен). Хранится флагом в azat_data.
