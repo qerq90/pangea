@@ -20,6 +20,7 @@ import pangea.model.skill.{MonsterEnergy, MonsterSkill, Skill}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.LootState
+import pangea.service.state.MurlocQuest
 import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
@@ -271,9 +272,11 @@ case class BattleState(
         (persistHero *> persistSquad *> clearDust).uninterruptible *> showLog *> showGroup *>
           renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
       case Outcome.Fled =>
+        // Сюжетный бой идёт не в лабиринте — бежать из него в город.
+        val to = if (res.battle.story.isDefined) StateType.GlobalMap else StateType.Dungeon
         (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
           showLog *>
-          renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(StateType.Dungeon)
+          renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(to)
     }
   }
 
@@ -2841,8 +2844,8 @@ case class BattleState(
     else {
       val b0 = res.battle.copy(group = res.battle.group.copy(round = res.battle.group.round + 1))
       for {
-        // подкрепление: сородич первого моба, редкость как обычно
-        comes <- chanceRoll(b0.group.aliveCount < GroupState.MaxMonsters, GroupState.ReinforcementChancePct)
+        // подкрепление: сородич первого моба, редкость как обычно (сюжетный бой — нет)
+        comes <- chanceRoll(b0.group.aliveCount < GroupState.MaxMonsters && b0.story.isEmpty, GroupState.ReinforcementChancePct)
         withMore <-
           if (!comes) ZIO.succeed((b0, Vector.empty[String]))
           else for {
@@ -2973,14 +2976,18 @@ case class BattleState(
       blessed = azat.blessingActive(now)
       // Все павшие этого боя в порядке гибели; в бою 1 на 1 — один моб.
       fallen = battle.group.slain :+ battle.slainActive
-      // Сюжетный бой: ни опыта, ни добычи по таблицам — только то, что положил сюжет.
-      storyFight = battle.story.isDefined
+      // Сюжетный бой: ни опыта, ни добычи по таблицам — только то, что положил
+      // сюжет. Налёт на деревню мурлоков — исключение: награда как за обычный
+      // бой, только этаж для неё — уровень героя (мурлоки его уровня).
+      raid       = battle.story.contains(MurlocQuest.RaidStory)
+      storyFight = battle.story.isDefined && !raid
+      killLevel  = if (raid) hero.lvl else hero.dungeonLevel.toLong
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
       // Группа — опыт одной суммой за всех.
       baseExp = if (storyFight) 0L
                 else battle.boss
                   .map(_.expReward(battle.monsterLvl))
-                  .getOrElse(fallen.map(m => (hero.dungeonLevel.toLong * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
+                  .getOrElse(fallen.map(m => (killLevel * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
                   .max(1L)
       expGained = if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
       leveled = hero.gainExp(expGained)
@@ -3000,7 +3007,7 @@ case class BattleState(
             val (d, r) = LootGenerator.roll(
               Rarity.withName(m.rarity),
               Race.withName(m.race),
-              hero.dungeonLevel.toLong,
+              killLevel,
               rng,
               gearChanceBonusPct = hero.gems.gearDropBonusPct,
               rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L
@@ -3017,14 +3024,14 @@ case class BattleState(
             hero.passives.hasJeweler,
             Rarity.withName(m.rarity),
             Race.withName(m.race),
-            hero.dungeonLevel.toLong,
+            killLevel,
             rng
           )
           (acc :+ (name -> (d ++ extra)), r)
       }
       // Благословение: 5% шанс дополнительной экипировки после боя.
       (blessingGear, _) =
-        if (blessed) LootGenerator.rollBlessingExtraGear(BattleState.BlessingExtraDropPct, battle.rarity, hero.dungeonLevel.toLong, rngAfter2)
+        if (blessed) LootGenerator.rollBlessingExtraGear(BattleState.BlessingExtraDropPct, battle.rarity, killLevel, rngAfter2)
         else (Option.empty[pangea.model.item.Item], rngAfter2)
       lootByMonster = withExtras.map { case (name, drops) =>
         LootState.MonsterLoot(
@@ -3044,11 +3051,16 @@ case class BattleState(
       prev <- heroDao
         .readSceneData(user.userId)
         .map(_.flatMap(_.as[LootState.LootData].toOption))
+      // Сотый убитый: старейшина мурлоков ждёт героя после добычи — если та не
+      // ведёт в другую сцену (тогда он выйдет на ближайшем осмотре этажа).
+      kills = hero.kills + fallen.size.toLong
+      elderWaits <- if (kills >= NpcQuest.MurlocElderKill) MurlocQuest.markPending(heroDao, user.userId, now)
+                    else ZIO.succeed(false)
       // После добычи с элементаля игрок идёт осматривать ЕГО логово. Гнилого Джо
       // это не касается — осматривать после него нечего.
       lootReturn = if (battle.boss.exists(_.race == Race.Elemental))
                      Some(StateType.ElementalSearch)
-                   else prev.flatMap(_.returnState)
+                   else prev.flatMap(_.returnState).orElse(Option.when(elderWaits)(StateType.MurlocElder))
       // Первый экран добычи — первый павший; остальные ждут своей очереди. Имя
       // моба над добычей показываем только в группе.
       lootData = LootState.LootData(
@@ -3069,8 +3081,8 @@ case class BattleState(
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
       // Вампирская фляга пьёт кровь павших: с каждого — шанс на глоток.
       flaskRefill <- vampiricRefill(user, hero, fallen.size)
-      // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе.
-      kills = hero.kills + fallen.size.toLong
+      // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе (сотый
+      // зовёт старейшину мурлоков — см. выше).
       _ <- heroDao.updateKills(user.userId, kills)
       letterFound <- if (hero.kills < NpcQuest.MarisaLetterKill && kills >= NpcQuest.MarisaLetterKill)
                        MarisaQuest.giveLetter(heroDao, inventoryRepo, itemRepo, user.userId, hero)
