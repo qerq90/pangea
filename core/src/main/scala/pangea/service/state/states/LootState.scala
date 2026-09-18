@@ -195,7 +195,10 @@ object LootState {
   //                   scene_data перед переходом, чтобы событие прочитало свой
   //                   прогресс — напр. ChainData цепочки боёв);
   //   - monsterName — чья это добыча (только после группового боя);
-  //   - queue       — добыча остальных павших, по одному экрану на каждого.
+  //   - queue       — добыча остальных павших, по одному экрану на каждого;
+  //   - won         — это добыча за ПОБЕДУ (пишет BattleState.applyVictory), а не
+  //                   роутинг, положенный сценой перед боем. По ней бой узнаёт
+  //                   свою же не доехавшую до экрана победу (см. BattleState.recover).
   final case class LootData(
     items:       List[Item],
     silvers:     List[Long],
@@ -203,7 +206,8 @@ object LootState {
     returnState: Option[StateType] = None,
     eventData:   Option[Json]      = None,
     monsterName: Option[String]    = None,
-    queue:       List[MonsterLoot] = Nil
+    queue:       List[MonsterLoot] = Nil,
+    won:         Boolean           = false
   )
   object LootData {
     implicit val encoder: Encoder[LootData] = deriveEncoder[LootData]
@@ -218,7 +222,8 @@ object LootState {
         eventData   <- c.getOrElse[Option[Json]]("eventData")(None)
         monsterName <- c.getOrElse[Option[String]]("monsterName")(None)
         queue       <- c.getOrElse[List[MonsterLoot]]("queue")(Nil)
-      } yield LootData(items, silvers, doubloons, returnState, eventData, monsterName, queue)
+        won         <- c.getOrElse[Boolean]("won")(false)
+      } yield LootData(items, silvers, doubloons, returnState, eventData, monsterName, queue, won)
   }
 
   /** Добыча с одного павшего в группе: ждёт своей очереди на экран. */

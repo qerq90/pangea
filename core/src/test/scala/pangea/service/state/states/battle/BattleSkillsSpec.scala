@@ -186,10 +186,32 @@ object BattleSkillsSpec extends ZIOSpecDefault {
       val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
       for {
         triple                <- makeState(hero, battle)
-        (state, heroDao, _)    = triple
+        (state, heroDao, renderer) = triple
         result                <- state.action(testUser, tap("Skill_101"), failing).either
         after                 <- heroDao.readActiveBattle(userId)
-      } yield assertTrue(result.isLeft) && assertTrue(after.isEmpty)
+        // Герой остался числиться в бою, боя нет, добыча за победу — в scene_data.
+        // Следующее нажатие (связь вернулась) ведёт к добыче, а не в ошибку.
+        next                  <- state.action(testUser, tap("Attack"), renderer)
+        loot                  <- heroDao.readSceneData(userId).map(_.flatMap(_.as[pangea.service.state.states.LootState.LootData].toOption))
+      } yield assertTrue(result.isLeft) && assertTrue(after.isEmpty) &&
+              assertTrue(next == StateType.Loot) && assertTrue(loot.exists(_.won))
+    },
+
+    test("Герой числится в бою, а боя нет и добычи нет (бой сняли снаружи) → сообщение и в лабиринт, не ошибка") {
+      import pangea.service.state.states.LootState.LootData
+      val hero  = heroWith(Some(Skill.SweepingStrike), None)
+      for {
+        triple                     <- makeState(hero, weakBattle(Nil))
+        (state, heroDao, renderer)  = triple
+        _                          <- heroDao.clearActiveBattle(userId)
+        // роутинг, положенный сценой ПЕРЕД боем, — не добыча за победу: в Loot не ведёт
+        _                          <- heroDao.writeSceneData(userId, LootData(Nil, Nil, returnState = Some(StateType.TreasureSchron)).asJson)
+        res                        <- state.action(testUser, tap("Attack"), renderer)
+        screens                    <- renderer.sentScreens
+        scene                      <- heroDao.readSceneData(userId)
+      } yield assertTrue(res == StateType.Dungeon) &&
+              assertTrue(screens.exists(_.text.contains("Бой оборвался"))) &&
+              assertTrue(scene.forall(_.isNull))
     },
 
     test("Damage-скилл добивает моба сам → победа, переход в Loot, бой очищен") {
