@@ -13,7 +13,7 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.model.trauma.{Trauma, TraumaRoll}
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.marisa.MarisaHuntState
-import pangea.service.state.{AzatData, MarisaQuest, State, UserAction}
+import pangea.service.state.{AzatData, MarisaQuest, MurlocQuest, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -42,6 +42,9 @@ case class DeathState(
       // Смерть от коллектора («Письмо Марисе»): серебра уходит не меньше 15 000,
       // дублонов — 105, задание закрывается, проснуться — в городе.
       collector     = battle.exists(_.story.contains(MarisaQuest.CollectorStory))
+      // Смерть в налёте на деревню мурлоков: штрафы обычные, задание остаётся
+      // (карта на руках), проснуться — в городе.
+      raid          = battle.exists(_.story.contains(MurlocQuest.RaidStory))
       withMarisa   <- heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LootData].toOption)
                         .flatMap(_.eventData).flatMap(_.as[MarisaHuntState.Progress].toOption).exists(_.withMarisa))
       // Благословение Азата смягчает штраф: теряется на BlessingBonusPct% меньше.
@@ -85,12 +88,15 @@ case class DeathState(
       // Коллектор: задание закрыто здесь же, а что сказать и куда идти —
       // RestState прочитает при пробуждении.
       _            <- ZIO.when(collector)(MarisaQuest.finish(heroDao, inventoryRepo, content, user.userId, hero))
-      wake          = if (!collector) Json.obj()
-                      else Json.obj(
+      wake          = if (collector) Json.obj(
                         "wakeTo"    -> (StateType.GlobalMap: StateType).asJson,
                         "wakeLines" -> List(
                           if (withMarisa) "marisa.deathReturnWithMarisa" else "marisa.deathReturn",
                           "marisa.questDone").asJson)
+                      else if (raid) Json.obj(
+                        "wakeTo"    -> (StateType.GlobalMap: StateType).asJson,
+                        "wakeLines" -> List("murlocVillage.raid.death").asJson)
+                      else Json.obj()
       _            <- heroDao.writeSceneData(user.userId, Json.obj(
                         "restDurationMs" -> deathRestMs.asJson,
                         "postDeath"      -> true.asJson).deepMerge(wake))

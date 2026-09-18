@@ -53,6 +53,8 @@ import pangea.model.state.StateType.{
   GustavoHerbs,
   MarisaSearch,
   MarisaHunt,
+  MurlocElder,
+  MurlocVillage,
   TreasureHunt,
   TreasureMobs,
   TreasureMobsFight,
@@ -85,6 +87,7 @@ import pangea.service.state.states.guild.{
 }
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.marisa.{MarisaHuntState, MarisaSearchState}
+import pangea.service.state.states.murloc.{MurlocElderState, MurlocVillageState}
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.gustavo.{
   GustavoBoostState,
@@ -207,6 +210,8 @@ object StatesMap {
           FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content),
           MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
           MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content),
+          MurlocElder       -> MurlocElderState(heroDao, inventoryRepo, itemRepo, content),
+          MurlocVillage     -> MurlocVillageState(heroDao, inventoryRepo, itemRepo, content),
           Outskirts -> OutskirtsState(
             heroDao,
             inventoryRepo,

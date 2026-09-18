@@ -1,7 +1,7 @@
 package pangea.service.state
 
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Renderer, SceneContent, Screen}
+import pangea.engine.{Renderer, SceneContent}
 import pangea.generator.item.GemGenerator
 import pangea.model.hero.{Achievement, Hero}
 import pangea.model.item.{GemKind, Item, QuestItemKind}
@@ -61,18 +61,12 @@ object MarisaQuest {
   val CollectorRace: Race     = Race.Human
   val CollectorRarity: Rarity = Rarity.Uncommon
 
-  /** Есть ли у героя такой сюжетный предмет. */
-  def has(items: List[Item], kind: QuestItemKind): Boolean = items.exists(_.questItem.contains(kind))
+  /** Есть ли у героя такой сюжетный предмет (см. [[QuestSupport.hasItem]]). */
+  def has(items: List[Item], kind: QuestItemKind): Boolean = QuestSupport.hasItem(items, kind)
 
-  /** Положить сюжетный предмет, если его ещё нет. Возвращает, положили ли. */
+  /** Положить сюжетный предмет, если его ещё нет (см. [[QuestSupport.giveItem]]). */
   def give(inventoryRepo: InventoryRepository, itemRepo: ItemRepository, hero: Hero, kind: QuestItemKind): Task[Boolean] =
-    for {
-      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      given <- if (has(inv.items.data, kind)) ZIO.succeed(false)
-               else itemRepo.persist(hero.id, QuestItemKind.item(kind))
-                      .flatMap(it => inventoryRepo.addItem(hero.id, it).mapError(e => new Throwable(e.toString)))
-                      .as(true)
-    } yield given
+    QuestSupport.giveItem(inventoryRepo, itemRepo, hero, kind)
 
   /** Пятидесятый убитый: письмо в сумку и задание на первый шаг. Если задание
     * уже начато или закрыто — ничего. */
@@ -94,22 +88,12 @@ object MarisaQuest {
   /** Закрыть задание: письмо и карта уходят из сумки, задание — в выполненные.
     * Возвращает строку для игрока. */
   def finish(heroDao: HeroDao, inventoryRepo: InventoryRepository, content: SceneContent, userId: UserId, hero: Hero): Task[String] =
-    for {
-      inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      ids  = inv.items.data.filter(i => i.questItem.exists(k => k == QuestItemKind.MarisaLetter || k == QuestItemKind.KelvinMap)).map(_.id).toSet
-      _   <- ZIO.when(ids.nonEmpty)(inventoryRepo.removeItems(ids, hero.id).mapError(e => new Throwable(e.toString)))
-      _   <- NpcQuestLog.modify(heroDao, userId)(_.finish(NpcQuest.Marisa))
-    } yield content.text("marisa.questDone")
+    QuestSupport.removeItems(inventoryRepo, hero, Set(QuestItemKind.MarisaLetter, QuestItemKind.KelvinMap)) *>
+      NpcQuestLog.modify(heroDao, userId)(_.finish(NpcQuest.Marisa)).as(content.text("marisa.questDone"))
 
-  /** Достижение — один раз; строка о нём показывается сразу. */
+  /** Достижение — один раз; строка о нём показывается сразу (см. [[QuestSupport.grant]]). */
   def grant(heroDao: HeroDao, content: SceneContent, user: User, hero: Hero, a: Achievement, renderer: Renderer): Task[Hero] =
-    if (hero.hasAchievement(a)) ZIO.succeed(hero)
-    else {
-      val updated = hero.withAchievement(a)
-      heroDao.updateAchievements(user.userId, updated.achievements) *>
-        renderer.show(user, Screen(content.format("marisa.achievement", "title" -> a.title, "bonus" -> a.bonusLine), Nil))
-          .as(updated)
-    }
+    QuestSupport.grant(heroDao, content, user, hero, a, renderer)
 
   /** Хватает ли на долг Кельвина. */
   def canPayDebt(hero: Hero): Boolean = hero.silver >= DebtSilver && hero.doubloons >= DebtDoubloons

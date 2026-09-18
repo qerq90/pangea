@@ -21,7 +21,8 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.states.marisa.MarisaHuntState
-import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, NpcQuestLog, State, UiScene, UserAction}
+import pangea.service.state.states.murloc.MurlocVillageState
+import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, State, UiScene, UserAction}
 import zio.{Random, Task, ZIO}
 
 case class InventoryState(
@@ -57,13 +58,16 @@ case class InventoryState(
       "UseKelvinMap"      -> Target.Run { (u, _,  r) => useKelvinMap(u, r) },
       "MapWithMarisa"     -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = true) },
       "MapAlone"          -> Target.Run { (u, _,  r) => startHunt(u, r, withMarisa = false) },
+      // «Деревня Мурлоков»: по карте старейшины — к развилке (налёт или помощь).
+      "UseMurlocMap"      -> Target.Run { (u, _,  r) => useMurlocMap(u, r) },
       // Трактаты Густаво: читать, пока не осилишь.
       "ReadTreatise"      -> Target.Run { (u, _,  r) => readTreatise(u, r) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing, StateType.MarisaHunt)
+  override def targetStates: Set[StateType] =
+    Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing, StateType.MarisaHunt, StateType.MurlocVillage)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
@@ -295,6 +299,10 @@ case class InventoryState(
         case Some(QuestItemKind.KelvinMap) =>
           Screen(s"${item.name}\n\n${QuestItemKind.KelvinMap.description}", List(
             content.choice("UseKelvinMap", "marisa.mapUseLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
+        case Some(QuestItemKind.MurlocVillageMap) =>
+          val text = s"${item.name}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MurlocQuest.MapDifficulty))}\n\n${QuestItemKind.MurlocVillageMap.description}"
+          Screen(text, List(
+            content.choice("UseMurlocMap", "murlocVillage.map.useLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
         case Some(book) if HerbLore.isTreatise(book) =>
           Screen(s"${item.name}\n\n${book.description}", List(
             content.choice("ReadTreatise", "knowledge.readLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
@@ -361,6 +369,17 @@ case class InventoryState(
              else if (quests.onStep(NpcQuest.Marisa, 3))
                renderer.show(user, content.screen("marisa.mapTakeMarisa")).as(StateType.Inventory)
              else startHunt(user, renderer, withMarisa = false)
+    } yield res
+
+  /** Карта деревни мурлоков: только из города; дальше развилку показывает сама деревня. */
+  private def useMurlocMap(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      from <- heroDao.readReturnState(user.userId)
+      res  <- if (!from.exists(StateType.cityStates.contains))
+                renderer.show(user, Screen(content.text("marisa.mapOnlyInCity"), Nil)) *> showList(user, renderer)
+              else
+                heroDao.writeSceneData(user.userId,
+                  MurlocVillageState.Progress(MurlocVillageState.Step.Route).asJson).as(StateType.MurlocVillage)
     } yield res
 
   private def startHunt(user: User, renderer: Renderer, withMarisa: Boolean): Task[StateType] =

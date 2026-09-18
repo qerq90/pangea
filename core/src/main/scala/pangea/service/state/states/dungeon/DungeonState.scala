@@ -14,7 +14,7 @@ import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{CharacterMenu, InstantRest, SquadDuty, State, UserAction}
+import pangea.service.state.{CharacterMenu, InstantRest, MurlocQuest, NpcQuestLog, SquadDuty, State, UserAction}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -49,7 +49,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     fallback = Target.Goto(StateType.Dungeon)
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats + StateType.MurlocElder
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -95,8 +95,14 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     branch.act(user, ua, renderer)
 
   /** Нажатие «Исследовать уровень»: показываем экран осмотра и сразу же
-   *  выбираем и разыгрываем случайное событие. */
+   *  выбираем и разыгрываем случайное событие. Старейшина мурлоков, которому
+   *  не досталось экрана добычи после сотого убитого, выходит здесь. */
   private def findEvent(user: User, renderer: Renderer): Task[StateType] =
+    NpcQuestLog.load(heroDao, user.userId).flatMap { quests =>
+      if (MurlocQuest.elderPending(quests)) ZIO.succeed(StateType.MurlocElder) else rollEvent(user, renderer)
+    }
+
+  private def rollEvent(user: User, renderer: Renderer): Task[StateType] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)

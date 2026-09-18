@@ -170,11 +170,11 @@ case class Hero(
   def effectiveBaseStats(nowMs: Long): BaseStats = {
     val p = combinedPenalties(nowMs)
     val b = HeroRaceBuff.of(race)
+    // Достижения дают плоскую прибавку к базе — до расы, травм и зелий.
     BaseStats(
-      agi = (b.applyAgi(baseStats.agi) * statBoosts.agiFactor(nowMs)).toLong.max(1L),
+      agi = (b.applyAgi(baseStats.agi + Achievement.agiBonus(this)) * statBoosts.agiFactor(nowMs)).toLong.max(1L),
       vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L),
-      str = (b.applyStr(baseStats.str) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
-      // Достижения дают плоскую прибавку к базе — до расы, травм и зелий.
+      str = (b.applyStr(baseStats.str + Achievement.strBonus(this)) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
       int = (b.applyInt(baseStats.int + Achievement.intBonus(this)) * (1.0 - p.intPct) * statBoosts.intFactor(nowMs)).toLong.max(1L)
     )
   }

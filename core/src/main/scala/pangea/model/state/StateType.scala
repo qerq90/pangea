@@ -100,6 +100,10 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object MarisaSearch extends StateType // поиски Долорес и Марисы в Портовом квартале
   case object MarisaHunt   extends StateType // поход к тайнику Кельвина по таймеру и встреча с коллектором
 
+  // «Деревня Мурлоков».
+  case object MurlocElder   extends StateType // старейшина выходит к герою после сотого убитого
+  case object MurlocVillage extends StateType // по карте: налёт на деревню или помощь снаряжением
+
   /** Городские сцены — где герой «в городе» (сюжетную карту можно открыть только
     * отсюда). Смотрится по `returnState` меню персонажа. */
   val cityStates: Set[StateType] = Set(
