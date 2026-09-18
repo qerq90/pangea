@@ -6,7 +6,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState}
+import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.squad.{AllyKind, AllySkill}
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
@@ -1863,7 +1863,7 @@ case class BattleState(
             "energy" -> hero.fightStats.energy.toString
           )
         )
-      case Some(slot) if BattleState.dealsDamage(slot.skill.effect) && battle.group.attackTargets.isEmpty =>
+      case Some(slot) if BattleState.needsEnemy(slot.skill.effect) && battle.group.attackTargets.isEmpty =>
         cont(hero, battle, content.text("battle.group.noTarget"))
       case Some(slot) =>
         val cost      = slot.skill.energyCost(hero)
@@ -1882,7 +1882,12 @@ case class BattleState(
     * нему: сосед оказывается напротив, получает урон и проки, и герой шагает
     * обратно — базовая атака и ответ мобов идут по-прежнему. Убитый умением
     * сосед уходит в павшие сразу, Таран по живому соседу помечает место, на
-    * которое герой шагнёт в конце раунда. */
+    * которое герой шагнёт в конце раунда. Умения, задевающие остальных в строю
+    * (дуга Размашистого — соседей цели, Вихрь и Веерный порез — всех в
+    * досягаемости героя, см. [[strikeOthers]]), могут добить того, кто стоял в
+    * полях до подмены; тогда возвращать некого, цель остаётся в полях, а пары у
+    * героя больше нет. «Отбросить» меняет строй само (см. [[knockBack]]): в
+    * полях после него стоит тот, кто вышел на место отброшенного. */
   private def skillHit(
       hero: Hero,
       battle: SoloPveBattle,
@@ -1914,13 +1919,20 @@ case class BattleState(
         else followUp(h, b, nowMs, lines, skip)
       } else {
         val back = b.engage(home)
+        // Прежний активный пал от отголоска умения (дуга, вихрь, порез): его
+        // место пусто, `engage` ничего не вернул — в полях так и стоит цель, и
+        // пары у героя нет.
+        val homeGone = back.group.activePos != home
         if (dead) {
-          val fallen = back.sideFallen(back.group.idxOf(target))
-          val slain  = lines :+ content.format("battle.group.sideSlain", "monster" -> b.monsterName)
-          if (paired) playerStrike(h, fallen, nowMs, slain, skip) else followUp(h, fallen, nowMs, slain, skip)
+          if (homeGone) ZIO.succeed(victoryByHero(h, back, lines, nowMs))
+          else {
+            val fallen = back.sideFallen(back.group.idxOf(target))
+            val slain  = lines :+ content.format("battle.group.sideSlain", "monster" -> b.monsterName)
+            if (paired) playerStrike(h, fallen, nowMs, slain, skip) else followUp(h, fallen, nowMs, slain, skip)
+          }
         } else {
           val rammed = ramMark(back)
-          if (paired) playerStrike(h, rammed, nowMs, lines, skip)
+          if (paired && !homeGone) playerStrike(h, rammed, nowMs, lines, skip)
           else strikeSide(h, rammed, target, nowMs, lines, skip).flatMap(closeTurn(_, nowMs, skip))
         }
       }
@@ -1938,6 +1950,63 @@ case class BattleState(
         case Skill.Effect.Damage(reducedByDefence) =>
           val value = if (reducedByDefence) reduced else raw
           dealSkillDamage(hero, bumped, value, dealt => tmpl.replace("{}", dealt.toString), next)
+
+        case Skill.Effect.Sweep(pct) =>
+          // По цели — как удар, срезанный защитой; её соседям по строю — доля
+          // от того, что по ней прошло.
+          dealSkillDamage(hero, bumped, reduced, dealt => tmpl.replace("{}", dealt.toString), next,
+            splash = (b, dealt) => strikeOthers(b, around(b.group.activePos)) { tmp =>
+              val amount = (dealt * pct / 100L).max(1L)
+              (plainHit(tmp, amount),
+               content.format("battle.group.sweepSplash", "monster" -> tmp.monsterName, "damage" -> amount.toString))
+            })
+
+        case Skill.Effect.Whirl =>
+          // По цели — как удар, срезанный защитой; каждому другому в
+          // досягаемости героя — тот же бросок, срезанный уже его защитой.
+          dealSkillDamage(hero, bumped, reduced, dealt => tmpl.replace("{}", dealt.toString), next,
+            splash = (b, _) => strikeOthers(b, around(b.group.heroPos)) { tmp =>
+              val amount = (raw * (1.0 - monsterDefenceCut(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs))).toLong.max(1L)
+              (plainHit(tmp, amount),
+               content.format("battle.group.whirlHit", "monster" -> tmp.monsterName, "damage" -> amount.toString))
+            })
+
+        case Skill.Effect.FanBleed(pct) =>
+          // Цели — урон и кровь, как у «Кровотечения»; каждому другому в
+          // досягаемости героя — тот же урон и та же кровь (иммунитеты — в withEffects).
+          def bleed(b: SoloPveBattle): SoloPveBattle =
+            b.withEffects(b.effects.copy(monsterBleed = Some(b.effects.monsterBleed.map(_.stackedWith(pct)).getOrElse(Bleed(pct)))))
+          dealSkillDamage(hero, bleed(bumped), raw, dealt => tmpl.replace("{}", dealt.toString), next,
+            splash = (b, _) => strikeOthers(b, around(b.group.heroPos)) { tmp =>
+              (bleed(plainHit(tmp, raw)),
+               content.format("battle.group.fanCut", "monster" -> tmp.monsterName, "damage" -> raw.toString, "pct" -> pct.toString))
+            })
+
+        case Skill.Effect.WarCry(maxPct, turns) =>
+          // Урона нет: все мобы в досягаемости героя — и в полях, и в строю —
+          // теряют pct% защиты на `turns` ходов и пропускают ближайшее умение.
+          val pct = raw.min(maxPct.toLong).max(1L).toInt
+          def cowed(b: SoloPveBattle): SoloPveBattle = b.withEffects(b.effects.copy(
+            monsterDefenceDebuff     = Some(TimedDefenceDebuff(pct, turns)),
+            monsterSkillBlockedTurns = BattleState.WarCrySkillBlockTurns))
+          val active  = if (bumped.group.attackTargets.contains(bumped.group.activePos)) cowed(bumped) else bumped
+          val (shouted, _) = strikeOthers(active, around(active.group.heroPos))(tmp => (cowed(tmp), ""))
+          next(hero, shouted, Vector(tmpl.replace("{}", pct.toString)))
+
+        case Skill.Effect.Knockback =>
+          // Урон без защиты; выживший отлетает в конец строя, а последний
+          // выходит на его место — базовая атака и ответ идут уже по нему.
+          val line: Long => String = dealt =>
+            tmpl.replaceFirst("\\{\\}", java.util.regex.Matcher.quoteReplacement(aimed.monsterName))
+                .replaceFirst("\\{\\}", dealt.toString)
+          val thrown: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] = (h, b, lines) =>
+            if (b.monsterCurrentHp <= 0) next(h, b, lines)
+            else knockBack(b) match {
+              case None                    => next(h, b, lines)
+              case Some((moved, newcomer)) =>
+                next(h, moved, lines :+ content.format("battle.group.knockedBack", "monster" -> b.monsterName, "next" -> newcomer))
+            }
+          dealSkillDamage(hero, bumped, raw, line, thrown)
 
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
@@ -2017,7 +2086,11 @@ case class BattleState(
       battle: SoloPveBattle,
       value: Long,
       line: Long => String,
-      next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult]
+      next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult],
+      // Что тот же удар делает с остальным строем (Размашистый, Вихрь, Веерный
+      // порез): получает бой после удара по цели и урон, который по ней реально
+      // прошёл.
+      splash: (SoloPveBattle, Long) => (SoloPveBattle, Vector[String]) = (b, _) => (b, Vector.empty)
   ): Task[TurnResult] = {
     // «Охотник» (порог 12): первая за бой способность, наносящая урон, бьёт вдвое.
     val doubles = hero.sets.doublesFirstSkill && !battle.effects.doubleSpent
@@ -2045,11 +2118,61 @@ case class BattleState(
     val hit      = battle
       .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
       .withEffects(effects)
-    if (newHp <= 0) next(hero, hit, Vector(skillLine + dotIndicators(hit)))
-    else
+    if (newHp <= 0) {
+      val (swept, splashLog) = splash(hit, armorDmg + hpDmg)
+      next(hero, swept, Vector(skillLine + dotIndicators(hit)) ++ splashLog)
+    } else
       resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>
-        next(hero, afterProcs, Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog)
+        val (swept, splashLog) = splash(afterProcs, armorDmg + hpDmg)
+        next(hero, swept, Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog ++ splashLog)
       }
+  }
+
+  /** Места в досягаемости от `pos`: оно само и соседние (см. `GroupState.Reach`). */
+  private def around(pos: Int): Range = (pos - GroupState.Reach) to (pos + GroupState.Reach)
+
+  /** Умение задевает и остальных в строю: каждый живой моб на местах `positions`
+    * (кроме того, что в полях) разворачивается во временную пару, `hit` бьёт его
+    * там — урон и эффекты ложатся с иммунитетами через `withEffects` — и он
+    * сворачивается обратно; добитый уходит в павшие, а Таран в него сгорает
+    * (см. `GroupState.withoutSlot`). Пустая строка от `hit` в лог не идёт.
+    * Бросков нет — чистая функция. */
+  private def strikeOthers(battle: SoloPveBattle, positions: Seq[Int])(
+      hit: SoloPveBattle => (SoloPveBattle, String)
+  ): (SoloPveBattle, Vector[String]) = {
+    val near = positions.toList.distinct.sorted
+      .filter(pos => pos != battle.group.activePos && battle.monsterAt(pos).exists(_.alive))
+    near.foldLeft((battle, Vector.empty[String])) { case ((b, log), pos) =>
+      val idx         = b.group.idxOf(pos)
+      val (tmp, line) = hit(b.withActive(b.group.others(idx)))
+      val placed      = b.copy(group = b.group.copy(others = b.group.others.updated(idx, tmp.activeSlot)))
+      val lines       = if (line.isEmpty) log else log :+ line
+      if (tmp.monsterCurrentHp > 0L) (placed, lines)
+      else (placed.sideFallen(idx), lines :+ content.format("battle.group.sideSlain", "monster" -> tmp.monsterName))
+    }
+  }
+
+  /** Урон-«отголосок» умения по мобу во временной паре: броня, потом HP — без
+    * защиты, стихий и проков (это отголосок удара, а не удар). */
+  private def plainHit(tmp: SoloPveBattle, amount: Long): SoloPveBattle = {
+    val armorDmg = math.min(tmp.monsterCurrentArmor, amount)
+    tmp.copy(monsterCurrentArmor = tmp.monsterCurrentArmor - armorDmg,
+             monsterCurrentHp    = (tmp.monsterCurrentHp - (amount - armorDmg)).max(0L))
+  }
+
+  /** «Отбросить»: активный моб отлетает на последнее занятое место строя, а тот,
+    * кто там стоял, выходит на его место — и в поля. Активный и так последний
+    * (или один) — None. Возвращает бой и имя вышедшего. */
+  private def knockBack(battle: SoloPveBattle): Option[(SoloPveBattle, String)] = {
+    val g    = battle.group
+    val last = (g.activePos :: g.places).max
+    if (last == g.activePos) None
+    else {
+      val idx   = g.idxOf(last)
+      val from  = g.activePos
+      val moved = battle.copy(group = g.copy(places = g.places.updated(idx, from), activePos = last))
+      Some((moved.engage(from), g.others(idx).name))
+    }
   }
 
   /** Восстановление брони героя на `value` (кап — эффективный максимум). Возвращает
@@ -3372,9 +3495,21 @@ object BattleState {
 
   /** Бьёт ли умение по врагу — таким в группе нужна цель. */
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {
-    case Skill.Effect.Damage(_) | Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
-    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _)                                    => false
+    case Skill.Effect.Damage(_) | Skill.Effect.Sweep(_) | Skill.Effect.Whirl | Skill.Effect.FanBleed(_) | Skill.Effect.Knockback |
+         Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
+    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) => false
   }
+
+  /** Нужен ли умению хоть один враг в досягаемости: удар — по цели, клич — по
+    * тем, кто рядом; без них ход не тратится. */
+  def needsEnemy(effect: Skill.Effect): Boolean = effect match {
+    case Skill.Effect.WarCry(_, _) => true
+    case other                     => dealsDamage(other)
+  }
+
+  /** На сколько тиков Боевой клич запирает умения мобов вокруг: гаснет один
+    * каст — ближайший (двойка по той же причине, что и у ComboSkillBlockTurns). */
+  val WarCrySkillBlockTurns: Int = 2
 
   /** Шанс уклонения защищающегося юнита от удара атакующего, в процентах, зажат
     * в [5, 95]: 100 * (agi + evasion) / (agi + evasion + defence * 1 +

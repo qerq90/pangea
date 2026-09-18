@@ -55,6 +55,33 @@ object Skill extends Enum[Skill] {
       */
     final case class Damage(reducedByDefence: Boolean) extends Effect
 
+    /** Урон по цели, срезанный её защитой, а `splashPct`% от прошедшего по ней
+      * урона достаётся каждому её соседу по строю (Размашистый удар): броня,
+      * потом HP, без защиты и проков.
+      */
+    final case class Sweep(splashPct: Int) extends Effect
+
+    /** Урон по цели, срезанный её защитой, и тот же бросок каждому другому мобу
+      * в досягаемости героя — срезанный уже его защитой (Вихрь клинка).
+      */
+    case object Whirl extends Effect
+
+    /** Урон без защиты + КРОВОТЕЧЕНИЕ `bleedPct`% — цели и каждому другому мобу
+      * в досягаемости героя (Веерный порез).
+      */
+    final case class FanBleed(bleedPct: Int) extends Effect
+
+    /** Без урона: каждый моб в досягаемости героя теряет baseValue% защиты (не
+      * более `maxPct`) на `turns` ходов и пропускает ближайшее умение (Боевой
+      * клич).
+      */
+    final case class WarCry(maxPct: Int, turns: Int) extends Effect
+
+    /** Урон без защиты; выживший отлетает на последнее место строя, а тот, кто
+      * там стоял, выходит на его место (Отбросить).
+      */
+    case object Knockback extends Effect
+
     /** Лечение HP героя. */
     case object Heal extends Effect
 
@@ -65,7 +92,7 @@ object Skill extends Enum[Skill] {
       */
     final case class GuardRepair(defencePct: Long, turns: Int) extends Effect
 
-    /** Урон; герой теряет 10% текущего HP (бонус 8% тек.HP уже учтён в
+    /** Урон; герой теряет 10% текущего HP (бонус 12% тек.HP уже учтён в
       * baseValue).
       */
     case object BloodHarvest extends Effect
@@ -78,8 +105,10 @@ object Skill extends Enum[Skill] {
     case object WeakSpotStrike extends Effect
   }
 
-  // Процент текущего HP, который тратит Кровавая жатва (8 из них идут в урон — см. baseValue).
-  val BloodHarvestHpCostPct: Long = 10L
+  // Процент текущего HP, который тратит Кровавая жатва, и сколько процентов
+  // текущего HP она вкладывает в урон (см. baseValue).
+  val BloodHarvestHpCostPct: Long     = 10L
+  val BloodHarvestHpToDamagePct: Long = 12L
 
   /** Русское склонение слова «ход» после числа: 1 ход, 2–4 хода, 5+ ходов
     * (с учётом 11–14 → «ходов»). */
@@ -100,11 +129,14 @@ object Skill extends Enum[Skill] {
         label = "Размашистый удар",
         cooldown = 2,
         initialCooldown = 0,
-        effect = Effect.Damage(reducedByDefence = true),
+        // Конструктор вложенного object'а не должен читать val'ы внешнего Skill:
+        // инициализация Skill (findValues) и SweepingStrike ждали бы друг друга
+        // из двух потоков — дедлок. Поэтому доля — литералом, здесь.
+        effect = Effect.Sweep(splashPct = 50),
         hitTemplate =
           "Размашистый удар по дуге достиг врага нанеся ему {} урона!",
         description =
-          "Размашистый удар по дуге, от которого сложно увернуться. Среднее влияние на урон от Силы, Интеллекта и Атаки. Использование расходует {} энергии."
+          "Размашистый удар по дуге, задевающий сразу нескольких врагов, от которого сложно увернуться. Среднее влияние на урон от Силы, Интеллекта и Атаки. Использование расходует {} энергии."
       ) {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
@@ -127,7 +159,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      4.0 * b.agi + 0.4 * f.accuracy + 4.0 * b.int + 0.1 * f.atk
+      4.0 * b.agi + 0.4 * f.accuracy + 4.0 * b.int + 0.3 * f.atk
     }
     def energyCost(hero: Hero): Long = 5L + hero.lvl / 2L
   }
@@ -146,7 +178,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      2.0 * b.str + 4.0 * b.int + 0.2 * f.atk + 0.5 * f.accuracy
+      2.0 * b.str + 4.0 * b.int + 0.3 * f.atk + 0.5 * f.accuracy
     }
     def energyCost(hero: Hero): Long = 10L + hero.lvl
   }
@@ -160,7 +192,7 @@ object Skill extends Enum[Skill] {
         hitTemplate =
           "Используя тяжесть своего тела и доспеха, вы врезаетесь во врага и вдавливаете его в стену, нанеся ему {} урона!",
         description =
-          "Мягкая подкладка во внутренней стороне и выступающие элементы брони — этот доспех будто был создан с целью пробивать деревянные стены. Сильное влияние на урон от Телосложения. Среднее влияние от Защиты и Интеллекта. Использование расходует {} энергии."
+          "Мягкая подкладка во внутренней стороне и выступающие элементы брони — этот доспех будто был создан с целью пробивать деревянные стены. Позволяет сменить место в бою. Сильное влияние на урон от Телосложения. Среднее влияние от Защиты и Интеллекта. Использование расходует {} энергии."
       ) {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
@@ -184,8 +216,8 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      // 8% текущего HP «вкладывается» в урон (см. BloodHarvestHpCostPct).
-      1.5 * b.str + 0.6 * f.atk + 0.08 * hero.fightStats.hp
+      // Часть текущего HP «вкладывается» в урон (см. BloodHarvestHpToDamagePct).
+      2.0 * b.str + 0.6 * f.atk + BloodHarvestHpToDamagePct / 100.0 * hero.fightStats.hp
     }
     def energyCost(hero: Hero): Long = 8L + hero.lvl / 2L
   }
@@ -204,7 +236,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      4.0 * b.agi + 0.2 * f.accuracy + 0.2 * f.atk + 5.0 * b.int
+      4.0 * b.agi + 0.3 * f.accuracy + 0.3 * f.atk + 5.0 * b.int
     }
     def energyCost(hero: Hero): Long = 8L + hero.lvl / 2L
   }
@@ -223,9 +255,47 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      2.0 * b.agi + 0.8 * f.accuracy + 4.0 * b.int
+      2.0 * b.agi + 0.8 * f.accuracy + 4.0 * b.int + 0.1 * f.atk
     }
     def energyCost(hero: Hero): Long = 10L + hero.lvl
+  }
+
+  case object BladeWhirl
+      extends Skill(
+        label = "Вихрь клинка",
+        cooldown = 3,
+        initialCooldown = 1,
+        effect = Effect.Whirl,
+        hitTemplate =
+          "Вы закружились в вихре стали — {} урона цели, и каждому рядом достаётся своё!",
+        description =
+          "Приём из старых наставлений: клинок описывает полный круг, и рядом с вами не остаётся места, куда можно было бы шагнуть. Бьёт всех вокруг разом. Среднее влияние на урон от Силы и Интеллекта. Слабое влияние от Атаки. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      1.0 * b.str + 3.0 * b.int + 0.3 * f.atk
+    }
+    def energyCost(hero: Hero): Long = 12L + hero.lvl
+  }
+
+  case object FanCut
+      extends Skill(
+        label = "Веерный порез",
+        cooldown = 3,
+        initialCooldown = 1,
+        effect = Effect.FanBleed(bleedPct = 2),
+        hitTemplate =
+          "Веер быстрых порезов: {} урона цели — и по строю пошла кровь (-2%).",
+        description =
+          "Лёгкий клинок с волнистой кромкой. Им не рубят — им чертят, и каждая черта потом долго не заживает. Задевает всех вокруг. Сильное влияние на урон от Ловкости и Интеллекта. Слабое от Точности. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      2.0 * b.agi + 3.0 * b.int + 0.2 * f.accuracy
+    }
+    def energyCost(hero: Hero): Long = 10L + hero.lvl / 2L
   }
 
   // ── Бронные навыки ──────────────────────────────────────────────────────────
@@ -302,17 +372,58 @@ object Skill extends Enum[Skill] {
     def energyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
-  // Оружие: 1,2,3,6,8,10. Нагрудник: 4,5,7,9,11.
+  case object BattleCry
+      extends Skill(
+        label = "Боевой клич",
+        cooldown = 4,
+        initialCooldown = 2,
+        effect = Effect.WarCry(maxPct = 25, turns = 2),
+        hitTemplate =
+          "Ваш рёв раскатывается под сводами — враги вокруг вжимают головы в плечи: их защита слабеет на {}% на 2 хода!",
+        description =
+          "На горжете выбит знак давно распущенной дружины — тот самый, что кричали в атаку. Слова забылись, а страх остался. Сильное влияние на ослабление от Интеллекта. Слабое от Защиты. Использование расходует {} энергии."
+      ) {
+    // Не урон, а проценты защиты, которые теряют враги вокруг (кап — в эффекте).
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      0.2 * b.int + 0.1 * f.defence
+    }
+    def energyCost(hero: Hero): Long = 12L + hero.lvl
+  }
+
+  case object Shove
+      extends Skill(
+        label = "Отбросить",
+        cooldown = 3,
+        initialCooldown = 0,
+        effect = Effect.Knockback,
+        hitTemplate = "Ударом щита вы отшвыриваете {} — {} урона!",
+        description =
+          "Умбон этого щита сточен до блеска о чужие рёбра. Бить им — не защита, а способ показать, кому здесь стоять первым. Позволяет отправить опасного врага подальше. Сильное влияние на урон от Телосложения. Среднее от Защиты и Интеллекта. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      0.5 * f.defence + 0.5 * b.vit + 2.0 * b.int
+    }
+    def energyCost(hero: Hero): Long = 12L + hero.lvl
+  }
+
+  // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.
+  // Нагрудник: 4,5,7,9,11 + Боевой клич, Отбросить.
   val weaponSkills: List[Skill] = List(
     SweepingStrike,
     QuickStrike,
     CunningStrike,
     BloodHarvest,
     Bleeding,
-    WeakSpotStrike
+    WeakSpotStrike,
+    BladeWhirl,
+    FanCut
   )
   val armorSkills: List[Skill] =
-    List(MinorHeal, Reinforcement, Restoration, Bulwark, Ram)
+    List(MinorHeal, Reinforcement, Restoration, Bulwark, Ram, BattleCry, Shove)
 
   implicit val encoder: Encoder[Skill] =
     Encoder.encodeString.contramap(_.entryName)

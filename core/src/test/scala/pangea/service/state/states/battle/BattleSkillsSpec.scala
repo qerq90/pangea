@@ -140,14 +140,15 @@ object BattleSkillsSpec extends ZIOSpecDefault {
     },
 
     test("Кровавая жатва: HP-цена списывается, даже когда добивает базовая атака (регресс)") {
-      // Моб: hp=1, armor=150. Урон скилла BloodHarvest (≤146 при данных статах)
-      // полностью гасится бронёй → моб переживает скилл; базовая атака следом
-      // (≥160) гарантированно пробивает остаток брони и добивает моба. Так кил
-      // приходится на БАЗОВУЮ атаку — раньше в этой ветке победы 10% HP-цена
-      // терялась (не персистилась). Диапазоны урона делают исход детерминированным.
+      // Моб: hp=1, armor=190. Урон скилла BloodHarvest (2·50 + 0.6·50 + 12% от
+      // 200 = 154, с разбросом ≤184) полностью гасится бронёй → моб переживает
+      // скилл; базовая атака следом (≥160) гарантированно пробивает остаток
+      // брони (≤67) и добивает моба. Так кил приходится на БАЗОВУЮ атаку —
+      // раньше в этой ветке победы 10% HP-цена терялась (не персистилась).
+      // Диапазоны урона делают исход детерминированным.
       val hero   = heroWith(Some(Skill.BloodHarvest), None)
       val slots  = List(SkillSlotState(101L, Skill.BloodHarvest))
-      val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 150L)
+      val battle = weakBattle(slots).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 190L)
       for {
         triple                       <- makeState(hero, battle)
         (state, heroDao, renderer)    = triple

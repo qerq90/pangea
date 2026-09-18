@@ -64,6 +64,9 @@ object GroupBattleSpec extends ZIOSpecDefault {
   private def groupFor(h: Hero, hps: Long*): SoloPveBattle =
     SoloPveBattle.fromGroup(hps.toList.map(monster(_)), h, Nil)
 
+  /** Умения готовы сразу — без стартового кд. */
+  private def ready(b: SoloPveBattle): SoloPveBattle = b.copy(skillSlots = b.skillSlots.map(_.copy(cooldown = 0)))
+
   private def makeState(h: Hero, b: SoloPveBattle) =
     for {
       dao      <- TestHeroDao.withHero(userId, h)
@@ -461,6 +464,135 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.slain.size == 1) &&
               assertTrue(after.monsterStats.hp == 1000L) &&
               assertTrue(screens.contains("пал."))
+    },
+
+    test("Размашистый удар по мобу в паре: соседу цели — половина урона, дальний под номером 3 цел") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
+      for {
+        t <- makeState(h, groupFor(h, 1000L, 1000L, 1000L))
+        (state, dao, r) = t
+        // умение (1·50 + 4·50 + 0.4·20 = 258 по цели при разбросе 100, половина — 129 — её соседу);
+        // базовая атака; ответ пары; сосед сбоку; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Skill_101", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        byPos    = after.group.entries.toMap
+      } yield assertTrue(after.monsterCurrentHp < 742L) &&
+              assertTrue(byPos(2).currentHp == 871L) &&
+              assertTrue(byPos(3).currentHp == 1000L) &&
+              assertTrue(screens.contains("Дуга удара задевает")) &&
+              assertTrue(screens.linesIterator.count(_.contains("Дуга удара задевает")) == 1)
+    },
+
+    test("Размашистый удар по соседу № 2: дуга задевает обоих его соседей — добила моба в паре и достала № 3, до которого герою не дотянуться") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
+      for {
+        t <- makeState(h, groupFor(h, 100L, 1000L, 1000L))
+        (state, dao, r) = t
+        // умение по № 2 (258), дуга по № 1 (129 > 100 — пал) и по № 3 (129); базовая атака по № 2;
+        // № 2 бьёт сбоку; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        result  <- state.action(testUser, aimed("Skill_101", 2), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        byPos    = after.group.entries.toMap
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(after.group.slain.size == 1) &&
+              assertTrue(after.monsterStats.hp == 1000L && after.monsterCurrentHp < 742L) &&
+              // цель освободилась и шагнула к герою; № 3 остался на своём месте с дугой в боку
+              assertTrue(after.group.paired && after.group.heroPos == 1) &&
+              assertTrue(byPos.keySet == Set(3) && byPos(3).currentHp == 871L) &&
+              assertTrue(screens.linesIterator.count(_.contains("Дуга удара задевает")) == 2 && screens.contains("пал."))
+    },
+
+    test("Вихрь клинка: цель и каждый в досягаемости героя получают свой бросок, дальний № 3 цел") {
+      val h = heroWithSkills(Skill.BladeWhirl, Skill.MinorHeal)
+      for {
+        t <- makeState(h, ready(groupFor(h, 1000L, 1000L, 1000L)))
+        (state, dao, r) = t
+        // умение (1·50 + 3·50 + 0.3·20 = 206 при разбросе 100, защита мобов 0); базовая атака; ответ; сосед; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Skill_101", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        byPos    = after.group.entries.toMap
+      } yield assertTrue(after.monsterCurrentHp < 794L) &&
+              assertTrue(byPos(2).currentHp == 794L) &&
+              assertTrue(byPos(3).currentHp == 1000L) &&
+              assertTrue(screens.contains("вихре стали") && screens.contains("Вихрь настигает"))
+    },
+
+    test("Веерный порез: урон и кровь цели и соседу героя") {
+      val h = heroWithSkills(Skill.FanCut, Skill.MinorHeal)
+      for {
+        t <- makeState(h, ready(groupFor(h, 10000L, 10000L)))
+        (state, dao, r) = t
+        // умение (2·50 + 3·50 + 0.2·9999 = 2249 при разбросе 100); базовая атака; ответ; сосед; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Skill_101", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        side     = after.group.others.head
+      } yield assertTrue(after.monsterCurrentHp < 10000L - 2249L) &&
+              assertTrue(after.effects.monsterBleed.exists(_.pct == 2)) &&
+              // порез 2249 и первый тик крови (2% от 10000) в фазе мобов вне пары
+              assertTrue(side.currentHp == 10000L - 2249L - 200L) &&
+              assertTrue(side.effects.monsterBleed.exists(_.pct == 2)) &&
+              assertTrue(screens.contains("пошла кровь") && screens.contains("Порез задевает"))
+    },
+
+    test("Боевой клич: цели не спрашивает, всем в досягаемости — дебаф защиты и запертое умение, потом базовая атака") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.BattleCry)
+      for {
+        t <- makeState(h, ready(groupFor(h, 1000L, 1000L, 1000L)))
+        (state, dao, r) = t
+        // клич (0.2·50 + 0.1·0 = 10% при разбросе 100); базовая атака; ответ; сосед; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, tap("Skill_202"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        byPos    = after.group.entries.toMap
+      } yield assertTrue(!screens.contains("в кого?")) &&
+              assertTrue(screens.contains("слабеет на 10% на 2 хода")) &&
+              // к концу раунда дебафы оттикали по разу: 2 → 1 хода, замок 2 → 1
+              assertTrue(after.effects.monsterDefenceDebuff.contains(pangea.model.battle.TimedDefenceDebuff(10, 1))) &&
+              assertTrue(after.effects.monsterSkillBlockedTurns == 1) &&
+              assertTrue(byPos(2).effects.monsterDefenceDebuff.contains(pangea.model.battle.TimedDefenceDebuff(10, 1))) &&
+              assertTrue(byPos(2).effects.monsterSkillBlockedTurns == 1) &&
+              // № 3 не в досягаемости — его клич не задел
+              assertTrue(byPos(3).effects.monsterDefenceDebuff.isEmpty && byPos(3).effects.monsterSkillBlockedTurns == 0) &&
+              assertTrue(after.monsterCurrentHp < 1000L)
+    },
+
+    test("Отбросить: выживший отлетает в конец строя, последний выходит на его место и встаёт в пару") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.Shove)
+      for {
+        t <- makeState(h, groupFor(h, 1000L, 2000L, 3000L))
+        (state, dao, r) = t
+        // умение по № 1 (0.5·0 + 0.5·50 + 2·50 = 125); базовая атака уже по вышедшему № 3; ответ; сосед; подкрепления нет
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Skill_202", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        byPos    = after.group.entries.toMap
+      } yield assertTrue(after.group.paired && after.monsterStats.hp == 3000L && after.monsterCurrentHp < 3000L) &&
+              assertTrue(byPos(3).stats.hp == 1000L && byPos(3).currentHp == 875L) &&
+              assertTrue(byPos(2).currentHp == 2000L) &&
+              assertTrue(screens.contains("отшвыриваете") && screens.contains("отлетает в конец строя"))
+    },
+
+    test("Отбросить последнего (или единственного) — просто удар, строй не меняется") {
+      val h = heroWithSkills(Skill.SweepingStrike, Skill.Shove)
+      for {
+        t <- makeState(h, groupFor(h, 1000L))
+        (state, dao, r) = t
+        _       <- quietRound(99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, tap("Skill_202"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.group.paired && after.monsterCurrentHp < 875L) &&
+              assertTrue(screens.contains("отшвыриваете") && !screens.contains("отлетает в конец строя"))
     },
 
     test("Таран по соседу: урон сразу, а в конце раунда он встаёт в пару") {
