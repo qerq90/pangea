@@ -35,6 +35,9 @@ trait HeroDao {
   def updateAchievements(userId: UserId, achievements: List[String]): Task[Unit]
   /** Отряд героя (см. [[pangea.model.squad.Squad]]). */
   def updateSquad(userId: UserId, squad: pangea.model.squad.Squad): Task[Unit]
+
+  /** Руны героя: клейма и понимание (см. [[pangea.model.rune.RuneData]]). */
+  def updateRunes(userId: UserId, runes: pangea.model.rune.RuneData): Task[Unit]
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Task[Unit]
   def updateEquipment(userId: UserId, eq: Equipment): Task[Unit]
   def updateEquipmentAndFightStats(userId: UserId, eq: Equipment, stats: FightStats): Task[Unit]

@@ -3,6 +3,7 @@ package pangea.model.hero
 import pangea.model.battle.SkillSlotState
 import pangea.model.item.ItemDetails
 import pangea.model.monster.Race
+import pangea.model.rune.{Rune, RuneData}
 import pangea.model.state.StateType
 import pangea.model.stats.{BaseStats, FightStats, StatBoosts}
 import pangea.model.trauma.{Trauma, TraumaPenalties}
@@ -35,7 +36,9 @@ case class Hero(
   // Достижения (ключи [[Achievement]]) — разовые и навсегда, со своими бонусами.
   achievements: List[String] = Nil,
   // Отряд: наёмники-союзники и позиция героя в строю (см. Squad).
-  squad: pangea.model.squad.Squad = pangea.model.squad.Squad.empty
+  squad: pangea.model.squad.Squad = pangea.model.squad.Squad.empty,
+  // Руны: клейма на теле и понимание рун (см. RuneData).
+  runes: RuneData = RuneData.empty
 ) {
   def hasAchievement(a: Achievement): Boolean = achievements.contains(a.entryName)
 
@@ -47,9 +50,16 @@ case class Hero(
    *  `maxDungeonLevel` уже сдвинут вперёд. Этажи ≤ `maxDungeonLevel` доступны всегда. */
   def canGoDarker: Boolean = dungeonLevel < maxDungeonLevel
 
-  /** Пассивные навыки надетых предметов (дубли схлопнуты) — типизированный фасад
-   *  для боя/лута/подземелья/инвентаря. */
-  def passives: HeroPassives = HeroPassives(equipment.passiveKinds)
+  /** Пассивные навыки надетых предметов и клейм на теле (дубли схлопнуты) —
+   *  типизированный фасад для боя/лута/подземелья/инвентаря. Понимание руны
+   *  множит её число, откуда бы она ни шла. */
+  def passives: HeroPassives = {
+    val kinds = equipment.passiveKinds ++ runes.brandedPassives
+    HeroPassives(kinds, kinds.map(k => k -> runes.mult(Rune.Passive(k))).toMap)
+  }
+
+  /** Множитель к числу боевой руны от её понимания — на надетой вещи и на клейме. */
+  def runeMult(skill: pangea.model.skill.Skill): Double = runes.mult(Rune.Active(skill))
 
   /** Камни-усилители в гнёздах снаряжения — типизированный фасад для боя/лута.
    *  Пыль на оружии идёт сюда же отдельным списком: она работает как камни, но
@@ -180,16 +190,22 @@ case class Hero(
   }
 
   /** Слоты активных навыков героя для боя: снимаются с надетых оружия и
-   *  нагрудника (у каждого может быть `activeSkill`). Ключ слота — id предмета,
-   *  поэтому два предмета с «одним» навыком катаются независимо. */
-  def activeSkillSlots: List[SkillSlotState] =
-    List(equipment.weapon, equipment.chestPlate).flatMap { it =>
+   *  нагрудника (у каждого может быть `activeSkill`) — ключ слота id предмета,
+   *  поэтому два предмета с «одним» навыком катаются независимо, — плюс клейма
+   *  на теле, которых нет на вещах (та же руна на вещи и на теле — одна кнопка;
+   *  id клейма отрицательный, см. `Rune.bodySlotId`). */
+  def activeSkillSlots: List[SkillSlotState] = {
+    val worn = List(equipment.weapon, equipment.chestPlate).flatMap { it =>
       it.details match {
         case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
         case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
         case _                     => None
       }
     }
+    val wornSkills = worn.map(_.skill).toSet
+    worn ++ runes.brandedActives.filterNot(wornSkills.contains).map(s =>
+      SkillSlotState(Rune.bodySlotId(s), s, cooldown = s.initialCooldown))
+  }
 
   /** Максимум Энергии: 5·Интеллект + 2·Ловкость + Энергия с экипировки + бусты
    *  Мастера Горна, за вычетом штрафа травм на энергию. Минимум 1. Интеллект и

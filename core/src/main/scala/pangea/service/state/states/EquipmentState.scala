@@ -117,7 +117,7 @@ case class EquipmentState(
       // Снятие последнего «Тайника» в экипировке (дубли не стакаются — см.
       // InventoryState.equipmentStashDelta) убирает +10 слотов: если сумка (с
       // возвращаемым предметом) не влезет в уменьшенную вместимость — блокируем.
-      capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq)
+      capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
       blockedByStash = capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 1)
       _ <- if (item.itemType == pangea.model.item.ItemType.NoItem)
              renderer.show(user, Screen(content.text("equipment.slotEmpty"), Nil))

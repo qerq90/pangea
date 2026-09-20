@@ -291,13 +291,13 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     // ── Пассивки лута ─────────────────────────────────────────────────────────
     test("без пассивок доп. дропов нет и RNG не тратится") {
       val (drops, r) = LootGenerator.rollPassiveDrops(
-        taxidermist = false, jeweler = false, Rarity.Common, Race.Human, 10L, Rng(7L))
+        trophyChancePct = 0L, silverChancePct = 0L, Rarity.Common, Race.Human, 10L, Rng(7L))
       assertTrue(drops.isEmpty) && assertTrue(r == Rng(7L))
     },
 
     test("Таксидермист иногда даёт лишний трофей этой расы (~10%)") {
       val trophies = (1L to 1000L).iterator.flatMap { s =>
-        LootGenerator.rollPassiveDrops(taxidermist = true, jeweler = false, Rarity.Rare, Race.Orc, 12L, Rng(s))._1
+        LootGenerator.rollPassiveDrops(trophyChancePct = 10L, silverChancePct = 0L, Rarity.Rare, Race.Orc, 12L, Rng(s))._1
       }.collect { case LootDrop.Trophy(i) => i }.toList
       assertTrue(trophies.nonEmpty) &&
         assertTrue(trophies.forall(i => i.itemType == ItemType.Trophy && raceOf(i).contains(Race.Orc.entryName))) &&
@@ -306,14 +306,14 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("Таксидермист срабатывает примерно в 10% случаев") {
       val hits = (1L to 2000L).count { s =>
-        LootGenerator.rollPassiveDrops(taxidermist = true, jeweler = false, Rarity.Rare, Race.Orc, 12L, Rng(s))._1.nonEmpty
+        LootGenerator.rollPassiveDrops(trophyChancePct = 10L, silverChancePct = 0L, Rarity.Rare, Race.Orc, 12L, Rng(s))._1.nonEmpty
       }
       assertTrue(hits >= 140 && hits <= 260) // ~200 из 2000
     },
 
     test("Ювелир иногда даёт отдельную (не груду) порцию серебра ~lvl×4±20%") {
       val silvers = (1L to 1000L).iterator.flatMap { s =>
-        LootGenerator.rollPassiveDrops(taxidermist = false, jeweler = true, Rarity.Common, Race.Human, 10L, Rng(s))._1
+        LootGenerator.rollPassiveDrops(trophyChancePct = 0L, silverChancePct = 10L, Rarity.Common, Race.Human, 10L, Rng(s))._1
       }.collect { case LootDrop.Silver(a, pile) => (a, pile) }.toList
       assertTrue(silvers.nonEmpty) &&
         assertTrue(silvers.forall { case (a, pile) => a >= 32L && a <= 48L && !pile })
@@ -321,7 +321,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
 
     test("обе пассивки вместе могут дать и трофей, и серебро за один вызов") {
       val both = (1L to 2000L).iterator.map { s =>
-        LootGenerator.rollPassiveDrops(taxidermist = true, jeweler = true, Rarity.Rare, Race.Orc, 12L, Rng(s))._1
+        LootGenerator.rollPassiveDrops(trophyChancePct = 10L, silverChancePct = 10L, Rarity.Rare, Race.Orc, 12L, Rng(s))._1
       }.exists { ds =>
         ds.exists { case LootDrop.Trophy(_) => true; case _ => false } &&
         ds.exists { case LootDrop.Silver(_, _) => true; case _ => false }
