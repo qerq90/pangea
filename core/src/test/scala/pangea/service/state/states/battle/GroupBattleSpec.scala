@@ -595,6 +595,32 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("отшвыриваете") && !screens.contains("отлетает в конец строя"))
     },
 
+    test("добил моба в паре — следующий встал: фляга снова доступна, кулдауны оттикали, а использованное умение — нет") {
+      val flask = Item(303L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = 3, maxCharges = 3))
+      val h0 = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
+      val h  = h0.copy(fightStats = h0.fightStats.copy(hp = 100L), equipment = h0.equipment.copy(flask = flask))
+      for {
+        t <- makeState(h, groupFor(h, 10L, 1000L).copy(skillSlots = List(
+               pangea.model.battle.SkillSlotState(101L, Skill.SweepingStrike),
+               pangea.model.battle.SkillSlotState(202L, Skill.MinorHeal, cooldown = 1))))
+        (state, dao, r) = t
+        // глоток фляги раунд не завершает; затем умение добивает моба в паре (10 HP)
+        _       <- state.action(testUser, tap("UseFlask"), r)
+        mid     <- battleOf(dao)
+        _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, aimed("Skill_101", 1), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(mid.consumableUsedThisRound) &&
+              assertTrue(screens.contains("пал.") && after.group.paired && after.monsterStats.hp == 1000L) &&
+              // раунд кончился: фляга снова доступна, чужой кулдаун оттикал, свой — начнёт со следующего хода
+              assertTrue(!after.consumableUsedThisRound) &&
+              assertTrue(after.slotByItem(202L).exists(_.cooldown == 0)) &&
+              assertTrue(after.slotByItem(101L).exists(_.cooldown == Skill.SweepingStrike.cooldown))
+    },
+
     test("Таран по соседу: урон сразу, а в конце раунда он встаёт в пару") {
       val h = heroWithSkills(Skill.SweepingStrike, Skill.Ram)
       for {

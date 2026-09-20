@@ -416,16 +416,16 @@ case class BattleState(
   ): Task[TurnResult] = {
     val home = battle.group.activePos
     playerStrike(hero, battle.engage(pos), nowMs, log, skip, retaliate = false)
-      .map(res => settleAfterHit(res, pos, home, nowMs))
+      .map(res => settleAfterHit(res, pos, home, nowMs, skip))
   }
 
   /** После удара по месту `pos` (см. [[strikeSide]]): запомнить цель, вернуть
     * прежнего активного в поля, добитого — в павшие или в победу. */
-  private def settleAfterHit(res: TurnResult, pos: Int, home: Int, nowMs: Long): TurnResult = {
+  private def settleAfterHit(res: TurnResult, pos: Int, home: Int, nowMs: Long, skip: Set[Long]): TurnResult = {
     val struck = res.battle.rememberTarget(pos)
     val dead   = struck.monsterCurrentHp <= 0L
     if (pos == home) {
-      if (dead) victoryByHero(res.hero, struck, res.log, nowMs) else res.copy(battle = struck)
+      if (dead) victoryByHero(res.hero, struck, res.log, nowMs, skip) else res.copy(battle = struck)
     } else {
       val back = struck.engage(home)
       if (dead)
@@ -616,7 +616,7 @@ case class BattleState(
             log4 = (log3 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
             r <-
               if (!retaliate) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Continue))
-              else if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs))
+              else if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs, skip))
               else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Death))
               else respond(thornedHero, thornedBattle, nowMs, log4, skip)
           } yield r
@@ -1688,10 +1688,13 @@ case class BattleState(
   }
 
   /** Победа ударом или умением героя: раунд кончился без хода моба, но энергия
-    * за него всё равно восстанавливается — и в бою 1 на 1, и в группе, где на
-    * место павшего встаёт следующий. */
-  private def victoryByHero(hero: Hero, battle: SoloPveBattle, log: Vector[String], nowMs: Long): TurnResult =
-    TurnResult(regainEnergy(hero, nowMs), battle, log, Outcome.Victory)
+    * за него всё равно восстанавливается, а бафы, кулдауны и «фляга уже пита»
+    * отсчитывают раунд, как после хода моба (`tickBuffs`, `skip` — слот только
+    * что применённого умения). Без этого в группе следующий моб встаёт в пару,
+    * а фляга и умения считают, что раунд не кончился. В бою 1 на 1 тик
+    * безобиден — бой всё равно кончился. */
+  private def victoryByHero(hero: Hero, battle: SoloPveBattle, log: Vector[String], nowMs: Long, skip: Set[Long]): TurnResult =
+    TurnResult(regainEnergy(hero, nowMs), battle.tickBuffs(skip), log, Outcome.Victory)
 
   /** Тик эффектов ГЕРОЯ в конце раунда: реген лечит на `pct`% макс.HP и слабеет.
     * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку
@@ -1935,7 +1938,7 @@ case class BattleState(
       val b    = if (damageSkill) b0.rememberTarget(target) else b0
       val dead = damageSkill && b.monsterCurrentHp <= 0
       if (!aimSide) {
-        if (dead) ZIO.succeed(victoryByHero(h, b, lines, nowMs))
+        if (dead) ZIO.succeed(victoryByHero(h, b, lines, nowMs, skip))
         else if (paired) playerStrike(h, b, nowMs, lines, skip)
         else if (damageSkill) playerStrike(h, ramMark(b), nowMs, lines, skip)
         else followUp(h, b, nowMs, lines, skip)
@@ -1946,7 +1949,7 @@ case class BattleState(
         // пары у героя нет.
         val homeGone = back.group.activePos != home
         if (dead) {
-          if (homeGone) ZIO.succeed(victoryByHero(h, back, lines, nowMs))
+          if (homeGone) ZIO.succeed(victoryByHero(h, back, lines, nowMs, skip))
           else {
             val fallen = back.sideFallen(back.group.idxOf(target))
             val slain  = lines :+ content.format("battle.group.sideSlain", "monster" -> b.monsterName)
