@@ -78,6 +78,20 @@ object InventoryStateSpec extends ZIOSpecDefault {
   override def spec = suite("InventoryState")(
 
     // ── Складывание одинаковых вещей ─────────────────────────────────────────
+    test("сюжетный предмет в списке и на карточке — со звёздочкой перед именем, без редкости и уровня") {
+      val letter = pangea.model.item.QuestItemKind.item(pangea.model.item.QuestItemKind.MarisaLetter).copy(id = 77L)
+      for {
+        t <- makeState(baseHero, List(letter))
+        (state, _, _, renderer) = t
+        _    <- state.enter(testUser, renderer)
+        list <- renderer.sentScreens.map(_.last)
+        _    <- state.action(testUser, tap(s"${InventoryState.ItemActionPrefix}77"), renderer)
+        card <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(list.choices.exists(_.label == "★ Старое письмо Марисе")) &&
+              assertTrue(card.text.startsWith("★ Старое письмо Марисе")) &&
+              assertTrue(letter.displayTitle == "★ Старое письмо Марисе")
+    },
+
     test("три одинаковых камня — одна кнопка с количеством") {
       val stones = (1 to 3).map(i =>
         GemGenerator.item(GemKind.Amethyst, 1).copy(id = 200L + i)).toList

@@ -183,6 +183,28 @@ case class SoloPveBattle(
   def admit(slot: MonsterSlot): SoloPveBattle =
     if (hasRoom) withReinforcement(slot) else copy(group = group.copy(queue = group.queue :+ slot))
 
+  /** Конец раунда: мобы вне досягаемости героя подтягиваются к нему на одно
+    * место, если оно свободно, — ближние первыми, чтобы следом двинулись и
+    * дальние. Не двигаются: те, кто уже достаёт героя, кто занят союзником
+    * напротив, и моб в полях (за него — `pullFree`). На место героя никто не
+    * шагает: к пустой паре ведёт `pullFree`. В дыму герой не виден — все стоят.
+    * Возвращает бой и кто куда шагнул. */
+  def closeIn: (SoloPveBattle, List[(MonsterSlot, Int)]) =
+    if (effects.heroInSmoke || group.heroDown) (this, Nil)
+    else {
+      val order = group.places.indices.toList.sortBy(i => math.abs(group.places(i) - group.heroPos))
+      order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), idx) =>
+        val pos  = b.group.places(idx)
+        val dist = pos - b.group.heroPos
+        val next = if (dist > 0) pos - 1 else pos + 1
+        val far  = math.abs(dist) > GroupState.Reach
+        val free = next >= 1 && next != b.group.heroPos && !b.group.hasMonster(next)
+        val busy = b.group.allyAt(pos).exists(_.alive)
+        if (!far || !free || busy) (b, moved)
+        else (b.copy(group = b.group.copy(places = b.group.places.updated(idx, next))), moved :+ (b.group.others(idx) -> next))
+      }
+    }
+
   /** Из очереди в строй — сколько влезет. Возвращает бой и вошедших. */
   def admitQueued: (SoloPveBattle, List[MonsterSlot]) =
     group.queue.foldLeft((copy(group = group.copy(queue = Nil)), List.empty[MonsterSlot])) { case ((b, in), s) =>

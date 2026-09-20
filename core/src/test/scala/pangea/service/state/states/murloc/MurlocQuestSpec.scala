@@ -36,9 +36,10 @@ object MurlocQuestSpec extends ZIOSpecDefault {
   private def murloc: Hero = hero.copy(race = Race.Murloc)
 
   private def map(id: Long = 12L): Item = QuestItemKind.item(QuestItemKind.MurlocVillageMap).copy(id = id)
-  private def gear(id: Long, rarity: Rarity = Rarity.Gray, lvl: Long = 1L, itemType: ItemType = ItemType.Helmet): Item =
+  private def gear(id: Long, rarity: Rarity = Rarity.Gray, lvl: Long = 1L, itemType: ItemType = ItemType.ChestPlate): Item =
     Item(id, s"Предмет $id", lvl, rarity, itemType, attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0)
-  private def gem(id: Long): Item = gear(id).copy(itemType = ItemType.Gem)
+  private def gem(id: Long): Item    = gear(id).copy(itemType = ItemType.Gem)
+  private def helmet(id: Long): Item = gear(id).copy(itemType = ItemType.Helmet)
 
   private def content = ZIO.attempt(SceneContent.load())
 
@@ -278,8 +279,9 @@ object MurlocQuestSpec extends ZIOSpecDefault {
     ),
 
     suite("помощь")(
-      test("деревня и экран сдачи: кнопки только по цветам, что есть в сумке; камни и надетое не в счёт") {
-        val items = List(gear(1L), gear(2L, Rarity.White), gear(3L, Rarity.Green), gear(4L, Rarity.Violet), gear(5L, Rarity.Orange), gem(6L))
+      test("деревня и экран сдачи: кнопки только по цветам, что есть в сумке; берёт лишь оружие и нагрудники — шлемы и камни не в счёт") {
+        val items = List(gear(1L), gear(2L, Rarity.White, itemType = ItemType.Weapon), gear(3L, Rarity.Green), gear(4L, Rarity.Violet),
+                         gear(5L, Rarity.Orange, itemType = ItemType.Weapon), gem(6L), helmet(7L), helmet(8L).copy(rarity = Rarity.Blue))
         for {
           t <- village(hero, items, handed = 2L)
           (state, _, _, r) = t
@@ -288,7 +290,7 @@ object MurlocQuestSpec extends ZIOSpecDefault {
           _    <- state.action(testUser, tap("HandIn"), r)
           hand <- r.sentScreens.map(_.last)
         } yield assertTrue(home.text.contains("Сухой пришёл") && home.choices.map(_.id) == List("HandIn", "ToCity")) &&
-                assertTrue(hand.text.contains("Сдано: 2 из 20")) &&
+                assertTrue(hand.text.contains("Сдано: 2 из 20") && hand.text.contains("оружие и нагрудники")) &&
                 assertTrue(hand.choices.map(_.label) == List("Сдать всё чёрное и белое (⚫⚪ 2)", "Сдать всё зелёное (🟢 1)",
                   "Сдать всё фиолетовое (🟣 1)", "Сдать всё (5)", "Назад"))
       },

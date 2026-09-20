@@ -110,6 +110,28 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.head.linesIterator.count(_.contains("🔴")) == 2)
     },
 
+    test("дальние подтягиваются: место 2 пусто — моб с 3 встаёт на 2, за ним с 4 на 3; сосед в досягаемости стоит") {
+      val b0 = group(1000L, 1000L, 1000L, 1000L)
+      val b  = b0.sideFallen(b0.group.idxOf(2)) // место 2 опустело: строй 1 (пара), 3, 4
+      for {
+        t <- makeState(hero(), b)
+        (state, dao, r) = t
+        // герой попал, моб в паре бьёт, подкрепления нет; никто не достаёт героя сбоку — бросков соседей нет
+        _       <- quietRound(99)
+        _       <- state.action(testUser, tap("Attack"), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        // ещё раунд: теперь на 2 стоит сосед — он бьёт сбоку, а на 3 подтянуться уже некуда (занято)
+        _       <- quietRound(99, 99)
+        _       <- state.action(testUser, aimed("Attack", 1), r)
+        later   <- battleOf(dao)
+        all     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.group.places.sorted == List(2, 3)) &&
+              assertTrue(screens.linesIterator.count(_.contains("подходит ближе")) == 2) &&
+              assertTrue(later.group.places.sorted == List(2, 3)) &&
+              assertTrue(all.contains("атаковал вас сбоку") || all.contains("ударил сбоку"))
+    },
+
     test("сосед под номером 2 бьёт героя сбоку, дальний под номером 3 — нет") {
       val h = hero(hp = 100000L)
       for {

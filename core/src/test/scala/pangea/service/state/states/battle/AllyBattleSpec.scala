@@ -473,6 +473,22 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.allies.head.position == 1)
     },
 
+    test("моб, занятый союзником напротив, к герою не подтягивается; свободный дальний — подтягивается") {
+      // герой на 1, союзники на 2 и 3 (отряд без дыр); мобы на 1 (пара), 3 (против гнома) и 5; места 2 и 4 пусты
+      val h  = hero(allies = List(ally(pos = 2), ally(AllyKind.Gnome, pos = 3)))
+      val b0 = group(h, 1000L, 1000L, 1000L, 1000L, 1000L)
+      val b  = b0.sideFallen(b0.group.idxOf(2)).sideFallen(b0.sideFallen(b0.group.idxOf(2)).group.idxOf(4))
+      for {
+        t <- makeState(h, b)
+        (state, dao, r) = t
+        _     <- TestRandom.feedInts(60, 99, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
+        _     <- state.action(testUser, tap("Attack"), r)
+        after <- battleOf(dao)
+      } yield assertTrue(b.group.places.sorted == List(3, 5)) &&
+              // № 3 остался против союзника, № 5 шагнул на 4 (место 3 занято)
+              assertTrue(after.group.places.sorted == List(3, 4))
+    },
+
     test("минибосс: союзник на позиции 2 бьёт босса как соседа") {
       val wolf    = MiniBoss.WhiteWolf
       val bossLvl = 2L

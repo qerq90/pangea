@@ -85,8 +85,10 @@ object MurlocQuest {
 
   // ── Снаряжение для старейшины ───────────────────────────────────────────────
 
-  /** Что старейшина берёт: всё, что надевается, — из сумки (надетое он не трогает). */
-  def gear(items: List[Item]): List[Item] = items.filter(i => ItemType.equippable.contains(i.itemType))
+  /** Что старейшина берёт: оружие и нагрудники — из сумки (надетое он не трогает). */
+  val GearTypes: Set[ItemType] = Set(ItemType.Weapon, ItemType.ChestPlate)
+
+  def gear(items: List[Item]): List[Item] = items.filter(i => GearTypes.contains(i.itemType))
 
   /** Кнопки сдачи: по цветам и всё разом. Обе фиолетовые редкости — одна
     * кнопка, оранжевое (легендарное) — только через «всё». */
