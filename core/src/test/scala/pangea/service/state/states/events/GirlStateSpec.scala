@@ -7,6 +7,7 @@ import pangea.model.hero.Hero
 import pangea.model.item.ItemType
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
+import pangea.model.squad.{Ally, AllyKind, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -28,6 +29,10 @@ object GirlStateSpec extends ZIOSpecDefault {
   private def hero: Hero = TestFixtures.hero(userId, dungeonLevel = 7).copy(lvl = 10L, silver = 1000L, guildReputation = 50L)
 
   private def orcScene(step: String): GirlScene = GirlScene(step, Race.Orc.entryName)
+
+  /** Герой с Йоргеном на второй позиции. */
+  private def squadHero: Hero =
+    hero.copy(squad = Squad(heroPos = 1, allies = List(Ally(AllyKind.Human, 2, 100L, 100L, 0L, hiredUntil = Long.MaxValue))))
 
   private def make(h: Hero, scene: Option[GirlScene] = None, barrelSilver: Long = 0L) =
     for {
@@ -66,9 +71,9 @@ object GirlStateSpec extends ZIOSpecDefault {
               assertTrue(after.contains(io.circe.Json.Null))
     },
 
-    test("«Помочь» → бандиты; «Извиниться» — в лабиринт; «Достать оружие» — бой с тремя первых трёх тиров") {
+    test("«Помочь» → бандиты; «Извиниться» — в лабиринт; «Достать оружие» — бой с тремя первых трёх тиров, отряд идёт с героем") {
       for {
-        t <- make(hero, Some(orcScene(Step.Meet)))
+        t <- make(squadHero, Some(orcScene(Step.Meet)))
         (state, dao, _, _, _, r) = t
         _       <- state.action(testUser, tap("Help"), r)
         bandits <- r.sentScreens.map(_.last)
@@ -87,6 +92,8 @@ object GirlStateSpec extends ZIOSpecDefault {
               assertTrue(battle.monstersInOrder.forall(m => m.race == Race.Orc.entryName && m.lvl == 7L)) &&
               assertTrue(routing.returnState.contains(StateType.Girl)) &&
               assertTrue(routing.eventData.flatMap(_.as[GirlScene].toOption).exists(_.step == Step.AfterFight)) &&
+              // бандиты в лабиринте — с отрядом, как любой бой здесь
+              assertTrue(battle.group.allies.map(_.kind) == List(AllyKind.Human)) &&
               assertTrue(back == StateType.Dungeon)
     },
 
@@ -237,9 +244,9 @@ object GirlStateSpec extends ZIOSpecDefault {
               assertTrue(h.silver == 0L && barrel.silverSnapshot == 500L)
     },
 
-    test("взять оружие: редкий человек уровня этажа, добыча ведёт в город") {
+    test("взять оружие: редкий человек уровня этажа, добыча ведёт в город; драка в таверне — без отряда") {
       for {
-        t <- make(hero, Some(orcScene(Step.Demand).copy(price = 500L)))
+        t <- make(squadHero, Some(orcScene(Step.Demand).copy(price = 500L)))
         (state, dao, _, _, _, r) = t
         _       <- TestRandom.feedLongs(50L)
         result  <- state.action(testUser, tap("FightBrother"), r)
@@ -247,7 +254,7 @@ object GirlStateSpec extends ZIOSpecDefault {
         routing <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption).get)
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(battle.monsterRace == Race.Human.entryName && battle.monsterRarity == Rarity.Rare.entryName) &&
-              assertTrue(battle.monsterLvl == 7L && !battle.isGroup) &&
+              assertTrue(battle.monsterLvl == 7L && !battle.isGroup && battle.group.allies.isEmpty) &&
               assertTrue(routing.returnState.contains(StateType.GlobalMap))
     },
 
