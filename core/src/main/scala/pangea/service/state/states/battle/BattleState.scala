@@ -2892,10 +2892,10 @@ case class BattleState(
         // очередь: освободилось место — из-за спин выходят следующие
         (b1q, entered) = b1b.admitQueued
         // дальние подтягиваются к герою на одно свободное место — чтобы в
-        // следующем раунде достать его сбоку
-        (b1, approached) = b1q.closeIn
-        log1 = log1a ++ log1b ++ entered.map(m => content.format("battle.group.fromQueue", "monster" -> m.name)).toVector ++
-          approached.map { case (m, pos) => content.format("battle.group.advance", "monster" -> m.name, "n" -> pos.toString) }.toVector
+        // следующем раунде достать его сбоку; в сводку это не идёт, перестановка
+        // и так видна по строю
+        (b1, _) = b1q.closeIn
+        log1 = log1a ++ log1b ++ entered.map(m => content.format("battle.group.fromQueue", "monster" -> m.name)).toVector
         // перемешивание: каждый четвёртый раунд, если есть кого мешать. Группу
         // берём у УЖЕ перемешанного боя — иначе новый активный встанет поверх
         // старого строя, один моб пропадёт, а другой задвоится.

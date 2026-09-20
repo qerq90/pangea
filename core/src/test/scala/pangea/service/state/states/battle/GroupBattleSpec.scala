@@ -127,7 +127,8 @@ object GroupBattleSpec extends ZIOSpecDefault {
         later   <- battleOf(dao)
         all     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(after.group.places.sorted == List(2, 3)) &&
-              assertTrue(screens.linesIterator.count(_.contains("подходит ближе")) == 2) &&
+              // в сводку перестановка не пишется — она видна по строю
+              assertTrue(!screens.contains("подходит ближе") && screens.contains("2. 🔴") && screens.contains("3. 🔴")) &&
               assertTrue(later.group.places.sorted == List(2, 3)) &&
               assertTrue(all.contains("атаковал вас сбоку") || all.contains("ударил сбоку"))
     },

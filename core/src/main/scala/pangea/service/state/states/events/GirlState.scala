@@ -115,8 +115,8 @@ case class GirlState(
                       .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
       routing = LootData(Nil, Nil, returnState = Some(StateType.Girl),
                   eventData = Some(scene.copy(step = Step.AfterFight).asJson))
-      // Сюжетная драка в таверне — без отряда.
-      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(mobs, hero, energies, squad = false).asJson)
+      // Бандиты в лабиринте — с отрядом, как любой бой здесь.
+      _ <- heroDao.writeActiveBattle(user.userId, SoloPveBattle.fromGroup(mobs, hero, energies).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format("girl.fightStart", "race" -> race.genitivePlural), Nil))
     } yield StateType.Battle
@@ -266,7 +266,8 @@ case class GirlState(
       _       <- clear(user)
     } yield StateType.GlobalMap
 
-  /** Взять оружие: редкий человек уровня этажа, добыча — и в город. */
+  /** Взять оружие: редкий человек уровня этажа, добыча — и в город. Драка в
+    * таверне — без отряда: наёмники остались за столом. */
   private def fightBrother(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
