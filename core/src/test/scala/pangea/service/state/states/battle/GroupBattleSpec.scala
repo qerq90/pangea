@@ -489,6 +489,22 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("пал."))
     },
 
+    test("понимание руны множит урон умения: 1000 понимания — вдвое, дуга соседу тоже вдвое") {
+      val h0 = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
+      val h  = h0.copy(runes = pangea.model.rune.RuneData.empty.copy(
+        understanding = Map(pangea.model.rune.Rune.Active(Skill.SweepingStrike).key -> 1000L)))
+      for {
+        t <- makeState(h, groupFor(h, 1000L, 1000L))
+        (state, dao, r) = t
+        // 258 × 2 = 516 по цели при разбросе 100, соседу — половина, 258
+        _     <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
+        _     <- state.action(testUser, aimed("Skill_101", 1), r)
+        after <- battleOf(dao)
+        all   <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.group.others.head.currentHp == 1000L - 258L) &&
+              assertTrue(all.contains("нанеся ему 516 урона"))
+    },
+
     test("Размашистый удар по мобу в паре: соседу цели — половина урона, дальний под номером 3 цел") {
       val h = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
       for {

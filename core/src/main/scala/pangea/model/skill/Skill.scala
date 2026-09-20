@@ -37,9 +37,12 @@ sealed abstract class Skill(
   /** Описание навыка для инвентаря — с подставленной стоимостью энергии и
     * перезарядкой (КД). Оба хвоста собираются здесь, а не в тексте каждого
     * навыка, чтобы формат был единым. */
-  def describe(hero: Hero): String =
+  def describe(hero: Hero): String = {
+    val understanding = hero.runes.understandingOf(pangea.model.rune.Rune.Active(this))
     description.replace("{}", energyCost(hero).toString) +
-      s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}."
+      s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}." +
+      (if (understanding > 0L) s" Понимание: $understanding." else "")
+  }
 }
 
 object Skill extends Enum[Skill] {

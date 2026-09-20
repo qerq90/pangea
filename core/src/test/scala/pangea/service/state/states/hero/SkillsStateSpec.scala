@@ -2,6 +2,7 @@ package pangea.service.state.states.hero
 
 import pangea.engine.SceneContent
 import pangea.model.hero.Equipment
+import pangea.model.rune.{Rune, RuneData}
 import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
@@ -50,6 +51,26 @@ object SkillsStateSpec extends ZIOSpecDefault {
         _       <- state.enter(testUser, renderer)
         screens <- renderer.sentScreens
       } yield assertTrue(screens.last.choices.map(_.id) == List("BackFromSkills"))
+    },
+
+    test("«Эффекты»: клейма с тела — с пометкой «на теле», в описании — понимание; заголовок «Эффекты»") {
+      val runes = RuneData.empty.brand(Rune.Active(Skill.Ram)).brand(Rune.Passive(PassiveKind.Healer))
+        .copy(understanding = Map(Rune.Active(Skill.Ram).key -> 12L, Rune.Passive(PassiveKind.Healer).key -> 3L))
+      val eq = TestFixtures.emptyEquipment.copy(weapon = weaponWith(Skill.CunningStrike, 1L))
+      for {
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(equipment = eq, runes = runes))
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = SkillsState(heroDao, content)
+        _        <- state.enter(testUser, renderer)
+        list     <- renderer.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap(s"ActiveSkill_${Rune.bodySlotId(Skill.Ram)}"), renderer)
+        ram      <- renderer.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap("PassiveSkill_Healer"), renderer)
+        healer   <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(list.text.startsWith("🎓 Эффекты")) &&
+              assertTrue(list.choices.map(_.label).take(3) == List("Хитрый удар", "Таран (на теле)", "Целитель (на теле)")) &&
+              assertTrue(ram.text.contains("Понимание: 12.") && healer.text.contains("Понимание: 3."))
     },
 
     test("enter с оружием и нагрудником → 2 кнопки активных умений с их названиями") {

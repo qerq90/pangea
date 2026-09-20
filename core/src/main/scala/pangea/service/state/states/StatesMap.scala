@@ -228,7 +228,7 @@ object StatesMap {
           ),
           TrainingHall  -> TrainingHallState(content),
           MasterHorn    -> MasterHornState(heroDao, inventoryRepo, content),
-          MentorKazimir -> MentorKazimirState(content)
+          MentorKazimir -> MentorKazimirState(heroDao, inventoryRepo, content)
         )
         _ <- GraphValidator.validate(states)
       } yield new StatesMap(states)

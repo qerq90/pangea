@@ -1468,7 +1468,7 @@ case class BattleState(
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
             impenDamage =
-              if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
+              if (impenTriggered) (baseReduced * (100L - hero.passives.impenetrableReductionPct) / 100L).max(1L)
               else baseReduced
             // Удар элементаля — это стихия, а не сталь: «Каменный страж» его режет.
             reducedDamage = bossDamageTaken(hero, battle, impenDamage)
@@ -1480,9 +1480,9 @@ case class BattleState(
               PassiveKind.Toughness.TriggerPct
             )
             restoredArmor =
-              if (toughTriggered) (hero.effectiveMaxArmor(nowMs) * PassiveKind.Toughness.RestorePct / 100L).max(1L) else 0L
+              if (toughTriggered) (hero.effectiveMaxArmor(nowMs) * hero.passives.toughnessRestorePct / 100L).max(1L) else 0L
             // «Шипастый»: вернуть 5% полученного урона врагу (по HP моба, мимо брони).
-            thorns = if (hero.passives.hasSpiky) (reducedDamage * PassiveKind.Spiky.ThornsPct / 100L).max(1L) else 0L
+            thorns = if (hero.passives.hasSpiky) (reducedDamage * hero.passives.thornsPct / 100L).max(1L) else 0L
             // Поджигает героя обычной атакой только тот, у кого огонь в природе
             // (огненный элементаль), и только пока не скован холодом. У камня и
             // гнили шанс нулевой, поэтому бросок у них не тратится.
@@ -1964,7 +1964,8 @@ case class BattleState(
     }
     for {
       spread <- Random.nextLongBetween(80L, 121L)
-      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult).toLong.max(1L)
+      // Понимание руны множит число умения — и с вещи, и с клейма (см. Hero.runeMult).
+      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult * hero.runeMult(slot.skill)).toLong.max(1L)
       bumped = aimed.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
       tmpl = slot.skill.hitTemplate
       // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
@@ -2221,7 +2222,7 @@ case class BattleState(
     * ещё раз). Возвращает флаг «раунд потрачен» (в `consumableUsedThisRound`) и
     * приписку в лог, если прокнуло. */
   private def quickHandsRoll(hero: Hero): Task[(Boolean, Vector[String])] =
-    chanceRoll(hero.passives.hasQuickHands, PassiveKind.QuickHands.RepeatChancePct).map { repeated =>
+    chanceRoll(hero.passives.hasQuickHands, hero.passives.quickHandsChancePct).map { repeated =>
       if (repeated) (false, Vector(content.text("battle.quickHands")))
       else (true, Vector.empty)
     }
@@ -2461,7 +2462,7 @@ case class BattleState(
             // «Непробиваемый»: 20% шанс срезать урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
             reducedDamage =
-              if (impenTriggered) (baseReduced * (100L - PassiveKind.Impenetrable.ReductionPct) / 100L).max(1L)
+              if (impenTriggered) (baseReduced * (100L - hero.passives.impenetrableReductionPct) / 100L).max(1L)
               else baseReduced
             // Удар в спину при бегстве разбирается тем же расчётом, что и обычная
             // атака в бою: та же баффовая броня, тот же порог 6 «Каменного стража».
@@ -3046,8 +3047,8 @@ case class BattleState(
       (withExtras, rngAfter2) = fallen.zip(perMonster).foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], rngAfter)) {
         case ((acc, rng), (m, (name, d))) =>
           val (extra, r) = LootGenerator.rollPassiveDrops(
-            hero.passives.hasTaxidermist,
-            hero.passives.hasJeweler,
+            hero.passives.taxidermistChancePct,
+            hero.passives.jewelerChancePct,
             Rarity.withName(m.rarity),
             Race.withName(m.race),
             killLevel,

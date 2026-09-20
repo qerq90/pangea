@@ -345,21 +345,23 @@ object LootGenerator {
   val JoeDoubloonSpreadPct: Long = 20L
 
   /** Доп. дропы от пассивок героя, независимые от основного ролла [[roll]] (каждый
-    * со своим шансом): «Таксидермист» — 10% на лишний трофей, «Ювелир» — 10% на
-    * отдельную груду серебра по обычной формуле дропа. Чистое ядро: флаги, не Hero. */
+    * со своим шансом): «Таксидермист» — шанс на лишний трофей, «Ювелир» — на
+    * отдельную груду серебра по обычной формуле дропа. Шансы в процентах (0 —
+    * пассивки нет; понимание руны их поднимает, см. HeroPassives). Чистое ядро:
+    * числа, не Hero. */
   def rollPassiveDrops(
-      taxidermist: Boolean,
-      jeweler: Boolean,
+      trophyChancePct: Long,
+      silverChancePct: Long,
       tier: MobRarity,
       race: Race,
       killLevel: Long,
       rng: Rng
   ): (List[LootDrop], Rng) = {
     val (trophy, r1) =
-      if (taxidermist) rollChance(PassiveTrophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
+      if (trophyChancePct > 0L) rollChance(trophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
       else (None, rng)
     val (silver, r2) =
-      if (jeweler) rollChance(PassiveSilverChancePct, r1) { r =>
+      if (silverChancePct > 0L) rollChance(silverChancePct, r1) { r =>
         val (amount, rr) = rollSilver(killLevel, r)
         (LootDrop.Silver(amount, pile = false), rr)
       }
@@ -378,8 +380,6 @@ object LootGenerator {
     } else (None, r1)
   }
 
-  private val PassiveTrophyChancePct: Long = 10L
-  private val PassiveSilverChancePct: Long = 10L
 
   // С шансом `pct`% выполнить `make` (даёт дроп), иначе None. RNG тратится всегда.
   private def rollChance(pct: Long, rng: Rng)(make: Rng => (LootDrop, Rng)): (Option[LootDrop], Rng) = {

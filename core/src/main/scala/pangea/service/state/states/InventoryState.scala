@@ -454,7 +454,7 @@ case class InventoryState(
             renderer.show(user, ringChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
             val (newEq, newFight, oldItem) = InventoryState.equip(hero, item, ringSlot)
-            val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq)
+            val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
             // Замена, снимающая последний «Тайник» в экипировке (делта < 0), переполнит сумку → блокируем.
             if (capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 0))
               renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil)).as(false)
@@ -817,9 +817,9 @@ object InventoryState {
    *  на герое, не даёт delta (бонус уже был учтён) — как и остальные пассивки,
    *  «работает только одна». Положительное — надет первый «Тайник» в экипировке,
    *  отрицательное — снят последний. */
-  def equipmentStashDelta(oldEq: Equipment, newEq: Equipment): Long =
-    pangea.model.hero.HeroPassives(newEq.passiveKinds).extraInventorySlots -
-      pangea.model.hero.HeroPassives(oldEq.passiveKinds).extraInventorySlots
+  def equipmentStashDelta(oldEq: Equipment, newEq: Equipment, body: Set[pangea.model.item.PassiveKind] = Set.empty): Long =
+    pangea.model.hero.HeroPassives(newEq.passiveKinds ++ body).extraInventorySlots -
+      pangea.model.hero.HeroPassives(oldEq.passiveKinds ++ body).extraInventorySlots
 
   /** Хватит ли места в сумке, если её вместимость изменится на `capDelta` (может
    *  быть отрицательным — например, теряем бонус «Тайника»), с учётом

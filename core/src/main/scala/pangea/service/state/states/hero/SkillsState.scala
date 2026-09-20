@@ -6,6 +6,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.item.{ItemSet, PassiveKind}
+import pangea.model.rune.Rune
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -13,12 +14,12 @@ import pangea.service.state.{ItemMenu, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 /**
- * Экран «Навыки» — список кнопками ВСЕХ активных умений и пассивок, которые
- * сейчас действуют на герое (сняты с надетого снаряжения): активные — с
- * оружия/нагрудника ([[Hero.activeSkillSlots]]), пассивные — со всего
- * остального снаряжения ([[pangea.model.hero.Equipment.passiveKinds]], дубли
- * уже схлопнуты в множество). Нажатие на кнопку показывает полное описание
- * умения; список — только просмотр, никаких действий тут не происходит.
+ * Экран «Эффекты» — список кнопками ВСЕХ активных умений, пассивок и наборов,
+ * которые сейчас действуют на герое: активные — с оружия/нагрудника и клейм на
+ * теле ([[Hero.activeSkillSlots]]), пассивные — со всего остального снаряжения
+ * и клейм ([[Hero.passives]], дубли уже схлопнуты в множество), наборы — по
+ * порогам. У руны с клейма — пометка «на теле», в описании — понимание.
+ * Нажатие на кнопку показывает полное описание; список — только просмотр.
  */
 case class SkillsState(heroDao: HeroDao, content: SceneContent) extends State {
   import SkillsState._
@@ -132,13 +133,16 @@ object SkillsState {
   object SkillEntry {
     final case class Active(itemId: Long, skill: Skill) extends SkillEntry {
       def buttonId: String = s"$ActivePrefix$itemId"
-      def label: String    = skill.label
+      def label: String    = if (Rune.isBodySlot(itemId)) s"${skill.label} (на теле)" else skill.label
       def describe(hero: Hero): String = skill.describe(hero)
     }
-    final case class Passive(kind: PassiveKind) extends SkillEntry {
+    final case class Passive(kind: PassiveKind, onBody: Boolean) extends SkillEntry {
       def buttonId: String = s"$PassivePrefix${kind.entryName}"
-      def label: String    = kind.label
-      def describe(hero: Hero): String = kind.describe
+      def label: String    = if (onBody) s"${kind.label} (на теле)" else kind.label
+      def describe(hero: Hero): String = {
+        val n = hero.runes.understandingOf(Rune.Passive(kind))
+        kind.describe + (if (n > 0L) s" Понимание: $n." else "")
+      }
     }
 
     /** Набор снаряжения: в списке — сколько предметов надето, в описании —
@@ -170,10 +174,12 @@ object SkillsState {
    *  снятые с надетого снаряжения. Активные (оружие/нагрудник) идут первыми,
    *  затем пассивки по алфавиту метки, затем наборы, набравшие хотя бы один
    *  порог — стабильный порядок между перерисовками. */
-  def entries(hero: Hero): List[SkillEntry] =
+  def entries(hero: Hero): List[SkillEntry] = {
+    val worn = hero.equipment.passiveKinds
     hero.activeSkillSlots.map(s => SkillEntry.Active(s.itemId, s.skill)) ++
-      hero.passives.kinds.toList.sortBy(_.label).map(SkillEntry.Passive) ++
+      hero.passives.kinds.toList.sortBy(_.label).map(k => SkillEntry.Passive(k, onBody = !worn.contains(k))) ++
       hero.sets.activeBonuses.map { case (set, _) => SkillEntry.Set(set) }
+  }
 
   final case class SkillsScene(page: Option[Int] = None)
   object SkillsScene {

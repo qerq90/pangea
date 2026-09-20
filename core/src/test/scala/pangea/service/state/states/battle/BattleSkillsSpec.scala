@@ -214,6 +214,22 @@ object BattleSkillsSpec extends ZIOSpecDefault {
               assertTrue(scene.forall(_.isNull))
     },
 
+    test("клеймо на теле: умение в бою без оружия с руной — кнопка с отрицательным id, ход проходит") {
+      val bodyId = pangea.model.rune.Rune.bodySlotId(Skill.SweepingStrike)
+      val hero   = heroWith(None, None).copy(runes = pangea.model.rune.RuneData.empty.brand(pangea.model.rune.Rune.Active(Skill.SweepingStrike)))
+      val battle = weakBattle(hero.activeSkillSlots)
+      for {
+        triple                     <- makeState(hero, battle)
+        (state, heroDao, renderer)  = triple
+        _                          <- state.enter(testUser, renderer)
+        screen                     <- renderer.sentScreens.map(_.last)
+        result                     <- state.action(testUser, tap(s"Skill_$bodyId"), renderer)
+        after                      <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
+      } yield assertTrue(screen.choices.exists(_.id == s"Skill_$bodyId")) &&
+              assertTrue(result == StateType.Battle && after.monsterCurrentHp < 999L) &&
+              assertTrue(after.slotByItem(bodyId).exists(_.uses == 1))
+    },
+
     test("Damage-скилл добивает моба сам → победа, переход в Loot, бой очищен") {
       val hero   = heroWith(Some(Skill.SweepingStrike), None)
       val slots  = List(SkillSlotState(101L, Skill.SweepingStrike))
