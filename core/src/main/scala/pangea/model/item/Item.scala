@@ -118,7 +118,8 @@ case class Item(
    *
    *  У карт клада, камней-усилителей и материалов уровня нет — только имя. */
   def displayTitle: String =
-    if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material || isQuestItem ||
+    if (isQuestItem) s"${Item.QuestMark} $name" // сюжетный предмет: звёздочка вместо редкости и уровня
+    else if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material ||
         itemType == ItemType.Flask || itemType == ItemType.Brew) name
     else {
       val prefix = s"${rarity.emoji} "
@@ -195,6 +196,9 @@ object Item {
   /** Разделитель между сравниваемым предметом и тем, что уже надето в том же
     * слоте. Единый для всех экранов сравнения (дроп, находка, инвентарь). */
   val ComparisonSeparator: String = "➖➖➖➖➖"
+
+  /** Значок сюжетного предмета перед именем — в списке сумки и на карточке. */
+  val QuestMark: String = "★"
 
   def NoItem: Item =
     Item(0, "Пусто", 0, Rarity.Gray, ItemType.NoItem, 0, 0, 0, 0, 0, 0, 0, ItemDetails.Plain)

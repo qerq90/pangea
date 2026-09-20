@@ -291,22 +291,22 @@ case class InventoryState(
       exit    = content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
       screen  = item.questItem match {
         case Some(QuestItemKind.MarisaLetter) =>
-          val text = s"${item.name}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MarisaQuest.LetterDifficulty))}\n\n${QuestItemKind.MarisaLetter.description}" +
+          val text = s"${item.displayTitle}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MarisaQuest.LetterDifficulty))}\n\n${QuestItemKind.MarisaLetter.description}" +
             (if (opened) "" else "\n\n" + content.text("marisa.letterHint"))
           Screen(text, List(
             content.choice("OpenLetter", if (opened) "marisa.readLetterLabel" else "marisa.openLetterLabel")
               .copy(color = ChoiceColor.Positive, row = Some(0)), exit))
         case Some(QuestItemKind.KelvinMap) =>
-          Screen(s"${item.name}\n\n${QuestItemKind.KelvinMap.description}", List(
+          Screen(s"${item.displayTitle}\n\n${QuestItemKind.KelvinMap.description}", List(
             content.choice("UseKelvinMap", "marisa.mapUseLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
         case Some(QuestItemKind.MurlocVillageMap) =>
-          val text = s"${item.name}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MurlocQuest.MapDifficulty))}\n\n${QuestItemKind.MurlocVillageMap.description}"
+          val text = s"${item.displayTitle}\n${content.format("marisa.difficulty", "difficulty" -> Difficulty.render(MurlocQuest.MapDifficulty))}\n\n${QuestItemKind.MurlocVillageMap.description}"
           Screen(text, List(
             content.choice("UseMurlocMap", "murlocVillage.map.useLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
         case Some(book) if HerbLore.isTreatise(book) =>
-          Screen(s"${item.name}\n\n${book.description}", List(
+          Screen(s"${item.displayTitle}\n\n${book.description}", List(
             content.choice("ReadTreatise", "knowledge.readLabel").copy(color = ChoiceColor.Positive, row = Some(0)), exit))
-        case _ => Screen(item.name, List(exit))
+        case _ => Screen(item.displayTitle, List(exit))
       }
       _ <- renderer.show(user, screen)
     } yield StateType.Inventory
