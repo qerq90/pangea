@@ -15,8 +15,10 @@ class TestBarrelRepository(private var items: List[Item] = Nil, private var silv
 
   def get(heroId: HeroId): IO[BarrelRepoError, Barrel] = ZIO.succeed(barrel)
 
+  // Как в проде: пыль места не занимает, но её не больше сотни горстей на вид.
   def deposit(heroId: HeroId, item: Item): IO[BarrelRepoError, Unit] =
-    if (items.length >= Barrel.MaxItems) ZIO.fail(BarrelRepoError.BarrelFull)
+    if (item.isDust && !item.dustKind.forall(barrel.hasRoomForDust)) ZIO.fail(BarrelRepoError.DustLimitReached)
+    else if (!item.isDust && barrel.freeSlots <= 0) ZIO.fail(BarrelRepoError.BarrelFull)
     else ZIO.succeed { items = items :+ item }
 
   def withdraw(heroId: HeroId, itemId: Long): IO[BarrelRepoError, Item] =

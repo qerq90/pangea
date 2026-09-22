@@ -20,8 +20,11 @@ final class InventoryRepositoryLive(inventoryDao: InventoryDao)
         .tapError(err => ZIO.logError(s"Error occurred: ${err.getMessage}"))
         .orElseFail(InventoryRepoError.CantFindInventory)
       updatedInventory <-
-        // Сюжетный предмет места не занимает и кладётся всегда.
-        if (!item.isQuestItem && inventory.maxItems <= inventory.occupied)
+        // Сюжетный предмет места не занимает и кладётся всегда; пыль — тоже, но
+        // у неё свой предел на вид.
+        if (item.isDust && !item.dustKind.forall(inventory.hasRoomForDust))
+          ZIO.fail(InventoryRepoError.DustLimitReached)
+        else if (!item.isQuestItem && !item.isDust && inventory.maxItems <= inventory.occupied)
           ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
         else ZIO.succeed(inventory.addItem(item))
       _ <- inventoryDao

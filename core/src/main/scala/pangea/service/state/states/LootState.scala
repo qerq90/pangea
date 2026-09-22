@@ -130,11 +130,12 @@ case class LootState(
              Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
 
       takenLines = results.collect { case (item, true) => itemLine(item) }
-      anyLost    = results.exists { case (_, added) => !added }
+      // У каждой непринятой вещи своя причина: сумка полна или пыли уже сотня.
+      lostLines  = results.collect { case (item, false) => InventoryFeedback.refusalLine(content, item) }.distinct
       slots     <- InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id)
       taken      = if (takenLines.isEmpty) content.text("loot.empty")
                    else content.text("loot.claimed") + "\n\n" + takenLines.mkString("\n")
-      full       = if (anyLost) "\n\n" + content.text("common.inventoryFull") else ""
+      full       = if (lostLines.isEmpty) "" else "\n\n" + lostLines.mkString("\n")
       _ <- renderer.show(user, Screen(taken + full + "\n\n" + slots, Nil))
       next <- finish(user, loot, renderer)
     } yield next

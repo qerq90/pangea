@@ -80,6 +80,13 @@ case class Item(
 
   def isQuestItem: Boolean = itemType == ItemType.QuestItem
 
+  /** Горсть пыли: места в сумке и в бочке не занимает, но её не больше
+    * [[MaterialKind.MaxDustPerKind]] на вид (в кубе Азата — как все, слот). */
+  def isDust: Boolean = material.exists(_.gem.isDefined)
+
+  /** Вид пыли, если это она. */
+  def dustKind: Option[MaterialKind] = material.filter(_.gem.isDefined)
+
   def brew: Option[BrewKind] = details match {
     case ItemDetails.Brew(k) => Some(k)
     case _                   => None

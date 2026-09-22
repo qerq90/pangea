@@ -15,7 +15,7 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.temple.CubeState._
-import pangea.service.state.{AzatData, HerbLore, MarisaQuest, State, UserAction}
+import pangea.service.state.{AzatData, HerbLore, InventoryFeedback, MarisaQuest, State, UserAction}
 import java.util.concurrent.TimeUnit
 import zio.{Random, Task, ZIO}
 
@@ -180,8 +180,11 @@ case class CubeState(
       _ <- azat.cubeItems.find(_.id == itemId) match {
         case None => showWithdraw(user, renderer)
         case Some(item) =>
-          if (inv.freeSlots <= 0)
-            renderer.show(user, Screen(content.text("cube.inventoryFull"), Nil)) *> showWithdraw(user, renderer)
+          // Пыль места не занимает — ей мешает только собственный предел на вид.
+          if (if (item.isDust) !item.dustKind.forall(inv.hasRoomForDust) else inv.freeSlots <= 0)
+            renderer.show(user, Screen(
+              if (item.isDust) InventoryFeedback.refusalLine(content, item, storage = true)
+              else content.text("cube.inventoryFull"), Nil)) *> showWithdraw(user, renderer)
           else
             inventoryRepo.addItem(hero.id, item).mapError(asThrowable) *>
               saveAzat(user, azat.copy(cubeItems = removeFirst(azat.cubeItems, itemId))) *>

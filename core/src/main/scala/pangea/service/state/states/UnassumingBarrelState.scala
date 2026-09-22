@@ -14,7 +14,7 @@ import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.UnassumingBarrelState._
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Неприметная бочка в Портовом квартале — личное хранилище игрока: до
@@ -60,7 +60,7 @@ case class UnassumingBarrelState(
     for {
       barrel <- getBarrel(user)
       text    = content.format("barrel.menu.text",
-                  "items"     -> barrel.items.data.length.toString,
+                  "items"     -> barrel.occupied.toString,
                   "maxItems"  -> Barrel.MaxItems.toString,
                   "silver"    -> barrel.silver.toString,
                   "maxSilver" -> Barrel.MaxSilver.toString)
@@ -228,6 +228,10 @@ case class UnassumingBarrelState(
           barrelRepo.deposit(hero.id, item).foldZIO(
             {
               case BarrelRepoError.BarrelFull => renderer.show(user, Screen(content.text("barrel.barrelFull"), Nil)) *> showDepositItems(user, renderer)
+              // Пыли этого вида в бочке уже сотня — горсть остаётся в сумке.
+              case BarrelRepoError.DustLimitReached =>
+                renderer.show(user, Screen(InventoryFeedback.refusalLine(content, item, storage = true), Nil)) *>
+                  showDepositItems(user, renderer)
               case e                          => ZIO.fail(asThrowable(e))
             },
             _ => inventoryRepo.removeItem(item.id, hero.id).mapError(asThrowable) *>
@@ -239,10 +243,16 @@ case class UnassumingBarrelState(
 
   private def withdrawItem(user: User, itemId: Long, renderer: Renderer): Task[Unit] =
     for {
-      hero <- getHero(user)
-      inv  <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      _ <- if (inv.freeSlots <= 0)
-             renderer.show(user, Screen(content.text("barrel.inventoryFull"), Nil)) *> showWithdrawItems(user, renderer)
+      hero   <- getHero(user)
+      inv    <- inventoryRepo.get(hero.id).mapError(asThrowable)
+      barrel <- getBarrel(user)
+      chosen  = barrel.items.data.find(_.id == itemId)
+      // Пыль места в сумке не занимает — ей мешает только свой предел на вид.
+      noRoom  = chosen.exists(i => if (i.isDust) !i.dustKind.forall(inv.hasRoomForDust) else inv.freeSlots <= 0)
+      _ <- if (noRoom)
+             renderer.show(user, Screen(
+               chosen.map(InventoryFeedback.refusalLine(content, _, storage = true))
+                 .getOrElse(content.text("barrel.inventoryFull")), Nil)) *> showWithdrawItems(user, renderer)
            else
              barrelRepo.withdraw(hero.id, itemId).foldZIO(
                {
@@ -252,9 +262,9 @@ case class UnassumingBarrelState(
                item => inventoryRepo.addItem(hero.id, item).foldZIO(
                  {
                    // редкая гонка: пока проверяли — кто-то заполнил. Возвращаем предмет в бочку.
-                   case InventoryRepoError.NoMorePlaceForItems =>
+                   case InventoryRepoError.NoMorePlaceForItems | InventoryRepoError.DustLimitReached =>
                      barrelRepo.deposit(hero.id, item).mapError(asThrowable) *>
-                       renderer.show(user, Screen(content.text("barrel.inventoryFull"), Nil)) *>
+                       renderer.show(user, Screen(InventoryFeedback.refusalLine(content, item, storage = true), Nil)) *>
                        showWithdrawItems(user, renderer)
                    case e => ZIO.fail(asThrowable(e))
                  },

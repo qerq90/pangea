@@ -170,6 +170,11 @@ object MaterialKind extends Enum[MaterialKind] {
   /** Все виды пыли — то, что можно сыпать на оружие и собирать в камни. */
   val dusts: IndexedSeq[MaterialKind] = values.filter(_.gem.isDefined)
 
+  /** Сколько горстей одного вида влезает в хранилище. Места пыль не занимает
+    * (см. `Inventory.occupied`), поэтому предел у неё свой: без него сумка
+    * копила бы её без конца. У сумки и у бочки счёт раздельный. */
+  val MaxDustPerKind: Int = 100
+
   implicit val encoder: Encoder[MaterialKind] = (k: MaterialKind) => k.entryName.asJson
   implicit val decoder: Decoder[MaterialKind] = (c: HCursor) => c.as[String].map(MaterialKind.withName)
 }

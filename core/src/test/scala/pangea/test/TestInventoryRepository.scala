@@ -2,7 +2,7 @@ package pangea.test
 
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory
-import pangea.model.item.Item
+import pangea.model.item.{Item, MaterialKind}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import zio.{IO, ZIO}
 
@@ -20,9 +20,12 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
   def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit] =
     ZIO.succeed { capacity += delta }
 
-  // Сюжетный предмет места не занимает — кладётся и в полную сумку, как в проде.
+  // Как в проде: сюжетный предмет и пыль места не занимают и кладутся в полную
+  // сумку, но пыли одного вида не больше MaxDustPerKind.
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
-    if (canAdd || item.isQuestItem) ZIO.succeed { items = items :+ item }
+    if (item.isDust && !item.dustKind.forall(k => items.count(_.dustKind.contains(k)) < MaterialKind.MaxDustPerKind))
+      ZIO.fail(InventoryRepoError.DustLimitReached)
+    else if (canAdd || item.isQuestItem || item.isDust) ZIO.succeed { items = items :+ item }
     else ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
 
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =
