@@ -211,10 +211,11 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       val items = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
-      val (materials, gear) = items.partition(_.itemType == ItemType.Material)
+      val (materials, rest) = items.partition(_.itemType == ItemType.Material)
+      val gear = rest.filterNot(_.itemType == ItemType.RuneStone)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
       assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.EverburningIron))) &&
-      // половина роллов — ингредиент, оставшуюся делят пополам фиолет и синь
+      // 40% роллов — ингредиент, 10% — руна, оставшуюся половину делят фиолет и синь
       assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
                                   g.rarity == pangea.model.item.Rarity.Blue)) &&
       assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple)) &&
@@ -227,7 +228,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     test("фиолетовых и синих вещей с элементаля примерно поровну — по 25% роллов") {
       val gear = (1L to 600L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
-        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+        .flatMap(_.itemOpt).filter(i => i.itemType != ItemType.Material && i.itemType != ItemType.RuneStone).toList
       val purple = gear.count(_.rarity == pangea.model.item.Rarity.Purple).toDouble
       val blue   = gear.count(_.rarity == pangea.model.item.Rarity.Blue).toDouble
       assertTrue(LootGenerator.ElementalPurpleChancePct == 25L) &&
@@ -250,10 +251,36 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(math.abs(purple - blue) / (purple + blue) < 0.2)
     },
 
+    test("большая руна падает со всех четырёх минибоссов: у элементалей 10% (за счёт ингредиента), у Джо 10% (за счёт камня и дублонов), у волка 5% (за счёт клыка)") {
+      import pangea.model.monster.MiniBoss
+      import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+      def rateOf(boss: MiniBoss, floor: Long = 1L): (Double, List[Item]) = {
+        val drops  = (1L to 4000L).toList.flatMap(s => LootGenerator.rollMiniBoss(boss, 1L, 40L, Rng(s), floor)._1)
+        val stones = drops.flatMap(_.itemOpt).filter(_.itemType == ItemType.RuneStone)
+        (stones.size.toDouble * 100.0 / drops.size, stones)
+      }
+      val (fire,  fireStones) = rateOf(MiniBoss.FireElemental)
+      val (stone, _)          = rateOf(MiniBoss.StoneElemental)
+      val (joe,   _)          = rateOf(MiniBoss.RottenJoe)
+      val (wolf,  wolfStones) = rateOf(MiniBoss.WhiteWolf, floor = 17L)
+      val runes = fireStones.flatMap(_.runeStone).flatMap(d => Rune.byKey(d.runeKey)).toSet
+      assertTrue(LootGenerator.ElementalIngredientChancePct == 40L && LootGenerator.ElementalRuneChancePct == 10L) &&
+      assertTrue(LootGenerator.WolfFangUntil == 20L && LootGenerator.WolfHideFrom - LootGenerator.WolfBlueUntil == 5L) &&
+      assertTrue(LootGenerator.JoeGemUntil - LootGenerator.JoeSkinUntil == 20L) &&
+      assertTrue(LootGenerator.JoeDoubloonsUntil - LootGenerator.JoeGemUntil == 20L) &&
+      assertTrue(LootGenerator.JoeRuneUntil - LootGenerator.JoeDoubloonsUntil == 10L) &&
+      assertTrue(fire > 8.0 && fire < 12.0 && stone > 8.0 && stone < 12.0) &&
+      assertTrue(joe > 8.0 && joe < 12.0) &&
+      // у волка 5%, но при уже выпавшей шкуре шкала укорачивается и доля руны выше
+      assertTrue(wolf > 4.0 && wolf < 9.0) &&
+      assertTrue((fireStones ++ wolfStones).forall(_.runeStone.exists(_.size == RuneStoneSize.Big))) &&
+      assertTrue(runes.size > 20 && runes.subsetOf(RuneStone.all.toSet))
+    },
+
     test("уровень сетовой вещи — уровень героя ±1, а не уровень босса") {
       val gear = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
-        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+        .flatMap(_.itemOpt).filter(i => i.itemType != ItemType.Material && i.itemType != ItemType.RuneStone).toList
       assertTrue(gear.nonEmpty) && assertTrue(gear.forall(i => i.lvl >= 39L && i.lvl <= 41L))
     },
 
@@ -282,7 +309,8 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       val items = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.StoneElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
-      val (materials, gear) = items.partition(_.itemType == ItemType.Material)
+      val (materials, rest) = items.partition(_.itemType == ItemType.Material)
+      val gear = rest.filterNot(_.itemType == ItemType.RuneStone)
       assertTrue(materials.nonEmpty) && assertTrue(gear.nonEmpty) &&
       assertTrue(materials.forall(_.material.contains(pangea.model.item.MaterialKind.MagicStone))) &&
       assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
@@ -294,7 +322,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     test("уровень вещи не выходит за границы игры: ни нулевого, ни 151-го") {
       def gearAt(heroLvl: Long) = (1L to 300L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, heroLvl, Rng(s))._1)
-        .flatMap(_.itemOpt).filter(_.itemType != ItemType.Material).toList
+        .flatMap(_.itemOpt).filter(i => i.itemType != ItemType.Material && i.itemType != ItemType.RuneStone).toList
       val lowest  = gearAt(1L)   // разброс −1 увёл бы вещь в нулевой уровень
       val highest = gearAt(150L) // разброс +1 увёл бы её в 151-й
       assertTrue(lowest.nonEmpty) && assertTrue(highest.nonEmpty) &&
@@ -302,12 +330,14 @@ object LootGeneratorSpec extends ZIOSpecDefault {
       assertTrue(highest.forall(i => i.lvl >= 149L && i.lvl <= 150L))
     },
 
-    test("ингредиент и вещь выпадают примерно поровну") {
+    test("ингредиент забирает 40% роллов элементаля, вещи набора — половину, руна — десятую часть") {
       val items = (1L to 600L).iterator
         .flatMap(s => LootGenerator.rollMiniBoss(pangea.model.monster.MiniBoss.FireElemental, 2L, 40L, Rng(s))._1)
         .flatMap(_.itemOpt).toList
       val materialShare = items.count(_.itemType == ItemType.Material).toDouble / items.size
-      assertTrue(materialShare > 0.4 && materialShare < 0.6)
+      val gearShare     = items.count(_.set.isDefined).toDouble / items.size
+      assertTrue(materialShare > 0.33 && materialShare < 0.47) &&
+      assertTrue(gearShare > 0.43 && gearShare < 0.57)
     },
 
     // ── Пассивки лута ─────────────────────────────────────────────────────────
