@@ -85,6 +85,13 @@ case class Item(
     case _                   => None
   }
 
+  /** Божественное оружие, если это оно (см. [[DivineKind]]); в доп. слоте может
+    * лежать и обычная вещь — тогда пусто. */
+  def divine: Option[ItemDetails.Divine] = details match {
+    case r: ItemDetails.Divine => Some(r)
+    case _                    => None
+  }
+
   def material: Option[MaterialKind] = details match {
     case ItemDetails.Material(k) => Some(k)
     case _                       => None
@@ -167,6 +174,8 @@ case class Item(
       case ItemDetails.Trophy(_, k, _)   => if (k.description.isEmpty) Nil else List(k.description)
       // Отвар: описание и рецепт — чтобы игрок помнил, из чего варил.
       case ItemDetails.Brew(k)           => List(k.description, s"Рецепт: ${k.recipe.map(_.displayName).mkString(" + ")}")
+      // Божественное оружие: только описание — ни статов, ни числа ударов, которые она ещё держит.
+      case ItemDetails.Divine(k, _, _)    => List(k.description)
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines
