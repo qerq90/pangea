@@ -60,7 +60,7 @@ case class SoloPveBattle(
   story: Option[String] = None,
   // Имя моба от сюжета («Коллектор») вместо имени по расе и редкости.
   customName: Option[String] = None,
-  // Божественное оружие доп. слота бьёт раз в раунд — и своего счётчика ни с кем не делит.
+  // Божественное оружие бьёт раз в раунд — и своего счётчика ни с кем не делит.
   divineUsedThisRound: Boolean = false
 ) {
 
@@ -276,7 +276,7 @@ case class SoloPveBattle(
   def tickBuffs(skipSlots: Set[Long] = Set.empty): SoloPveBattle = copy(
     heroBattleState         = heroBattleState.tick,
     consumableUsedThisRound = false,
-    // Божественное оружие доп. слота живёт своим счётчиком: «быстрые руки» его не ускоряют,
+    // Божественное оружие живёт своим счётчиком: «быстрые руки» его не ускоряют,
     // а расходник в руках её не блокирует.
     divineUsedThisRound      = false,
     skillSlots              = skillSlots.map(s =>

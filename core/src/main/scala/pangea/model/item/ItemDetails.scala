@@ -84,8 +84,9 @@ object ItemDetails {
   /** Отвар из трав — какой именно (см. [[BrewKind]]). */
   case class Brew(kind: BrewKind) extends ItemDetails
 
-  /** Божественное оружие в доп. слоте (см. [[DivineKind]]): вид и сколько ударов ещё держит.
-   *  Заряды игроку не показываются — божественное оружие рассыпается без предупреждения. */
+  /** Божественное оружие (см. [[DivineKind]]): вид и сколько ударов ещё держит.
+   *  Носится в доп. слоте наравне с обычными вещами этого слота; заряды игроку
+   *  не показываются — оружие рассыпается без предупреждения. */
   case class Divine(kind: DivineKind, charges: Int, maxCharges: Int) extends Charged {
     def withCharges(n: Int): Divine = copy(charges = n)
   }

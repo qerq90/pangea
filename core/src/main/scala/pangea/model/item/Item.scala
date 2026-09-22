@@ -85,7 +85,8 @@ case class Item(
     case _                   => None
   }
 
-  /** Божественное оружие доп. слота, если это она (см. [[DivineKind]]). */
+  /** Божественное оружие, если это оно (см. [[DivineKind]]); в доп. слоте может
+    * лежать и обычная вещь — тогда пусто. */
   def divine: Option[ItemDetails.Divine] = details match {
     case r: ItemDetails.Divine => Some(r)
     case _                    => None

@@ -3220,7 +3220,7 @@ case class BattleState(
   private def saveAzat(user: User, azat: AzatState): Task[Unit] =
     heroDao.writeAzatData(user.userId, azat.asJson)
 
-  // ── Божественное оружие доп. слота ─────────────────────────────────────────────────────
+  // ── Божественное оружие ─────────────────────────────────────────────────────
 
   /** Удар божественного оружия: бьёт всех врагов на поле разом — сперва броня,
     * остатком по HP, — стихия ложится на каждого без броска, и сверху идёт грань
@@ -3453,7 +3453,8 @@ case class BattleState(
         row = Some(2)
       )
     }
-    // Божественное оружие в доп. слоте — своя кнопка над «Сбежать»: удар по всему полю.
+    // В доп. слоте божественное оружие (а не обычная вещь) — своя кнопка над
+    // «Сбежать»: удар по всему полю.
     val divineButton = hero.equipment.additionalWeapon.divine.map { _ =>
       pangea.engine.Choice("UseDivine", pangea.engine.Choice.fit(hero.equipment.additionalWeapon.name),
         color = if (battle0.divineUsedThisRound) pangea.engine.ChoiceColor.Negative

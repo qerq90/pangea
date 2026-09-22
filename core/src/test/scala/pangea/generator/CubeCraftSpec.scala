@@ -49,7 +49,7 @@ object CubeCraftSpec extends ZIOSpecDefault {
         assertTrue(result.items.count(_.gem.exists(_.grade == 2)) == 2)
     },
 
-    test("оружие + 8 надколотых камней → божественное оружие того же уровня и редкости, в доп. слот") {
+    test("оружие + 8 надколотых камней → божественное оружие того же уровня и редкости, под доп. слот") {
       val sword  = Item(1L, "🟣 Меч Дворянина", 37L, Rarity.Violet, ItemType.Weapon,
         attack = 100, accuracy = 10, energy = 0, armor = 0, defence = 0, evasion = 0)
       val result = CubeCraft.craft(sword :: List.fill(8)(gem(GemKind.Ruby, 1)), charges = 50, rng)
