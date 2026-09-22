@@ -59,7 +59,9 @@ case class SoloPveBattle(
   // таблицами; смерть в нём — тоже (см. DeathState).
   story: Option[String] = None,
   // Имя моба от сюжета («Коллектор») вместо имени по расе и редкости.
-  customName: Option[String] = None
+  customName: Option[String] = None,
+  // Реликвия доп. слота бьёт раз в раунд — и своего счётчика ни с кем не делит.
+  relicUsedThisRound: Boolean = false
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -274,6 +276,9 @@ case class SoloPveBattle(
   def tickBuffs(skipSlots: Set[Long] = Set.empty): SoloPveBattle = copy(
     heroBattleState         = heroBattleState.tick,
     consumableUsedThisRound = false,
+    // Реликвия доп. слота живёт своим счётчиком: «быстрые руки» её не ускоряют,
+    // а расходник в руках её не блокирует.
+    relicUsedThisRound      = false,
     skillSlots              = skillSlots.map(s =>
       if (skipSlots.contains(s.itemId)) s
       else s.copy(cooldown = (s.cooldown - 1).max(0))
@@ -297,6 +302,7 @@ case class SoloPveBattle(
       heroPoisonCoatTurns  = (effects.heroPoisonCoatTurns - 1).max(0),
       heroBleedCoatTurns   = (effects.heroBleedCoatTurns - 1).max(0),
       heroSmokeTurns       = (effects.heroSmokeTurns - 1).max(0),
+      heroTrueStrikeTurns  = (effects.heroTrueStrikeTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
@@ -380,8 +386,9 @@ object SoloPveBattle {
       group               <- c.getOrElse[GroupState]("group")(GroupState.empty)
       story               <- c.getOrElse[Option[String]]("story")(None)
       customName          <- c.getOrElse[Option[String]]("customName")(None)
+      relicUsed           <- c.getOrElse[Boolean]("relicUsedThisRound")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName)
+                         story, customName, relicUsed)
 }

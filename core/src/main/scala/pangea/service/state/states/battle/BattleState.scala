@@ -12,7 +12,7 @@ import pangea.model.squad.{AllyKind, AllySkill}
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.NpcQuest
-import pangea.model.item.{FlaskEffect, FlaskRates, ItemDetails, PassiveKind, PotionKind}
+import pangea.model.item.{FlaskEffect, FlaskRates, Item, ItemDetails, PassiveKind, PotionKind, RelicKind, RelicRates}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
@@ -61,6 +61,7 @@ case class BattleState(
       "SquadTick"   -> Target.Run((u, _, r) => squadTick(u, r)),
       "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r)(flaskTurn)),
       "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
+      "UseRelic"    -> Target.Run((u, _, r) => resolve(u, r)(relicTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
@@ -3219,6 +3220,103 @@ case class BattleState(
   private def saveAzat(user: User, azat: AzatState): Task[Unit] =
     heroDao.writeAzatData(user.userId, azat.asJson)
 
+  // ── Реликвия доп. слота ─────────────────────────────────────────────────────
+
+  /** Удар реликвии: бьёт всех врагов на поле разом — урон мимо брони и защиты,
+    * стихия ложится на каждого без броска, — и добавляет грань своего вида:
+    * вытянутую жизнь, верный глаз, яд или ветер в спину. Раунд не завершает
+    * (герой бьёт дальше), но за раунд удар один, и «Быстрые руки» его не
+    * ускоряют. Последний удар рассыпает реликвию прямо в руках. */
+  private def relicTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    hero.equipment.additionalWeapon.relic match {
+      case None                                 => cont(hero, battle, content.text("battle.relic.none"))
+      case Some(_) if battle.relicUsedThisRound => cont(hero, battle, content.text("battle.relic.alreadyUsed"))
+      case Some(relic)                          =>
+        val item  = hero.equipment.additionalWeapon
+        val kind  = relic.kind
+        val blow  = RelicRates.DamagePerLvl * item.lvl
+        // `dealt` — сколько сняли со всех разом (по нему пьёт череп), `blow` —
+        // сколько прилетело каждому.
+        val (swept, dealt, foes) = relicSweep(battle, blow, kind)
+
+        // Грань вида: череп пьёт половину отнятого, аметист даёт верный глаз,
+        // бриллиант — ветер в спину за каждого задетого. Яд змеиного клинка
+        // уже лёг на врагов в самом ударе.
+        val maxHp   = hero.effectiveMaxHp(nowMs)
+        val drained = if (kind == RelicKind.DarkLordSword) (dealt * RelicRates.DrainPct / 100L).max(0L) else 0L
+        val healed  = ((hero.fightStats.hp + drained).min(maxHp) - hero.fightStats.hp).max(0L)
+        val heroFed = if (healed > 0) hero.copy(fightStats = hero.fightStats.copy(hp = hero.fightStats.hp + healed)) else hero
+
+        val eyed =
+          if (kind == RelicKind.AmethystGoddess)
+            swept.withEffects(swept.effects.copy(heroTrueStrikeTurns = RelicRates.BuffRounds))
+          else swept
+        val hasted =
+          if (kind == RelicKind.WindLordStaff && foes > 0)
+            eyed.copy(heroBattleState = eyed.heroBattleState.add(
+              Buff(0L, 0L, 0L, dodgePct = RelicRates.HastePctPerFoe * foes, defencePct = 0L,
+                   turnsLeft = Some(RelicRates.BuffRounds))))
+          else eyed
+
+        // Заряд потрачен; последний рассыпает реликвию — слот пустеет.
+        val spent      = relic.spent
+        val crumbles   = spent.charges <= 0
+        val slot       = if (crumbles) Item.NoItem else item.copy(details = spent)
+        val heroAfter0 = heroFed.copy(equipment = heroFed.equipment.copy(additionalWeapon = slot))
+
+        val line = content.format(s"battle.relic.${kind.entryName}",
+          "damage" -> blow.toString, "heal" -> healed.toString, "foes" -> foes.toString)
+        val log  = Vector(line) ++
+          (if (crumbles) Vector(content.format("battle.relic.crumbled", "name" -> kind.itemName)) else Vector.empty)
+
+        val outcome = if (hasted.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
+        // Реликвия раунд не завершает — энергию за раунд герой возьмёт своим
+        // ударом; но если поле ею и закончилось, раунд кончился вместе с боем.
+        val heroAfter = if (outcome == Outcome.Victory && hasted.promoteNext.isEmpty) regainEnergy(heroAfter0, nowMs) else heroAfter0
+        ZIO.succeed(TurnResult(heroAfter, hasted.copy(relicUsedThisRound = true), log, outcome, endsRound = false))
+    }
+
+  /** Проход реликвии по всему полю: каждому врагу — урон мимо брони и защиты
+    * (сопротивление минибосса в силе) и прок стихии со стопроцентным шансом;
+    * змеиный клинок вдобавок травит. Павшие уходят в добычу. Возвращает бой,
+    * суммарный нанесённый урон и число задетых врагов. */
+  private def relicSweep(battle: SoloPveBattle, damage: Long, kind: RelicKind): (SoloPveBattle, Long, Int) = {
+    val element = kind.element
+    val poisons = kind == RelicKind.SnakeGodBlade
+
+    def strike(b: SoloPveBattle): (SoloPveBattle, Long) = {
+      val resist = element.map(e => b.boss.map(_.damageTakenMult(e)).getOrElse(1.0))
+        .getOrElse(b.boss.map(_.plainDamageTakenMult).getOrElse(1.0))
+      val dealt = (damage * resist).toLong.max(1L).min(b.monsterCurrentHp)
+      val hit   = b.copy(monsterCurrentHp = (b.monsterCurrentHp - dealt).max(0L))
+      // Стихия и яд ложатся молча: строки проков только засорили бы экран.
+      val alive   = hit.monsterCurrentHp > 0L
+      val procced = if (alive) element.map(e => applyProcs(hit, Set(e))._1).getOrElse(hit) else hit
+      val venomed =
+        if (poisons && alive)
+          procced.withEffects(procced.effects.copy(
+            monsterPoison = Some(procced.effects.monsterPoison.map(_.stacked).getOrElse(Poison.onHit))))
+        else procced
+      (venomed, dealt)
+    }
+
+    // Мобы вне пары — с конца строя: павший уходит из `others`, и удаление не
+    // сдвигает ещё не битых.
+    val (sided, sideDealt, sideFoes) =
+      battle.group.others.indices.reverse.foldLeft((battle, 0L, 0)) { case ((b, total, foes), idx) =>
+        val slot = b.group.others(idx)
+        if (!slot.alive) (b, total, foes)
+        else {
+          val (hit, dealt) = strike(b.withActive(slot))
+          val back    = b.copy(group = b.group.copy(others = b.group.others.updated(idx, hit.activeSlot)))
+          val settled = if (hit.monsterCurrentHp <= 0L) back.sideFallen(idx) else back
+          (settled, total + dealt, foes + 1)
+        }
+      }
+    val (swept, activeDealt) = strike(sided)
+    (swept, sideDealt + activeDealt, sideFoes + 1)
+  }
+
   // ── Экран боя ───────────────────────────────────────────────────────────────
 
   /** Экран боя; в группе перед ним — строй, чтобы с порога было видно, кто
@@ -3349,6 +3447,13 @@ case class BattleState(
         row = Some(2)
       )
     }
+    // Реликвия в доп. слоте — своя кнопка над «Сбежать»: удар по всему полю.
+    val relicButton = hero.equipment.additionalWeapon.relic.map { _ =>
+      pangea.engine.Choice("UseRelic", pangea.engine.Choice.fit(hero.equipment.additionalWeapon.name),
+        color = if (battle0.relicUsedThisRound) pangea.engine.ChoiceColor.Negative
+                else pangea.engine.ChoiceColor.Positive,
+        row = Some(3))
+    }
     // Бить некого (напротив пусто, соседей нет) — вместо атаки «Переместиться»
     // (поменяться местами с союзником), а без союзников — «Ждать».
     val attackButton =
@@ -3358,12 +3463,13 @@ case class BattleState(
     val mainButtons =
       (List(attackButton, flaskButton)) ++
         beltButton.toList ++
+        relicButton.toList ++
         List(
           pangea.engine.Choice(
             "Flee",
             "Сбежать",
             color = pangea.engine.ChoiceColor.Negative,
-            row = Some(3)
+            row = Some(4)
           )
         )
     Screen(text, skillButtons ++ mainButtons)
@@ -3418,7 +3524,9 @@ case class BattleState(
     val airPct      = if (battle.effects.mobAirBoostTurns > 0) Element.Air.ProcBonusPct else 0L
     val instinctPct = if (battle.effects.mobInstinct) MiniBoss.WhiteWolf.InstinctBoostPct else 0L
     val evasion     = battle.monsterStats.evasion * (100L + airPct + instinctPct) / 100L
-    BattleState.dodgeChance(0L, evasion, 0L, heroAccuracy)
+    val dodge       = BattleState.dodgeChance(0L, evasion, 0L, heroAccuracy)
+    // Пока держится грань аметистовой реликвии, герой бьёт почти наверняка.
+    if (battle.effects.heroTrueStrikeTurns > 0) dodge.min((100L - RelicRates.TrueStrikePct).toDouble) else dodge
   }
 }
 
