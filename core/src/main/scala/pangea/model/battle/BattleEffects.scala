@@ -183,8 +183,8 @@ case class BattleEffects(
   // Ставится с запасом в один тик, как monsterSkillBlockedTurns: `tickBuffs`
   // идёт в начале хода моба, до фазы соседей.
   heroSmokeTurns:       Int                        = 0,
-  // Грань аметистовой реликвии: сколько раундов герой бьёт почти без промаха
-  // (шанс попасть — RelicRates.TrueStrikePct).
+  // Грань аметистовой божественного оружия: сколько раундов герой бьёт почти без промаха
+  // (шанс попасть — DivineRates.TrueStrikePct).
   heroTrueStrikeTurns:  Int                        = 0
 ) {
 

@@ -84,10 +84,10 @@ object ItemDetails {
   /** Отвар из трав — какой именно (см. [[BrewKind]]). */
   case class Brew(kind: BrewKind) extends ItemDetails
 
-  /** Реликвия в доп. слоте (см. [[RelicKind]]): вид и сколько ударов ещё держит.
-   *  Заряды игроку не показываются — реликвия рассыпается без предупреждения. */
-  case class Relic(kind: RelicKind, charges: Int, maxCharges: Int) extends Charged {
-    def withCharges(n: Int): Relic = copy(charges = n)
+  /** Божественное оружие в доп. слоте (см. [[DivineKind]]): вид и сколько ударов ещё держит.
+   *  Заряды игроку не показываются — божественное оружие рассыпается без предупреждения. */
+  case class Divine(kind: DivineKind, charges: Int, maxCharges: Int) extends Charged {
+    def withCharges(n: Int): Divine = copy(charges = n)
   }
 
   // --- Покодечная сериализация с диспатчем по "type" ---
@@ -121,8 +121,8 @@ object ItemDetails {
   private val questDec:  Decoder[Quest]            = deriveDecoder
   private val brewEnc:   Encoder[Brew]             = deriveEncoder
   private val brewDec:   Decoder[Brew]             = deriveDecoder
-  private val relicEnc:  Encoder[Relic]            = deriveEncoder
-  private val relicDec:  Decoder[Relic]            = deriveDecoder
+  private val divineEnc:  Encoder[Divine]            = deriveEncoder
+  private val divineDec:  Decoder[Divine]            = deriveDecoder
 
   private def tagged(tpe: String, body: Json): Json =
     body.deepMerge(Json.obj("type" -> tpe.asJson))
@@ -140,7 +140,7 @@ object ItemDetails {
     case m: Material    => tagged("Material", matEnc(m))
     case q: Quest       => tagged("Quest", questEnc(q))
     case b: Brew        => tagged("Brew", brewEnc(b))
-    case r: Relic       => tagged("Relic", relicEnc(r))
+    case d: Divine      => tagged("Divine", divineEnc(d))
   }
 
   implicit val decoder: Decoder[ItemDetails] = Decoder.instance { c =>
@@ -157,7 +157,7 @@ object ItemDetails {
       case "Material"    => matDec(c)
       case "Quest"       => questDec(c)
       case "Brew"        => brewDec(c)
-      case "Relic"       => relicDec(c)
+      case "Divine"      => divineDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))
     }
   }

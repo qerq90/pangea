@@ -49,45 +49,45 @@ object CubeCraftSpec extends ZIOSpecDefault {
         assertTrue(result.items.count(_.gem.exists(_.grade == 2)) == 2)
     },
 
-    test("оружие + 8 надколотых камней → реликвия того же уровня и редкости, в доп. слот") {
+    test("оружие + 8 надколотых камней → божественное оружие того же уровня и редкости, в доп. слот") {
       val sword  = Item(1L, "🟣 Меч Дворянина", 37L, Rarity.Violet, ItemType.Weapon,
         attack = 100, accuracy = 10, energy = 0, armor = 0, defence = 0, evasion = 0)
       val result = CubeCraft.craft(sword :: List.fill(8)(gem(GemKind.Ruby, 1)), charges = 50, rng)
-      val relic  = result.items.head
+      val forged = result.items.head
       assertTrue(result.chargesUsed == 1 && result.items.size == 1) &&
-      assertTrue(relic.name == "🟣 Топор Владыки Огня" && relic.itemType == ItemType.AdditionalWeapon) &&
-      assertTrue(relic.lvl == 37L && relic.rarity == Rarity.Violet) &&
-      assertTrue(relic.relic.exists(r => r.kind == RelicKind.FireLordAxe && r.charges == RelicKind.chargesFor(Rarity.Violet))) &&
-      assertTrue(relic.attack == 0 && relic.accuracy == 0)
+      assertTrue(forged.name == "🟣 Топор Владыки Огня" && forged.itemType == ItemType.AdditionalWeapon) &&
+      assertTrue(forged.lvl == 37L && forged.rarity == Rarity.Violet) &&
+      assertTrue(forged.divine.exists(d => d.kind == DivineKind.FireLordAxe && d.charges == DivineKind.chargesFor(Rarity.Violet))) &&
+      assertTrue(forged.attack == 0 && forged.accuracy == 0)
     },
 
-    test("вид реликвии — по камням: семь рубинов против черепа дают рубиновую впятеро чаще, чужих видов нет") {
+    test("вид божественного оружия — по камням: семь рубинов против черепа дают рубиновую впятеро чаще, чужих видов нет") {
       val sword = Item(1L, "⚫ Меч", 5L, Rarity.Gray, ItemType.Weapon,
         attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
       val pool  = sword :: (List.fill(7)(gem(GemKind.Ruby, 1)) :+ gem(GemKind.Skull, 1))
       val kinds = (1L to 400L).toList
-        .flatMap(seed => CubeCraft.craft(pool, charges = 1, Rng(seed)).items.head.relic.map(_.kind))
-      val ruby  = kinds.count(_ == RelicKind.FireLordAxe)
-      val skull = kinds.count(_ == RelicKind.DarkLordSword)
+        .flatMap(seed => CubeCraft.craft(pool, charges = 1, Rng(seed)).items.head.divine.map(_.kind))
+      val ruby  = kinds.count(_ == DivineKind.FireLordAxe)
+      val skull = kinds.count(_ == DivineKind.DarkLordSword)
       assertTrue(kinds.size == 400 && ruby + skull == 400) &&
       assertTrue(skull > 0 && ruby > skull * 3)
     },
 
-    test("камни выше надколотых в ковку не идут, и без оружия реликвии не выйдет") {
+    test("камни выше надколотых в ковку не идут, и без оружия божественного оружия не выйдет") {
       val sword   = Item(1L, "⚫ Меч", 5L, Rarity.Gray, ItemType.Weapon,
         attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
       val damaged = CubeCraft.craft(sword :: List.fill(8)(gem(GemKind.Ruby, 2)), charges = 50, rng)
       val noSword = CubeCraft.craft(List.fill(8)(gem(GemKind.Skull, 1)), charges = 50, rng)
-      assertTrue(damaged.items.forall(_.relic.isEmpty)) &&
-      assertTrue(noSword.items.forall(_.relic.isEmpty))
+      assertTrue(damaged.items.forall(_.divine.isEmpty)) &&
+      assertTrue(noSword.items.forall(_.divine.isEmpty))
     },
 
-    test("реликвию куб не переплавляет: ни мифрил, ни ингредиент набора её не трогают") {
-      val relic    = RelicKind.item(RelicKind.DarkLordSword, 40L, Rarity.Orange).copy(id = 9L)
-      val reforged = CubeCraft.craft(List(relic, mithril(2L), mithril(3L)), charges = 50, rng)
-      val infused  = CubeCraft.craft(List(relic, MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 4L)), charges = 50, rng)
-      assertTrue(reforged.chargesUsed == 0 && reforged.items.contains(relic)) &&
-      assertTrue(infused.chargesUsed == 0 && infused.items.contains(relic))
+    test("божественное оружие куб не переплавляет: ни мифрил, ни ингредиент набора его не трогают") {
+      val blade    = DivineKind.item(DivineKind.DarkLordSword, 40L, Rarity.Orange).copy(id = 9L)
+      val reforged = CubeCraft.craft(List(blade, mithril(2L), mithril(3L)), charges = 50, rng)
+      val infused  = CubeCraft.craft(List(blade, MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 4L)), charges = 50, rng)
+      assertTrue(reforged.chargesUsed == 0 && reforged.items.contains(blade)) &&
+      assertTrue(infused.chargesUsed == 0 && infused.items.contains(blade))
     },
 
     test("9 голов существ → Левитирующая голова монстра") {

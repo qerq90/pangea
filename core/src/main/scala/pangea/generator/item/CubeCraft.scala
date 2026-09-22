@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, RelicKind, TrophyKind}
+import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, TrophyKind}
 import pangea.model.monster.MiniBoss
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
@@ -41,7 +41,7 @@ object CubeCraft {
   private def isMithril(i: Item): Boolean = i.material.contains(MaterialKind.Mithril)
 
   private def isLegendaryGear(i: Item): Boolean =
-    i.rarity == Rarity.Orange && ItemType.equippable.contains(i.itemType) && i.relic.isEmpty
+    i.rarity == Rarity.Orange && ItemType.equippable.contains(i.itemType) && i.divine.isEmpty
 
   // 3 одинаковых камня (вид+грейд, грейд < макс) → 1 камень грейдом выше.
   private object GemUpgrade extends Recipe {
@@ -72,11 +72,11 @@ object CubeCraft {
     }
   }
 
-  // Оружие + 8 надколотых камней → реликвия в доп. слот. Камни могут быть
-  // разных видов: вид реликвии роллится по их числу — семь рубинов против
+  // Оружие + 8 надколотых камней → божественное оружие в доп. слот. Камни могут быть
+  // разных видов: вид божественного оружия роллится по их числу — семь рубинов против
   // одного черепа дают рубиновый вариант в семь раз чаще. Уровень и редкость
-  // реликвия берёт у оружия, ушедшего в ковку.
-  private object RelicForge extends Recipe {
+  // божественное оружие берёт у оружия, ушедшего в ковку.
+  private object DivineForge extends Recipe {
     /** Сколько надколотых камней уходит в ковку. */
     val Gems: Int = 8
     val size: Int = 1 + Gems
@@ -87,7 +87,7 @@ object CubeCraft {
         case Some(weapon) if cracked.sizeIs >= Gems =>
           val taken      = cracked.take(Gems)
           val (kind, r2) = pickKind(taken.flatMap(_.gem).map(_.kind), rng)
-          Some((weapon :: taken, RelicKind.item(RelicKind.of(kind), weapon.lvl, weapon.rarity), r2))
+          Some((weapon :: taken, DivineKind.item(DivineKind.of(kind), weapon.lvl, weapon.rarity), r2))
         case _ => None
       }
     }
@@ -145,10 +145,10 @@ object CubeCraft {
         set        <- setOf(ingredient)
         // Вещь, которой этот набор ещё не присвоен: иначе рецепт крутился бы
         // впустую, тратя заряды на переименование в тот же самый набор.
-        // Реликвию набор не берёт: перековывать её не во что, а переименование
-        // стёрло бы и вид, и заряды.
+        // Божественное оружие набор не берёт: перековывать его не во что, а
+        // переименование стёрло бы и вид, и заряды.
         target     <- pool.find(i =>
-                        i != ingredient && ItemType.equippable.contains(i.itemType) && !i.set.contains(set) && i.relic.isEmpty)
+                        i != ingredient && ItemType.equippable.contains(i.itemType) && !i.set.contains(set) && i.divine.isEmpty)
       } yield {
         val (name, r2) = ItemNameGenerator.setName(target.itemType, target.rarity, set, rng)
         (List(target, ingredient), target.copy(name = name, set = Some(set)), r2)
@@ -221,7 +221,7 @@ object CubeCraft {
 
   // От самого длинного рецепта к самому короткому.
   private val recipes: List[Recipe] = List(
-    RelicForge,                                            // 9
+    DivineForge,                                            // 9
     NineHeads,                                             // 9
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
