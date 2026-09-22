@@ -63,6 +63,7 @@ object LootGenerator {
     case object Gem        extends Category
     case object Flask      extends Category
     case object Rune       extends Category
+    case object RuneSmall  extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -85,21 +86,22 @@ object LootGenerator {
   //   Редкие и мифические — 1% у трофея;
   //   Легендарные        — 5%: 2% у трофея и 3% у серебра.
   // Фляга (Flask) — 1% у всех тиров, забранный у экипировки (Gear: 35 → 34).
-  // Рунный камень (Rune) — 5% у всех тиров, тоже забранные у экипировки (34 → 29).
+  // Рунные камни — 5% у всех тиров, забранные у экипировки (34 → 29), и эти
+  // пять поделены между большой руной (1%) и малой (4%).
   private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
     tier match {
       case MobRarity.Rare =>
         List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 26, Category.Gem -> 1,
-             Category.Flask -> 1, Category.Rune -> 5)
+             Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case MobRarity.Mythical =>
         List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 25, Category.MapHalf -> 1,
-             Category.Gem -> 1, Category.Flask -> 1, Category.Rune -> 5)
+             Category.Gem -> 1, Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case MobRarity.Legendary =>
         List(Category.Gear -> 29, Category.Trophy -> 37, Category.SilverPile -> 22, Category.MapHalf -> 1,
-             Category.Gem -> 5, Category.Flask -> 1, Category.Rune -> 5)
+             Category.Gem -> 5, Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case _ =>
         List(Category.Gear -> 29, Category.Trophy -> 39, Category.SilverPile -> 26, Category.Flask -> 1,
-             Category.Rune -> 5)
+             Category.Rune -> 1, Category.RuneSmall -> 4)
     }
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
@@ -260,9 +262,10 @@ object LootGenerator {
   def isHide(drop: LootDrop): Boolean =
     drop.itemOpt.exists(_.material.contains(MaterialKind.WhiteWolfHide))
 
-  /** С Белого волка поровну четыре вещи: клык, фиолетовая и синяя вещи
-    * «Охотника» и шкура. Если шкура с этого волка уже выпала, её четверть
-    * делится между остальными тремя — бросок идёт по укороченной шкале. */
+  /** С Белого волка: клык (20%), фиолетовая и синяя вещи «Охотника» (по 25%),
+    * большая руна (5% — забраны у клыка) и шкура (25%). Если шкура с этого
+    * волка уже выпала, её четверть делится между остальными — бросок идёт по
+    * укороченной шкале, поэтому шкура стоит в конце. */
   private def wolfDrop(
       boss: MiniBoss,
       bossLvl: Long,
@@ -274,7 +277,8 @@ object LootGenerator {
     val (roll, r1) = rng.between(0L, if (hideAvailable) 100L else WolfHideFrom)
     if (roll < WolfFangUntil) (LootDrop.Trophy(wolfFang(bossLvl, floorLvl)), r1)
     else if (roll < WolfPurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, r1)
-    else if (roll < WolfHideFrom) setGear(boss, heroLvl, ItemRarity.Blue, r1)
+    else if (roll < WolfBlueUntil) setGear(boss, heroLvl, ItemRarity.Blue, r1)
+    else if (roll < WolfHideFrom) bigRune(r1)
     else (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
   }
 
@@ -291,37 +295,48 @@ object LootGenerator {
       Some(MiniBoss.WhiteWolf.FangCoefPerLvl * bossLvl))
   )
 
-  /** Границы роллов волка (0..99): до 25 — клык, до 50 — фиолетовая вещь, до 75 —
-    * синяя, дальше — шкура. */
-  val WolfFangUntil: Long   = 25L
-  val WolfPurpleUntil: Long = 50L
+  /** Границы роллов волка (0..99): до 20 — клык, до 45 — фиолетовая вещь, до 70 —
+    * синяя, до 75 — большая руна, дальше — шкура. */
+  val WolfFangUntil: Long   = 20L
+  val WolfPurpleUntil: Long = 45L
+  val WolfBlueUntil: Long   = 70L
   val WolfHideFrom: Long    = 75L
 
-  /** С элементаля половину роллов забирает ингредиент, а вторую делят пополам
-    * фиолетовая и синяя вещи его набора. */
+  /** С элементаля 40% роллов забирает ингредиент, 10% — большая руна (взяты у
+    * ингредиента), а оставшуюся половину делят пополам фиолетовая и синяя вещи
+    * его набора. */
   private def elementalDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < ElementalIngredientChancePct) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
-    else if (roll < ElementalIngredientChancePct + ElementalPurpleChancePct)
+    else if (roll < ElementalIngredientChancePct + ElementalRuneChancePct) bigRune(rng)
+    else if (roll < ElementalIngredientChancePct + ElementalRuneChancePct + ElementalPurpleChancePct)
       setGear(boss, heroLvl, ItemRarity.Purple, rng)
     else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
-  /** С Гнилого Джо падает поровну четыре вещи: кожа упыря, расколотый усилитель,
-    * горсть дублонов и вещь «Упыря» — последнюю четверть делят пополам фиолетовая
-    * и синяя, как и у элементалей. */
+  /** С Гнилого Джо: кожа упыря (25%), расколотый усилитель (20%), горсть
+    * дублонов (20%), большая руна (10% — по пять забраны у усилителя и у
+    * дублонов) и вещь «Упыря» — последнюю четверть делят фиолетовая и синяя,
+    * как и у элементалей. */
   private def joeDrop(boss: MiniBoss, roll: Long, bossLvl: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
-    if (roll < 25L) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
-    else if (roll < 50L) {
+    if (roll < JoeSkinUntil) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
+    else if (roll < JoeGemUntil) {
       // Усилитель — любой камень или череп, но всегда самого низкого качества
       // («расколотый»), тем же роллом, что и обычный дроп камня.
       val (gem, r1) = GemGenerator.randomGem(GemModel.MinGrade, rng)
       (LootDrop.Gem(gem), r1)
-    } else if (roll < 75L) {
+    } else if (roll < JoeDoubloonsUntil) {
       // Дублоны: 2 × BossLvL с разбросом ±20%, но не меньше одного.
       val base       = JoeDoubloonsPerLvl * bossLvl
       val (pct, r1)  = rng.between(100L - JoeDoubloonSpreadPct, 100L + JoeDoubloonSpreadPct + 1L)
       (LootDrop.Doubloons((base * pct / 100L).max(1L)), r1)
-    } else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
+    } else if (roll < JoeRuneUntil) bigRune(rng)
+    else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
     else setGear(boss, heroLvl, ItemRarity.Blue, rng)
+
+  /** Большая руна с минибосса: вид равновероятен среди всех, как и в добыче. */
+  private def bigRune(rng: Rng): (LootDrop, Rng) = {
+    val (rune, r1) = rng.pick(RuneStone.all)
+    (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Big)), r1)
+  }
 
   /** Вещь набора этого босса заданной редкости: уровень героя ±1, но строго в
     * границах игры — на первом уровне разброс не уводит вещь в нулевой, на
@@ -336,15 +351,24 @@ object LootGenerator {
   }
 
   /** Шанс (в %), что предмет с элементаля окажется ингредиентом, а не вещью набора. */
-  val ElementalIngredientChancePct: Long = 50L
+  val ElementalIngredientChancePct: Long = 40L
+
+  /** Большая руна с элементаля — забраны у его ингредиента. */
+  val ElementalRuneChancePct: Long = 10L
 
   /** Из оставшейся половины столько процентов приходится на фиолетовую вещь; всё,
     * что не выпало ингредиентом и не фиолетовым, — синяя вещь того же набора. */
   val ElementalPurpleChancePct: Long = 25L
 
-  /** Граница внутри последней четверти роллов Джо (75..99): до неё — фиолетовая
-    * вещь набора, после — синяя. Нечётный остаток достаётся фиолетовой. */
-  val JoePurpleUntil: Long = 88L
+  /** Границы роллов Джо (0..99): до 25 — кожа упыря, до 45 — усилитель, до 65 —
+    * дублоны, до 75 — большая руна (по пять процентов забраны у усилителя и у
+    * дублонов), дальше — вещь набора: до 88 фиолетовая, после — синяя.
+    * Нечётный остаток достаётся фиолетовой. */
+  val JoeSkinUntil: Long      = 25L
+  val JoeGemUntil: Long       = 45L
+  val JoeDoubloonsUntil: Long = 65L
+  val JoeRuneUntil: Long      = 75L
+  val JoePurpleUntil: Long    = 88L
 
   /** Сколько дублонов за уровень босса роняет Джо и с каким разбросом (в %). */
   val JoeDoubloonsPerLvl: Long   = 2L
@@ -470,6 +494,10 @@ object LootGenerator {
         // Большая руна: вид равновероятен среди всех, боевых и пассивных.
         val (rune, r1) = rng.pick(RuneStone.all)
         (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Big)), r1)
+
+      case Category.RuneSmall =>
+        val (rune, r1) = rng.pick(RuneStone.all)
+        (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Small)), r1)
     }
 
   // Серебро: базис lvl×4 с разбросом ±20%, минимум 1.

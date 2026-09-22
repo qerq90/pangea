@@ -325,6 +325,43 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("сложили две половинки")))
     },
 
+    test("пять малых рун одного узора складываются в большую; четырёх мало, а в полную сумку большую не сложить") {
+      import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+      import pangea.model.skill.Skill
+      val rune  = Rune.Active(Skill.SweepingStrike)
+      def small(id: Long) = RuneStone.item(rune, RuneStoneSize.Small).copy(id = id)
+      val four  = (1L to 4L).toList.map(small)
+      val five  = (1L to 5L).toList.map(small)
+      for {
+        // четырёх осколков мало
+        few                     <- makeState(baseHero, four)
+        (fs, _, finv, fr)        = few
+        _                       <- fs.enter(testUser, fr)
+        _                       <- fs.action(testUser, selectItem(1L), fr)
+        card                    <- fr.sentScreens.map(_.last)
+        _                       <- fs.action(testUser, tap("CombineRune"), fr)
+        fewTexts                <- fr.sentScreens.map(_.map(_.text).mkString(" | "))
+        // пятерых хватает
+        ok                      <- makeState(baseHero, five)
+        (os, _, oinv, or)        = ok
+        _                       <- os.enter(testUser, or)
+        _                       <- os.action(testUser, selectItem(1L), or)
+        _                       <- os.action(testUser, tap("CombineRune"), or)
+        okTexts                 <- or.sentScreens.map(_.map(_.text).mkString(" | "))
+        // сумка забита — большую руну класть некуда
+        full                    <- makeState(baseHero, five ++ (10L to 29L).toList.map(i => sword.copy(id = i)))
+        (ps, _, pinv, pr)        = full
+        _                       <- ps.enter(testUser, pr)
+        _                       <- ps.action(testUser, selectItem(1L), pr)
+        _                       <- ps.action(testUser, tap("CombineRune"), pr)
+        fullTexts               <- pr.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(card.choices.exists(_.id == "CombineRune") && !card.choices.exists(_.id == "Equip")) &&
+              assertTrue(finv.snapshot.size == 4 && fewTexts.contains("осколков всего 4, а нужно 5")) &&
+              assertTrue(oinv.snapshot.size == 1 && oinv.snapshot.head.runeStone.exists(_.size == RuneStoneSize.Big)) &&
+              assertTrue(okTexts.contains("узор смыкается")) &&
+              assertTrue(pinv.snapshot.count(_.isSmallRune) == 5 && fullTexts.contains("переполнена"))
+    },
+
     test("Объединить без второй половины этой зоны → сообщение, половинки на месте") {
       for {
         quad                          <- makeState(baseHero, List(kinetHalfA, gorgeHalf))

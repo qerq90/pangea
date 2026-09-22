@@ -80,12 +80,23 @@ case class Item(
 
   def isQuestItem: Boolean = itemType == ItemType.QuestItem
 
-  /** Горсть пыли: места в сумке и в бочке не занимает, но её не больше
-    * [[MaterialKind.MaxDustPerKind]] на вид (в кубе Азата — как все, слот). */
+  /** Горсть пыли: места в сумке и в бочке не занимает (в кубе Азата — как все, слот). */
   def isDust: Boolean = material.exists(_.gem.isDefined)
 
   /** Вид пыли, если это она. */
   def dustKind: Option[MaterialKind] = material.filter(_.gem.isDefined)
+
+  /** Малая руна: как и пыль, места не занимает и копится до предела. */
+  def isSmallRune: Boolean = runeStone.exists(_.size == pangea.model.rune.RuneStoneSize.Small)
+
+  /** Ключ «этого же добра» у вещей, которые не занимают места: по нему считается
+    * предел [[Item.HoardLimit]]. None — обычная вещь, она занимает слот. */
+  def hoardKey: Option[String] =
+    dustKind.map(k => s"dust:${k.entryName}")
+      .orElse(Option.when(isSmallRune)(s"rune:${runeStone.get.runeKey}"))
+
+  /** Вещь, которая не занимает места ни в сумке, ни в бочке. */
+  def weightless: Boolean = hoardKey.isDefined
 
   def brew: Option[BrewKind] = details match {
     case ItemDetails.Brew(k) => Some(k)
@@ -190,8 +201,8 @@ case class Item(
       // Божественное оружие: только описание — ни статов, ни числа ударов, которые она ещё держит.
       case ItemDetails.Divine(k, _, _)    => List(k.description)
       // Рунный камень: узор, ощущение от него и что даст сама руна.
-      case ItemDetails.RuneStone(key, _)  =>
-        pangea.model.rune.Rune.byKey(key).map(pangea.model.rune.RuneStone.describe).getOrElse(Nil)
+      case ItemDetails.RuneStone(key, size) =>
+        pangea.model.rune.Rune.byKey(key).map(pangea.model.rune.RuneStone.describe(_, size)).getOrElse(Nil)
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines
@@ -218,6 +229,12 @@ case class Item(
 }
 
 object Item {
+  /** Сколько одинакового невесомого добра (пыль, малые руны) влезает в одно
+    * хранилище. Места оно не занимает (см. `Inventory.occupied`), поэтому предел
+    * у него свой: без него сумка копила бы его без конца. У сумки и у бочки счёт
+    * раздельный. */
+  val HoardLimit: Int = 100
+
   /** Разделитель между сравниваемым предметом и тем, что уже надето в том же
     * слоте. Единый для всех экранов сравнения (дроп, находка, инвентарь). */
   val ComparisonSeparator: String = "➖➖➖➖➖"

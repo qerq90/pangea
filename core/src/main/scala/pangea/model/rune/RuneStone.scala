@@ -11,7 +11,10 @@ import pangea.model.skill.Skill
 sealed abstract class RuneStoneSize(val prefix: String, val points: Long, val price: Long) extends EnumEntry
 
 object RuneStoneSize extends Enum[RuneStoneSize] {
-  case object Big extends RuneStoneSize("Большая руна", 5L, 400L)
+  case object Big   extends RuneStoneSize("Большая руна", 5L, 400L)
+  /** Осколок: даёт одно понимание, места не занимает; пять таких складываются
+    * в большую прямо в сумке (см. `RuneStone.PiecesPerBig`). */
+  case object Small extends RuneStoneSize("Малая руна", 1L, 80L)
 
   val values: IndexedSeq[RuneStoneSize] = findValues
 
@@ -32,6 +35,9 @@ object RuneStone {
 
   /** Строка, которая стоит под узором на любом рунном камне. */
   val Insight: String = "Всматриваясь в неё, я как будто лучше начинаю её понимать…"
+
+  /** Сколько малых рун складывается в большую. */
+  val PiecesPerBig: Int = 5
 
   /** Все руны, на которые бывают камни: боевые и пассивные. */
   def all: List[Rune] =
@@ -126,9 +132,18 @@ object RuneStone {
   /** «Большая руна Размашистого удара». */
   def name(rune: Rune, size: RuneStoneSize): String = s"${size.prefix} ${look(rune).genitive}"
 
-  /** Строки карточки: узор, то, что чувствуешь, глядя на него, и что даст руна. */
-  def describe(rune: Rune): List[String] =
-    List(look(rune).engraving, Insight, s"${rune.label}: ${rune.description}")
+  /** Узор малой руны — тот же, но на осколке. */
+  def engraving(rune: Rune, size: RuneStoneSize): String =
+    if (size == RuneStoneSize.Small) s"Осколок плиты с тем же узором. ${look(rune).engraving}"
+    else look(rune).engraving
+
+  /** Строки карточки: узор, то, что чувствуешь, глядя на него, у малой — ещё и
+    * приписка про складывание, и напоследок — что даст сама руна. */
+  def describe(rune: Rune, size: RuneStoneSize): List[String] = {
+    val fold = Option.when(size == RuneStoneSize.Small)(
+      s"Места в сумке не занимает; $PiecesPerBig таких складываются в большую руну.")
+    List(engraving(rune, size), Insight) ++ fold ++ List(s"${rune.label}: ${rune.description}")
+  }
 
   /** Готовый предмет. Уровня у камня нет, редкость служебная — в заголовке её не
     * видно (см. `Item.displayTitle`), а цена у Ришелье своя, по размеру. */

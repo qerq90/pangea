@@ -14,6 +14,7 @@ import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
 import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
 import pangea.model.quest.{Difficulty, NpcQuest}
+import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
@@ -42,6 +43,7 @@ case class InventoryState(
       "EquipRing"         -> Target.Run { (u, ua, r) => equipChosenRing(u, ua, r) },
       "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
+      "CombineRune"       -> Target.Run { (u, _, r) => combineRuneSelected(u, r) },
       "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) },
       "BreakGem"          -> Target.Run { (u, _,  r) => offerBreak(u, r) },
       "BreakGemPick"      -> Target.Run { (u, ua, r) => confirmBreak(u, ua, r) },
@@ -128,12 +130,15 @@ case class InventoryState(
           val text     = itemDetail(item, hero, hero.silver) + stackLine(count)
           val canEquip = ItemType.equippable.contains(item.itemType)
           val canCombine = item.itemType == ItemType.TreasureMapHalf
+          // Пять малых рун одного узора складываются в большую — прямо в сумке.
+          val canFoldRune = item.isSmallRune
           val canSocket  = item.gem.isDefined
           // Ломать можно и камни в гнёздах вещи, и сам камень, лежащий в сумке.
           val canBreak   = GemBreaking.hasGems(item)
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
             Option.when(canCombine)(content.choice("CombineMap", "inventory.combineMap").copy(color = ChoiceColor.Positive, row = Some(0))),
+            Option.when(canFoldRune)(content.choice("CombineRune", "inventory.combineRune").copy(color = ChoiceColor.Positive, row = Some(0))),
             Option.when(canSocket)(content.choice("SocketInsert", "inventory.socket").copy(color = ChoiceColor.Positive, row = Some(0))),
             Option.when(canBreak)(content.choice("BreakGem", "inventory.breakGem").copy(color = ChoiceColor.Negative, row = Some(0))),
             Option.when(canSocket)(content.choice("CrushGem", "inventory.crushGem").copy(color = ChoiceColor.Negative, row = Some(0))),
@@ -548,6 +553,49 @@ case class InventoryState(
                 showList(user, renderer)
           }
         case _ => showList(user, renderer)
+      }
+    } yield res
+
+  private def combineRuneSelected(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- readScene(user)
+      res <- scene.selectedId match {
+        case None     => showList(user, renderer)
+        case Some(id) => combineRuneById(user, id, renderer)
+      }
+    } yield res
+
+  /** Пять малых рун одного узора → одна большая. Малые места не занимают, а
+    * большая занимает слот — в полную сумку её не сложить. */
+  private def combineRuneById(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      items  = inv.items.data
+      res <- items.find(i => i.id == itemId && i.isSmallRune).flatMap(i => i.runeStone.map(i -> _)) match {
+        case None => showList(user, renderer)
+        case Some((first, details)) =>
+          val pieces = items.filter(_.runeStone.exists(d =>
+            d.size == RuneStoneSize.Small && d.runeKey == details.runeKey)).take(RuneStone.PiecesPerBig)
+          val rune   = Rune.byKey(details.runeKey)
+          (pieces.sizeIs == RuneStone.PiecesPerBig, rune) match {
+            case (false, _) =>
+              renderer.show(user, Screen(content.format("inventory.runeNeedMore",
+                "name" -> first.name, "have" -> pieces.size.toString, "need" -> RuneStone.PiecesPerBig.toString), Nil)) *>
+                showList(user, renderer)
+            case (_, None) => showList(user, renderer)
+            case (true, Some(_)) if inv.freeSlots <= 0 =>
+              renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showList(user, renderer)
+            case (true, Some(r)) =>
+              val big = RuneStone.item(r, RuneStoneSize.Big)
+              for {
+                _         <- inventoryRepo.removeItems(pieces.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString))
+                persisted <- itemRepository.persist(hero.id, big)
+                _         <- inventoryRepo.addItem(hero.id, persisted).mapError(e => new Throwable(e.toString))
+                _         <- renderer.show(user, Screen(content.format("inventory.runeFolded", "name" -> big.name), Nil))
+                back      <- showList(user, renderer)
+              } yield back
+          }
       }
     } yield res
 

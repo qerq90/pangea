@@ -247,8 +247,8 @@ case class UnassumingBarrelState(
       inv    <- inventoryRepo.get(hero.id).mapError(asThrowable)
       barrel <- getBarrel(user)
       chosen  = barrel.items.data.find(_.id == itemId)
-      // Пыль места в сумке не занимает — ей мешает только свой предел на вид.
-      noRoom  = chosen.exists(i => if (i.isDust) !i.dustKind.forall(inv.hasRoomForDust) else inv.freeSlots <= 0)
+      // Пыль и малые руны места в сумке не занимают — им мешает только свой предел.
+      noRoom  = chosen.exists(i => if (i.weightless) !inv.hasRoomForHoard(i) else inv.freeSlots <= 0)
       _ <- if (noRoom)
              renderer.show(user, Screen(
                chosen.map(InventoryFeedback.refusalLine(content, _, storage = true))

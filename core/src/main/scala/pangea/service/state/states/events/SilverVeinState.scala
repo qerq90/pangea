@@ -170,8 +170,8 @@ object SilverVeinState {
     if (hero.squad.has(AllyKind.Gnome)) GnomeHarvestDurationMs else HarvestDurationMs
   val MinSpreadPct: Int       = 10
   val MaxSpreadPct: Int       = 20
-  val GemDropChancePct: Int   = 20 // шанс выпадения одного камня из жилы
-  val DustDropChancePct: Int  = 20 // шанс намыть вместе с серебром горсть пыли
+  val GemDropChancePct: Int   = 15 // шанс выпадения одного камня из жилы
+  val DustDropChancePct: Int  = 15 // шанс намыть вместе с серебром горсть пыли
 
   /** Виды камней, которые может выкатить жила. Череп (Skull) намеренно исключён —
    *  «Надколотый череп» не должен выпадать с добычи серебряной руды. */
