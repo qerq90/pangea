@@ -63,6 +63,7 @@ object LootGenerator {
     case object Gem        extends Category
     case object Flask      extends Category
     case object Rune       extends Category
+    case object RuneSmall  extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -85,21 +86,22 @@ object LootGenerator {
   //   Редкие и мифические — 1% у трофея;
   //   Легендарные        — 5%: 2% у трофея и 3% у серебра.
   // Фляга (Flask) — 1% у всех тиров, забранный у экипировки (Gear: 35 → 34).
-  // Рунный камень (Rune) — 5% у всех тиров, тоже забранные у экипировки (34 → 29).
+  // Рунные камни — 5% у всех тиров, забранные у экипировки (34 → 29), и эти
+  // пять поделены между большой руной (1%) и малой (4%).
   private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
     tier match {
       case MobRarity.Rare =>
         List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 26, Category.Gem -> 1,
-             Category.Flask -> 1, Category.Rune -> 5)
+             Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case MobRarity.Mythical =>
         List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 25, Category.MapHalf -> 1,
-             Category.Gem -> 1, Category.Flask -> 1, Category.Rune -> 5)
+             Category.Gem -> 1, Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case MobRarity.Legendary =>
         List(Category.Gear -> 29, Category.Trophy -> 37, Category.SilverPile -> 22, Category.MapHalf -> 1,
-             Category.Gem -> 5, Category.Flask -> 1, Category.Rune -> 5)
+             Category.Gem -> 5, Category.Flask -> 1, Category.Rune -> 1, Category.RuneSmall -> 4)
       case _ =>
         List(Category.Gear -> 29, Category.Trophy -> 39, Category.SilverPile -> 26, Category.Flask -> 1,
-             Category.Rune -> 5)
+             Category.Rune -> 1, Category.RuneSmall -> 4)
     }
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
@@ -470,6 +472,10 @@ object LootGenerator {
         // Большая руна: вид равновероятен среди всех, боевых и пассивных.
         val (rune, r1) = rng.pick(RuneStone.all)
         (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Big)), r1)
+
+      case Category.RuneSmall =>
+        val (rune, r1) = rng.pick(RuneStone.all)
+        (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Small)), r1)
     }
 
   // Серебро: базис lvl×4 с разбросом ±20%, минимум 1.

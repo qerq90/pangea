@@ -79,11 +79,13 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
       assertTrue(half.forall(hasZone))
     },
 
-    test("большая руна (5% за счёт экипировки) встречается в схроне: без уровня, с узором в описании") {
+    test("рунные камни (5% за счёт экипировки) встречаются в схроне: и большие, и малые, без уровня") {
       import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
       val stones = rewards(Race.Demon, 50L, 2, 3).flatMap(_.items).filter(_.itemType == ItemType.RuneStone)
-      assertTrue(stones.nonEmpty) &&
-      assertTrue(stones.forall(i => i.lvl == 1L && i.runeStone.exists(_.size == RuneStoneSize.Big))) &&
+      val (big, small) = stones.partition(_.runeStone.exists(_.size == RuneStoneSize.Big))
+      assertTrue(stones.nonEmpty && big.nonEmpty && small.nonEmpty) &&
+      assertTrue(small.size > big.size) &&                         // малых вчетверо больше
+      assertTrue(stones.forall(_.lvl == 1L)) &&
       assertTrue(stones.forall(i => i.runeStone.flatMap(d => Rune.byKey(d.runeKey)).isDefined)) &&
       assertTrue(stones.forall(_.statsLines.contains(RuneStone.Insight)))
     },

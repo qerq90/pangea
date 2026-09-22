@@ -2,7 +2,7 @@ package pangea.test
 
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Item, MaterialKind}
+import pangea.model.item.Item
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import zio.{IO, ZIO}
 
@@ -20,12 +20,12 @@ class TestInventoryRepository(canAdd: Boolean, private var items: List[Item] = N
   def increaseCapacity(heroId: HeroId, delta: Long): IO[InventoryRepoError, Unit] =
     ZIO.succeed { capacity += delta }
 
-  // Как в проде: сюжетный предмет и пыль места не занимают и кладутся в полную
-  // сумку, но пыли одного вида не больше MaxDustPerKind.
+  // Как в проде: сюжетный предмет, пыль и малые руны места не занимают и кладутся
+  // в полную сумку, но невесомого добра одного вида не больше Item.HoardLimit.
   def addItem(heroId: HeroId, item: Item): IO[InventoryRepoError, Unit] =
-    if (item.isDust && !item.dustKind.forall(k => items.count(_.dustKind.contains(k)) < MaterialKind.MaxDustPerKind))
+    if (item.weightless && !item.hoardKey.forall(k => items.count(_.hoardKey.contains(k)) < Item.HoardLimit))
       ZIO.fail(InventoryRepoError.DustLimitReached)
-    else if (canAdd || item.isQuestItem || item.isDust) ZIO.succeed { items = items :+ item }
+    else if (canAdd || item.isQuestItem || item.weightless) ZIO.succeed { items = items :+ item }
     else ZIO.fail(InventoryRepoError.NoMorePlaceForItems)
 
   def removeItem(itemId: Long, heroId: HeroId): IO[InventoryRepoError, Unit] =

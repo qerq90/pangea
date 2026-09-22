@@ -72,9 +72,9 @@ object SilverVeinStateSpec extends ZIOSpecDefault {
       assertTrue(SilverVeinState.DroppableDusts.contains(MaterialKind.RubyDust))
     },
 
-    test("шанс пыли — те же 20%, что и у камня, и бросок отдельный") {
-      assertTrue(SilverVeinState.DustDropChancePct == 20) &&
-      assertTrue(SilverVeinState.GemDropChancePct == 20)
+    test("шанс пыли — те же 15%, что и у камня, и бросок отдельный") {
+      assertTrue(SilverVeinState.DustDropChancePct == 15) &&
+      assertTrue(SilverVeinState.GemDropChancePct == 15)
     },
 
     test("Harvest: пыль прокнула, камень нет → в добыче серебро и одна горсть пыли") {

@@ -2185,6 +2185,11 @@ inventory:
   combineMap:
     label: "🧩 Объединить"
     color: "positive"
+  combineRune:
+    label: "🪨 Сложить большую руну"
+    color: "positive"
+  runeFolded: "🪨 Осколки сходятся кромка к кромке, и узор смыкается: у вас {name}."
+  runeNeedMore: "🪨 {name}: осколков всего {have}, а нужно {need} — узор не сомкнётся."
   socket:
     label: "💎 Вставить в предмет"
     color: "positive"

@@ -2,7 +2,7 @@ package pangea.service.state
 
 import pangea.engine.SceneContent
 import pangea.model.hero.HeroId
-import pangea.model.item.{Item, MaterialKind}
+import pangea.model.item.Item
 import pangea.repository.inventory.InventoryRepository
 import zio.Task
 
@@ -19,12 +19,10 @@ object InventoryFeedback {
     * поэтому её не приняли по своей причине — предел на вид (см.
     * `MaterialKind.MaxDustPerKind`), и говорить о переполненной сумке неверно. */
   def refusalLine(content: SceneContent, item: Item, storage: Boolean = false): String =
-    item.dustKind match {
-      case Some(kind) =>
-        content.format(if (storage) "common.dustLimitHere" else "common.dustLimit",
-          "name" -> kind.displayName, "n" -> MaterialKind.MaxDustPerKind.toString)
-      case None => content.text("common.inventoryFull")
-    }
+    if (item.weightless)
+      content.format(if (storage) "common.dustLimitHere" else "common.dustLimit",
+        "name" -> item.name, "n" -> Item.HoardLimit.toString)
+    else content.text("common.inventoryFull")
 
   def freeSlotsLine(
     inventoryRepo: InventoryRepository,

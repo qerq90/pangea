@@ -180,10 +180,10 @@ case class CubeState(
       _ <- azat.cubeItems.find(_.id == itemId) match {
         case None => showWithdraw(user, renderer)
         case Some(item) =>
-          // Пыль места не занимает — ей мешает только собственный предел на вид.
-          if (if (item.isDust) !item.dustKind.forall(inv.hasRoomForDust) else inv.freeSlots <= 0)
+          // Пыль и малые руны места не занимают — им мешает только свой предел.
+          if (if (item.weightless) !inv.hasRoomForHoard(item) else inv.freeSlots <= 0)
             renderer.show(user, Screen(
-              if (item.isDust) InventoryFeedback.refusalLine(content, item, storage = true)
+              if (item.weightless) InventoryFeedback.refusalLine(content, item, storage = true)
               else content.text("cube.inventoryFull"), Nil)) *> showWithdraw(user, renderer)
           else
             inventoryRepo.addItem(hero.id, item).mapError(asThrowable) *>

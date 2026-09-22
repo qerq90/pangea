@@ -14,10 +14,10 @@ final class BarrelRepositoryLive(dao: BarrelDao) extends BarrelRepository {
   def deposit(heroId: HeroId, item: Item): IO[BarrelRepoError, Unit] =
     for {
       barrel <- get(heroId)
-      // Пыль места не занимает, но её не больше сотни горстей на вид.
-      _      <- ZIO.when(item.isDust && !item.dustKind.forall(barrel.hasRoomForDust))(
+      // Пыль и малые руны места не занимают, но их не больше сотни на вид.
+      _      <- ZIO.when(item.weightless && !barrel.hasRoomForHoard(item))(
                   ZIO.fail(BarrelRepoError.DustLimitReached))
-      _      <- ZIO.when(!item.isDust && barrel.freeSlots <= 0)(ZIO.fail(BarrelRepoError.BarrelFull))
+      _      <- ZIO.when(!item.weightless && barrel.freeSlots <= 0)(ZIO.fail(BarrelRepoError.BarrelFull))
       _      <- dao.update(barrel.addItem(item)).orElseFail(BarrelRepoError.CantUpdateBarrel)
     } yield ()
 

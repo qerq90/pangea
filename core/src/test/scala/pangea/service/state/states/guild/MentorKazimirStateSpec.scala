@@ -188,6 +188,19 @@ object MentorKazimirStateSpec extends ZIOSpecDefault {
               assertTrue(inv.snapshot.isEmpty)   // оба камня ушли: один в понимание, второй в клеймо
     },
 
+    test("малая руна даёт одно понимание — вчетверо… впятеро меньше большой") {
+      val small = RuneStone.item(cunning, RuneStoneSize.Small).copy(id = 3L)
+      for {
+        t <- make(hero(lvl = 10L), List(small))
+        (state, dao, inv, r) = t
+        _    <- state.action(testUser, tap("DeepenItem", "k" -> cunning.key, "id" -> "3"), r)
+        hero <- heroOf(dao)
+        all  <- texts(r)
+      } yield assertTrue(RuneStoneSize.Small.points == 1L) &&
+              assertTrue(hero.runes.understandingOf(cunning) == 1L && all.contains("стало глубже: 1 (+1)")) &&
+              assertTrue(inv.snapshot.isEmpty)
+    },
+
     test("у потолка вещь не сгорает и понимание не растёт") {
       val data = RuneData.empty.copy(understanding = Map(cunning.key -> 30L))
       for {

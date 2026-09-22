@@ -20,7 +20,7 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     case LootDrop.MapHalf(_)      => "mapHalf"
     case LootDrop.Gem(_)          => "gem"
     case LootDrop.Flask(_)        => "flask"
-    case LootDrop.Rune(_)         => "rune"
+    case LootDrop.Rune(i)         => if (i.isSmallRune) "runeSmall" else "rune"
     case LootDrop.Silver(_, true) => "silverPile"
     case LootDrop.Silver(_, _)    => "silverSmall"
     case LootDrop.Doubloons(_)    => "doubloons"
@@ -156,20 +156,24 @@ object LootGeneratorSpec extends ZIOSpecDefault {
     },
 
     // ── Большие руны ──────────────────────────────────────────────────────────
-    test("большая руна падает у всех тиров с весом 5% (за счёт экипировки): без уровня, любой руны, с описанием узора") {
+    test("рунные камни падают у всех тиров на те же 5% (за счёт экипировки): большая 1%, малая 4%, без уровня, любой руны") {
       import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
-      val common = catRatePct(Rarity.Common, "rune")
-      val leg    = catRatePct(Rarity.Legendary, "rune")
+      val common = catRatePct(Rarity.Common, "rune") + catRatePct(Rarity.Common, "runeSmall")
+      val leg    = catRatePct(Rarity.Legendary, "rune") + catRatePct(Rarity.Legendary, "runeSmall")
       val stones = (1L to 20000L).iterator
         .flatMap(s => LootGenerator.roll(Rarity.Legendary, Race.Orc, 30L, Rng(s))._1)
         .collect { case LootDrop.Rune(i) => i }.toList
+      val (big, small) = stones.partition(_.runeStone.exists(_.size == RuneStoneSize.Big))
       val runes  = stones.flatMap(_.runeStone).flatMap(d => Rune.byKey(d.runeKey)).toSet
       // у обычных первый слот 30% × 5% ≈ 1,5%; у легендарных два гарантированных слота ≈ 10%
       assertTrue(common > 1.0 && common < 2.2) && assertTrue(leg > 7.0 && leg < 13.0) &&
       assertTrue(stones.nonEmpty && stones.forall(i => i.itemType == ItemType.RuneStone && i.lvl == 1L)) &&
-      assertTrue(stones.forall(_.runeStone.exists(_.size == RuneStoneSize.Big))) &&
+      // малых вчетверо больше больших
+      assertTrue(big.nonEmpty && small.size > big.size * 2 && small.size < big.size * 7) &&
       assertTrue(runes == RuneStone.all.toSet) &&
-      assertTrue(stones.forall(i => i.name.startsWith("Большая руна ") && i.statsLines.contains(RuneStone.Insight)))
+      assertTrue(big.forall(i => i.name.startsWith("Большая руна ") && !i.weightless)) &&
+      assertTrue(small.forall(i => i.name.startsWith("Малая руна ") && i.weightless)) &&
+      assertTrue(stones.forall(_.statsLines.contains(RuneStone.Insight)))
     },
 
     // ── Фляги ─────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ package pangea.model.barrel
 
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory.Items
-import pangea.model.item.{Item, MaterialKind}
+import pangea.model.item.Item
 
 /** Личная неприметная бочка игрока в Портовом квартале: хранилище до 100 предметов
  *  и до 100 000 серебра, независимое от инвентаря и кошелька героя.
@@ -18,15 +18,16 @@ case class Barrel(
 
   def withItems(items: List[Item]): Barrel = copy(items = Items(items))
 
-  /** Сколько в бочке лежит того, что занимает место: пыль не в счёт. */
-  def occupied: Long = items.data.count(!_.isDust).toLong
+  /** Сколько в бочке лежит того, что занимает место: пыль и малые руны не в счёт. */
+  def occupied: Long = items.data.count(!_.weightless).toLong
 
   def freeSlots: Long = (Barrel.MaxItems - occupied).max(0L)
 
-  /** Сколько горстей этой пыли уже в бочке — у неё свой предел вместо места. */
-  def dustCount(kind: MaterialKind): Int = items.data.count(_.dustKind.contains(kind))
+  /** Сколько такого же невесомого добра уже в бочке — у него свой предел вместо места. */
+  def hoardCount(key: String): Int = items.data.count(_.hoardKey.contains(key))
 
-  def hasRoomForDust(kind: MaterialKind): Boolean = dustCount(kind) < MaterialKind.MaxDustPerKind
+  def hasRoomForHoard(item: Item): Boolean =
+    item.hoardKey.forall(k => hoardCount(k) < Item.HoardLimit)
 
   def freeSilverSpace: Long = (Barrel.MaxSilver - silver).max(0L)
 }

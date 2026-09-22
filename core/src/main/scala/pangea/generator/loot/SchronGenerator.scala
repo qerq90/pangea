@@ -33,7 +33,8 @@ object SchronGenerator {
     case object Trophy  extends Category
     case object Silver  extends Category
     case object MapHalf extends Category
-    case object Rune    extends Category
+    case object Rune      extends Category
+    case object RuneSmall extends Category
   }
 
   // Слоты схрона и шанс каждого (в %): первый гарантированный, второй — 60%.
@@ -42,10 +43,11 @@ object SchronGenerator {
   // Веса категорий (в %, сумма = 100). На втором слоте уже выпавшая категория
   // исключается — суммарный вес активных падает, появляется доля «пусто».
   // Половинка карты сокровищ (MapHalf) — 3%, забранные у серебра (Silver: 30 → 27).
-  // Большая руна (Rune) — 5%, забранные у экипировки (Gear: 35 → 30).
+  // Рунные камни — 5%, забранные у экипировки (Gear: 35 → 30), и поделены между
+  // большой руной (1%) и малой (4%), как в обычной добыче.
   private val categoryWeights: List[(Category, Int)] =
     List(Category.Gear -> 30, Category.Trophy -> 35, Category.Silver -> 27, Category.MapHalf -> 3,
-         Category.Rune -> 5)
+         Category.Rune -> 1, Category.RuneSmall -> 4)
 
   // Редкость выпавшей экипировки (в %, сумма = 100). Без серой/белой.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -113,6 +115,9 @@ object SchronGenerator {
                     // большая руна: вид равновероятен среди всех, боевых и пассивных
                     val (rune, r3) = r2.pick(RuneStone.all)
                     loop(tail, used + cat, RuneStone.item(rune, RuneStoneSize.Big) :: items, silver, doubloons, r3)
+                  case Category.RuneSmall =>
+                    val (rune, r3) = r2.pick(RuneStone.all)
+                    loop(tail, used + cat, RuneStone.item(rune, RuneStoneSize.Small) :: items, silver, doubloons, r3)
                 }
             }
       }
