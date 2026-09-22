@@ -895,6 +895,7 @@ object InventoryState {
     case ItemType.Material         => Item.NoItem // материал не экипируется
     case ItemType.QuestItem        => Item.NoItem // сюжетный предмет не экипируется
     case ItemType.Brew             => Item.NoItem // отвар не экипируется
+    case ItemType.RuneStone        => Item.NoItem // рунный камень не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
 
@@ -923,6 +924,7 @@ object InventoryState {
     case ItemType.Material         => eq // материал не экипируется
     case ItemType.QuestItem        => eq // сюжетный предмет не экипируется
     case ItemType.Brew             => eq // отвар не экипируется
+    case ItemType.RuneStone        => eq // рунный камень не экипируется
     case ItemType.NoItem           => eq
   }
 

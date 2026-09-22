@@ -65,7 +65,7 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
     test("экипировка: редкости только Green/Blue/Purple/Violet/Orange, не трофей") {
       val gears = rewards(Race.Demon, 50L, 2, 3)
         .flatMap(_.items)
-        .filter(i => i.itemType != ItemType.Trophy && !i.isTreasureMap)
+        .filter(i => i.itemType != ItemType.Trophy && i.itemType != ItemType.RuneStone && !i.isTreasureMap)
       assertTrue(gears.nonEmpty) &&
       assertTrue(gears.forall(i => gearRarities.contains(i.rarity))) &&
       assertTrue(gears.forall(i => i.lvl >= 1L && i.lvl <= 51L))
@@ -77,6 +77,15 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
         .find(_.itemType == ItemType.TreasureMapHalf)
       assertTrue(half.nonEmpty) &&
       assertTrue(half.forall(hasZone))
+    },
+
+    test("большая руна (5% за счёт экипировки) встречается в схроне: без уровня, с узором в описании") {
+      import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+      val stones = rewards(Race.Demon, 50L, 2, 3).flatMap(_.items).filter(_.itemType == ItemType.RuneStone)
+      assertTrue(stones.nonEmpty) &&
+      assertTrue(stones.forall(i => i.lvl == 1L && i.runeStone.exists(_.size == RuneStoneSize.Big))) &&
+      assertTrue(stones.forall(i => i.runeStone.flatMap(d => Rune.byKey(d.runeKey)).isDefined)) &&
+      assertTrue(stones.forall(_.statsLines.contains(RuneStone.Insight)))
     },
 
     test("трофей: только Реликвия/Талисман, хранит расу и уровень") {

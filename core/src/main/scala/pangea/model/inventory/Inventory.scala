@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import pangea.model.hero.HeroId
 import pangea.model.inventory.Inventory.Items
-import pangea.model.item.Item
+import pangea.model.item.{Item, MaterialKind}
 
 case class Inventory(
   id: Long,
@@ -19,8 +19,14 @@ case class Inventory(
 
   def withItems(items: List[Item]): Inventory = copy(items = Items(items))
 
-  /** Сколько слотов занято: сюжетные предметы места не занимают. */
-  def occupied: Long = items.data.count(!_.isQuestItem).toLong
+  /** Сколько слотов занято: сюжетные предметы и пыль места не занимают. */
+  def occupied: Long = items.data.count(i => !i.isQuestItem && !i.isDust).toLong
+
+  /** Сколько горстей этой пыли уже лежит — предел у неё вместо места. */
+  def dustCount(kind: MaterialKind): Int = items.data.count(_.dustKind.contains(kind))
+
+  /** Влезет ли ещё одна горсть этого вида. */
+  def hasRoomForDust(kind: MaterialKind): Boolean = dustCount(kind) < MaterialKind.MaxDustPerKind
 
   /** Свободных слотов в сумке (не уходит ниже нуля). */
   def freeSlots: Long = (maxItems - occupied).max(0L)

@@ -27,14 +27,14 @@ object LootStateSpec extends ZIOSpecDefault {
          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
          details = ItemDetails.Trophy("Human", TrophyKind.Head))
 
-  private def makeState(loot: LootData, canAdd: Boolean = true) =
+  private def makeState(loot: LootData, canAdd: Boolean = true, bag: List[Item] = Nil) =
     for {
       renderer <- TestRenderer.make
       heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(silver = 100L))
       _        <- heroDao.writeSceneData(userId, loot.asJson)
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
-      invRepo   = if (canAdd) TestInventoryRepository.accepting else TestInventoryRepository.full
+      invRepo   = if (canAdd) TestInventoryRepository.withItems(bag) else TestInventoryRepository.full
       itemRepo  = TestItemRepository.make
       state     = LootState(heroDao, invRepo, itemRepo, journal, content)
     } yield (state, renderer, heroDao, invRepo)
@@ -113,6 +113,29 @@ object LootStateSpec extends ZIOSpecDefault {
         screens <- renderer.sentScreens
       } yield assertTrue(invRepo.snapshot.isEmpty) &&
               assertTrue(screens.exists(_.text.contains("Сумка странника переполнена")))
+    },
+
+    test("пыль ложится и в полную сумку, а сверх сотни горстей одного вида осыпается со своей строкой") {
+      import pangea.generator.item.MaterialGenerator
+      import pangea.model.item.{GemKind, MaterialKind}
+      val ruby = MaterialKind.dustOf(GemKind.Ruby)
+      val full = (1L to 100L).toList.map(i => MaterialGenerator.item(ruby).copy(id = i))
+      for {
+        // сумка забита экипировкой — пыль всё равно ложится
+        tight <- makeState(LootData(items = List(MaterialGenerator.item(ruby)), silvers = Nil),
+                           bag = (1L to 20L).toList.map(i => gear(s"Шлем $i").copy(id = i)))
+        (ts, tr, _, tinv) = tight
+        _     <- ts.action(testUser, tap("Take"), tr)
+        tight2 <- ZIO.succeed(tinv.snapshot.count(_.isDust))
+        // сотня рубиновой уже есть — сто первая осыпается
+        over  <- makeState(LootData(items = List(MaterialGenerator.item(ruby)), silvers = Nil), bag = full)
+        (os, or, _, oinv) = over
+        _     <- os.action(testUser, tap("Take"), or)
+        texts <- or.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(tight2 == 1) &&                                   // в полную сумку пыль легла
+              assertTrue(oinv.snapshot.count(_.isDust) == 100) &&          // сверх сотни не приняли
+              assertTrue(texts.contains("у вас уже 100 горстей")) &&
+              assertTrue(!texts.contains("Сумка странника переполнена"))
     },
 
     test("Leave → предметы не кладутся, серебро не трогается, сообщение «оставляете», уход в Dungeon") {

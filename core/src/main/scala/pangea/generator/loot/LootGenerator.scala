@@ -5,6 +5,7 @@ import pangea.generator.item.{FlaskGenerator, GemGenerator, ItemGenerator, ItemN
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, MaterialKind, TrophyKind}
 import pangea.model.monster.{MiniBoss, Race, Rarity => MobRarity}
+import pangea.model.rune.{RuneStone, RuneStoneSize}
 import pangea.model.item.{Gem => GemModel, Rarity => ItemRarity}
 
 import scala.annotation.tailrec
@@ -37,6 +38,7 @@ object LootGenerator {
       case LootDrop.MapHalf(i)   => Some(i)
       case LootDrop.Gem(i)       => Some(i)
       case LootDrop.Flask(i)     => Some(i)
+      case LootDrop.Rune(i)      => Some(i)
       case LootDrop.Silver(_, _) => None
       case LootDrop.Doubloons(_) => None
     }
@@ -47,6 +49,7 @@ object LootGenerator {
     final case class MapHalf(item: Item)                 extends LootDrop
     final case class Gem(item: Item)                     extends LootDrop
     final case class Flask(item: Item)                   extends LootDrop
+    final case class Rune(item: Item)                    extends LootDrop
     final case class Silver(amount: Long, pile: Boolean) extends LootDrop
     final case class Doubloons(amount: Long)             extends LootDrop
   }
@@ -59,6 +62,7 @@ object LootGenerator {
     case object MapHalf    extends Category
     case object Gem        extends Category
     case object Flask      extends Category
+    case object Rune       extends Category
   }
 
   // Сколько слотов дропа и шанс каждого (в %), по тиру моба.
@@ -81,19 +85,21 @@ object LootGenerator {
   //   Редкие и мифические — 1% у трофея;
   //   Легендарные        — 5%: 2% у трофея и 3% у серебра.
   // Фляга (Flask) — 1% у всех тиров, забранный у экипировки (Gear: 35 → 34).
+  // Рунный камень (Rune) — 5% у всех тиров, тоже забранные у экипировки (34 → 29).
   private def categoryWeights(tier: MobRarity): List[(Category, Int)] =
     tier match {
       case MobRarity.Rare =>
-        List(Category.Gear -> 34, Category.Trophy -> 38, Category.SilverPile -> 26, Category.Gem -> 1,
-             Category.Flask -> 1)
+        List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 26, Category.Gem -> 1,
+             Category.Flask -> 1, Category.Rune -> 5)
       case MobRarity.Mythical =>
-        List(Category.Gear -> 34, Category.Trophy -> 38, Category.SilverPile -> 25, Category.MapHalf -> 1,
-             Category.Gem -> 1, Category.Flask -> 1)
+        List(Category.Gear -> 29, Category.Trophy -> 38, Category.SilverPile -> 25, Category.MapHalf -> 1,
+             Category.Gem -> 1, Category.Flask -> 1, Category.Rune -> 5)
       case MobRarity.Legendary =>
-        List(Category.Gear -> 34, Category.Trophy -> 37, Category.SilverPile -> 22, Category.MapHalf -> 1,
-             Category.Gem -> 5, Category.Flask -> 1)
+        List(Category.Gear -> 29, Category.Trophy -> 37, Category.SilverPile -> 22, Category.MapHalf -> 1,
+             Category.Gem -> 5, Category.Flask -> 1, Category.Rune -> 5)
       case _ =>
-        List(Category.Gear -> 34, Category.Trophy -> 39, Category.SilverPile -> 26, Category.Flask -> 1)
+        List(Category.Gear -> 29, Category.Trophy -> 39, Category.SilverPile -> 26, Category.Flask -> 1,
+             Category.Rune -> 5)
     }
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
@@ -459,6 +465,11 @@ object LootGenerator {
         // семи, черепа в том числе — в отличие от серебряной жилы, где череп исключён.
         val (gem, r1) = GemGenerator.randomGem(GemModel.MinGrade, rng)
         (LootDrop.Gem(gem), r1)
+
+      case Category.Rune =>
+        // Большая руна: вид равновероятен среди всех, боевых и пассивных.
+        val (rune, r1) = rng.pick(RuneStone.all)
+        (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Big)), r1)
     }
 
   // Серебро: базис lvl×4 с разбросом ±20%, минимум 1.

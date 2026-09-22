@@ -221,7 +221,7 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
       res   <- (runeOf(ua), payload(ua, "id").flatMap(_.toLongOption).flatMap(id => items.find(_.id == id))) match {
         case (Some(rune), Some(item)) if Rune.of(item).contains(rune) =>
           val cap = Rune.cap(hero.lvl)
-          val (updated, gained) = hero.runes.deepen(rune, Rune.points(item.rarity), cap)
+          val (updated, gained) = hero.runes.deepen(rune, Rune.pointsOf(item), cap)
           if (gained == 0L) say(user, renderer, content.format("kazimir.deepen.atCap", "name" -> rune.label, "max" -> cap.toString))
           else for {
             _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
@@ -243,8 +243,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
     val candidates = items.filter(i => Rune.of(i).isDefined && hero.runes.burns(i.rarity))
     candidates.groupBy(i => Rune.of(i).get).toList.sortBy(_._1.label).foldLeft((hero.runes, List.empty[Item], List.empty[(Rune, Long)])) {
       case ((data, burnt, gains), (rune, its)) =>
-        val (data2, burnt2, gain) = its.sortBy(i => Rune.points(i.rarity)).foldLeft((data, burnt, 0L)) { case ((d, b, g), item) =>
-          val (d2, got) = d.deepen(rune, Rune.points(item.rarity), cap)
+        val (data2, burnt2, gain) = its.sortBy(i => Rune.pointsOf(i)).foldLeft((data, burnt, 0L)) { case ((d, b, g), item) =>
+          val (d2, got) = d.deepen(rune, Rune.pointsOf(item), cap)
           if (got == 0L) (d, b, g) else (d2, b :+ item, g + got)
         }
         (data2, burnt2, if (gain > 0L) gains :+ (rune -> gain) else gains)

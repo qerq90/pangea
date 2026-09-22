@@ -4,6 +4,7 @@ import pangea.domain.Rng
 import pangea.generator.item.{ItemGenerator, TreasureMapGenerator}
 import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.monster.Race
+import pangea.model.rune.{RuneStone, RuneStoneSize}
 import pangea.model.item.{Rarity => ItemRarity}
 
 import scala.annotation.tailrec
@@ -32,6 +33,7 @@ object SchronGenerator {
     case object Trophy  extends Category
     case object Silver  extends Category
     case object MapHalf extends Category
+    case object Rune    extends Category
   }
 
   // Слоты схрона и шанс каждого (в %): первый гарантированный, второй — 60%.
@@ -40,8 +42,10 @@ object SchronGenerator {
   // Веса категорий (в %, сумма = 100). На втором слоте уже выпавшая категория
   // исключается — суммарный вес активных падает, появляется доля «пусто».
   // Половинка карты сокровищ (MapHalf) — 3%, забранные у серебра (Silver: 30 → 27).
+  // Большая руна (Rune) — 5%, забранные у экипировки (Gear: 35 → 30).
   private val categoryWeights: List[(Category, Int)] =
-    List(Category.Gear -> 35, Category.Trophy -> 35, Category.Silver -> 27, Category.MapHalf -> 3)
+    List(Category.Gear -> 30, Category.Trophy -> 35, Category.Silver -> 27, Category.MapHalf -> 3,
+         Category.Rune -> 5)
 
   // Редкость выпавшей экипировки (в %, сумма = 100). Без серой/белой.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
@@ -105,6 +109,10 @@ object SchronGenerator {
                     // половинка карты по уровню схрона; RNG не тратит
                     val half = TreasureMapGenerator.create(killLevel, half = true)
                     loop(tail, used + cat, half :: items, silver, doubloons, r2)
+                  case Category.Rune =>
+                    // большая руна: вид равновероятен среди всех, боевых и пассивных
+                    val (rune, r3) = r2.pick(RuneStone.all)
+                    loop(tail, used + cat, RuneStone.item(rune, RuneStoneSize.Big) :: items, silver, doubloons, r3)
                 }
             }
       }

@@ -74,6 +74,27 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
               assertTrue(barrelRepo.itemsSnapshot.size == 100)
     },
 
+    test("пыль в бочке места не занимает: полная бочка её принимает, а сверх сотни горстей — отказ со своей строкой") {
+      import pangea.generator.item.MaterialGenerator
+      import pangea.model.item.{GemKind, MaterialKind}
+      val ruby     = MaterialKind.dustOf(GemKind.Ruby)
+      val full     = (1L to 100L).toList.map(i => gearItem(i, s"X$i"))
+      val hundred  = (1L to 100L).toList.map(i => MaterialGenerator.item(ruby).copy(id = i))
+      for {
+        // бочка забита вещами — пыль всё равно кладётся
+        t <- makeState(inventory = List(MaterialGenerator.item(ruby).copy(id = 200L)), barrelItems = full)
+        (state, _, invRepo, barrelRepo, renderer) = t
+        _ <- state.action(testUser, tap("DepositItem_200"), renderer)
+        // а в бочку с сотней рубиновой сто первая не лезет
+        t2 <- makeState(inventory = List(MaterialGenerator.item(ruby).copy(id = 201L)), barrelItems = hundred)
+        (state2, _, invRepo2, barrelRepo2, renderer2) = t2
+        _  <- state2.action(testUser, tap("DepositItem_201"), renderer2)
+        texts <- renderer2.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(invRepo.snapshot.isEmpty && barrelRepo.itemsSnapshot.size == 101) &&
+              assertTrue(invRepo2.snapshot.map(_.id) == List(201L) && barrelRepo2.itemsSnapshot.size == 100) &&
+              assertTrue(texts.contains("в сумке уже 100 горстей"))
+    },
+
     test("WithdrawItem_<id> → предмет возвращается в инвентарь") {
       for {
         t <- makeState(inventory = Nil, barrelItems = List(gearItem(7L, "Меч")))

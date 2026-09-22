@@ -45,17 +45,24 @@ object Rune {
   /** Потолок понимания — 30 на уровень героя. */
   val CapPerLevel: Long = 30L
 
-  /** Руна на вещи, если она есть. */
+  /** Руна на вещи, если она есть. Рунный камень для Казимира — та же вещь с
+    * узором: с него и клеймят, и углубляют понимание. */
   def of(item: Item): Option[Rune] = item.details match {
-    case ItemDetails.Weapon(s) => Some(Active(s))
-    case ItemDetails.Armor(s)  => Some(Active(s))
-    case _                     => item.passive.map(Passive(_))
+    case ItemDetails.Weapon(s)       => Some(Active(s))
+    case ItemDetails.Armor(s)        => Some(Active(s))
+    case ItemDetails.RuneStone(k, _) => byKey(k)
+    case _                           => item.passive.map(Passive(_))
   }
 
   def byKey(key: String): Option[Rune] =
     if (key.startsWith(ActivePrefix)) Skill.withNameOption(key.stripPrefix(ActivePrefix)).map(Active(_))
     else if (key.startsWith(PassivePrefix)) PassiveKind.withNameOption(key.stripPrefix(PassivePrefix)).map(Passive(_))
     else None
+
+  /** Сколько понимания даёт сожжённая вещь: у рунного камня — по его размеру,
+    * у прочих — по редкости. */
+  def pointsOf(item: Item): Long =
+    item.runeStone.map(_.size.points).getOrElse(points(item.rarity))
 
   /** Сколько понимания даёт сожжённая вещь: по редкости. Обе фиолетовые — одинаково. */
   def points(rarity: Rarity): Long = rarity match {

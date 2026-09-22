@@ -3,6 +3,8 @@ common:
   next: "След. ▶"
   freeSlots: "👝 Свободных слотов в сумке: {free}"
   inventoryFull: "❌ Сумка странника переполнена трофеями прошлых битв. Новому предмету не нашлось места."
+  dustLimit: "🪨 {name}: у вас уже {n} горстей — больше не унести, лишнее осыпается сквозь пальцы."
+  dustLimitHere: "🪨 {name}: в сумке уже {n} горстей — эта пока полежит здесь."
   character: "Персонаж"
 
 registration:
@@ -1275,6 +1277,7 @@ merchant:
     passives: "Пассивные способности: {state}"
     actives: "Активные способности: {state}"
     trophies: "Трофеи: {state}"
+    runes: "Руны: {state}"
     back:
       label: "↩ Назад"
       color: "negative"

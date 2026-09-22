@@ -80,9 +80,22 @@ case class Item(
 
   def isQuestItem: Boolean = itemType == ItemType.QuestItem
 
+  /** Горсть пыли: места в сумке и в бочке не занимает, но её не больше
+    * [[MaterialKind.MaxDustPerKind]] на вид (в кубе Азата — как все, слот). */
+  def isDust: Boolean = material.exists(_.gem.isDefined)
+
+  /** Вид пыли, если это она. */
+  def dustKind: Option[MaterialKind] = material.filter(_.gem.isDefined)
+
   def brew: Option[BrewKind] = details match {
     case ItemDetails.Brew(k) => Some(k)
     case _                   => None
+  }
+
+  /** Рунный камень, если это он (см. [[pangea.model.rune.RuneStone]]). */
+  def runeStone: Option[ItemDetails.RuneStone] = details match {
+    case r: ItemDetails.RuneStone => Some(r)
+    case _                        => None
   }
 
   /** Божественное оружие, если это оно (см. [[DivineKind]]); в доп. слоте может
@@ -127,7 +140,7 @@ case class Item(
   def displayTitle: String =
     if (isQuestItem) s"${Item.QuestMark} $name" // сюжетный предмет: звёздочка вместо редкости и уровня
     else if (isTreasureMap || itemType == ItemType.Gem || itemType == ItemType.Material ||
-        itemType == ItemType.Flask || itemType == ItemType.Brew) name
+        itemType == ItemType.Flask || itemType == ItemType.Brew || itemType == ItemType.RuneStone) name
     else {
       val prefix = s"${rarity.emoji} "
       if (name.startsWith(prefix)) s"${rarity.emoji} [Ур.$lvl] ${name.stripPrefix(prefix)}"
@@ -176,6 +189,9 @@ case class Item(
       case ItemDetails.Brew(k)           => List(k.description, s"Рецепт: ${k.recipe.map(_.displayName).mkString(" + ")}")
       // Божественное оружие: только описание — ни статов, ни числа ударов, которые она ещё держит.
       case ItemDetails.Divine(k, _, _)    => List(k.description)
+      // Рунный камень: узор, ощущение от него и что даст сама руна.
+      case ItemDetails.RuneStone(key, _)  =>
+        pangea.model.rune.Rune.byKey(key).map(pangea.model.rune.RuneStone.describe).getOrElse(Nil)
       case _                             => Nil
     }
     numeric ++ setLine ++ extra ++ socketLines
