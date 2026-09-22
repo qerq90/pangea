@@ -2,7 +2,8 @@ package pangea.service.state.states.merchant
 
 import pangea.engine.SceneContent
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
-import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, MaterialKind, Rarity, TrophyKind}
+import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, MaterialKind, PassiveKind, Rarity, TrophyKind}
+import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -309,6 +310,35 @@ object MerchantStateSpec extends ZIOSpecDefault {
       } yield assertTrue(btn.exists(_.label == "Трофеи: Выкл")) && // по умолчанию выключено
               assertTrue(settings.trophies) &&
               assertTrue(invRepo.snapshot.isEmpty) // ушли и серый предмет, и трофей
+    },
+
+    test("руны: переключатель выключен по умолчанию, после нажатия камень уходит за 400 серебра") {
+      val stone = RuneStone.item(Rune.Active(Skill.SweepingStrike), RuneStoneSize.Big).copy(id = 5L)
+      for {
+        t <- makeState(richHero, items = List(stone))
+        (state, heroDao, invRepo, renderer) = t
+        _        <- state.action(testUser, tap("JunkSettings"), renderer)
+        screens  <- renderer.sentScreens
+        btn       = screens.last.choices.find(_.id == "JunkRunes")
+        _        <- state.action(testUser, tap("SellJunk"), renderer)
+        kept      = invRepo.snapshot.map(_.id)
+        _        <- state.action(testUser, tap("JunkRunes"), renderer)
+        settings <- readMerchant(heroDao).map(_.junkSettings)
+        _        <- state.action(testUser, tap("SellJunk"), renderer)
+        hero     <- heroDao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(btn.exists(_.label == "Руны: Выкл")) &&
+              assertTrue(kept == List(5L)) &&                  // пока выключено — камень остаётся
+              assertTrue(settings.runes && invRepo.snapshot.isEmpty) &&
+              assertTrue(hero.silver == richHero.silver + RuneStoneSize.Big.price)
+    },
+
+    test("isJunk: рунный камень уходит только по своему переключателю, редкости на него не влияют") {
+      val stone = RuneStone.item(Rune.Passive(PassiveKind.Stash), RuneStoneSize.Big)
+      val off   = JunkSaleSettings(rarities = JunkRarityGroups.flatMap(_.rarities).toSet)
+      val on    = off.copy(runeSale = Some(true))
+      assertTrue(!off.runes && !MerchantState.isJunk(stone, off)) &&
+      assertTrue(MerchantState.isJunk(stone, on)) &&
+      assertTrue(MerchantState.isJunk(stone, JunkSaleSettings(rarities = Set.empty, runeSale = Some(true))))
     },
 
     test("трофеи не смотрят на редкости: продаются даже с выключенной серой") {

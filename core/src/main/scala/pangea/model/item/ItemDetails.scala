@@ -84,6 +84,10 @@ object ItemDetails {
   /** Отвар из трав — какой именно (см. [[BrewKind]]). */
   case class Brew(kind: BrewKind) extends ItemDetails
 
+  /** Рунный камень (см. [[pangea.model.rune.RuneStone]]): ключ руны и размер
+   *  плиты. Ключ, а не сама руна, — чтобы `model.item` не зависел от `model.rune`. */
+  case class RuneStone(runeKey: String, size: pangea.model.rune.RuneStoneSize) extends ItemDetails
+
   /** Божественное оружие (см. [[DivineKind]]): вид и сколько ударов ещё держит.
    *  Носится в доп. слоте наравне с обычными вещами этого слота; заряды игроку
    *  не показываются — оружие рассыпается без предупреждения. */
@@ -124,6 +128,8 @@ object ItemDetails {
   private val brewDec:   Decoder[Brew]             = deriveDecoder
   private val divineEnc:  Encoder[Divine]            = deriveEncoder
   private val divineDec:  Decoder[Divine]            = deriveDecoder
+  private val runeEnc:    Encoder[RuneStone]         = deriveEncoder
+  private val runeDec:    Decoder[RuneStone]         = deriveDecoder
 
   private def tagged(tpe: String, body: Json): Json =
     body.deepMerge(Json.obj("type" -> tpe.asJson))
@@ -142,6 +148,7 @@ object ItemDetails {
     case q: Quest       => tagged("Quest", questEnc(q))
     case b: Brew        => tagged("Brew", brewEnc(b))
     case d: Divine      => tagged("Divine", divineEnc(d))
+    case r: RuneStone   => tagged("RuneStone", runeEnc(r))
   }
 
   implicit val decoder: Decoder[ItemDetails] = Decoder.instance { c =>
@@ -159,6 +166,7 @@ object ItemDetails {
       case "Quest"       => questDec(c)
       case "Brew"        => brewDec(c)
       case "Divine"      => divineDec(c)
+      case "RuneStone"   => runeDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))
     }
   }

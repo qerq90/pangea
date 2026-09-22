@@ -1275,6 +1275,7 @@ merchant:
     passives: "Пассивные способности: {state}"
     actives: "Активные способности: {state}"
     trophies: "Трофеи: {state}"
+    runes: "Руны: {state}"
     back:
       label: "↩ Назад"
       color: "negative"

@@ -3,7 +3,7 @@ package pangea.service.state.states.guild
 import pangea.engine.{ChoiceColor, SceneContent}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, Rarity}
-import pangea.model.rune.{Rune, RuneData}
+import pangea.model.rune.{Rune, RuneData, RuneStone, RuneStoneSize}
 import pangea.model.skill.Skill
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -166,6 +166,26 @@ object MentorKazimirStateSpec extends ZIOSpecDefault {
               assertTrue(h1.runes.understandingOf(cunning) == 2L && all.contains("стало глубже: 2 (+2)")) &&
               // 2 + 5 + 5 = 12, ещё 5 → 17: все влезли в потолок 30; ничего не осталось лишним
               assertTrue(h2.runes.understandingOf(cunning) == 17L && inv.snapshot.map(_.id) == List(5L))
+    },
+
+    test("большая руна читается как вещь с узором: 5 понимания за камень и клеймо по обычной цене") {
+      val stone  = RuneStone.item(cunning, RuneStoneSize.Big).copy(id = 7L)
+      val stone2 = RuneStone.item(cunning, RuneStoneSize.Big).copy(id = 8L)
+      for {
+        t <- make(hero(rep = 600L, lvl = 10L), List(stone, stone2))
+        (state, dao, inv, r) = t
+        _      <- state.action(testUser, tap("DeepenList", "p" -> "0"), r)
+        list   <- r.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("DeepenItem", "k" -> cunning.key, "id" -> "7"), r)
+        deep   <- heroOf(dao)
+        _      <- state.action(testUser, tap("BrandItem", "k" -> cunning.key, "id" -> "8"), r)
+        branded <- heroOf(dao)
+        all    <- texts(r)
+      } yield assertTrue(list.choices.filter(_.id == "DeepenRune").map(_.label) == List("Хитрый удар")) &&
+              assertTrue(deep.runes.understandingOf(cunning) == RuneStoneSize.Big.points) &&
+              assertTrue(all.contains("стало глубже: 5 (+5)")) &&
+              assertTrue(branded.runes.isBranded(cunning) && branded.guildReputation == 100L) &&
+              assertTrue(inv.snapshot.isEmpty)   // оба камня ушли: один в понимание, второй в клеймо
     },
 
     test("у потолка вещь не сгорает и понимание не растёт") {

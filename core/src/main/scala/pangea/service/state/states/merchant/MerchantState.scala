@@ -53,6 +53,7 @@ case class MerchantState(
       "JunkPassives"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(passives = !s.passives)) },
       "JunkActives"     -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(actives = !s.actives)) },
       "JunkTrophies"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(trophies = !s.trophies)) },
+      "JunkRunes"       -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(runeSale = Some(!s.runes))) },
       "BackFromJunk"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
       "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
@@ -304,7 +305,8 @@ case class MerchantState(
     val flags = List(
       ("JunkPassives", "merchant.junk.passives", s.passives),
       ("JunkActives",  "merchant.junk.actives",  s.actives),
-      ("JunkTrophies", "merchant.junk.trophies", s.trophies)
+      ("JunkTrophies", "merchant.junk.trophies", s.trophies),
+      ("JunkRunes",    "merchant.junk.runes",    s.runes)
     )
     val flagButtons = flags.zipWithIndex.map { case ((id, key, on), i) =>
       Choice(id, content.format(key, "state" -> state(on)), color = color(on),
@@ -452,7 +454,8 @@ case class MerchantState(
   // Фляга к уровню не привязана: у неё своя цена по редкости (см. FlaskKind.priceFor).
   private def sellPrice(item: Item): Long =
     if (item.itemType == ItemType.Flask) FlaskKind.priceFor(item.rarity)
-    else ((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L)
+    // Рунный камень стоит своё по размеру: ни уровня, ни редкости у него нет.
+    else item.runeStone.map(_.size.price).getOrElse(((item.lvl + 5) * 1.2 * item.rarity.factorR).toLong.max(1L))
 
   /** Сколько дублонов Ришелье платит за предмет; 0 — обычная продажа за серебро.
     * Пока золотом он выкупает только материалы (см. [[MaterialKind.doubloonPrice]]). */
@@ -500,8 +503,12 @@ object MerchantState {
     rarities: Set[Rarity] = Set(Rarity.Gray, Rarity.White),
     passives: Boolean     = true,
     actives:  Boolean     = true,
-    trophies: Boolean     = false
+    trophies: Boolean     = false,
+    // Руны по умолчанию не продаются: их носят Казимиру, а не Ришелье. Option,
+    // а не голый Boolean: у сохранённых лавок поля в JSON нет.
+    runeSale: Option[Boolean] = None
   ) {
+    def runes: Boolean = runeSale.getOrElse(false)
 
     /** Группа включена, если продаются все её редкости (переключатель ставит их
       * только целиком, так что промежуточного состояния не бывает). */
@@ -546,6 +553,8 @@ object MerchantState {
   def isJunk(item: Item, s: JunkSaleSettings): Boolean =
     if (item.isQuestItem) false
     else if (item.itemType == ItemType.Trophy) s.trophies
+    // Руны уходят только по своему переключателю: редкости у камня нет.
+    else if (item.itemType == ItemType.RuneStone) s.runes
     else
       // Камни и материалы крафта не хлам никогда: их редкость ничего не говорит
       // о ценности (вечно огненное железо — серое, а стоит дороже иной вещи).
