@@ -237,6 +237,36 @@ object MentorKazimirStateSpec extends ZIOSpecDefault {
               assertTrue(set2.choices.find(_.data.get("g").contains("Blue")).exists(_.color == ChoiceColor.Positive) && later.runes.burns(Rarity.Blue))
     },
 
+    test("рунные камни в «Сдать всё» идут по своим переключателям: по умолчанию оба выключены, редкости на них не влияют") {
+      val small = RuneStone.item(cunning, RuneStoneSize.Small).copy(id = 7L)
+      val big   = RuneStone.item(cunning, RuneStoneSize.Big).copy(id = 8L)
+      for {
+        t <- make(hero(lvl = 10L), List(small, big, weapon(1L, Skill.CunningStrike)))
+        (state, dao, inv, r) = t
+        // редкости серые — обычное оружие сгорает, камни остаются
+        _     <- state.action(testUser, tap("BurnAllYes"), r)
+        after <- heroOf(dao)
+        kept  <- ZIO.succeed(inv.snapshot.map(_.id).sorted)
+        _     <- state.action(testUser, tap("BurnSettings"), r)
+        set   <- r.sentScreens.map(_.last)
+        // включаем малые — сгорают только они
+        _     <- state.action(testUser, tap("BurnStones", "s" -> "Small"), r)
+        set2  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("BurnAllYes"), r)
+        mid   <- heroOf(dao)
+        midBag <- ZIO.succeed(inv.snapshot.map(_.id))
+        // включаем большие — уходит и она
+        _     <- state.action(testUser, tap("BurnStones", "s" -> "Big"), r)
+        _     <- state.action(testUser, tap("BurnAllYes"), r)
+        last  <- heroOf(dao)
+      } yield assertTrue(kept == List(7L, 8L) && after.runes.understandingOf(cunning) == 1L) &&
+              assertTrue(set.choices.filter(_.id == "BurnStones").map(_.color) == List(ChoiceColor.Negative, ChoiceColor.Negative)) &&
+              assertTrue(set2.choices.find(_.data.get("s").contains("Small")).exists(_.color == ChoiceColor.Positive)) &&
+              assertTrue(midBag == List(8L) && mid.runes.understandingOf(cunning) == 2L) &&
+              assertTrue(inv.snapshot.isEmpty && last.runes.understandingOf(cunning) == 7L) &&
+              assertTrue(last.runes.burnsStones(RuneStoneSize.Small) && last.runes.burnsStones(RuneStoneSize.Big))
+    },
+
     test("сдать всё: у потолка лишнее остаётся в сумке, сжигать нечего — сообщение") {
       val data = RuneData.empty.copy(understanding = Map(cunning.key -> 29L))
       for {

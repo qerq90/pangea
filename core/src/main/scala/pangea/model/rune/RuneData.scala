@@ -16,12 +16,16 @@ import pangea.model.skill.Skill
   *    надетой вещи; растёт от сожжённых у Казимира вещей, не выше
   *    [[Rune.cap]] по уровню героя; при сведении не теряется;
   *  - `burnRarities` — какие редкости уходят по «Сдать всё» (как настройка
-  *    продажи хлама; ключи — `Rarity.entryName`). */
+  *    продажи хлама; ключи — `Rarity.entryName`);
+  *  - `burnStones` — какие рунные камни уходят туда же (ключи —
+  *    `RuneStoneSize.entryName`). Редкости у камня нет, поэтому у него свои
+  *    переключатели, и по умолчанию оба выключены: камни копят под клеймо. */
 final case class RuneData(
   active:        List[String]      = Nil,
   passive:       List[String]      = Nil,
   understanding: Map[String, Long] = Map.empty,
-  burnRarities:  Set[String]       = RuneData.DefaultBurnRarities
+  burnRarities:  Set[String]       = RuneData.DefaultBurnRarities,
+  burnStones:    Set[String]       = Set.empty
 ) {
   def brandedActives: List[Skill]        = active.flatMap(Skill.withNameOption)
   def brandedPassives: List[PassiveKind] = passive.flatMap(PassiveKind.withNameOption)
@@ -71,6 +75,17 @@ final case class RuneData(
 
   def burns(rarity: Rarity): Boolean = burnRarities.contains(rarity.entryName)
 
+  /** Уходит ли по «Сдать всё» эта вещь: у рунного камня — по своему
+    * переключателю, у прочих — по редкости. */
+  def burnsItem(item: pangea.model.item.Item): Boolean =
+    item.runeStone.map(d => burnsStones(d.size)).getOrElse(burns(item.rarity))
+
+  def burnsStones(size: RuneStoneSize): Boolean = burnStones.contains(size.entryName)
+
+  def toggleStones(size: RuneStoneSize): RuneData =
+    if (burnsStones(size)) copy(burnStones = burnStones - size.entryName)
+    else copy(burnStones = burnStones + size.entryName)
+
   def toggleBurn(rarities: List[Rarity]): RuneData = {
     val keys = rarities.map(_.entryName).toSet
     if (keys.forall(burnRarities.contains)) copy(burnRarities = burnRarities -- keys)
@@ -90,7 +105,8 @@ object RuneData {
     "active"        -> r.active.asJson,
     "passive"       -> r.passive.asJson,
     "understanding" -> r.understanding.asJson,
-    "burnRarities"  -> r.burnRarities.toList.sorted.asJson
+    "burnRarities"  -> r.burnRarities.toList.sorted.asJson,
+    "burnStones"    -> r.burnStones.toList.sorted.asJson
   )
 
   // Декодер рукописный, каждое поле с запасным значением: новое поле не должно
@@ -101,7 +117,8 @@ object RuneData {
       passive <- c.getOrElse[List[String]]("passive")(Nil)
       und     <- c.getOrElse[Map[String, Long]]("understanding")(Map.empty)
       burn    <- c.getOrElse[Option[List[String]]]("burnRarities")(None)
-    } yield RuneData(active, passive, und, burn.map(_.toSet).getOrElse(DefaultBurnRarities))
+      stones  <- c.getOrElse[List[String]]("burnStones")(Nil)
+    } yield RuneData(active, passive, und, burn.map(_.toSet).getOrElse(DefaultBurnRarities), stones.toSet)
 
   implicit val meta: Meta[RuneData] = new Meta(pgDecoderGet, pgEncoderPut)
 }

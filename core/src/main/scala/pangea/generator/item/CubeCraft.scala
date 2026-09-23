@@ -3,6 +3,7 @@ package pangea.generator.item
 import pangea.domain.Rng
 import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, TrophyKind}
 import pangea.model.monster.MiniBoss
+import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 
 /** Чистое ядро крафта в кубе Азата. При «Активации» просчитываем рецепты от самого
  *  длинного к самому короткому; каждый рецепт применяется повторно, пока в пуле есть
@@ -98,6 +99,23 @@ object CubeCraft {
       val sorted     = kinds.sortBy(_.entryName)
       val (roll, r2) = rng.between(0L, sorted.size.toLong)
       (sorted(roll.toInt.max(0).min(sorted.size - 1)), r2)
+    }
+  }
+
+  // Пять вещей с одной руной → большая руна этого узора. Сами рунные камни в
+  // счёт не идут: пять малых складываются в сумке, а большие переплавлять
+  // незачем.
+  private object RuneFold extends Recipe {
+    val size: Int = RuneStone.PiecesPerBig
+
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
+      val byRune = pool.filter(i => i.runeStone.isEmpty && ItemType.equippable.contains(i.itemType))
+        .flatMap(i => Rune.of(i).map(_ -> i))
+        .groupBy(_._1).view.mapValues(_.map(_._2)).toMap
+      byRune.collect { case (rune, its) if its.sizeIs >= size => rune }
+        .toList.sortBy(_.key)
+        .headOption
+        .map(rune => (byRune(rune).take(size), RuneStone.item(rune, RuneStoneSize.Big), rng))
     }
   }
 
@@ -223,6 +241,7 @@ object CubeCraft {
   private val recipes: List[Recipe] = List(
     DivineForge,                                            // 9
     NineHeads,                                             // 9
+    RuneFold,                                              // 5
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
     DustAssembly,                                          // 3
