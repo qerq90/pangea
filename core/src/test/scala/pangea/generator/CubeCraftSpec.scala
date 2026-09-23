@@ -3,6 +3,7 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.item.{CubeCraft, GemGenerator, MaterialGenerator}
 import pangea.model.item._
+import pangea.model.item.PassiveKind
 import zio.test._
 
 object CubeCraftSpec extends ZIOSpecDefault {
@@ -88,6 +89,30 @@ object CubeCraftSpec extends ZIOSpecDefault {
       val infused  = CubeCraft.craft(List(blade, MaterialGenerator.item(MaterialKind.EverburningIron).copy(id = 4L)), charges = 50, rng)
       assertTrue(reforged.chargesUsed == 0 && reforged.items.contains(blade)) &&
       assertTrue(infused.chargesUsed == 0 && infused.items.contains(blade))
+    },
+
+    test("пять вещей с одной руной → большая руна этого узора; сами рунные камни в счёт не идут") {
+      import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+      import pangea.model.skill.Skill
+      def weapon(id: Long, skill: Skill): Item =
+        Item(id, "Меч", 10L, Rarity.Blue, ItemType.Weapon, attack = 1, accuracy = 0, energy = 0,
+          armor = 0, defence = 0, evasion = 0, details = ItemDetails.Weapon(skill))
+      def helm(id: Long, kind: PassiveKind): Item =
+        Item(id, "Шлем", 10L, Rarity.Blue, ItemType.Helmet, attack = 0, accuracy = 0, energy = 0,
+          armor = 5, defence = 0, evasion = 0, details = ItemDetails.Passive(kind))
+      val five   = (1L to 5L).toList.map(weapon(_, Skill.CunningStrike))
+      val folded = CubeCraft.craft(five, charges = 50, rng)
+      val four   = CubeCraft.craft(five.take(4), charges = 50, rng)
+      val mixed  = CubeCraft.craft(five.take(3) ++ List(helm(6L, PassiveKind.Healer), helm(7L, PassiveKind.Healer)), charges = 50, rng)
+      val stones = CubeCraft.craft((11L to 15L).toList.map(i =>
+                     RuneStone.item(Rune.Active(Skill.CunningStrike), RuneStoneSize.Small).copy(id = i)), charges = 50, rng)
+      assertTrue(folded.chargesUsed == 1 && folded.items.size == 1) &&
+      assertTrue(folded.items.head.runeStone.exists(d =>
+        d.size == RuneStoneSize.Big && d.runeKey == Rune.Active(Skill.CunningStrike).key)) &&
+      assertTrue(folded.items.head.name == "Большая руна Хитрого удара") &&
+      assertTrue(four.chargesUsed == 0 && four.items.size == 4) &&                 // четырёх мало
+      assertTrue(mixed.chargesUsed == 0 && mixed.items.size == 5) &&               // разные руны не смешиваются
+      assertTrue(stones.chargesUsed == 0 && stones.items.size == 5)                // камни куб не складывает
     },
 
     test("9 голов существ → Левитирующая голова монстра") {

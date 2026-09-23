@@ -4,7 +4,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.item.Item
-import pangea.model.rune.{Rune, RuneData}
+import pangea.model.rune.{Rune, RuneData, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -43,6 +43,7 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
       "BurnAllYes"         -> Target.Run { (u, _, r) => burnAll(u, r) },
       "BurnSettings"       -> Target.Run { (u, _, r) => burnSettings(u, r) },
       "BurnRarity"         -> Target.Run { (u, ua, r) => toggleBurnRarity(u, ua, r) },
+      "BurnStones"         -> Target.Run { (u, ua, r) => toggleBurnStones(u, ua, r) },
       "Runes"              -> Target.Run { (u, ua, r) => runesView(u, ua, r) },
       "LeaveMentorKazimir" -> Target.Goto(StateType.TrainingHall)
     ),
@@ -240,7 +241,7 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
     * сгорело и прибавку по рунам. */
   private def burnPlan(hero: Hero, items: List[Item]): (RuneData, List[Item], List[(Rune, Long)]) = {
     val cap = Rune.cap(hero.lvl)
-    val candidates = items.filter(i => Rune.of(i).isDefined && hero.runes.burns(i.rarity))
+    val candidates = items.filter(i => Rune.of(i).isDefined && hero.runes.burnsItem(i))
     candidates.groupBy(i => Rune.of(i).get).toList.sortBy(_._1.label).foldLeft((hero.runes, List.empty[Item], List.empty[(Rune, Long)])) {
       case ((data, burnt, gains), (rune, its)) =>
         val (data2, burnt2, gain) = its.sortBy(i => Rune.pointsOf(i)).foldLeft((data, burnt, 0L)) { case ((d, b, g), item) =>
@@ -294,8 +295,29 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
       Choice("BurnRarity", content.format("merchant.junk.rarity", "emoji" -> g.emoji, "state" -> state(on)),
         color = if (on) ChoiceColor.Positive else ChoiceColor.Negative, data = Map("g" -> g.id), row = Some(i))
     }
-    Screen(content.text("kazimir.deepen.settings"), buttons :+ content.choice("Deepen", "kazimir.back").copy(row = Some(buttons.size)))
+    // Рунные камни редкости не имеют — у каждого размера свой переключатель,
+    // и по умолчанию оба выключены.
+    val stoneButtons = RuneStoneSize.values.toList.zipWithIndex.map { case (size, i) =>
+      val on = r.burnsStones(size)
+      Choice("BurnStones", content.format("kazimir.deepen.settingsStones", "name" -> size.prefix, "state" -> state(on)),
+        color = if (on) ChoiceColor.Positive else ChoiceColor.Negative,
+        data = Map("s" -> size.entryName), row = Some(buttons.size + i))
+    }
+    val all = buttons ++ stoneButtons
+    Screen(content.text("kazimir.deepen.settings"), all :+ content.choice("Deepen", "kazimir.back").copy(row = Some(all.size)))
   }
+
+  private def toggleBurnStones(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      res  <- payload(ua, "s").flatMap(RuneStoneSize.withNameOption) match {
+        case None       => burnSettings(user, renderer)
+        case Some(size) =>
+          val updated = hero.runes.toggleStones(size)
+          heroDao.updateRunes(user.userId, updated) *>
+            renderer.show(user, burnSettingsScreen(updated)).as(StateType.MentorKazimir)
+      }
+    } yield res
 
   private def toggleBurnRarity(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
