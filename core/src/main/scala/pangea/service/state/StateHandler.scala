@@ -7,7 +7,11 @@ import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
+import io.circe.syntax.EncoderOps
+import pangea.service.chat.ChatCommand
+import pangea.service.parcel.Parcels
 import pangea.service.payout.Payouts
+import pangea.service.state.states.parcel.TransferState
 import pangea.service.sender.Api
 import pangea.service.sender.vk.VkRenderer
 import pangea.service.state.states.StatesMap
@@ -19,6 +23,7 @@ class StateHandler(
   heroRepo: HeroRepository,
   heroDao: HeroDao,
   payouts: Payouts,
+  parcels: Parcels,
   states: Map[StateType, State],
   lock: PlayerLock
 ) {
@@ -58,6 +63,66 @@ class StateHandler(
       _ <- lock.withLock(user.userId)(makeActionSafe(user, action, renderer))
     } yield ()
   }
+
+  /** «Передать» из общей беседы: адресата бот берёт из процитированного
+    * сообщения, а выбирать вещь отправитель будет у себя в личке — там у
+    * каждой кнопки видны характеристики, и одинаковые названия не путаются.
+    *
+    * Отдавать можно только из города; получатель может быть где угодно, вещь
+    * придёт ему посылкой. */
+  def transferFromChat(senderVk: VkId, targetVk: VkId, query: String, eventId: Long): Task[Unit] = {
+    val renderer = VkRenderer(api)
+    userRepo.getUserByVkId(senderVk).flatMap {
+      case None => ZIO.unit  // писал не игрок — молчим
+      case Some(sender) =>
+        lock.withLock(sender.userId) {
+          // Номера сообщений у беседы свои, и с номерами из лички они
+          // пересекаются — поэтому чатовые события считаем отрицательными,
+          // иначе повтор-защита приняла бы их за уже виденные.
+          userRepo.checkAndRecordEvent(sender.userId, -eventId).flatMap { fresh =>
+            ZIO.when(fresh)(startTransfer(sender, targetVk, query, renderer)).unit
+          }
+        }
+    }
+  }
+
+  private def startTransfer(sender: User, targetVk: VkId, query: String, renderer: Renderer): Task[Unit] =
+    for {
+      heroOp   <- heroRepo.getHero(sender.userId)
+      targetOp <- userRepo.getUserByVkId(targetVk)
+      targetHero <- targetOp.fold(ZIO.none: Task[Option[pangea.model.hero.Hero]])(u => heroRepo.getHero(u.userId))
+      _ <- (heroOp, targetOp, targetHero) match {
+        case (Some(hero), Some(target), Some(theirHero)) if target.userId != sender.userId =>
+          if (!StateType.cityStates.contains(hero.state))
+            api.sendMessage(sender, StateHandler.TransferNotInCity, List.empty, None)
+          else
+            for {
+              name <- api.getName(target).map(r => s"${r.response.head.firstName} ${r.response.head.lastName}")
+                        .orElse(ZIO.succeed(StateHandler.TransferSomeone))
+              scene = TransferState.TransferScene(
+                        toHeroId = theirHero.id.value,
+                        toUserId = target.userId.value,
+                        toName   = name,
+                        query    = ChatCommand.itemQuery(query),
+                        count    = ChatCommand.count(query))
+              _ <- heroDao.writeSceneData(sender.userId, scene.asJson)
+              // Куда вернуть после передачи — туда же, откуда позвали.
+              _ <- heroDao.writeReturnState(sender.userId, Some(hero.state))
+              _ <- enterState(sender, StateType.Transfer, renderer)
+            } yield ()
+        case (Some(_), _, _) =>
+          api.sendMessage(sender, StateHandler.TransferNoTarget, List.empty, None)
+        case _ => ZIO.unit
+      }
+    } yield ()
+
+  /** Показать экран состояния и записать его герою (без проверки «уже там»). */
+  private def enterState(user: User, to: StateType, renderer: Renderer): Task[Unit] =
+    for {
+      target <- ZIO.fromOption(states.get(to)).orElseFail(new Throwable(s"Not found state '$to'"))
+      _      <- target.enter(user, renderer)
+      _      <- heroRepo.updateState(user.userId, to)
+    } yield ()
 
   /** Исполняет отложенную задачу (см. `Scheduler`) под локом игрока. Действие
     * применяется только если текущее состояние героя совпадает с
@@ -119,6 +184,8 @@ class StateHandler(
       // городе: в лабиринте такие деньги наполовину сгорели бы при смерти.
       _ <- ZIO.when(StateType.cityStates.contains(hero.state))(
              payouts.deliver(user, hero, renderer).ignore)
+      // Посылки ложатся в банковскую ячейку откуда угодно: она не при герое.
+      _ <- parcels.deliver(user, hero, renderer).ignore
       hero <- heroRepo.getHero(user.userId).map(_.getOrElse(hero))
       _ <-
         if (StateHandler.isHomeCommand(action))
@@ -255,8 +322,17 @@ object StateHandler {
 
   val RestartDone: String = "💀 Прошлое стёрто. Начинаем заново."
 
+  /** Ответы на «Передать» из беседы: короткие и в личку, чтобы не шуметь в чате. */
+  val TransferNotInCity: String =
+    "Передавать вещи можно только из города: дойдите до Кинета и повторите."
+
+  val TransferNoTarget: String =
+    "Не понял, кому передавать. Ответьте на сообщение игрока (или перешлите его) и напишите «Передать …»."
+
+  val TransferSomeone: String = "искатель"
+
   val live: ZLayer[
-    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts,
+    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels,
     Nothing,
     StateHandler
   ] =
@@ -267,8 +343,9 @@ object StateHandler {
         heroRepo  <- ZIO.service[HeroRepository]
         heroDao   <- ZIO.service[HeroDao]
         payouts   <- ZIO.service[Payouts]
+        parcels   <- ZIO.service[Parcels]
         statesMap <- ZIO.service[StatesMap]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
-      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, statesMap.states, lock)
+      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, statesMap.states, lock)
     )
 }

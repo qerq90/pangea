@@ -7,6 +7,7 @@ import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.bank.BankRepository
+import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
@@ -18,6 +19,7 @@ import zio.{Task, ZIO}
 case class TradeHouseState(
   heroDao:  HeroDao,
   bankRepo: BankRepository,
+  parcels:  Parcels,
   content:  SceneContent
 ) extends State {
 
@@ -34,6 +36,7 @@ case class TradeHouseState(
       "MyVault"         -> Target.Goto(StateType.BankVault),
       "Auction"         -> Target.Goto(StateType.Auction),
       "FetShop"         -> Target.Goto(StateType.FetShop),
+      "Mail"            -> Target.Goto(StateType.Mail),
       "LeaveTradeHouse" -> Target.Goto(StateType.CityCenter)
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
@@ -50,9 +53,15 @@ case class TradeHouseState(
   // --- Меню Рахадима ---
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
-    getVault(user).flatMap(vault => renderer.show(user, menuScreen(vault)))
+    for {
+      hero  <- getHero(user)
+      vault <- bankRepo.get(hero.id).mapError(asThrowable)
+      // Почта видна, только если на ней что-то лежит.
+      mail  <- parcels.waitingCount(hero.id).orElse(ZIO.succeed(0L))
+      _     <- renderer.show(user, menuScreen(vault, mail))
+    } yield ()
 
-  private def menuScreen(vault: BankVault): Screen = {
+  private def menuScreen(vault: BankVault, mail: Long = 0L): Screen = {
     // Ряд на две кнопки: покупка ячейки и вход в хранилище (если есть что открывать).
     val buy = Choice("BuyCell",
       Choice.fit(content.format("bank.tradeHouse.buyCell", "price" -> vault.nextCellPrice.toString)),
@@ -67,8 +76,11 @@ case class TradeHouseState(
       Choice("BuyDoubloons",    content.text("bank.tradeHouse.doubloonsLabel"), row = Some(1)),
       Choice("DepositInterest", content.text("bank.tradeHouse.interestLabel"),  row = Some(1)),
       Choice("FetShop",         content.text("bank.tradeHouse.fetLabel"),       row = Some(2))
-    ) ++ auction :+
-      Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(3))
+    ) ++ auction ++
+      Option.when(mail > 0L)(Choice("Mail",
+        content.format("bank.tradeHouse.mailLabel", "count" -> mail.toString),
+        color = ChoiceColor.Positive, row = Some(3))) :+
+      Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(4))
     val text = content.format("bank.tradeHouse.menu",
       "cells" -> vault.cells.toString, "price" -> vault.nextCellPrice.toString)
     Screen(text, (buy :: vaultBtn.toList) ++ rest)
