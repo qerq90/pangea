@@ -4,8 +4,11 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
+import pangea.model.trauma.Trauma
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task}
 
@@ -14,8 +17,12 @@ import zio.{Random, Task}
  *  шутник» без списаний. По завершении возвращает в меню [[GustavoState]]. */
 case class GustavoHealState(
   heroDao: HeroDao,
-  content: SceneContent
+  content: SceneContent,
+  bank:    Option[BankRepository] = None
 ) extends State with GustavoScene {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -69,21 +76,30 @@ case class GustavoHealState(
     val price  = cost(hero)
     if (active.isEmpty)
       renderer.show(user, Screen(content.text("gustavo.noTraumas"), Nil))
-    else if (hero.silver < price)
-      renderer.show(user, Screen(content.format("gustavo.notEnoughSilver", "cost" -> price.toString), Nil))
     else
       for {
-        idx      <- Random.nextIntBetween(0, active.length)
-        healed    = active(idx)
-        newNames  = removeFirst(hero.traumaNames, healed.name)
-        newUntil  = if (newNames.isEmpty) None else hero.traumaUntil
-        _        <- heroDao.updateSilver(user.userId, hero.silver - price)
-        _        <- heroDao.updateTrauma(user.userId, newUntil, newNames)
-        _        <- heroDao.writeGustavoData(user.userId,
-                      data.copy(healCooldownUntil = Some(now + GustavoData.HealCooldownMs)).asJson)
-        _        <- renderer.show(user, Screen(content.format("gustavo.healed", "trauma" -> healed.name), Nil))
+        wallet   <- purse.wallet(hero)
+        _        <- if (!wallet.canAfford(price))
+                      renderer.show(user, Screen(content.format("gustavo.notEnoughSilver", "cost" -> price.toString), Nil))
+                    else heal(user, hero, data, active, price, now, renderer)
       } yield ()
   }
+
+  private def heal(
+    user: User, hero: Hero, data: GustavoData, active: List[Trauma],
+    price: Long, now: Long, renderer: Renderer
+  ): Task[Unit] =
+    for {
+      idx      <- Random.nextIntBetween(0, active.length)
+      healed    = active(idx)
+      newNames  = removeFirst(hero.traumaNames, healed.name)
+      newUntil  = if (newNames.isEmpty) None else hero.traumaUntil
+      _        <- purse.charge(user.userId, hero, price)
+      _        <- heroDao.updateTrauma(user.userId, newUntil, newNames)
+      _        <- heroDao.writeGustavoData(user.userId,
+                    data.copy(healCooldownUntil = Some(now + GustavoData.HealCooldownMs)).asJson)
+      _        <- renderer.show(user, Screen(content.format("gustavo.healed", "trauma" -> healed.name), Nil))
+    } yield ()
 
   private def healRemaining(data: GustavoData, now: Long): Option[Long] =
     data.healCooldownUntil.filter(_ > now).map(_ - now)

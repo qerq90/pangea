@@ -9,6 +9,8 @@ import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{CharacterMenu, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -20,7 +22,15 @@ import java.util.concurrent.TimeUnit
  * хранится в `scene_data` (транзиентно) — пока она снята, меню заменяется экраном
  * комнаты.
  */
-case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
+case class TavernState(
+  heroDao:   HeroDao,
+  scheduler: Scheduler,
+  content:   SceneContent,
+  bank:      Option[BankRepository] = None
+) extends State {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   // Снятая комната исцеляет травмы спустя 3 часа реального времени.
   private val RoomDurationMs = 3L * 60L * 60L * 1000L
@@ -87,15 +97,16 @@ case class TavernState(heroDao: HeroDao, scheduler: Scheduler, content: SceneCon
   // Снять комнату: списываем серебро, фиксируем время старта, показываем комнату.
   private def rentRoom(user: User, renderer: Renderer): Task[StateType] =
     for {
-      now  <- nowMs
-      hero <- getHero(user)
-      cost  = roomCost(hero)
-      _ <- if (hero.silver < cost)
+      now    <- nowMs
+      hero   <- getHero(user)
+      wallet <- purse.wallet(hero)
+      cost    = roomCost(hero)
+      _ <- if (!wallet.canAfford(cost))
              renderer.show(user, Screen(
                content.format("tavern.notEnoughSilver",
-                 "cost" -> cost.toString, "silver" -> hero.silver.toString), Nil))
+                 "cost" -> cost.toString, "silver" -> wallet.total.toString), Nil))
            else
-             heroDao.updateSilver(user.userId, hero.silver - cost) *>
+             purse.charge(user.userId, hero, cost) *>
                heroDao.writeSceneData(user.userId, Json.obj(RoomStartKey -> now.asJson)) *>
                // push-исцеление: поллер сам выполнит LeaveRoom через 3 часа, если
                // игрок всё ещё в таверне; иначе исцеление забирается вручную при

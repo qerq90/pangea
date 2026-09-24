@@ -8,6 +8,8 @@ import pangea.model.squad.{AllyKind, AllyRates, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -18,8 +20,16 @@ import java.util.concurrent.TimeUnit
   * встречает репликой о свитке и снова нанимается. Йорген берёт серебром
   * (500 × уровень), Плюх — Живой водой, Брамбл — шнапсом из красавки (уровень
   * на пять, но не меньше одного). */
-case class MercenariesState(heroDao: HeroDao, inventoryRepo: InventoryRepository, content: SceneContent) extends State {
+case class MercenariesState(
+  heroDao:       HeroDao,
+  inventoryRepo: InventoryRepository,
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
+) extends State {
   import MercenariesState._
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -94,9 +104,11 @@ case class MercenariesState(heroDao: HeroDao, inventoryRepo: InventoryRepository
     kind match {
       case AllyKind.Human =>
         val cost = silverCost(hero)
-        if (hero.silver < cost)
-          ZIO.succeed(Some(content.format("mercenaries.notEnoughSilver", "cost" -> cost.toString, "silver" -> hero.silver.toString)))
-        else heroDao.updateSilver(user.userId, hero.silver - cost).as(None)
+        purse.wallet(hero).flatMap { wallet =>
+          if (!wallet.canAfford(cost))
+            ZIO.succeed(Some(content.format("mercenaries.notEnoughSilver", "cost" -> cost.toString, "silver" -> wallet.total.toString)))
+          else purse.charge(user.userId, hero, cost).as(None)
+        }
       case k =>
         val brew = brewFor(k)
         val n    = AllyKind.brewsFor(hero.lvl).toInt

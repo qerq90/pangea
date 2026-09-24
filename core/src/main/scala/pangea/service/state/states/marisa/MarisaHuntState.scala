@@ -16,6 +16,8 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.schedule.Scheduler
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.marisa.MarisaHuntState._
 import pangea.service.state.{MarisaQuest, State, UserAction}
@@ -36,8 +38,12 @@ case class MarisaHuntState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
   scheduler:     Scheduler,
-  content:       SceneContent
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
 ) extends State {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -114,22 +120,27 @@ case class MarisaHuntState(
   // ── Коллектор ───────────────────────────────────────────────────────────────
 
   private def showCollector(user: User, renderer: Renderer, p: Progress): Task[Unit] =
-    getHero(user).flatMap { hero =>
+    getHero(user).flatMap(hero => canPay(hero).flatMap { able =>
       val text = (if (p.withMarisa) content.text("marisa.hunt.collectorWithMarisa") + "\n\n" + content.text("marisa.hunt.marisaAdvice")
                   else content.text("marisa.hunt.collector")) +
-        (if (MarisaQuest.canPayDebt(hero)) "" else "\n\n" + content.text("marisa.hunt.cantPay"))
-      val pay = Option.when(MarisaQuest.canPayDebt(hero))(content.choice("PayCollector", "marisa.hunt.payLabel"))
+        (if (able) "" else "\n\n" + content.text("marisa.hunt.cantPay"))
+      val pay = Option.when(able)(content.choice("PayCollector", "marisa.hunt.payLabel"))
       renderer.show(user, Screen(text, pay.toList :+ content.choice("FightCollector", "marisa.hunt.fightLabel")))
-    }
+    })
+
+  /** Долг платится и серебром из ячейки Торгового дома. */
+  private def canPay(hero: Hero): Task[Boolean] =
+    purse.total(hero).map(MarisaQuest.canPayDebt(hero, _))
 
   /** Заплатить долг Кельвина: с Марисой — «Спаситель Марисы». */
   private def payCollector(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
       p    <- requireProgress(user)
-      res  <- if (!MarisaQuest.canPayDebt(hero)) showCollector(user, renderer, p).as(StateType.MarisaHunt)
+      able <- canPay(hero)
+      res  <- if (!able) showCollector(user, renderer, p).as(StateType.MarisaHunt)
               else for {
-                paid <- MarisaQuest.payDebt(heroDao, user.userId, hero)
+                paid <- MarisaQuest.payDebt(purse, user.userId, hero)
                 _    <- renderer.show(user, Screen(content.text("marisa.hunt.debtPaid"), Nil))
                 _    <- ZIO.when(p.withMarisa)(MarisaQuest.grant(heroDao, content, user, paid, Achievement.MarisaSavior, renderer))
                 _    <- close(user, paid, renderer)
@@ -159,21 +170,21 @@ case class MarisaHuntState(
     if (!p.withMarisa)
       getHero(user).flatMap(hero => renderer.show(user, Screen(content.text("marisa.hunt.collectorDown"), Nil)) *> close(user, hero, renderer))
     else
-      getHero(user).flatMap { hero =>
-        val canGive = MarisaQuest.canPayDebt(hero)
+      getHero(user).flatMap(hero => canPay(hero).flatMap { canGive =>
         renderer.show(user, Screen(
           content.text("marisa.hunt.collectorDownWithMarisa") + (if (canGive) "" else "\n\n" + content.text("marisa.hunt.cantPay")),
           Option.when(canGive)(content.choice("GiveMarisa", "marisa.hunt.giveLabel")).toList :+
             content.choice("KeepSilver", "marisa.hunt.keepLabel")))
-      }
+      })
 
   private def giveMarisa(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
       p    <- requireProgress(user)
-      res  <- if (!MarisaQuest.canPayDebt(hero)) afterFight(user, renderer, p).as(StateType.MarisaHunt)
+      able <- canPay(hero)
+      res  <- if (!able) afterFight(user, renderer, p).as(StateType.MarisaHunt)
               else for {
-                paid <- MarisaQuest.payDebt(heroDao, user.userId, hero)
+                paid <- MarisaQuest.payDebt(purse, user.userId, hero)
                 _    <- MarisaQuest.grant(heroDao, content, user, paid, Achievement.MarisaSavior, renderer)
                 _    <- close(user, paid, renderer)
               } yield StateType.GlobalMap

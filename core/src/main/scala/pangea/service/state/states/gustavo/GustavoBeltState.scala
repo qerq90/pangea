@@ -6,6 +6,8 @@ import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
@@ -15,7 +17,12 @@ import zio.Task
 case class GustavoBeltState(
   heroDao: HeroDao,
   content: SceneContent
+,
+  bank:    Option[BankRepository] = None
 ) extends State with GustavoScene {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -58,21 +65,22 @@ case class GustavoBeltState(
 
   private def buy(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
+      hero   <- getHero(user)
+      wallet <- purse.wallet(hero)
       belt = hero.equipment.belt
       price = beltRefillCost(hero)
       _ <- if (!hasBelt(belt))
              renderer.show(user, Screen(content.text("gustavo.supplies.beltNone"), back))
            else if (isFull(belt))
              renderer.show(user, Screen(content.text("gustavo.supplies.beltFull"), back))
-           else if (hero.silver < price)
+           else if (!wallet.canAfford(price))
              renderer.show(user, Screen(content.format("gustavo.supplies.beltNotEnoughSilver", "cost" -> price.toString), back))
            else
              refill(user, hero, belt, price, renderer)
     } yield StateType.GustavoSupplies
 
   private def refill(user: User, hero: Hero, belt: Item, price: Long, renderer: Renderer): Task[Unit] =
-    heroDao.updateSilver(user.userId, hero.silver - price) *>
+    purse.charge(user.userId, hero, price) *>
       heroDao.updateEquipment(user.userId, hero.equipment.copy(belt = belt.copy(details = beltDetails(belt).map(_.refilled).getOrElse(belt.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.beltRefilled",
         "charges" -> beltDetails(belt).map(_.maxCharges).getOrElse(0).toString), back))

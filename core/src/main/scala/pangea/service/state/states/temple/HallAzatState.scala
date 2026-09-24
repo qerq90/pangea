@@ -6,14 +6,23 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{AzatData, State, UserAction}
 import java.util.concurrent.TimeUnit
 import zio.{Task, ZIO}
 
 /** Зал Азата: лор про кубы, подход к кубу (покупка/активация/открытие крафта) и
  *  пополнение зарядов у жреца. */
-case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State {
+case class HallAzatState(
+  heroDao: HeroDao,
+  content: SceneContent,
+  bank:    Option[BankRepository] = None
+) extends State {
   import HallAzatState._
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -78,15 +87,16 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
 
   private def activateCube(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
-      azat <- loadAzat(user)
+      hero   <- getHero(user)
+      azat   <- loadAzat(user)
+      wallet <- purse.wallet(hero)
       _ <- if (!azat.cubeFound) renderer.show(user, Screen(content.text("hall.cube.notFound"), Nil))
-           else if (hero.doubloons < ActivateDoubloons || hero.silver < ActivateSilver)
+           else if (hero.doubloons < ActivateDoubloons || !wallet.canAfford(ActivateSilver))
              renderer.show(user, Screen(content.format("hall.cube.notEnoughActivate",
                "doubloons" -> ActivateDoubloons.toString, "silver" -> ActivateSilver.toString), Nil))
            else
              heroDao.updateDoubloons(user.userId, hero.doubloons - ActivateDoubloons) *>
-               heroDao.updateSilver(user.userId, hero.silver - ActivateSilver) *>
+               purse.charge(user.userId, hero, ActivateSilver) *>
                saveAzat(user, azat.copy(cube = CubeStatus.Active, cubeCharges = AzatState.MaxCharges)) *>
                renderer.show(user, Screen(content.text("hall.cube.activated"), Nil))
       _ <- enter(user, renderer)
@@ -103,16 +113,17 @@ case class HallAzatState(heroDao: HeroDao, content: SceneContent) extends State 
 
   private def recharge(user: User, renderer: Renderer, cost: Long, charges: Int): Task[StateType] =
     for {
-      hero <- getHero(user)
-      azat <- loadAzat(user)
+      hero   <- getHero(user)
+      azat   <- loadAzat(user)
+      wallet <- purse.wallet(hero)
       _ <- if (!azat.hasCube) renderer.show(user, Screen(content.text("hall.recharge.noCube"), Nil))
            else if (azat.cubeCharges >= AzatState.MaxCharges)
              renderer.show(user, Screen(content.text("hall.recharge.full_already"), Nil))
-           else if (hero.silver < cost)
+           else if (!wallet.canAfford(cost))
              renderer.show(user, Screen(content.format("hall.recharge.notEnough", "cost" -> cost.toString), Nil))
            else {
              val newCharges = (azat.cubeCharges + charges).min(AzatState.MaxCharges)
-             heroDao.updateSilver(user.userId, hero.silver - cost) *>
+             purse.charge(user.userId, hero, cost) *>
                saveAzat(user, azat.copy(cubeCharges = newCharges)) *>
                renderer.show(user, Screen(content.format("hall.recharge.done", "charges" -> newCharges.toString), Nil))
            }
