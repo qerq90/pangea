@@ -6,7 +6,7 @@ import doobie.postgres.circe.json.implicits._
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.TraumaInstances._
-import pangea.model.hero.{Equipment, Hero, MasterHornBoosts}
+import pangea.model.hero.{Equipment, Hero, HeroId, MasterHornBoosts}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -38,6 +38,15 @@ object Queries {
 
   def updateDoubloons(userId: UserId, doubloons: Long): Fragment =
     sql"update $tableName set doubloons = $doubloons where user_id = $userId"
+
+  // Прибавка по id героя: деньги за проданный лот приходят, пока продавец
+  // где-то ходит, поэтому считаем в самом UPDATE — чтобы не затереть то, что
+  // он в этот момент тратит сам.
+  def addSilver(heroId: HeroId, amount: Long): Fragment =
+    sql"update $tableName set silver = silver + $amount where id = $heroId"
+
+  def addDoubloons(heroId: HeroId, amount: Long): Fragment =
+    sql"update $tableName set doubloons = doubloons + $amount where id = $heroId"
 
   def updateBaseStats(userId: UserId, stats: pangea.model.stats.BaseStats): Fragment =
     sql"update $tableName set base_stats = ${stats.asJson} where user_id = $userId"

@@ -62,15 +62,17 @@ import pangea.model.state.StateType.{
   TrophyExchange,
   UnassumingBarrel,
   TradeHouse,
-  BankVault
+  BankVault,
+  Auction
 }
+import pangea.repository.auction.AuctionRepository
 import pangea.repository.bank.BankRepository
 import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
-import pangea.service.state.states.bank.{BankVaultState, TradeHouseState}
+import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHouseState}
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RottenJoeState, SilverVeinState}
@@ -122,6 +124,7 @@ object StatesMap {
       with InventoryRepository
       with BarrelRepository
       with BankRepository
+      with AuctionRepository
       with ItemRepository
       with Journal
       with SceneContent
@@ -136,6 +139,7 @@ object StatesMap {
         inventoryRepo <- ZIO.service[InventoryRepository]
         barrelRepo    <- ZIO.service[BarrelRepository]
         bankRepo      <- ZIO.service[BankRepository]
+        auctionRepo   <- ZIO.service[AuctionRepository]
         itemRepo      <- ZIO.service[ItemRepository]
         journal       <- ZIO.service[Journal]
         content       <- ZIO.service[SceneContent]
@@ -189,6 +193,7 @@ object StatesMap {
           CityCenter -> CityCenterState(content),
           TradeHouse -> TradeHouseState(heroDao, bankRepo, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content),
+          Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, players, content, bank),
           TempleAzat -> TempleAzatState(heroDao, inventoryRepo, itemRepo, content),
           HallAzat   -> HallAzatState(heroDao, content, bank),
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),

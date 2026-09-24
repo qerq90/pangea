@@ -11,6 +11,8 @@ class VkPlayers(api: Api) extends Players {
       val u = response.response.head
       s"${u.firstName} ${u.lastName}"
     }
+
+  def announce(message: String): Task[Unit] = api.sendToChat(message)
 }
 
 object VkPlayers {
