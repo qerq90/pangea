@@ -2,6 +2,7 @@ package app
 
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
+import pangea.dao.bank.BankVaultDao
 import pangea.dao.barrel.BarrelDao
 import pangea.dao.hero.HeroDao
 import pangea.dao.inventory.InventoryDao
@@ -11,6 +12,7 @@ import pangea.dao.schedule.ScheduledTaskDao
 import pangea.dao.sendfailure.SendFailureDao
 import pangea.dao.user.UserDao
 import pangea.engine.{Players, SceneContent}
+import pangea.repository.bank.BankRepository
 import pangea.repository.barrel.BarrelRepository
 import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
@@ -45,6 +47,7 @@ object Main extends ZIOAppDefault {
       UserDao.live,
       InventoryDao.live,
       BarrelDao.live,
+      BankVaultDao.live,
       ItemDao.live,
       ScheduledTaskDao.live,
       SendFailureDao.live,
@@ -56,6 +59,7 @@ object Main extends ZIOAppDefault {
       UserRepository.live,
       InventoryRepository.live,
       BarrelRepository.live,
+      BankRepository.live,
       StateHandler.live,
       Scheduler.live,
       SchedulerPoller.live,

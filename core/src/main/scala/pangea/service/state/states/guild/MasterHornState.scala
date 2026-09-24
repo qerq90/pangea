@@ -10,6 +10,8 @@ import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -24,9 +26,13 @@ import zio.{Task, ZIO}
 case class MasterHornState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
 ) extends State {
   import MasterHornState._
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   /** «Ржавая вилка»: набрать сто репутации трофеями — и одно улучшение даром.
     * Завязка смотрит на оружие героя. */
@@ -128,7 +134,7 @@ case class MasterHornState(
             enter(user, renderer).as(StateType.MasterHorn)
         case Some(stat) =>
           val price = cost(hero, stat)
-          freeImprove(user).flatMap { free =>
+          freeImprove(user).zip(purse.wallet(hero)).flatMap { case (free, wallet) =>
             if (free)
               // Задание Горна: этот раз — даром, и это его развязка.
               writeBoost(user, hero, stat, 0L) *> questFinish(user, hero, stat, renderer)
@@ -136,7 +142,7 @@ case class MasterHornState(
               renderer.show(user, Screen(
                 content.format("guild.masterHorn.notEnough", "cost" -> price.toString), Nil)) *>
                 askImprove(user, renderer, stat)
-            else if (hero.silver < price)
+            else if (!wallet.canAfford(price))
               renderer.show(user, Screen(
                 content.format("guild.masterHorn.notEnoughSilver", "cost" -> price.toString), Nil)) *>
                 askImprove(user, renderer, stat)
@@ -171,7 +177,7 @@ case class MasterHornState(
   // числе (см. `cost`): прокачка стоит `price` очков репутации И `price` серебра.
   private def applyBoost(user: User, hero: Hero, stat: Stat, price: Long, renderer: Renderer): Task[Unit] = {
     val remainingRep    = hero.guildReputation - price
-    val remainingSilver = hero.silver - price
+    val remainingSilver = (hero.silver - price).max(0L)
     for {
       _ <- writeBoost(user, hero, stat, price)
       _ <- renderer.show(user, Screen(
@@ -186,7 +192,7 @@ case class MasterHornState(
   private def writeBoost(user: User, hero: Hero, stat: Stat, price: Long): Task[Unit] =
     for {
       _ <- heroDao.updateGuildReputation(user.userId, hero.guildReputation - price)
-      _ <- heroDao.updateSilver(user.userId, hero.silver - price)
+      _ <- purse.charge(user.userId, hero, price)
       _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
       _ <- heroDao.updateMasterHornBoosts(user.userId, bumped(hero.masterHornBoosts, stat))
     } yield ()

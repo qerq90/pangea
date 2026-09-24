@@ -8,6 +8,8 @@ import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.stats.StatBoost
 import pangea.model.user.User
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{NpcQuestLog, State, UserAction}
 import zio.Task
 
@@ -18,7 +20,12 @@ import zio.Task
 case class GustavoBoostState(
   heroDao: HeroDao,
   content: SceneContent
+,
+  bank:    Option[BankRepository] = None
 ) extends State with GustavoScene {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -85,12 +92,14 @@ case class GustavoBoostState(
                    // Угощение по заданию не тратит бесплатное зелье этого типа.
                    val free  = !data.freeBoostsUsed.contains(bs.key)
                    val price = if (free || treat) 0L else cost(hero)
-                   if (price > 0 && hero.silver < price)
-                     renderer.show(user, Screen(content.format("gustavo.boostNotEnoughSilver",
-                       "potion" -> bs.potion, "cost" -> price.toString), Nil))
-                   else
-                     applyBoost(user, hero, data, bs, free && !treat, price, now, renderer) *>
-                       questPotionTaken(user, now)
+                   purse.wallet(hero).flatMap { wallet =>
+                     if (price > 0 && !wallet.canAfford(price))
+                       renderer.show(user, Screen(content.format("gustavo.boostNotEnoughSilver",
+                         "potion" -> bs.potion, "cost" -> price.toString), Nil))
+                     else
+                       applyBoost(user, hero, data, bs, free && !treat, price, now, renderer) *>
+                         questPotionTaken(user, now)
+                   }
                }
           _ <- render(user, renderer)
         } yield StateType.GustavoBoost
@@ -103,7 +112,7 @@ case class GustavoBoostState(
     val newBoosts = hero.statBoosts.add(StatBoost(bs.boostName, bs.buff, now + GustavoData.BoostDurationMs), now)
     val newFree   = if (free) data.freeBoostsUsed :+ bs.key else data.freeBoostsUsed
     val msgKey    = if (price == 0L) "gustavo.boostAppliedFree" else "gustavo.boostApplied"
-    heroDao.updateSilver(user.userId, hero.silver - price) *>
+    purse.charge(user.userId, hero, price) *>
       heroDao.updateStatBoosts(user.userId, newBoosts) *>
       heroDao.writeGustavoData(user.userId, data.copy(freeBoostsUsed = newFree).asJson) *>
       renderer.show(user, Screen(content.format(msgKey, "potion" -> bs.potion, "stat" -> bs.label), Nil))

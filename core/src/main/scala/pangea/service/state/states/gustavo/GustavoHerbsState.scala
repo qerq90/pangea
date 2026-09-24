@@ -8,6 +8,8 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{HerbLore, MarisaQuest, State, UserAction}
 import zio.Task
 
@@ -19,8 +21,12 @@ case class GustavoHerbsState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
 ) extends State with GustavoScene {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -77,11 +83,12 @@ case class GustavoHerbsState(
   /** Купить трактат: серебро — Густаво, книга — в сумку (места не занимает). */
   private def buy(user: User, renderer: Renderer, book: QuestItemKind, price: Long): Task[StateType] =
     for {
-      hero <- getHero(user)
-      _ <- if (hero.silver < price)
+      hero   <- getHero(user)
+      wallet <- purse.wallet(hero)
+      _ <- if (!wallet.canAfford(price))
              renderer.show(user, Screen(content.format("gustavo.herbs.noSilver", "price" -> price.toString), Nil))
            else
-             heroDao.updateSilver(user.userId, hero.silver - price) *>
+             purse.charge(user.userId, hero, price) *>
                HerbLore.readLore(heroDao, user.userId).flatMap(l =>
                  HerbLore.writeLore(heroDao, user.userId, l.bookBought(book.entryName))) *>
                MarisaQuest.give(inventoryRepo, itemRepo, hero, book) *>

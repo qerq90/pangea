@@ -9,6 +9,7 @@ import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.quest.NpcQuest
 import pangea.model.user.{User, UserId}
 import pangea.repository.inventory.InventoryRepository
+import pangea.service.purse.Purse
 import pangea.repository.item.ItemRepository
 import zio.{Task, ZIO}
 
@@ -95,11 +96,14 @@ object MarisaQuest {
   def grant(heroDao: HeroDao, content: SceneContent, user: User, hero: Hero, a: Achievement, renderer: Renderer): Task[Hero] =
     QuestSupport.grant(heroDao, content, user, hero, a, renderer)
 
-  /** Хватает ли на долг Кельвина. */
-  def canPayDebt(hero: Hero): Boolean = hero.silver >= DebtSilver && hero.doubloons >= DebtDoubloons
+  /** Хватает ли на долг Кельвина: серебро считается вместе с ячейкой в
+    * Торговом доме, дублоны — только свои. */
+  def canPayDebt(hero: Hero, silver: Long): Boolean = silver >= DebtSilver && hero.doubloons >= DebtDoubloons
 
-  def payDebt(heroDao: HeroDao, userId: UserId, hero: Hero): Task[Hero] = {
-    val paid = hero.copy(silver = hero.silver - DebtSilver, doubloons = hero.doubloons - DebtDoubloons)
-    heroDao.updateSilver(userId, paid.silver) *> heroDao.updateDoubloons(userId, paid.doubloons).as(paid)
-  }
+  def payDebt(purse: Purse, userId: UserId, hero: Hero): Task[Hero] =
+    for {
+      charged <- purse.charge(userId, hero, DebtSilver)
+      paid     = charged.getOrElse(hero).copy(doubloons = hero.doubloons - DebtDoubloons)
+      _       <- purse.heroDao.updateDoubloons(userId, paid.doubloons)
+    } yield paid
 }

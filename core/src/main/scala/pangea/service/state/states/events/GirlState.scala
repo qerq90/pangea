@@ -17,6 +17,8 @@ import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.events.GirlState._
 import pangea.service.state.{State, UserAction}
@@ -41,8 +43,12 @@ case class GirlState(
   itemRepo:      ItemRepository,
   barrelRepo:    BarrelRepository,
   scheduler:     Scheduler,
-  content:       SceneContent
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
 ) extends State {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -174,7 +180,8 @@ case class GirlState(
       hero  <- getHero(user)
       scene <- requireScene(user)
       price  = scene.price
-      res <- if (hero.silver < price)
+      wallet <- purse.wallet(hero)
+      res <- if (!wallet.canAfford(price))
                renderer.show(user, Screen(content.format("girl.mapNoSilver", "price" -> price.toString), Nil)) *>
                  renderer.show(user, screenFor(scene)).as(StateType.Girl)
              else
@@ -185,7 +192,7 @@ case class GirlState(
                             renderer.show(user, Screen(content.text("girl.mapNoRoom"), Nil)) *>
                               renderer.show(user, screenFor(scene)).as(StateType.Girl)
                           else
-                            heroDao.updateSilver(user.userId, hero.silver - price) *>
+                            purse.charge(user.userId, hero, price) *>
                               renderer.show(user, Screen(content.format("girl.mapBought", "price" -> price.toString), Nil)) *>
                               clear(user).as(StateType.GlobalMap)
                } yield next

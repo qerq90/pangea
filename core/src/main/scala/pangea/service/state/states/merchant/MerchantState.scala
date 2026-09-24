@@ -14,6 +14,8 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.states.merchant.MerchantState._
 import pangea.service.state.{CharacterMenu, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -30,8 +32,12 @@ case class MerchantState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  bank:          Option[BankRepository] = None
 ) extends State {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   /** «Товар с того света»: три серых вещи через «Продать хлам» — Ришелье
     * доплачивает до цены белых и обновляет партию вне очереди. */
@@ -101,13 +107,14 @@ case class MerchantState(
 
   private def doBuy(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
-      now  <- nowMs
-      hero <- getHero(user)
-      data <- loadOrInit(user, now)
-      idx   = payloadIdx(ua).getOrElse(-1)
+      now    <- nowMs
+      hero   <- getHero(user)
+      data   <- loadOrInit(user, now)
+      wallet <- purse.wallet(hero)
+      idx     = payloadIdx(ua).getOrElse(-1)
       _ <- data.items.lift(idx) match {
              case Some(mi) if !mi.bought =>
-               if (hero.silver < mi.price)
+               if (!wallet.canAfford(mi.price))
                  renderer.show(user, Screen(content.text("merchant.notEnoughSilver"), Nil)) *> showMenu(user, renderer)
                else
                  for {
@@ -115,7 +122,7 @@ case class MerchantState(
                    added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
                    _ <- if (added) {
                           val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
-                          heroDao.updateSilver(user.userId, hero.silver - mi.price) *>
+                          purse.charge(user.userId, hero, mi.price) *>
                             heroDao.writeMerchantData(user.userId, newData.asJson) *>
                             InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
                               renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil))) *>

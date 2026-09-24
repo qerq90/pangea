@@ -6,6 +6,8 @@ import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
@@ -15,7 +17,12 @@ import zio.Task
 case class GustavoFlaskState(
   heroDao: HeroDao,
   content: SceneContent
+,
+  bank:    Option[BankRepository] = None
 ) extends State with GustavoScene {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -61,7 +68,8 @@ case class GustavoFlaskState(
 
   private def buy(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
+      hero   <- getHero(user)
+      wallet <- purse.wallet(hero)
       flask = hero.equipment.flask
       price = flaskRefillCost(hero)
       _ <- if (!hasFlask(flask))
@@ -70,14 +78,14 @@ case class GustavoFlaskState(
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskBlood"), back))
            else if (isFull(flask))
              renderer.show(user, Screen(content.text("gustavo.supplies.flaskFull"), back))
-           else if (hero.silver < price)
+           else if (!wallet.canAfford(price))
              renderer.show(user, Screen(content.format("gustavo.supplies.flaskNotEnoughSilver", "cost" -> price.toString), back))
            else
              refill(user, hero, flask, price, renderer)
     } yield StateType.GustavoSupplies
 
   private def refill(user: User, hero: Hero, flask: Item, price: Long, renderer: Renderer): Task[Unit] =
-    heroDao.updateSilver(user.userId, hero.silver - price) *>
+    purse.charge(user.userId, hero, price) *>
       heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = flask.copy(details = flaskDetails(flask).map(_.refilled).getOrElse(flask.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.flaskRefilled",
         "charges" -> flaskDetails(flask).map(_.maxCharges).getOrElse(0).toString), back))

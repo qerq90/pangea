@@ -10,6 +10,8 @@ import pangea.model.quest.{NpcQuest, QuestData}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.bank.BankRepository
+import pangea.service.purse.Purse
 import pangea.service.state.{CharacterMenu, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -23,8 +25,12 @@ import zio.{Task, ZIO}
 case class InnkeeperState(
   heroDao: HeroDao,
   inventoryRepo: InventoryRepository,
-  content: SceneContent
+  content: SceneContent,
+  bank:    Option[BankRepository] = None
 ) extends State {
+
+  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
+  private val purse = Purse(heroDao, bank)
 
   /** «Плата за первую кружку»: принести любой трофей — Трактирщик забирает самый
     * дешёвый, платит серебром и рассказывает, куда герой попал. */
@@ -164,14 +170,15 @@ case class InnkeeperState(
   /** Оплата: списываем серебро, запоминаем покупку и рассказываем легенду. */
   private def payLore(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
-      lore <- readLore(user)
+      hero   <- getHero(user)
+      lore   <- readLore(user)
+      wallet <- purse.wallet(hero)
       _ <- if (lore.elementalLore) showMenu(user, renderer)
-           else if (hero.silver < InnkeeperState.LorePrice)
+           else if (!wallet.canAfford(InnkeeperState.LorePrice))
              renderer.show(user, Screen(content.text("innkeeper.elementalLoreNoSilver"), Nil)) *>
                showMenu(user, renderer)
            else
-             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.LorePrice) *>
+             purse.charge(user.userId, hero, InnkeeperState.LorePrice) *>
                heroDao.writeLoreData(user.userId, lore.copy(elementalLore = true).asJson) *>
                renderer.show(user, Screen(
                  content.text("innkeeper.elementalLoreText"),
@@ -189,14 +196,15 @@ case class InnkeeperState(
 
   private def payJoeLore(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
-      lore <- readLore(user)
+      hero   <- getHero(user)
+      lore   <- readLore(user)
+      wallet <- purse.wallet(hero)
       _ <- if (lore.joeLore) showMenu(user, renderer)
-           else if (hero.silver < InnkeeperState.JoeLorePrice)
+           else if (!wallet.canAfford(InnkeeperState.JoeLorePrice))
              renderer.show(user, Screen(content.text("innkeeper.joeLoreNoSilver"), Nil)) *>
                showMenu(user, renderer)
            else
-             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.JoeLorePrice) *>
+             purse.charge(user.userId, hero, InnkeeperState.JoeLorePrice) *>
                heroDao.writeLoreData(user.userId, lore.copy(joeLore = true).asJson) *>
                renderer.show(user, Screen(
                  content.text("innkeeper.joeLoreText"),
@@ -214,14 +222,15 @@ case class InnkeeperState(
 
   private def payWolfLore(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero <- getHero(user)
-      lore <- readLore(user)
+      hero   <- getHero(user)
+      lore   <- readLore(user)
+      wallet <- purse.wallet(hero)
       _ <- if (lore.wolfLore) showMenu(user, renderer)
-           else if (hero.silver < InnkeeperState.WolfLorePrice)
+           else if (!wallet.canAfford(InnkeeperState.WolfLorePrice))
              renderer.show(user, Screen(content.text("innkeeper.wolfLoreNoSilver"), Nil)) *>
                showMenu(user, renderer)
            else
-             heroDao.updateSilver(user.userId, hero.silver - InnkeeperState.WolfLorePrice) *>
+             purse.charge(user.userId, hero, InnkeeperState.WolfLorePrice) *>
                heroDao.writeLoreData(user.userId, lore.copy(wolfLore = true).asJson) *>
                renderer.show(user, Screen(
                  content.text("innkeeper.wolfLoreText"),
