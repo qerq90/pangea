@@ -25,6 +25,13 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       .option
       .transact(xa)
 
+  override def getHeroById(heroId: HeroId): Task[Option[Hero]] =
+    Queries
+      .getHeroById(heroId)
+      .query[Hero]
+      .option
+      .transact(xa)
+
   override def deleteHero(userId: UserId): Task[Unit] =
     Queries.deleteHeroCascade(userId).transact(xa)
 
@@ -81,6 +88,12 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
 
   override def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit] =
     Queries.updateDoubloons(userId, doubloons).update.run.transact(xa).unit
+
+  override def addSilver(heroId: HeroId, amount: Long): Task[Unit] =
+    Queries.addSilver(heroId, amount).update.run.transact(xa).unit
+
+  override def addDoubloons(heroId: HeroId, amount: Long): Task[Unit] =
+    Queries.addDoubloons(heroId, amount).update.run.transact(xa).unit
 
   override def updateGuildReputation(userId: UserId, value: Long): Task[Unit] =
     Queries.updateGuildReputation(userId, value).update.run.transact(xa).unit

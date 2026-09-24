@@ -76,6 +76,32 @@ class VkApi(client: Client[Task], config: VkConfig, failures: SendFailureDao) ex
     } yield ()
   }
 
+  // Объявление в общую беседу: тот же messages.send, только адресат — peer_id
+  // беседы из конфига. Без настроенной беседы молчим: объявления аукциона не
+  // должны ломать ход игрока, поэтому и ошибки здесь не роняют вызов.
+  override def sendToChat(message: String): Task[Unit] =
+    config.chatPeerId match {
+      case None => ZIO.unit
+      case Some(peerId) =>
+        val formParams = Map(
+          "message"   -> List(message),
+          "peer_id"   -> List(peerId.toString),
+          "random_id" -> List(randomId.toString)
+        ) ++ baseQueryParams
+
+        val request = Request[Task](
+          method = Method.POST,
+          uri = uri / "messages.send"
+        ).withEntity(UrlForm(formParams.map { case (k, vs) => k -> Chain.fromSeq(vs) }))
+
+        client
+          .run(request)
+          .use(res => res.bodyText.compile.toList.map(_.mkString("")).flatMap(VkApi.failOnBadResponse(res.status, _)))
+          .retry(sendRetry)
+          .tapError(err => ZIO.logError(s"vk chat announce failed: ${err.getMessage}"))
+          .orElse(ZIO.unit)
+    }
+
   private def recordFailure(
     user:         User,
     messageText:  String,

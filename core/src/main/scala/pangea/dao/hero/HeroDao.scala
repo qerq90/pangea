@@ -11,6 +11,8 @@ import zio.{Task, ZLayer}
 
 trait HeroDao {
   def getHeroByUserId(userId: UserId): Task[Option[Hero]]
+  /** Герой по его id — так находят продавца лота, чтобы сообщить о продаже. */
+  def getHeroById(heroId: HeroId): Task[Option[Hero]]
   def insertHero(hero: Hero): Task[HeroId]
   /** Полное удаление героя со всем, что к нему привязано (см. Queries.deleteHeroCascade). */
   def deleteHero(userId: UserId): Task[Unit]
@@ -23,6 +25,10 @@ trait HeroDao {
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
   def updateSilver(userId: UserId, silver: Long): Task[Unit]
   def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit]
+  /** Прибавить денег герою по его id — так приходит выручка с аукциона, пока
+    * продавец занят своими делами (см. Queries.addSilver). */
+  def addSilver(heroId: HeroId, amount: Long): Task[Unit]
+  def addDoubloons(heroId: HeroId, amount: Long): Task[Unit]
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
   def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]

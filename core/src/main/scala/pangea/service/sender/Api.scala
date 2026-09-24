@@ -18,6 +18,10 @@ trait Api {
       attachments: List[Attachment],
       keyboard: Option[Keyboard]
   ): Task[Unit]
+
+  /** Написать в общую беседу Пангеи (объявления аукциона). Беседа не настроена —
+    * тихо ничего не делаем: это объявление, а не часть хода игрока. */
+  def sendToChat(message: String): Task[Unit]
 }
 
 object Api {

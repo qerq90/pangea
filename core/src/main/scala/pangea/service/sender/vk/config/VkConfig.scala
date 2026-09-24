@@ -4,7 +4,9 @@ import pureconfig.ConfigSource
 import pureconfig.generic.auto._
 import zio.{ZIO, ZLayer}
 
-case class VkConfig(token: String)
+/** @param chatPeerId `peer_id` общей беседы Пангеи (2000000000 + chat_id):
+  *                    туда уходят объявления аукциона. Не задан — не пишем. */
+case class VkConfig(token: String, chatPeerId: Option[Long] = None)
 
 object VkConfig {
   private val loadConfig =

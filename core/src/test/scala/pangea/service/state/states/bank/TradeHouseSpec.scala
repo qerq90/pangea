@@ -61,7 +61,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
           menu     = screens.last
         } yield assertTrue(screens.head.text.contains("Рахадим")) &&
                 assertTrue(menu.choices.map(_.id) ==
-                  List("BuyCell", "BuyDoubloons", "DepositInterest", "LeaveTradeHouse")) &&
+                  List("BuyCell", "BuyDoubloons", "DepositInterest", "Auction", "LeaveTradeHouse")) &&
                 assertTrue(menu.choices.head.label.contains(BankVault.FirstCellPrice.toString)) &&
                 assertTrue(menu.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))
       },
