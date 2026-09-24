@@ -99,7 +99,8 @@ object BrewSpec extends ZIOSpecDefault {
         dope  <- r.sentScreens.map(_.last)
         _     <- state.action(testUser, selectItem(12L), r)
         booze <- r.sentScreens.map(_.last)
-      } yield assertTrue(water.text.contains("Живая вода") && water.text.contains("Рецепт: Шалфей + Ромашка + Крапива")) &&
+        // Рецепта в карточке нет: из чего сварен отвар — не дело описания.
+      } yield assertTrue(water.text.contains("Живая вода") && !water.text.contains("Рецепт")) &&
               // фляги нет — заправлять нечего, кнопки нет
               assertTrue(water.choices.map(_.id) == List("Drop", "InventoryList")) &&
               assertTrue(dope.text.contains("Сонный дурман") && dope.text.contains("валят с ног быка")) &&

@@ -121,6 +121,15 @@ object AuctionSpec extends ZIOSpecDefault {
               assertTrue(screens.last.choices.map(_.id) == List("BuyLot", "Auction"))
     },
 
+    test("номер выкупленного лота — просто строчка, без экрана с «Назад»") {
+      for {
+        f       <- auction()
+        _       <- f.state.action(testUser, text("404"), f.renderer)
+        screens <- f.renderer.sentScreens
+      } yield assertTrue(screens.size == 1) &&
+              assertTrue(screens.last.text.contains("404") && screens.last.choices.isEmpty)
+    },
+
     suite("Выставление")(
 
       test("вещь уходит в лот, десятина — Рахадиму, объявление — в общий чат") {
