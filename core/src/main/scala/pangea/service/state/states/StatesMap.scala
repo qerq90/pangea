@@ -68,7 +68,9 @@ import pangea.model.state.StateType.{
   Backpack,
   Casket,
   LivingBag,
-  Wardrobe
+  Wardrobe,
+  Transfer,
+  Mail
 }
 import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.auction.AuctionRepository
@@ -77,12 +79,14 @@ import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.service.parcel.Parcels
 import pangea.service.payout.Payouts
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.model.artifact.ArtifactKind
 import pangea.service.state.states.artifact.{ArtifactState, BackpackState, FetShopState}
 import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHouseState}
+import pangea.service.state.states.parcel.{MailState, TransferState}
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RottenJoeState, SilverVeinState}
@@ -137,6 +141,7 @@ object StatesMap {
       with AuctionRepository
       with ArtifactRepository
       with Payouts
+      with Parcels
       with ItemRepository
       with UserRepository
       with Journal
@@ -155,6 +160,7 @@ object StatesMap {
         auctionRepo   <- ZIO.service[AuctionRepository]
         artifactRepo  <- ZIO.service[ArtifactRepository]
         payouts       <- ZIO.service[Payouts]
+        parcels       <- ZIO.service[Parcels]
         itemRepo      <- ZIO.service[ItemRepository]
         userRepo      <- ZIO.service[UserRepository]
         journal       <- ZIO.service[Journal]
@@ -210,7 +216,9 @@ object StatesMap {
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
-          TradeHouse -> TradeHouseState(heroDao, bankRepo, content),
+          TradeHouse -> TradeHouseState(heroDao, bankRepo, parcels, content),
+          Transfer   -> TransferState(heroDao, inventoryRepo, userRepo, parcels, players, content),
+          Mail       -> MailState(heroDao, inventoryRepo, parcels, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content),
           Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, bankRepo, payouts, players, content),
           FetShop    -> FetShopState(heroDao, artifactRepo, content),

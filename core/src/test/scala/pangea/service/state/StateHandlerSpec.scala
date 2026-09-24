@@ -13,7 +13,7 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.states.GlobalMapState
 import pangea.service.state.states.battle.BattleState
 import pangea.service.payout.Payouts
-import pangea.test.{TestApi, TestFixtures, TestHeroDao, TestHeroRepository, TestInventoryRepository, TestItemRepository, TestPayoutDao, TestUserRepository}
+import pangea.test.{TestApi, TestBankRepository, TestFixtures, TestHeroDao, TestHeroRepository, TestInventoryRepository, TestItemRepository, TestParcelDao, TestPayoutDao, TestUserRepository}
 import zio.ZIO
 import zio.test._
 
@@ -57,7 +57,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       )
       lock <- PlayerLock.make
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, heroRepo, api)
+      parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, states, lock), heroDao, heroRepo, api)
 
   /** Обвязка для отложенной выручки: герой, диспетчер и склад невыданных денег. */
   private def makePayoutHandler(startState: StateType) =
@@ -70,11 +71,12 @@ object StateHandlerSpec extends ZIOSpecDefault {
       content   <- ZIO.attempt(SceneContent.load())
       payoutDao  = TestPayoutDao.empty
       payouts    = Payouts(payoutDao, heroDao, content)
+      parcels    = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
       states     = Map[StateType, State](
         StateType.GlobalMap -> GlobalMapState(heroDao, content),
         StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content))
       lock      <- PlayerLock.make
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, api, payoutDao)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, states, lock), heroDao, api, payoutDao)
 
   override def spec = suite("StateHandler /home")(
 
@@ -249,5 +251,6 @@ object StateHandlerSpec extends ZIOSpecDefault {
       )
       lock <- PlayerLock.make
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, api)
+      parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, states, lock), heroDao, api)
 }

@@ -10,6 +10,7 @@ import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes}
 import pangea.model.user.VkId
 import pangea.service.state.{StateHandler, UserAction}
+import pangea.service.chat.ChatCommand
 import server.model.{ServerConfig, VkEvent}
 import zio.interop.catz._
 import zio.{Task, UIO, ZIO}
@@ -41,13 +42,17 @@ final class ServerLive(
         _ <- (event match {
           case Some(value) =>
             val msg = value.`object`.message
-            ZIO.logInfo(s"peer=${msg.peerId} text=${msg.text} payload=${msg.payload.getOrElse("")}") *>
-              stateHandler
-                .makeActionVK(
-                  VkId(msg.peerId.toString),
-                  msg.id,
-                  UserAction(msg.text, msg.payload)
-                )
+            ZIO.logInfo(s"peer=${msg.peerId} from=${msg.fromId.getOrElse(0L)} text=${msg.text} payload=${msg.payload.getOrElse("")}") *>
+              // Беседа — не игрок: её peer_id за героя принимать нельзя, оттуда
+              // мы слушаем только команды вроде «Передать».
+              (if (msg.fromChat) handleChat(msg)
+               else
+                 stateHandler
+                   .makeActionVK(
+                     VkId(msg.peerId.toString),
+                     msg.id,
+                     UserAction(msg.text, msg.payload)
+                   ))
                 .catchAll(err => ZIO.logError(err.getMessage))
           case None => ZIO.attempt(println(json.noSpaces))
         }).catchAll { err =>
@@ -56,6 +61,15 @@ final class ServerLive(
         resp <- Ok("ok")
       } yield resp
   }
+
+  /** Что умеет общая беседа: пока только «Передать» в ответ (или пересылкой)
+    * на сообщение того, кому передают. Всё прочее там нас не касается. */
+  private def handleChat(msg: VkEvent.Message): Task[Unit] =
+    (msg.fromId, msg.quotedAuthor, ChatCommand.transferQuery(msg.text)) match {
+      case (Some(from), Some(to), Some(query)) if from > 0L && to > 0L =>
+        stateHandler.transferFromChat(VkId(from.toString), VkId(to.toString), query, msg.id)
+      case _ => ZIO.unit
+    }
 
   private val httpApp: HttpApp[Task] = (routes <+> LogsRoutes.routes).orNotFound
 

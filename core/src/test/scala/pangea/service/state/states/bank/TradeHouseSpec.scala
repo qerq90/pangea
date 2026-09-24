@@ -5,9 +5,10 @@ import pangea.model.bank.BankVault
 import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.service.parcel.Parcels
 import pangea.service.purse.{Purse, Wallet}
 import pangea.service.state.UserAction
-import pangea.test.{TestBankRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
+import pangea.test.{TestBankRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestParcelDao, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -31,7 +32,8 @@ object TradeHouseSpec extends ZIOSpecDefault {
       bankRepo  = TestBankRepository.of(cells, silver = vaultSilver)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (TradeHouseState(heroDao, bankRepo, content), heroDao, bankRepo, renderer)
+      parcels   = Parcels(TestParcelDao.empty, bankRepo, content)
+    } yield (TradeHouseState(heroDao, bankRepo, parcels, content), heroDao, bankRepo, renderer)
 
   private def vaultState(
     inventory:   List[Item],
