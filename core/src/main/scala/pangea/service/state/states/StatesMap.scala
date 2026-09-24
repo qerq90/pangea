@@ -193,7 +193,7 @@ object StatesMap {
             artifacts
           ),
           Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content, scheduler),
-          Death  -> DeathState(heroDao, inventoryRepo, content),
+          Death  -> DeathState(heroDao, inventoryRepo, content, artifacts),
           Rest   -> RestState(heroDao, scheduler, content),
           Inventory -> InventoryState(
             heroDao,

@@ -24,7 +24,10 @@ sealed abstract class ArtifactKind(
   /** Есть ли у артефакта магия на зарядах (кнопка и зарядка у Жреца). */
   val hasMagic:     Boolean,
   /** Ловит ли вещь прямо с добычи, минуя сумку. */
-  val autoCollect:  Boolean
+  val autoCollect:  Boolean,
+  /** Уцелеет ли содержимое при смерти. Ларец и сумка — нет: их добро уходит с
+    * тем же броском, что и вещи из сумки (см. `DeathState.dropItems`). */
+  val safeFromDeath: Boolean
 ) extends EnumEntry {
   /** Берёт ли артефакт эту вещь себе. */
   def accepts(item: Item): Boolean
@@ -35,24 +38,23 @@ sealed abstract class ArtifactKind(
 object ArtifactKind extends Enum[ArtifactKind] {
 
   case object Casket extends ArtifactKind("Ларец Азата", StateType.Casket, "casket",
-    slotsPerTier = 15, hasMagic = true, autoCollect = true) {
+    slotsPerTier = 15, hasMagic = true, autoCollect = true, safeFromDeath = false) {
     // Любой камень-усилитель, включая черепа и надколотые. Пыль невесома и
     // места нигде не занимает — её ларец не трогает.
     def accepts(item: Item): Boolean = item.gem.isDefined
   }
 
   case object LivingBag extends ArtifactKind("Живая сумка", StateType.LivingBag, "bag",
-    slotsPerTier = 15, hasMagic = true, autoCollect = true) {
+    slotsPerTier = 15, hasMagic = true, autoCollect = true, safeFromDeath = false) {
     def accepts(item: Item): Boolean =
       item.itemType == ItemType.Brew || item.material.exists(_.isHerb)
   }
 
-  /** Шкаф-брелок: места в нём мало, зато они как слоты сумки — и смерть до них
-    * не дотянется (сейчас смерть вещей и так не отбирает, но шкаф держит их
-    * вне сумки, что бы с ней ни случилось). Сам он с добычи ничего не ловит:
-    * что положить, хозяин решает сам. */
+  /** Шкаф-брелок: места в нём мало, зато они как слоты сумки, и единственный из
+    * трёх он спасает добро от смерти — брелок с тела не снимают. Сам он с
+    * добычи ничего не ловит: что положить, хозяин решает сам. */
   case object Wardrobe extends ArtifactKind("Миниатюрный шкаф", StateType.Wardrobe, "wardrobe",
-    slotsPerTier = 3, hasMagic = false, autoCollect = false) {
+    slotsPerTier = 3, hasMagic = false, autoCollect = false, safeFromDeath = true) {
     def accepts(item: Item): Boolean = !item.weightless && !item.isQuestItem
   }
 
