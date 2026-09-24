@@ -22,13 +22,17 @@ object DeathStateSpec extends ZIOSpecDefault {
                               attack = 10, accuracy = 0, energy = 0,
                               armor = 0, defence = 0, evasion = 0)
 
-  private def makeState(hero: pangea.model.hero.Hero, items: List[Item] = Nil) =
+  private def makeState(
+    hero:      pangea.model.hero.Hero,
+    items:     List[Item] = Nil,
+    artifacts: Option[pangea.test.TestArtifactRepository] = None
+  ) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       invRepo   = TestInventoryRepository.withItems(items)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (DeathState(heroDao, invRepo, content), heroDao, invRepo, renderer)
+    } yield (DeathState(heroDao, invRepo, content, artifacts), heroDao, invRepo, renderer)
 
   // exp=80 (внутри уровня 1), теряет 10% = 8, newExp=72
   private val richHero = TestFixtures.hero(userId).copy(exp = 80L, silver = 500L)
@@ -52,6 +56,33 @@ object DeathStateSpec extends ZIOSpecDefault {
       } yield assertTrue(left.size == 3) &&
               // одно сообщение на всё потерянное, с количеством
               assertTrue(log.contains("×2"))
+    },
+
+    test("ларец и сумка смерти не помеха, а шкаф — помеха: бросок трясёт и артефакты") {
+      import pangea.model.artifact.ArtifactKind
+      import pangea.test.TestArtifactRepository
+      def stone(id: Long) = pangea.generator.item.GemGenerator
+        .item(pangea.model.item.GemKind.Amethyst, 1).copy(id = id)
+      def leaf(id: Long) = pangea.generator.item.MaterialGenerator
+        .item(pangea.model.item.MaterialKind.Chamomile).copy(id = id)
+      val artifacts = TestArtifactRepository.of(
+        casket   = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, items = List(stone(101L), stone(102L))),
+        bag      = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1, items = List(leaf(201L))),
+        wardrobe = TestArtifactRepository.artifact(ArtifactKind.Wardrobe, tier = 1, items = List(testItem)))
+      for {
+        t <- makeState(richHero, items = Nil, artifacts = Some(artifacts))
+        (state, _, _, renderer) = t
+        // Первый бросок — выбор травмы; дальше по одному на вещь в артефактах:
+        // ларец (два камня), сумка (лист). Шкаф в бросок не попадает вовсе.
+        _   <- TestRandom.feedInts(1, 0, 2, 0)
+        _   <- state.enter(testUser, renderer)
+        all  = artifacts.snapshot
+        log <- renderer.sentScreens.map(_.map(_.text).mkString)
+      } yield assertTrue(all.of(ArtifactKind.Casket).items.data.map(_.id) == List(102L)) &&
+              assertTrue(all.of(ArtifactKind.LivingBag).items.data.isEmpty) &&
+              // шкаф цел: его содержимое смерть не трогает
+              assertTrue(all.of(ArtifactKind.Wardrobe).items.data.map(_.id) == List(42L)) &&
+              assertTrue(log.contains("аметист") && log.contains("Ромашка") && !log.contains("Меч судьбы"))
     },
 
     test("с благословением опыта теряется на 10% меньше") {

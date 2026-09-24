@@ -14,7 +14,7 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
   private val branch = new Branch(
     routes = Map(
       "Back"           -> Target.Run { (user, _, _) => returnToCaller(user) },
-      "OpenInventory"  -> Target.Goto(StateType.Inventory),
+      "OpenInventory"  -> Target.Goto(StateType.Backpack),
       "OpenEquipment"  -> Target.Goto(StateType.Equipment),
       "OpenSkills"     -> Target.Goto(StateType.Skills),
       "OpenKnowledge"  -> Target.Goto(StateType.Knowledge),

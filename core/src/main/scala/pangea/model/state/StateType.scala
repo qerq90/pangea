@@ -47,6 +47,11 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TradeHouse       extends StateType // Торговый дом возле Храма (банкир Рахадим)
   case object BankVault        extends StateType // хранилище героя в Торговом доме
   case object Auction          extends StateType // аукцион Торгового дома
+  case object FetShop          extends StateType // Лавка Фета: сборные артефакты
+  case object Backpack         extends StateType // рюкзак героя: сумка, ларец, живая сумка
+  case object Casket           extends StateType // Ларец Азата
+  case object LivingBag        extends StateType // Живая сумка
+  case object Wardrobe         extends StateType // Миниатюрный шкаф
   case object Registration extends StateType
   case object Dungeon      extends StateType
   case object HeroStats    extends StateType
@@ -111,7 +116,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
     * отсюда). Смотрится по `returnState` меню персонажа. */
   val cityStates: Set[StateType] = Set(
     GlobalMap, HarborQuarter, MarketSquare, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
-    TradeHouse, BankVault, Auction,
+    TradeHouse, BankVault, Auction, FetShop,
     Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoFlask, GustavoBelt,
     Tavern, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
     MasterHorn, MentorKazimir)

@@ -2,10 +2,12 @@ package pangea.service.state.states.temple
 
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
-import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{AzatState, CubeStatus, Hero}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.model.artifact.{ArtifactKind, HeroArtifacts}
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
 import pangea.service.state.{AzatData, State, UserAction}
@@ -15,9 +17,10 @@ import zio.{Task, ZIO}
 /** Зал Азата: лор про кубы, подход к кубу (покупка/активация/открытие крафта) и
  *  пополнение зарядов у жреца. */
 case class HallAzatState(
-  heroDao: HeroDao,
-  content: SceneContent,
-  bank:    Option[BankRepository] = None
+  heroDao:   HeroDao,
+  content:   SceneContent,
+  bank:      Option[BankRepository] = None,
+  artifacts: Option[ArtifactRepository] = None
 ) extends State {
   import HallAzatState._
 
@@ -28,6 +31,7 @@ case class HallAzatState(
     routes = Map(
       "ApproachCube"         -> Target.Run { (u, _, r) => approachCube(u, r) },
       "Recharge"             -> Target.Run { (u, _, r) => showRecharge(u, r) },
+      "RechargeArtifact"     -> Target.Run { (u, ua, r) => rechargeArtifact(u, ua, r) },
       "BackToTempleFromHall" -> Target.Goto(StateType.TempleAzat),
       "BuyCube"              -> Target.Run { (u, _, r) => buyCube(u, r) },
       "ActivateCube"         -> Target.Run { (u, _, r) => activateCube(u, r) },
@@ -103,13 +107,65 @@ case class HallAzatState(
     } yield StateType.HallAzat
 
   private def showRecharge(user: User, renderer: Renderer): Task[StateType] =
-    renderer.show(user, Screen(content.format("hall.recharge.text",
-      "full" -> RechargeFullSilver.toString, "half" -> RechargeHalfSilver.toString),
-      List(
-        content.choice("RechargeFull", "hall.recharge.full"),
-        content.choice("RechargeHalf", "hall.recharge.half"),
-        content.choice("BackToHall", "hall.back")
-      ))).as(StateType.HallAzat)
+    for {
+      // Сборные артефакты Фета заряжает тот же Жрец — кнопки видит только их владелец.
+      owned <- ownedArtifacts(user)
+      artifactButtons = owned.map { case (kind, _) =>
+        Choice("RechargeArtifact",
+          Choice.fit(content.format("hall.recharge.artifact",
+            "title" -> content.text(s"artifact.${kind.key}.title"),
+            "cost"  -> HeroArtifacts.RechargeSilver.toString)),
+          data = Map("kind" -> kind.entryName))
+      }
+      _ <- renderer.show(user, Screen(content.format("hall.recharge.text",
+             "full" -> RechargeFullSilver.toString, "half" -> RechargeHalfSilver.toString),
+             List(
+               content.choice("RechargeFull", "hall.recharge.full"),
+               content.choice("RechargeHalf", "hall.recharge.half")
+             ) ++ artifactButtons :+ content.choice("BackToHall", "hall.back")))
+    } yield StateType.HallAzat
+
+  /** Какие артефакты есть у героя (и сколько в них зарядов). */
+  private def ownedArtifacts(user: User): Task[List[(ArtifactKind, Int)]] =
+    artifacts match {
+      case None => ZIO.succeed(Nil)
+      case Some(repo) =>
+        getHero(user).flatMap(h => repo.get(h.id).either).map {
+          case Right(all) => ArtifactKind.values.toList.map(k => k -> all.of(k)).collect {
+            case (k, a) if a.owned && k.hasMagic => k -> a.charges
+          }
+          case Left(_) => Nil
+        }
+    }
+
+  private def rechargeArtifact(user: User, ua: UserAction, renderer: Renderer): Task[StateType] = {
+    val kind = ua.payload
+      .flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("kind")))
+      .flatMap(ArtifactKind.withNameOption)
+    (kind, artifacts) match {
+      case (Some(k), Some(repo)) =>
+        for {
+          hero   <- getHero(user)
+          wallet <- purse.wallet(hero)
+          all    <- repo.get(hero.id).mapError(e => new Throwable(e.toString))
+          a       = all.of(k)
+          cost    = HeroArtifacts.RechargeSilver
+          _ <- if (!a.owned) renderer.show(user, Screen(content.text(s"artifact.${k.key}.notOwned"), Nil))
+               else if (a.charges >= HeroArtifacts.MaxCharges)
+                 renderer.show(user, Screen(content.text("hall.recharge.artifactFull"), Nil))
+               else if (!wallet.canAfford(cost))
+                 renderer.show(user, Screen(content.format("hall.recharge.artifactNotEnough", "cost" -> cost.toString), Nil))
+               else
+                 purse.charge(user.userId, hero, cost) *>
+                   repo.recharge(hero.id, k).mapError(e => new Throwable(e.toString)).flatMap(done =>
+                     renderer.show(user, Screen(content.format("hall.recharge.artifactDone",
+                       "title" -> content.text(s"artifact.${k.key}.title"),
+                       "charges" -> done.charges.toString), Nil)))
+          res <- showRecharge(user, renderer)
+        } yield res
+      case _ => showRecharge(user, renderer)
+    }
+  }
 
   private def recharge(user: User, renderer: Renderer, cost: Long, charges: Int): Task[StateType] =
     for {

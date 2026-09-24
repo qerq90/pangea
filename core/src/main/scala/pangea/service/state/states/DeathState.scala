@@ -9,6 +9,8 @@ import pangea.model.hero.AzatState
 import pangea.model.item.ItemStack
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.model.artifact.ArtifactKind
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.model.trauma.{Trauma, TraumaRoll}
 import pangea.service.state.states.LootState.LootData
@@ -20,7 +22,8 @@ import java.util.concurrent.TimeUnit
 case class DeathState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
 
   override def targetStates: Set[StateType] = Set(StateType.Rest)
@@ -110,6 +113,25 @@ case class DeathState(
   // Даёт новую травму из текущего тира; если пул пуст (все травмы уже собраны —
   // максимум), новую не выдаёт, лишь продлевает таймер снятия на 8 часов и
   // показывает соответствующее сообщение.
+  /** Что лежит в артефактах и может пропасть вместе с сумкой. */
+  private def stashItems(heroId: pangea.model.hero.HeroId): Task[List[(ArtifactKind, pangea.model.item.Item)]] =
+    artifacts match {
+      case None => ZIO.succeed(Nil)
+      case Some(repo) =>
+        repo.get(heroId).either.map {
+          case Right(all) =>
+            ArtifactKind.values.toList.filterNot(_.safeFromDeath)
+              .flatMap(kind => all.of(kind).items.data.filterNot(_.isQuestItem).map(kind -> _))
+          case Left(_) => Nil
+        }
+    }
+
+  /** Один бросок на вещь: [[DeathState.DropOneIn]] к одному, что она пропадёт. */
+  private def rollLoss(item: pangea.model.item.Item)(remove: => zio.ZIO[Any, Any, Any]): Task[Option[pangea.model.item.Item]] =
+    Random.nextIntBetween(0, DeathState.DropOneIn).flatMap { roll =>
+      if (roll != 0) ZIO.none else remove.ignore.as(Some(item))
+    }
+
   private def applyTrauma(
     user:          User,
     existingNames: List[String],
@@ -138,15 +160,19 @@ case class DeathState(
                        pangea.model.inventory.Inventory.Items(Nil))))
       // Сюжетные предметы при смерти не теряются.
       realItems  = inventory.items.data.filter(i => i.id != 0L && !i.isQuestItem)
+      // Ларец и Живая сумка от смерти не спасают: их добро трясут тем же
+      // броском. Прячет только Миниатюрный шкаф (см. `ArtifactKind`).
+      stash     <- stashItems(heroId)
       // Бросок идёт на КАЖДЫЙ предмет отдельно, в том числе на каждый камень и
       // каждую горсть пыли: сложенные в одну строку на экране, в сумке они
       // остаются разными вещами, и уносят их поштучно, а не стопкой.
-      lost      <- ZIO.foreach(realItems) { item =>
-                     Random.nextIntBetween(0, 4).flatMap { roll =>
-                       if (roll != 0) ZIO.none
-                       else inventoryRepo.removeItem(item.id, heroId).orElse(ZIO.unit).as(Some(item))
-                     }
+      lostBag   <- ZIO.foreach(realItems) { item =>
+                     rollLoss(item)(inventoryRepo.removeItem(item.id, heroId).unit)
                    }.map(_.flatten)
+      lostStash <- ZIO.foreach(stash) { case (kind, item) =>
+                     rollLoss(item)(ZIO.foreachDiscard(artifacts)(_.take(heroId, kind, item.id)))
+                   }.map(_.flatten)
+      lost       = lostBag ++ lostStash
       // Одно сообщение на всё потерянное: одинаковые вещи схлопнуты в «имя ×N».
       _         <- ZIO.when(lost.nonEmpty) {
                      val names = lost
@@ -169,4 +195,7 @@ object DeathState {
 
   /** Сколько процентов опыта сгорает при смерти (до скидки благословения). */
   val ExpLossPct: Long = 10L
+
+  /** Шанс потерять вещь при смерти: один к четырём на каждую. */
+  val DropOneIn: Int = 4
 }

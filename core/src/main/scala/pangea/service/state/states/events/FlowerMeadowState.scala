@@ -15,6 +15,8 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
+import pangea.repository.artifact.ArtifactRepository
+import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.state.states.LootState
 import pangea.service.state.states.events.FlowerMeadowState._
 import pangea.service.state.{CharacterMenu, HerbLore, InventoryFeedback, State, UserAction}
@@ -38,7 +40,8 @@ case class FlowerMeadowState(
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
   scheduler:     Scheduler,
-  content:       SceneContent
+  content:       SceneContent,
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
 
   private val branch = new Branch(
@@ -109,7 +112,8 @@ case class FlowerMeadowState(
             kind      = HerbLore.recognised(lore, pool(idx))
             item      = MaterialGenerator.item(kind)
             persisted <- itemRepo.persist(hero.id, item)
-            added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
+            intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
+            added      = intake != Intake.Refused
             slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
             lost       = if (added) "" else "\n" + content.text("common.inventoryFull")
             maxEnergy  = hero.maxEnergy(now)

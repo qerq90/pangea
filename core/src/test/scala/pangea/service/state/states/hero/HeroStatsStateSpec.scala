@@ -119,7 +119,7 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
         content  <- ZIO.attempt(SceneContent.load())
         state     = HeroStatsState(heroDao, content)
         result   <- state.action(testUser, tap("OpenInventory"), renderer)
-      } yield assertTrue(result == StateType.Inventory)
+      } yield assertTrue(result == StateType.Backpack)
     },
 
     test("Upgrade → показывает экран распределения с 4 кнопками статов") {

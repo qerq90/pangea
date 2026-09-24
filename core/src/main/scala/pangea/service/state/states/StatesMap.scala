@@ -63,8 +63,14 @@ import pangea.model.state.StateType.{
   UnassumingBarrel,
   TradeHouse,
   BankVault,
-  Auction
+  Auction,
+  FetShop,
+  Backpack,
+  Casket,
+  LivingBag,
+  Wardrobe
 }
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.auction.AuctionRepository
 import pangea.repository.bank.BankRepository
 import pangea.repository.barrel.BarrelRepository
@@ -74,6 +80,8 @@ import pangea.repository.user.UserRepository
 import pangea.service.payout.Payouts
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
+import pangea.model.artifact.ArtifactKind
+import pangea.service.state.states.artifact.{ArtifactState, BackpackState, FetShopState}
 import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHouseState}
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
@@ -127,6 +135,7 @@ object StatesMap {
       with BarrelRepository
       with BankRepository
       with AuctionRepository
+      with ArtifactRepository
       with Payouts
       with ItemRepository
       with UserRepository
@@ -144,6 +153,7 @@ object StatesMap {
         barrelRepo    <- ZIO.service[BarrelRepository]
         bankRepo      <- ZIO.service[BankRepository]
         auctionRepo   <- ZIO.service[AuctionRepository]
+        artifactRepo  <- ZIO.service[ArtifactRepository]
         payouts       <- ZIO.service[Payouts]
         itemRepo      <- ZIO.service[ItemRepository]
         userRepo      <- ZIO.service[UserRepository]
@@ -152,6 +162,8 @@ object StatesMap {
         scheduler     <- ZIO.service[Scheduler]
         // Кошель героя: своё серебро, а следом — ячейка в Торговом доме.
         bank           = Some(bankRepo)
+        // Ларец Азата и Живая сумка ловят добычу до того, как она попадёт в сумку.
+        artifacts      = Some(artifactRepo)
         states = Map[StateType, State](
           GlobalMap     -> GlobalMapState(heroDao, content),
           HarborQuarter -> HarborQuarterState(content),
@@ -177,10 +189,11 @@ object StatesMap {
             inventoryRepo,
             itemRepo,
             journal,
-            content
+            content,
+            artifacts
           ),
           Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content, scheduler),
-          Death  -> DeathState(heroDao, inventoryRepo, content),
+          Death  -> DeathState(heroDao, inventoryRepo, content, artifacts),
           Rest   -> RestState(heroDao, scheduler, content),
           Inventory -> InventoryState(
             heroDao,
@@ -200,10 +213,15 @@ object StatesMap {
           TradeHouse -> TradeHouseState(heroDao, bankRepo, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content),
           Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, bankRepo, payouts, players, content),
+          FetShop    -> FetShopState(heroDao, artifactRepo, content),
+          Backpack   -> BackpackState(heroDao, inventoryRepo, artifactRepo, content),
+          Casket     -> ArtifactState(ArtifactKind.Casket, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
+          LivingBag  -> ArtifactState(ArtifactKind.LivingBag, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
+          Wardrobe   -> ArtifactState(ArtifactKind.Wardrobe, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
           TempleAzat -> TempleAzatState(heroDao, inventoryRepo, itemRepo, content),
-          HallAzat   -> HallAzatState(heroDao, content, bank),
+          HallAzat   -> HallAzatState(heroDao, content, bank, artifacts),
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),
-          Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content),
+          Loot -> LootState(heroDao, inventoryRepo, itemRepo, journal, content, artifacts),
           Merchant -> MerchantState(heroDao, inventoryRepo, itemRepo, content, bank),
           Gustavo  -> GustavoState(heroDao, inventoryRepo, content),
           GustavoHerbs    -> GustavoHerbsState(heroDao, inventoryRepo, itemRepo, content, bank),
@@ -228,7 +246,7 @@ object StatesMap {
           TreasureSchron    -> TreasureSchronState(heroDao, content),
           TreasureDig       -> TreasureDigState(heroDao, scheduler, content),
           Girl              -> GirlState(heroDao, inventoryRepo, itemRepo, barrelRepo, scheduler, content, bank),
-          FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content),
+          FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
           MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content, bank),
           MurlocElder       -> MurlocElderState(heroDao, inventoryRepo, itemRepo, content),

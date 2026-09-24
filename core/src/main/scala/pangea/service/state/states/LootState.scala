@@ -12,6 +12,8 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.repository.artifact.ArtifactRepository
+import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
@@ -31,7 +33,8 @@ case class LootState(
   inventoryRepository: InventoryRepository,
   itemRepository:      ItemRepository,
   journal:             Journal,
-  content:             SceneContent
+  content:             SceneContent,
+  artifacts:           Option[ArtifactRepository] = None
 ) extends State {
 
   private val branch = new Branch(
@@ -118,20 +121,24 @@ case class LootState(
       hero <- getHero(user)
       loot <- readLoot(user)
 
+      // Камни летят в Ларец Азата, травы и отвары — в Живую сумку; что не
+      // взяли артефакты, идёт в сумку героя, как и раньше.
       results <- ZIO.foreach(loot.items) { item =>
                    for {
                      persisted <- itemRepository.persist(hero.id, item)
-                     added     <- inventoryRepository.addItem(hero.id, persisted).as(true)
-                                    .catchAll(_ => ZIO.succeed(false))
-                   } yield (persisted, added)
+                     intake    <- ArtifactIntake.accept(artifacts, inventoryRepository, hero.id, persisted)
+                   } yield (persisted, intake)
                  }
 
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
              Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
 
-      takenLines = results.collect { case (item, true) => itemLine(item) }
+      takenLines = results.collect {
+        case (item, Intake.ToInventory)             => itemLine(item)
+        case (item, Intake.ToArtifact(kind, free))  => ArtifactIntake.line(content, item, kind, free)
+      }
       // У каждой непринятой вещи своя причина: сумка полна или пыли уже сотня.
-      lostLines  = results.collect { case (item, false) => InventoryFeedback.refusalLine(content, item) }.distinct
+      lostLines  = results.collect { case (item, Intake.Refused) => InventoryFeedback.refusalLine(content, item) }.distinct
       slots     <- InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id)
       taken      = if (takenLines.isEmpty) content.text("loot.empty")
                    else content.text("loot.claimed") + "\n\n" + takenLines.mkString("\n")
