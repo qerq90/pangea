@@ -51,6 +51,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Backpack         extends StateType // рюкзак героя: сумка, ларец, живая сумка
   case object Casket           extends StateType // Ларец Азата
   case object LivingBag        extends StateType // Живая сумка
+  case object Wardrobe         extends StateType // Миниатюрный шкаф
   case object Registration extends StateType
   case object Dungeon      extends StateType
   case object HeroStats    extends StateType

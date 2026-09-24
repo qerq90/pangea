@@ -51,7 +51,8 @@ final class ArtifactRepositoryLive(dao: ArtifactDao) extends ArtifactRepository 
       cur  = all.of(kind)
       _   <- ZIO.when(!cur.canUpgrade)(ZIO.fail(ArtifactRepoError.FullyUpgraded))
       // Первая ступень приходит заряженной: Фет отдаёт артефакт готовым к делу.
-      next = cur.copy(tier = cur.tier + 1, charges = if (cur.owned) cur.charges else HeroArtifacts.MaxCharges)
+      next = cur.copy(tier = cur.tier + 1,
+               charges = if (cur.owned || !kind.hasMagic) cur.charges else HeroArtifacts.MaxCharges)
       _   <- save(all.updated(kind, next))
     } yield next
 

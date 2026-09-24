@@ -67,7 +67,8 @@ import pangea.model.state.StateType.{
   FetShop,
   Backpack,
   Casket,
-  LivingBag
+  LivingBag,
+  Wardrobe
 }
 import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.auction.AuctionRepository
@@ -216,6 +217,7 @@ object StatesMap {
           Backpack   -> BackpackState(heroDao, inventoryRepo, artifactRepo, content),
           Casket     -> ArtifactState(ArtifactKind.Casket, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
           LivingBag  -> ArtifactState(ArtifactKind.LivingBag, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
+          Wardrobe   -> ArtifactState(ArtifactKind.Wardrobe, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
           TempleAzat -> TempleAzatState(heroDao, inventoryRepo, itemRepo, content),
           HallAzat   -> HallAzatState(heroDao, content, bank, artifacts),
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),

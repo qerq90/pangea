@@ -64,7 +64,7 @@ object ArtifactSpec extends ZIOSpecDefault {
       },
 
       test("три улучшения по 100 доводят до шестидесяти мест, четвёртого нет") {
-        val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(tier = 1))
+        val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
         for {
           t <- shop(doubloons = 400L, repo)
           (state, heroDao, _, renderer) = t
@@ -96,8 +96,8 @@ object ArtifactSpec extends ZIOSpecDefault {
 
       test("камень летит в ларец, трава — в сумку, меч остаётся в сумке героя") {
         val repo = TestArtifactRepository.of(
-          casket = TestArtifactRepository.artifact(tier = 1),
-          bag    = TestArtifactRepository.artifact(tier = 1))
+          casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1),
+          bag    = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1))
         val inv  = TestInventoryRepository.accepting
         for {
           stone <- ArtifactIntake.accept(Some(repo), inv, heroId, gem(10L))
@@ -111,7 +111,7 @@ object ArtifactSpec extends ZIOSpecDefault {
 
       test("ларца нет или он полон — камень идёт в сумку, как раньше") {
         val full = TestArtifactRepository.of(casket =
-          TestArtifactRepository.artifact(tier = 1, items = (1L to 15L).toList.map(gem(_))))
+          TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, items = (1L to 15L).toList.map(gem(_))))
         val inv  = TestInventoryRepository.accepting
         for {
           none  <- ArtifactIntake.accept(None, inv, heroId, gem(20L))
@@ -125,7 +125,7 @@ object ArtifactSpec extends ZIOSpecDefault {
 
       test("меню показывает сборку, места и заряды") {
         val repo = TestArtifactRepository.of(casket =
-          TestArtifactRepository.artifact(tier = 2, charges = 7, items = List(gem(1L))))
+          TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 2, charges = 7, items = List(gem(1L))))
         for {
           t <- chest(ArtifactKind.Casket, repo)
           (state, _, renderer) = t
@@ -138,7 +138,7 @@ object ArtifactSpec extends ZIOSpecDefault {
       },
 
       test("положить камень и забрать обратно") {
-        val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(tier = 1))
+        val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
         for {
           t <- chest(ArtifactKind.Casket, repo, inventory = List(gem(5L), sword(6L)))
           (state, inv, renderer) = t
@@ -158,7 +158,7 @@ object ArtifactSpec extends ZIOSpecDefault {
       test("камень на крышке: три одинаковых камня → один категорией выше, минус заряд") {
         val three = List(gem(1L), gem(2L), gem(3L))
         val repo  = TestArtifactRepository.of(casket =
-          TestArtifactRepository.artifact(tier = 1, charges = 5, items = three))
+          TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, charges = 5, items = three))
         for {
           t <- chest(ArtifactKind.Casket, repo)
           (state, _, renderer) = t
@@ -171,9 +171,9 @@ object ArtifactSpec extends ZIOSpecDefault {
 
       test("нечего плавить и нет зарядов — говорим об этом, ничего не тратя") {
         val idle = TestArtifactRepository.of(casket =
-          TestArtifactRepository.artifact(tier = 1, charges = 3, items = List(gem(1L))))
+          TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, charges = 3, items = List(gem(1L))))
         val dead = TestArtifactRepository.of(casket =
-          TestArtifactRepository.artifact(tier = 1, charges = 0, items = List(gem(1L), gem(2L), gem(3L))))
+          TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, charges = 0, items = List(gem(1L), gem(2L), gem(3L))))
         for {
           t <- chest(ArtifactKind.Casket, idle)
           (state, _, renderer) = t
@@ -192,7 +192,7 @@ object ArtifactSpec extends ZIOSpecDefault {
 
     test("кристалл живой сумки варит отвар из трав") {
       val herbs = List(herb(1L, MaterialKind.Chamomile), herb(2L, MaterialKind.Calendula), herb(3L, MaterialKind.Nettle))
-      val repo  = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(tier = 1, charges = 2, items = herbs))
+      val repo  = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1, charges = 2, items = herbs))
       for {
         t <- chest(ArtifactKind.LivingBag, repo)
         (state, _, renderer) = t
@@ -204,7 +204,7 @@ object ArtifactSpec extends ZIOSpecDefault {
     },
 
     test("рюкзак: кнопки артефактов появляются только у владельца") {
-      val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(tier = 1))
+      val repo = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
       for {
         heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
         invRepo   = TestInventoryRepository.accepting
@@ -219,10 +219,56 @@ object ArtifactSpec extends ZIOSpecDefault {
               assertTrue(toCasket == StateType.Casket && toBag == StateType.Inventory)
     },
 
+    suite("Миниатюрный шкаф")(
+
+      test("три места на ступень, любые вещи со слотом и никакой магии") {
+        val repo = TestArtifactRepository.of(wardrobe = TestArtifactRepository.artifact(ArtifactKind.Wardrobe, tier = 1))
+        val dust = MaterialGenerator.item(MaterialKind.dustOf(pangea.model.item.GemKind.Ruby)).copy(id = 9L)
+        for {
+          t <- chest(ArtifactKind.Wardrobe, repo, inventory = List(sword(5L), dust))
+          (state, inv, renderer) = t
+          _       <- state.enter(testUser, renderer)
+          menu    <- renderer.sentScreens.map(_.last)
+          _       <- state.action(testUser, tap("ArtifactPut"), renderer)
+          list    <- renderer.sentScreens.map(_.last)
+          _       <- state.action(testUser, tap("ArtPut_5"), renderer)
+          stored   = repo.snapshot.of(ArtifactKind.Wardrobe)
+        } yield assertTrue(menu.text.contains("1/4") && menu.text.contains("0/3") && !menu.text.contains("Заряды")) &&
+                // магии у шкафа нет — и кнопки тоже
+                assertTrue(menu.choices.map(_.id) == List("ArtifactPut", "ArtifactTake", "LeaveArtifact")) &&
+                // невесомая пыль слотов не занимает, поэтому в шкаф не идёт
+                assertTrue(list.choices.map(_.id).contains("ArtPut_5") && !list.choices.map(_.id).contains("ArtPut_9")) &&
+                assertTrue(stored.items.data.map(_.id) == List(5L) && stored.capacity == 3) &&
+                assertTrue(inv.snapshot.map(_.id) == List(9L))
+      },
+
+      test("шкаф ничего не ловит с добычи сам") {
+        val repo = TestArtifactRepository.of(wardrobe = TestArtifactRepository.artifact(ArtifactKind.Wardrobe, tier = 4))
+        val inv  = TestInventoryRepository.accepting
+        for {
+          blade <- ArtifactIntake.accept(Some(repo), inv, heroId, sword(7L))
+        } yield assertTrue(blade == Intake.ToInventory) &&
+                assertTrue(repo.snapshot.of(ArtifactKind.Wardrobe).items.data.isEmpty)
+      },
+
+      test("покупка у Фета: 100 дублонов, три места, дальше по три за улучшение") {
+        for {
+          t <- shop(doubloons = 200L)
+          (state, _, repo, renderer) = t
+          _     <- state.action(testUser, tap("FetBuyYes", "kind" -> "Wardrobe"), renderer)
+          first  = repo.snapshot.of(ArtifactKind.Wardrobe)
+          _     <- state.action(testUser, tap("FetBuyYes", "kind" -> "Wardrobe"), renderer)
+          second = repo.snapshot.of(ArtifactKind.Wardrobe)
+        } yield assertTrue(first.tier == 1 && first.capacity == 3 && first.charges == 0) &&
+                assertTrue(second.tier == 2 && second.capacity == 6)
+      }
+    ),
+
     test("цены, ступени и заряды") {
       assertTrue(HeroArtifacts.StepPriceDoubloons == 100L && HeroArtifacts.MaxTier == 4) &&
-      assertTrue(HeroArtifacts.SlotsPerTier == 15 && HeroArtifacts.MaxCharges == 25) &&
-      assertTrue(HeroArtifacts.RechargeSilver == 5000L)
+      assertTrue(ArtifactKind.Casket.slotsPerTier == 15 && ArtifactKind.LivingBag.slotsPerTier == 15) &&
+      assertTrue(ArtifactKind.Wardrobe.slotsPerTier == 3 && !ArtifactKind.Wardrobe.hasMagic) &&
+      assertTrue(HeroArtifacts.MaxCharges == 25 && HeroArtifacts.RechargeSilver == 5000L)
     }
   )
 }

@@ -43,16 +43,17 @@ case class FetShopState(
     renderer.show(user, Screen(content.text("fet.counter"),
       ArtifactKind.values.toList.zipWithIndex.map { case (k, i) =>
         Choice("FetGoods", content.text(s"artifact.${k.key}.title"), data = Map("kind" -> k.entryName), row = Some(i))
-      } :+ Choice("LeaveFetShop", content.text("fet.leave"), color = ChoiceColor.Negative, row = Some(2))))
+      } :+ Choice("LeaveFetShop", content.text("fet.leave"),
+             color = ChoiceColor.Negative, row = Some(ArtifactKind.values.size))))
 
   /** Карточка товара: рассказ Фета, цена и что сейчас с артефактом у героя. */
   private def showGoods(user: User, kind: ArtifactKind, renderer: Renderer): Task[Unit] =
     mine(user, kind).flatMap { a =>
       val state =
-        if (!a.owned) content.format("fet.stateNone", "slots" -> HeroArtifacts.SlotsPerTier.toString)
+        if (!a.owned) content.format("fet.stateNone", "slots" -> kind.slotsPerTier.toString)
         else if (a.canUpgrade) content.format("fet.stateOwned",
           "tier" -> a.tier.toString, "maxTier" -> HeroArtifacts.MaxTier.toString,
-          "capacity" -> a.capacity.toString, "next" -> (a.capacity + HeroArtifacts.SlotsPerTier).toString)
+          "capacity" -> a.capacity.toString, "next" -> (a.capacity + kind.slotsPerTier).toString)
         else content.format("fet.stateFull", "capacity" -> a.capacity.toString)
       val buyLabel =
         if (!a.owned) content.format("fet.buyLabel", "price" -> HeroArtifacts.StepPriceDoubloons.toString)

@@ -63,15 +63,17 @@ case class ArtifactState(
     mine(user).flatMap { a =>
       if (!a.owned) renderer.show(user, Screen(content.text(s"artifact.$key.notOwned"), leaveRow))
       else renderer.show(user, Screen(menuText(a), List(
-        Choice("ArtifactPut",   content.text("artifact.putLabel"),  row = Some(0)),
-        Choice("ArtifactTake",  content.text("artifact.takeLabel"), row = Some(0)),
-        Choice("ArtifactMagic", content.text(s"artifact.$key.magicLabel"), color = ChoiceColor.Positive, row = Some(1)),
-        Choice("LeaveArtifact", content.text("artifact.back"), color = ChoiceColor.Negative, row = Some(2))
-      )))
+        Some(Choice("ArtifactPut",   content.text("artifact.putLabel"),  row = Some(0))),
+        Some(Choice("ArtifactTake",  content.text("artifact.takeLabel"), row = Some(0))),
+        Option.when(kind.hasMagic)(Choice("ArtifactMagic", content.text(s"artifact.$key.magicLabel"),
+          color = ChoiceColor.Positive, row = Some(1))),
+        Some(Choice("LeaveArtifact", content.text("artifact.back"), color = ChoiceColor.Negative, row = Some(2)))
+      ).flatten))
     }
 
   private def menuText(a: Artifact): String =
-    content.format("artifact.menu",
+    // У шкафа зарядов нет — и строки про них тоже.
+    content.format(if (kind.hasMagic) "artifact.menu" else "artifact.menuPlain",
       "title"      -> content.text(s"artifact.$key.title"),
       "tier"       -> a.tier.toString,
       "maxTier"    -> HeroArtifacts.MaxTier.toString,
@@ -178,7 +180,7 @@ case class ArtifactState(
     for {
       hero <- getHero(user)
       a    <- mine(user)
-      _ <- if (!a.owned) renderer.show(user, Screen(content.text(s"artifact.$key.notOwned"), leaveRow))
+      _ <- if (!a.owned || !kind.hasMagic) renderer.show(user, Screen(content.text(s"artifact.$key.notOwned"), leaveRow))
            else if (a.charges <= 0)
              renderer.show(user, Screen(content.format("artifact.noCharges",
                "cost" -> HeroArtifacts.RechargeSilver.toString), Nil)) *> showMenu(user, renderer)
@@ -191,6 +193,8 @@ case class ArtifactState(
       result = kind match {
                  case ArtifactKind.Casket    => CubeCraft.upgradeGems(a.items.data, a.charges, Rng(seed))
                  case ArtifactKind.LivingBag => CubeCraft.brewHerbs(a.items.data, a.charges, Rng(seed))
+                 // У шкафа магии нет — сюда он не попадает (кнопки тоже нет).
+                 case ArtifactKind.Wardrobe  => CubeCraft.Result(a.items.data, 0, Rng(seed))
                }
       // Свежесозданному (id <= 0) нужен свой id — как и результатам куба.
       persisted <- ZIO.foreach(result.items)(i => if (i.id > 0L) ZIO.succeed(i) else itemRepo.persist(hero.id, i))

@@ -132,7 +132,7 @@ case class HallAzatState(
       case Some(repo) =>
         getHero(user).flatMap(h => repo.get(h.id).either).map {
           case Right(all) => ArtifactKind.values.toList.map(k => k -> all.of(k)).collect {
-            case (k, a) if a.owned => k -> a.charges
+            case (k, a) if a.owned && k.hasMagic => k -> a.charges
           }
           case Left(_) => Nil
         }

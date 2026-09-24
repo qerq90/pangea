@@ -97,7 +97,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
     test("Жрец заряжает Ларец Азата за 5000 серебра") {
       import pangea.model.artifact.{ArtifactKind, HeroArtifacts}
       val artifacts = pangea.test.TestArtifactRepository.of(
-        casket = pangea.test.TestArtifactRepository.artifact(tier = 2, charges = 0))
+        casket = pangea.test.TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 2, charges = 0))
       for {
         dao      <- TestHeroDao.withHero(userId, hero(silver = 7000L))
         _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 10).asJson)

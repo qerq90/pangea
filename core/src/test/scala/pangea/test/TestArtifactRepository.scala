@@ -16,7 +16,7 @@ class TestArtifactRepository(private var all: HeroArtifacts) extends ArtifactRep
     if (!cur.canUpgrade) ZIO.fail(ArtifactRepoError.FullyUpgraded)
     else {
       val next = cur.copy(tier = cur.tier + 1,
-        charges = if (cur.owned) cur.charges else HeroArtifacts.MaxCharges)
+        charges = if (cur.owned || !kind.hasMagic) cur.charges else HeroArtifacts.MaxCharges)
       all = all.updated(kind, next)
       ZIO.succeed(next)
     }
@@ -71,10 +71,15 @@ object TestArtifactRepository {
 
   /** Готовые артефакты: ступень, заряды и содержимое. */
   def of(
-    casket:        Artifact = Artifact.empty,
-    bag:           Artifact = Artifact.empty
-  ): TestArtifactRepository = new TestArtifactRepository(HeroArtifacts(heroId, casket, bag))
+    casket:   Artifact = Artifact.empty(ArtifactKind.Casket),
+    bag:      Artifact = Artifact.empty(ArtifactKind.LivingBag),
+    wardrobe: Artifact = Artifact.empty(ArtifactKind.Wardrobe)
+  ): TestArtifactRepository = new TestArtifactRepository(HeroArtifacts(heroId, casket, bag, wardrobe))
 
-  def artifact(tier: Int, charges: Int = HeroArtifacts.MaxCharges, items: List[Item] = Nil): Artifact =
-    Artifact(tier, charges, pangea.model.inventory.Inventory.Items(items))
+  def artifact(
+    kind:    ArtifactKind,
+    tier:    Int,
+    charges: Int        = HeroArtifacts.MaxCharges,
+    items:   List[Item] = Nil
+  ): Artifact = Artifact(kind, tier, charges, pangea.model.inventory.Inventory.Items(items))
 }

@@ -6,50 +6,69 @@ import pangea.model.inventory.Inventory.Items
 import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 
-/** Сборные артефакты из Лавки Фета: Ларец Азата глотает драгоценные камни,
- *  Живая сумка — травы и отвары. Оба берут вещь прямо с добычи, держат её у
- *  себя (место в сумке при этом не тратится) и умеют одну «магию Азата» за
- *  заряд: ларец плавит три одинаковых камня в один категорией выше, сумка
- *  варит отвар из трав.
+/** Сборные артефакты из Лавки Фета. Ларец Азата глотает драгоценные камни,
+ *  Живая сумка — травы и отвары, Миниатюрный шкаф носит что угодно, лишь бы
+ *  оно занимало место. Общее у всех: вещи внутри не тратят слотов сумки, за
+ *  дублоны артефакт собирается дальше и становится вместительнее.
  *
- *  Различий между ними ровно два: что артефакт принимает и что делает магия, —
- *  поэтому вид описан здесь, а всё остальное у них общее. */
+ *  Различаются они тремя вещами — что берут, сколько мест даёт ступень и есть
+ *  ли у них «магия Азата» на зарядах, — поэтому вид описан здесь, а всё
+ *  остальное у них общее. */
 sealed abstract class ArtifactKind(
-  val label:     String,
-  val state:     StateType,
-  /** Ключ в `scenes.yaml`: `artifact.casket.*` / `artifact.bag.*`. */
-  val key:       String
+  val label:        String,
+  val state:        StateType,
+  /** Ключ в `scenes.yaml`: `artifact.casket.*`, `artifact.bag.*`, `artifact.wardrobe.*`. */
+  val key:          String,
+  /** Сколько мест добавляет каждая ступень сборки. */
+  val slotsPerTier: Int,
+  /** Есть ли у артефакта магия на зарядах (кнопка и зарядка у Жреца). */
+  val hasMagic:     Boolean,
+  /** Ловит ли вещь прямо с добычи, минуя сумку. */
+  val autoCollect:  Boolean
 ) extends EnumEntry {
   /** Берёт ли артефакт эту вещь себе. */
   def accepts(item: Item): Boolean
+
+  def capacityAt(tier: Int): Int = tier * slotsPerTier
 }
 
 object ArtifactKind extends Enum[ArtifactKind] {
 
-  case object Casket extends ArtifactKind("Ларец Азата", StateType.Casket, "casket") {
+  case object Casket extends ArtifactKind("Ларец Азата", StateType.Casket, "casket",
+    slotsPerTier = 15, hasMagic = true, autoCollect = true) {
     // Любой камень-усилитель, включая черепа и надколотые. Пыль невесома и
     // места нигде не занимает — её ларец не трогает.
     def accepts(item: Item): Boolean = item.gem.isDefined
   }
 
-  case object LivingBag extends ArtifactKind("Живая сумка", StateType.LivingBag, "bag") {
+  case object LivingBag extends ArtifactKind("Живая сумка", StateType.LivingBag, "bag",
+    slotsPerTier = 15, hasMagic = true, autoCollect = true) {
     def accepts(item: Item): Boolean =
       item.itemType == ItemType.Brew || item.material.exists(_.isHerb)
   }
 
+  /** Шкаф-брелок: места в нём мало, зато они как слоты сумки — и смерть до них
+    * не дотянется (сейчас смерть вещей и так не отбирает, но шкаф держит их
+    * вне сумки, что бы с ней ни случилось). Сам он с добычи ничего не ловит:
+    * что положить, хозяин решает сам. */
+  case object Wardrobe extends ArtifactKind("Миниатюрный шкаф", StateType.Wardrobe, "wardrobe",
+    slotsPerTier = 3, hasMagic = false, autoCollect = false) {
+    def accepts(item: Item): Boolean = !item.weightless && !item.isQuestItem
+  }
+
   val values: IndexedSeq[ArtifactKind] = findValues
 
-  /** Кто первым возьмёт вещь себе. Виды не пересекаются, так что порядок важен
-    * только для определённости. */
-  def forItem(item: Item): Option[ArtifactKind] = values.find(_.accepts(item))
+  /** Кто ловит эту вещь прямо с добычи. Ларец и сумка не пересекаются, шкаф в
+    * счёт не идёт — он наполняется только руками. */
+  def forItem(item: Item): Option[ArtifactKind] = values.find(k => k.autoCollect && k.accepts(item))
 }
 
 /** Один артефакт героя: ступень сборки, заряды и то, что внутри. */
-final case class Artifact(tier: Int, charges: Int, items: Items) {
+final case class Artifact(kind: ArtifactKind, tier: Int, charges: Int, items: Items) {
   def owned: Boolean = tier > 0
 
-  /** Мест внутри: [[HeroArtifacts.SlotsPerTier]] за каждую ступень. */
-  def capacity: Int = tier * HeroArtifacts.SlotsPerTier
+  /** Мест внутри: [[ArtifactKind.slotsPerTier]] за каждую ступень. */
+  def capacity: Int = kind.capacityAt(tier)
 
   def occupied: Int = items.data.size
 
@@ -65,40 +84,43 @@ final case class Artifact(tier: Int, charges: Int, items: Items) {
 }
 
 object Artifact {
-  val empty: Artifact = Artifact(0, 0, Items(Nil))
+  def empty(kind: ArtifactKind): Artifact = Artifact(kind, 0, 0, Items(Nil))
 }
 
 /** Артефакты героя одной записью (таблица `hero_artifacts`). */
-final case class HeroArtifacts(heroId: HeroId, casket: Artifact, bag: Artifact) {
+final case class HeroArtifacts(heroId: HeroId, casket: Artifact, bag: Artifact, wardrobe: Artifact) {
 
   def of(kind: ArtifactKind): Artifact = kind match {
     case ArtifactKind.Casket    => casket
     case ArtifactKind.LivingBag => bag
+    case ArtifactKind.Wardrobe  => wardrobe
   }
 
   def updated(kind: ArtifactKind, artifact: Artifact): HeroArtifacts = kind match {
     case ArtifactKind.Casket    => copy(casket = artifact)
     case ArtifactKind.LivingBag => copy(bag = artifact)
+    case ArtifactKind.Wardrobe  => copy(wardrobe = artifact)
   }
 
-  /** Какой артефакт готов принять эту вещь прямо сейчас. */
+  /** Какой артефакт готов принять эту вещь прямо с добычи. */
   def keeperFor(item: Item): Option[ArtifactKind] =
     ArtifactKind.forItem(item).filter(k => of(k).hasRoom)
 }
 
 object HeroArtifacts {
-  /** Сколько мест даёт одна ступень сборки: 15, 30, 45, 60. */
-  val SlotsPerTier: Int = 15
-
   /** Покупка и три улучшения. */
   val MaxTier: Int = 4
 
   /** Цена покупки и каждого улучшения — в дублонах. */
   val StepPriceDoubloons: Long = 100L
 
-  /** Максимум зарядов и цена полной зарядки у Жреца. */
+  /** Максимум зарядов и цена полной зарядки у Жреца (у кого есть магия). */
   val MaxCharges: Int = 25
   val RechargeSilver: Long = 5000L
 
-  def empty(heroId: HeroId): HeroArtifacts = HeroArtifacts(heroId, Artifact.empty, Artifact.empty)
+  def empty(heroId: HeroId): HeroArtifacts =
+    HeroArtifacts(heroId,
+      Artifact.empty(ArtifactKind.Casket),
+      Artifact.empty(ArtifactKind.LivingBag),
+      Artifact.empty(ArtifactKind.Wardrobe))
 }
