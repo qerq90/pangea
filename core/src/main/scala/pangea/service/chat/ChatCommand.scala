@@ -32,10 +32,17 @@ object ChatCommand {
       .replaceAll(raw"\s+", " ").trim
 
   /** Подходит ли вещь под запрос: сравниваем по «голому» названию, без эмодзи
-    * редкости и без «[Ур.N]». Пустой запрос подходит всему. */
+    * редкости и без «[Ур.N]». Регистр не важен, уровень в запросе не нужен.
+    * Пустой запрос подходит всему. */
   def matches(query: String, name: String): Boolean = {
     val needle = normalize(query)
     needle.isEmpty || normalize(name).contains(needle)
+  }
+
+  /** Названо ли ровно это: «надколотый Череп» — тот самый «Надколотый череп». */
+  def sameName(query: String, name: String): Boolean = {
+    val needle = normalize(query)
+    needle.nonEmpty && needle == normalize(name)
   }
 
   private def normalize(s: String): String =

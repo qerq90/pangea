@@ -7,7 +7,7 @@ import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.chat.ChatCommand
-import pangea.service.parcel.Parcels
+import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.state.UserAction
 import pangea.test._
 import zio.ZIO
@@ -27,8 +27,10 @@ object TransferSpec extends ZIOSpecDefault {
   private def tap(key: String, data: (String, String)*): UserAction =
     UserAction("", Some((("action" -> key) +: data).map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")))
 
+  private val target = TransferTarget(friend, friendUs, "Пётр")
+
   private def skull(id: Long): Item =
-    Item(id, "Расколотый череп", 1L, Rarity.Gray, ItemType.Trophy, attack = 0, accuracy = 0,
+    Item(id, "Надколотый череп", 1L, Rarity.Gray, ItemType.Trophy, attack = 0, accuracy = 0,
       energy = 0, armor = 0, defence = 0, evasion = 0)
 
   private def sword(id: Long, name: String = "Меч"): Item =
@@ -38,6 +40,19 @@ object TransferSpec extends ZIOSpecDefault {
   private def scene(query: String, count: Int) =
     TransferState.TransferScene(
       toHeroId = friend.value, toUserId = friendUs.value, toName = "Пётр", query = query, count = count)
+
+  /** Сервис передачи и всё, что к нему прилагается. */
+  private def fixture(items: List[Item]) =
+    for {
+      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId, state = StateType.TradeHouse))
+      invRepo   = TestInventoryRepository.withItems(items)
+      userRepo <- TestUserRepository.withUsers(testUser, friendUser)
+      parcelDao = TestParcelDao.empty
+      content  <- ZIO.attempt(SceneContent.load())
+      players   = new TestPlayers
+      parcels   = Parcels(parcelDao, TestBankRepository.withCells(1), content)
+      hero     <- heroDao.getHeroByUserId(userId).map(_.get)
+    } yield (Transfers(invRepo, userRepo, parcels, players, content), hero, invRepo, parcelDao, players)
 
   private def transfer(items: List[Item], query: String, count: Int = 1) =
     for {
@@ -52,7 +67,8 @@ object TransferSpec extends ZIOSpecDefault {
       players   = new TestPlayers
       renderer <- TestRenderer.make
       parcels   = Parcels(parcelDao, bank, content)
-    } yield (TransferState(heroDao, invRepo, userRepo, parcels, players, content),
+      transfers = Transfers(invRepo, userRepo, parcels, players, content)
+    } yield (TransferState(heroDao, invRepo, transfers, content),
              invRepo, parcelDao, bank, players, renderer)
 
   override def spec = suite("Передача вещей")(
@@ -68,6 +84,56 @@ object TransferSpec extends ZIOSpecDefault {
       // пустой запрос подходит всему: игрок выберет вещь кнопкой
       assertTrue(ChatCommand.matches("", "Что угодно"))
     },
+
+    suite("Без уточнения")(
+
+      test("точное название и не экипировка — уходит сразу, экран не нужен") {
+        for {
+          f <- fixture((1L to 3L).toList.map(skull))
+          (transfers, hero, inv, parcelDao, players) = f
+          out <- transfers.quickSend(testUser, hero, target, "надколотый Череп", 2, 0L)
+        } yield assertTrue(out.isInstanceOf[Transfers.Outcome.Sent]) &&
+                // регистр не важен, ушли ровно две
+                assertTrue(parcelDao.snapshot.size == 2 && inv.snapshot.map(_.id) == List(3L)) &&
+                assertTrue(players.announced.exists(m =>
+                  m.contains("[id" + testUser.vkId.value) && m.contains("[id" + friendUser.vkId.value) &&
+                  m.contains("Надколотый череп")))
+      },
+
+      test("экипировка в единственном числе тоже уходит сразу") {
+        for {
+          f <- fixture(List(sword(1L)))
+          (transfers, hero, inv, parcelDao, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "меч", 1, 0L)
+        } yield assertTrue(out.isInstanceOf[Transfers.Outcome.Sent]) &&
+                assertTrue(parcelDao.snapshot.map(_.item.id) == List(1L) && inv.snapshot.isEmpty)
+      },
+
+      test("двух мечей уже не спутать вслепую — уточняем кнопками") {
+        for {
+          f <- fixture(List(sword(1L).copy(attack = 12), sword(2L).copy(attack = 9)))
+          (transfers, hero, inv, parcelDao, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "меч", 1, 0L)
+        } yield assertTrue(out == Transfers.Outcome.NeedPick) &&
+                assertTrue(parcelDao.snapshot.isEmpty && inv.snapshot.size == 2)
+      },
+
+      test("подходит несколько разных вещей — тоже уточняем") {
+        for {
+          f <- fixture(List(skull(1L), skull(2L).copy(name = "Надколотый череп волка")))
+          (transfers, hero, _, parcelDao, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "череп", 1, 0L)
+        } yield assertTrue(out == Transfers.Outcome.NeedPick && parcelDao.snapshot.isEmpty)
+      },
+
+      test("в сумке ничего похожего — так и говорим") {
+        for {
+          f <- fixture(List(sword(1L)))
+          (transfers, hero, _, _, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "череп", 1, 0L)
+        } yield assertTrue(out == Transfers.Outcome.Empty)
+      }
+    ),
 
     test("список показывает только подходящее, одинаковые названия — разными кнопками") {
       val two = List(sword(1L).copy(attack = 12), sword(2L).copy(attack = 9), skull(3L))
@@ -95,7 +161,7 @@ object TransferSpec extends ZIOSpecDefault {
               assertTrue(parcelDao.snapshot.map(_.heroId).distinct == List(friend)) &&
               assertTrue(parcelDao.snapshot.size == 2) &&
               assertTrue(players.sentLetters.map(_._1) == List(friendUs)) &&
-              assertTrue(players.sentLetters.head._2.contains("Расколотый череп")) &&
+              assertTrue(players.sentLetters.head._2.contains("Надколотый череп")) &&
               // возвращаемся туда, откуда пришли
               assertTrue(next == StateType.GlobalMap)
     },

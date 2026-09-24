@@ -24,7 +24,7 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
-import pangea.service.parcel.Parcels
+import pangea.service.parcel.{Parcels, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.schedule.{Scheduler, SchedulerPoller}
 import pangea.service.sender.Api
@@ -76,6 +76,7 @@ object Main extends ZIOAppDefault {
       ArtifactRepository.live,
       Payouts.live,
       Parcels.live,
+      Transfers.live,
       StateHandler.live,
       Scheduler.live,
       SchedulerPoller.live,
