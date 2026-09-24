@@ -33,6 +33,7 @@ case class TradeHouseState(
       "DepositInterest" -> Target.Run { (u, _, r) => showPage(u, r, "bank.tradeHouse.interest").as(StateType.TradeHouse) },
       "MyVault"         -> Target.Goto(StateType.BankVault),
       "Auction"         -> Target.Goto(StateType.Auction),
+      "FetShop"         -> Target.Goto(StateType.FetShop),
       "LeaveTradeHouse" -> Target.Goto(StateType.CityCenter)
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
@@ -64,7 +65,8 @@ case class TradeHouseState(
       Choice("Auction", content.text("bank.tradeHouse.auctionLabel"), row = Some(2)))
     val rest = List(
       Choice("BuyDoubloons",    content.text("bank.tradeHouse.doubloonsLabel"), row = Some(1)),
-      Choice("DepositInterest", content.text("bank.tradeHouse.interestLabel"),  row = Some(1))
+      Choice("DepositInterest", content.text("bank.tradeHouse.interestLabel"),  row = Some(1)),
+      Choice("FetShop",         content.text("bank.tradeHouse.fetLabel"),       row = Some(2))
     ) ++ auction :+
       Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(3))
     val text = content.format("bank.tradeHouse.menu",

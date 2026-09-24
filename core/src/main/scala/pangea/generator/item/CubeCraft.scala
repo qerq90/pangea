@@ -251,7 +251,18 @@ object CubeCraft {
     SetInfusion                                            // 2
   )
 
-  def craft(items: List[Item], charges: Int, rng: Rng): Result = {
+  def craft(items: List[Item], charges: Int, rng: Rng): Result =
+    craftWith(recipes, items, charges, rng)
+
+  /** Магия Ларца Азата: только «три одинаковых камня → камень категорией выше». */
+  def upgradeGems(items: List[Item], charges: Int, rng: Rng): Result =
+    craftWith(List(GemUpgrade), items, charges, rng)
+
+  /** Кристалл Живой сумки: только варка отваров из трав. */
+  def brewHerbs(items: List[Item], charges: Int, rng: Rng): Result =
+    craftWith(List(HerbBrew), items, charges, rng)
+
+  private def craftWith(recipes: List[Recipe], items: List[Item], charges: Int, rng: Rng): Result = {
     var pool      = items
     var results   = List.empty[Item]
     var r         = rng

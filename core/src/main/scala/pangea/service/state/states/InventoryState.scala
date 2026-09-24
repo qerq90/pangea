@@ -35,7 +35,7 @@ case class InventoryState(
 
   private val branch = new Branch(
     routes = Map(
-      "BackFromInventory" -> Target.Goto(StateType.HeroStats),
+      "BackFromInventory" -> Target.Goto(StateType.Backpack),
       "InventoryList"     -> Target.Run { (u, _, r) => writeScene(u, InventoryScene(page = Some(0))) *> showList(u, r).as(StateType.Inventory) },
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },

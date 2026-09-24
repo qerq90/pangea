@@ -13,6 +13,8 @@ import pangea.model.user.User
 import pangea.model.GameEvent
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.repository.artifact.ArtifactRepository
+import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.state.states.InventoryState
 import pangea.service.state.states.events.item.FoundItemState.FoundItemData
 import pangea.service.state.{InventoryFeedback, State, UserAction}
@@ -23,7 +25,8 @@ case class FoundItemState(
   inventoryRepository: InventoryRepository,
   itemRepository:      ItemRepository,
   journal:             Journal,
-  content:             SceneContent
+  content:             SceneContent,
+  artifacts:           Option[ArtifactRepository] = None
 ) extends State {
 
   private val branch = new Branch(
@@ -80,10 +83,8 @@ case class FoundItemState(
         .getHeroByUserId(user.userId)
         .flatMap(ZIO.fromOption(_))
         .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
-      added <- inventoryRepository
-        .addItem(hero.id, item)
-        .as(true)
-        .catchAll(_ => ZIO.succeed(false))
+      intake <- ArtifactIntake.accept(artifacts, inventoryRepository, hero.id, item)
+      added   = intake != Intake.Refused
       _ <- journal.append(GameEvent(user.userId,
               if (added) "item_taken" else "item_cant_take",
               Json.obj("name" -> item.name.asJson)))

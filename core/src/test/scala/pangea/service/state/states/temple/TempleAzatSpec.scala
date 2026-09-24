@@ -65,7 +65,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
               assertTrue(buyBtn.exists(b => !b.label.contains("{")))
     },
 
-    test("BuyCube: 200 дублонов → активный куб с 50 зарядами, дублоны списаны") {
+    test("BuyCube: 200 дублонов → активный куб с полными зарядами, дублоны списаны") {
       for {
         dao      <- TestHeroDao.withHero(userId, hero(doubloons = 300L))
         renderer <- TestRenderer.make
@@ -79,7 +79,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
               assertTrue(left == 100L)
     },
 
-    test("ActivateCube из найденного: 20 дублонов + 10000 серебра → активен, 50 зарядов") {
+    test("ActivateCube из найденного: 20 дублонов + 10000 серебра → активен и полон зарядов") {
       for {
         dao      <- TestHeroDao.withHero(userId, hero(silver = 10000L, doubloons = 20L))
         _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.FoundInactive).asJson)
@@ -94,7 +94,26 @@ object TempleAzatSpec extends ZIOSpecDefault {
               assertTrue(silverLeft == 0L)
     },
 
-    test("RechargeFull: +50 зарядов до максимума, серебро списано") {
+    test("Жрец заряжает Ларец Азата за 5000 серебра") {
+      import pangea.model.artifact.{ArtifactKind, HeroArtifacts}
+      val artifacts = pangea.test.TestArtifactRepository.of(
+        casket = pangea.test.TestArtifactRepository.artifact(tier = 2, charges = 0))
+      for {
+        dao      <- TestHeroDao.withHero(userId, hero(silver = 7000L))
+        _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 10).asJson)
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HallAzatState(dao, content, None, Some(artifacts))
+        _        <- state.action(testUser, tap("Recharge"), renderer)
+        screen   <- renderer.sentScreens.map(_.last)
+        _        <- state.action(testUser, UserAction("", Some("""{"action":"RechargeArtifact","kind":"Casket"}""")), renderer)
+        silver   <- dao.getHeroByUserId(userId).map(_.get.silver)
+      } yield assertTrue(screen.choices.map(_.id).contains("RechargeArtifact")) &&
+              assertTrue(artifacts.snapshot.of(ArtifactKind.Casket).charges == HeroArtifacts.MaxCharges) &&
+              assertTrue(silver == 2000L)
+    },
+
+    test("RechargeFull: +50 зарядов к десяти, серебро списано") {
       for {
         dao      <- TestHeroDao.withHero(userId, hero(silver = 20000L))
         _        <- dao.writeAzatData(userId, AzatState(cube = CubeStatus.Active, cubeCharges = 10).asJson)
@@ -104,7 +123,7 @@ object TempleAzatSpec extends ZIOSpecDefault {
         _        <- state.action(testUser, tap("RechargeFull"), renderer)
         azat     <- readAzat(dao)
         silverLeft <- dao.getHeroByUserId(userId).map(_.get.silver)
-      } yield assertTrue(azat.cubeCharges == AzatState.MaxCharges) &&
+      } yield assertTrue(azat.cubeCharges == 60 && AzatState.MaxCharges == 100) &&
               assertTrue(silverLeft == 10000L)
     }
   )

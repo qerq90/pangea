@@ -382,7 +382,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
         result                  <- state.action(testUser, tap("BackFromInventory"), renderer)
-      } yield assertTrue(result == StateType.HeroStats)
+      } yield assertTrue(result == StateType.Backpack)
     },
 
     test("Equip выбранного оружия в пустой слот → надет, удалён из инвентаря") {
