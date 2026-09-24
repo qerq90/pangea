@@ -147,7 +147,7 @@ case class AuctionState(
       hero <- getHero(user)
       res  <- auctionRepo.lot(lotId).either
       _ <- res match {
-        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), backRow))
+        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), Nil))
         case Right(lot) =>
           val stats = lot.item.statsLines
           val card  = content.format("bank.auction.card",
@@ -181,7 +181,7 @@ case class AuctionState(
       hero <- getHero(user)
       res  <- auctionRepo.lot(lotId).either
       _ <- res match {
-        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), backRow))
+        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), Nil))
         case Right(lot) if !lot.onSale(now) => renderer.show(user, Screen(content.text("bank.auction.lotGone"), backRow))
         case Right(lot) if lot.sellerId == hero.id => renderer.show(user, Screen(content.text("bank.auction.ownLot"), backRow))
         case Right(lot) =>
@@ -461,7 +461,7 @@ case class AuctionState(
       inv  <- inventoryRepo.get(hero.id).mapError(asThrowable)
       res  <- auctionRepo.lot(lotId).either
       _ <- res match {
-        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), backRow))
+        case Left(_) => renderer.show(user, Screen(content.format("bank.auction.noSuchLot", "id" -> lotId.toString), Nil))
         case Right(lot) if lot.sellerId != hero.id => renderer.show(user, Screen(content.text("bank.auction.notYours"), backRow))
         case Right(_) if inv.freeSlots <= 0        => renderer.show(user, Screen(content.text("bank.auction.noRoom"), backRow))
         case Right(lot) =>

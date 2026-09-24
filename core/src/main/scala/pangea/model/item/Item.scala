@@ -196,8 +196,9 @@ case class Item(
         if (k.description.isEmpty) List(s"Материал: ${k.displayName}") else List(k.description)
       // Клык Белого волка — трофей с историей; у обычных трофеев описания нет.
       case ItemDetails.Trophy(_, k, _)   => if (k.description.isEmpty) Nil else List(k.description)
-      // Отвар: описание и рецепт — чтобы игрок помнил, из чего варил.
-      case ItemDetails.Brew(k)           => List(k.description, s"Рецепт: ${k.recipe.map(_.displayName).mkString(" + ")}")
+      // Отвар: только описание. Рецепты в карточках предметов не пишем — их
+      // игрок узнаёт сам (или у нужного человека), это часть игры.
+      case ItemDetails.Brew(k)           => List(k.description)
       // Божественное оружие: только описание — ни статов, ни числа ударов, которые она ещё держит.
       case ItemDetails.Divine(k, _, _)    => List(k.description)
       // Рунный камень: узор, ощущение от него и что даст сама руна.
