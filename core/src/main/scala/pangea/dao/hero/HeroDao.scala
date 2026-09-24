@@ -25,10 +25,6 @@ trait HeroDao {
   def updateExpAndLevel(userId: UserId, exp: Long, lvl: Long, upgradePoints: Long): Task[Unit]
   def updateSilver(userId: UserId, silver: Long): Task[Unit]
   def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit]
-  /** Прибавить денег герою по его id — так приходит выручка с аукциона, пока
-    * продавец занят своими делами (см. Queries.addSilver). */
-  def addSilver(heroId: HeroId, amount: Long): Task[Unit]
-  def addDoubloons(heroId: HeroId, amount: Long): Task[Unit]
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit]
   def updateMasterHornBoosts(userId: UserId, boosts: MasterHornBoosts): Task[Unit]
   def updateTrauma(userId: UserId, traumaUntil: Option[Long], traumaNames: List[String]): Task[Unit]

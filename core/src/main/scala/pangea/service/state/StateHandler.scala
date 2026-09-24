@@ -7,6 +7,7 @@ import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
+import pangea.service.payout.Payouts
 import pangea.service.sender.Api
 import pangea.service.sender.vk.VkRenderer
 import pangea.service.state.states.StatesMap
@@ -17,6 +18,7 @@ class StateHandler(
   userRepo: UserRepository,
   heroRepo: HeroRepository,
   heroDao: HeroDao,
+  payouts: Payouts,
   states: Map[StateType, State],
   lock: PlayerLock
 ) {
@@ -113,6 +115,11 @@ class StateHandler(
         case Some(h) => ZIO.succeed(h)
         case None    => heroRepo.registerNewHero(user.userId)
       }
+      // Выручка с аукциона, не влезшая в банковскую ячейку, догоняет героя в
+      // городе: в лабиринте такие деньги наполовину сгорели бы при смерти.
+      _ <- ZIO.when(StateType.cityStates.contains(hero.state))(
+             payouts.deliver(user, hero, renderer).ignore)
+      hero <- heroRepo.getHero(user.userId).map(_.getOrElse(hero))
       _ <-
         if (StateHandler.isHomeCommand(action))
           goHome(user, renderer)
@@ -249,7 +256,7 @@ object StateHandler {
   val RestartDone: String = "💀 Прошлое стёрто. Начинаем заново."
 
   val live: ZLayer[
-    Api with StatesMap with HeroRepository with UserRepository with HeroDao,
+    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts,
     Nothing,
     StateHandler
   ] =
@@ -259,8 +266,9 @@ object StateHandler {
         userRepo  <- ZIO.service[UserRepository]
         heroRepo  <- ZIO.service[HeroRepository]
         heroDao   <- ZIO.service[HeroDao]
+        payouts   <- ZIO.service[Payouts]
         statesMap <- ZIO.service[StatesMap]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
-      } yield new StateHandler(api, userRepo, heroRepo, heroDao, statesMap.states, lock)
+      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, statesMap.states, lock)
     )
 }

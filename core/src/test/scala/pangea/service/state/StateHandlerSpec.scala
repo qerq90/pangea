@@ -12,7 +12,8 @@ import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.states.GlobalMapState
 import pangea.service.state.states.battle.BattleState
-import pangea.test.{TestApi, TestFixtures, TestHeroDao, TestHeroRepository, TestInventoryRepository, TestItemRepository, TestUserRepository}
+import pangea.service.payout.Payouts
+import pangea.test.{TestApi, TestFixtures, TestHeroDao, TestHeroRepository, TestInventoryRepository, TestItemRepository, TestPayoutDao, TestUserRepository}
 import zio.ZIO
 import zio.test._
 
@@ -55,9 +56,47 @@ object StateHandlerSpec extends ZIOSpecDefault {
         StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content)
       )
       lock <- PlayerLock.make
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, states, lock), heroDao, heroRepo, api)
+      payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, heroRepo, api)
+
+  /** Обвязка для отложенной выручки: герой, диспетчер и склад невыданных денег. */
+  private def makePayoutHandler(startState: StateType) =
+    for {
+      baseHero  <- ZIO.succeed(hero.copy(state = startState))
+      heroDao   <- TestHeroDao.withHero(userId, baseHero)
+      heroRepo  <- TestHeroRepository.withHero(userId, baseHero)
+      userRepo  <- TestUserRepository.withUser(testUser)
+      api       <- TestApi.make
+      content   <- ZIO.attempt(SceneContent.load())
+      payoutDao  = TestPayoutDao.empty
+      payouts    = Payouts(payoutDao, heroDao, content)
+      states     = Map[StateType, State](
+        StateType.GlobalMap -> GlobalMapState(heroDao, content),
+        StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content))
+      lock      <- PlayerLock.make
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, api, payoutDao)
 
   override def spec = suite("StateHandler /home")(
+
+    test("выручка с аукциона догоняет героя в городе, а в бою ждёт своего часа") {
+      for {
+        t <- makePayoutHandler(StateType.GlobalMap)
+        (handler, heroDao, api, payouts) = t
+        _        <- payouts.add(hero.id, 300L, 0L)
+        _        <- handler.makeActionVK(vkId, eventId = 1L, UserAction("", None))
+        updated  <- heroDao.getHeroByUserId(userId).map(_.get)
+        messages <- api.sentMessages
+        // Тот же герой в лабиринте денег не получает: там их отнимет смерть.
+        d <- makePayoutHandler(StateType.Battle)
+        (fighter, fightDao, _, fightPayouts) = d
+        _        <- fightPayouts.add(hero.id, 300L, 0L)
+        _        <- fighter.makeActionVK(vkId, eventId = 2L, UserAction("", None))
+        inFight  <- fightDao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(updated.silver == hero.silver + 300L) &&
+              assertTrue(messages.exists(_._1.contains("выручку с аукциона"))) &&
+              assertTrue(payouts.snapshot.isEmpty) &&
+              assertTrue(inFight.silver == hero.silver && fightPayouts.snapshot.nonEmpty)
+    },
 
     test("/home посреди боя → переносит в GlobalMap, чистит активный бой и scene_data, герой ничего не теряет/не получает") {
       for {
@@ -209,5 +248,6 @@ object StateHandlerSpec extends ZIOSpecDefault {
                                     players, heroDao, invRepo, itemRepo, journal, content)
       )
       lock <- PlayerLock.make
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, states, lock), heroDao, api)
+      payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, states, lock), heroDao, api)
 }

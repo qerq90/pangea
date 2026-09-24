@@ -70,15 +70,6 @@ class TestHeroDao(
   def updateDoubloons(userId: UserId, doubloons: Long): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(doubloons = doubloons))))
 
-  /** Прибавка по id героя: как в проде, считаем от текущего значения. */
-  def addSilver(heroId: HeroId, amount: Long): Task[Unit] =
-    heroRef.update(m => m.find(_._2.id == heroId).fold(m) { case (u, h) =>
-      m.updated(u, h.copy(silver = h.silver + amount)) })
-
-  def addDoubloons(heroId: HeroId, amount: Long): Task[Unit] =
-    heroRef.update(m => m.find(_._2.id == heroId).fold(m) { case (u, h) =>
-      m.updated(u, h.copy(doubloons = h.doubloons + amount)) })
-
   def updateGuildReputation(userId: UserId, value: Long): Task[Unit] =
     heroRef.update(m => m.get(userId).fold(m)(h => m.updated(userId, h.copy(guildReputation = value))))
 

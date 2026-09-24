@@ -5,14 +5,17 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Players, Renderer, SceneContent, Screen, Target}
-import pangea.model.auction.{AuctionCurrency, AuctionLot, LotStatus}
+import pangea.model.auction.{AuctionCurrency, AuctionLot}
+import pangea.model.bank.BankVault
 import pangea.model.hero.Hero
 import pangea.model.item.Item
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.auction.AuctionRepository
+import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.user.UserRepository
+import pangea.service.payout.Payouts
 import pangea.repository.item.ItemRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.bank.AuctionState._
@@ -36,13 +39,14 @@ case class AuctionState(
   itemRepo:      ItemRepository,
   auctionRepo:   AuctionRepository,
   userRepo:      UserRepository,
+  bankRepo:      BankRepository,
+  payouts:       Payouts,
   players:       Players,
-  content:       SceneContent,
-  bank:          Option[pangea.repository.bank.BankRepository] = None
+  content:       SceneContent
 ) extends State {
 
   /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
-  private val purse = Purse(heroDao, bank)
+  private val purse = Purse(heroDao, Some(bankRepo))
 
   private val branch = new Branch(
     routes = Map(
@@ -67,10 +71,24 @@ case class AuctionState(
   override def targetStates: Set[StateType] = branch.gotoTargets
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    resetScene(user) *> showMenu(user, renderer)
+    resetScene(user) *> withVault(user, renderer)(showMenu(user, renderer))
 
+  // Уйти из аукциона можно всегда, остальное — только с выкупленной ячейкой:
+  // деньги и вещи здесь ходят через неё.
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
-    branch.act(user, ua, renderer)
+    if (parseAction(ua.payload).contains("LeaveAuction")) branch.act(user, ua, renderer)
+    else withVault(user, renderer)(branch.act(user, ua, renderer).unit).as(StateType.Auction)
+
+  /** В аукционе участвуют только с ячейкой в Торговом доме. */
+  private def withVault(user: User, renderer: Renderer)(action: => Task[Unit]): Task[Unit] =
+    vaultOf(user).flatMap { vault =>
+      if (vault.open) action
+      else renderer.show(user, Screen(content.text("bank.auction.needVault"),
+        List(Choice("LeaveAuction", content.text("bank.auction.leave"), color = ChoiceColor.Negative, row = Some(0)))))
+    }
+
+  private def vaultOf(user: User): Task[BankVault] =
+    getHero(user).flatMap(h => bankRepo.get(h.id).mapError(asThrowable))
 
   // ── Меню ───────────────────────────────────────────────────────────────────
 
@@ -139,12 +157,11 @@ case class AuctionState(
             "hours" -> lot.hoursLeft(now).toString) + (if (stats.isEmpty) "" else "\n" + stats.mkString("\n"))
           val own = lot.sellerId == hero.id
           val buttons =
-            if (lot.status == LotStatus.Sold)     Nil
-            else if (own && lot.unsold(now))      List(Choice("Reclaim", content.text("bank.auction.reclaimLabel"), data = Map("id" -> lot.id.toString), row = Some(0)))
-            else if (own)                         List(Choice("Reclaim", content.text("bank.auction.withdrawLabel"), data = Map("id" -> lot.id.toString), row = Some(0)))
-            else if (lot.onSale(now))             List(Choice("BuyLot", Choice.fit(content.format("bank.auction.buyLabel", "price" -> lot.priceLine)),
-                                                    color = ChoiceColor.Positive, data = Map("id" -> lot.id.toString), row = Some(0)))
-            else                                  Nil
+            if (own && lot.unsold(now)) List(Choice("Reclaim", content.text("bank.auction.reclaimLabel"), data = Map("id" -> lot.id.toString), row = Some(0)))
+            else if (own)               List(Choice("Reclaim", content.text("bank.auction.withdrawLabel"), data = Map("id" -> lot.id.toString), row = Some(0)))
+            else if (lot.onSale(now))   List(Choice("BuyLot", Choice.fit(content.format("bank.auction.buyLabel", "price" -> lot.priceLine)),
+                                          color = ChoiceColor.Positive, data = Map("id" -> lot.id.toString), row = Some(0)))
+            else                        Nil
           val state = lotStateLine(lot, now, own)
           renderer.show(user, Screen(card + state, buttons :+
             Choice("Auction", content.text("bank.auction.back"), color = ChoiceColor.Negative, row = Some(1))))
@@ -152,11 +169,9 @@ case class AuctionState(
     } yield ()
 
   private def lotStateLine(lot: AuctionLot, now: Long, own: Boolean): String =
-    if (lot.status == LotStatus.Sold)          "\n\n" + content.text("bank.auction.stateSold")
-    else if (lot.status == LotStatus.Returned) "\n\n" + content.text("bank.auction.stateReturned")
-    else if (lot.unsold(now))                  "\n\n" + content.text("bank.auction.stateUnsold")
-    else if (own)                              "\n\n" + content.text("bank.auction.stateOwn")
-    else                                       ""
+    if (lot.unsold(now)) "\n\n" + content.text("bank.auction.stateUnsold")
+    else if (own)        "\n\n" + content.text("bank.auction.stateOwn")
+    else                 ""
 
   // ── Покупка ────────────────────────────────────────────────────────────────
 
@@ -198,7 +213,7 @@ case class AuctionState(
         case Right(lot) =>
           // Лот закрывается первым и атомарно: опоздавший увидит «лот ушёл»,
           // и никаких денег с него не спишется.
-          auctionRepo.buy(lot.id, hero.id, now).either.flatMap {
+          auctionRepo.buy(lot.id, now).either.flatMap {
             case Left(_)  => renderer.show(user, Screen(content.text("bank.auction.lotGone"), backRow))
             case Right(_) => handOver(user, hero, lot, renderer)
           }
@@ -213,29 +228,37 @@ case class AuctionState(
       .foldZIO(
         _ => auctionRepo.reclaim(lot.id, lot.sellerId).ignore *>
                renderer.show(user, Screen(content.text("bank.auction.noRoom"), backRow)),
-        _ => payForLot(user, hero, lot) *>
-               tellSeller(lot) *>
+        _ => payForLot(user, hero, lot).flatMap(tellSeller(lot, _)) *>
                renderer.show(user, Screen(content.format("bank.auction.bought",
                  "name" -> lot.item.displayTitle, "price" -> lot.priceLine), Nil)) *>
                showMenu(user, renderer)
       )
 
-  private def payForLot(user: User, hero: Hero, lot: AuctionLot): Task[Unit] =
+  /** Покупатель платит, а выручка продавца идёт в его банковскую ячейку. Не
+    * приняла (полна или монета не та) — деньги ждут его в городе. Возвращает,
+    * легли ли они в ячейку: об этом говорит колокольчик. */
+  private def payForLot(user: User, hero: Hero, lot: AuctionLot): Task[Boolean] =
     lot.currency match {
       case AuctionCurrency.Silver =>
-        purse.charge(user.userId, hero, lot.price) *> heroDao.addSilver(lot.sellerId, lot.price)
+        purse.charge(user.userId, hero, lot.price) *>
+          bankRepo.depositSilver(lot.sellerId, lot.price).either.flatMap {
+            case Right(_) => ZIO.succeed(true)
+            case Left(_)  => payouts.queue(lot.sellerId, silver = lot.price).as(false)
+          }
       case AuctionCurrency.Doubloons =>
+        // Ячейка держит только серебро, поэтому дублоны всегда ждут в городе.
         heroDao.updateDoubloons(user.userId, hero.doubloons - lot.price) *>
-          heroDao.addDoubloons(lot.sellerId, lot.price)
+          payouts.queue(lot.sellerId, doubloons = lot.price).as(false)
     }
 
   /** Колокольчик продавцу: лот купили, деньги уже пришли. Не дозвонились —
     * молчим: покупка от этого не рушится, продажу видно и в «Моих лотах». */
-  private def tellSeller(lot: AuctionLot): Task[Unit] =
+  private def tellSeller(lot: AuctionLot, intoVault: Boolean): Task[Unit] =
     (for {
       hero   <- heroDao.getHeroById(lot.sellerId).someOrFailException
       seller <- userRepo.getUserById(hero.userId).someOrFailException
-      _      <- players.notify(seller, content.format("bank.auction.soldNotice",
+      key     = if (intoVault) "bank.auction.soldNoticeVault" else "bank.auction.soldNoticeCity"
+      _      <- players.notify(seller, content.format(key,
                   "id" -> lot.id.toString, "name" -> lot.item.displayTitle, "price" -> lot.priceLine))
     } yield ()).ignore
 
@@ -354,7 +377,11 @@ case class AuctionState(
       wallet <- purse.wallet(hero)
       item    = scene.itemId.flatMap(id => inv.items.data.find(i => i.id == id && sellable(i)))
       cur     = scene.currency.flatMap(AuctionCurrency.withNameOption)
+      mine   <- auctionRepo.mineCount(hero.id).mapError(asThrowable)
       _ <- (item, cur, scene.price) match {
+        case (Some(_), _, _) if mine >= AuctionLot.MaxLots.toLong =>
+          renderer.show(user, Screen(content.format("bank.auction.tooManyLots",
+            "max" -> AuctionLot.MaxLots.toString), backRow))
         case (Some(it), Some(c), Some(price)) =>
           val fee = AuctionLot.fee(price)
           if (!hasFee(c, fee, hero, wallet.total))
@@ -403,8 +430,8 @@ case class AuctionState(
       _ <- if (lots.isEmpty) renderer.show(user, Screen(content.text("bank.auction.mineEmpty"), backRow))
            else {
              val lines = lots.map(mineLine(_, now))
-             // Кнопки только у того, что можно забрать: активное и непроданное.
-             val actionable = lots.filter(l => l.status == LotStatus.Active).take(ItemMenu.DefaultPageSize)
+             // В таблице только живые лоты, так что забрать можно любой из них.
+             val actionable = lots.take(ItemMenu.DefaultPageSize)
              val buttons = actionable.zipWithIndex.map { case (lot, i) =>
                Choice("Reclaim",
                  ItemMenu.truncate(content.format(
@@ -421,10 +448,8 @@ case class AuctionState(
 
   private def mineLine(lot: AuctionLot, now: Long): String = {
     val state =
-      if (lot.status == LotStatus.Sold)          content.text("bank.auction.mineSold")
-      else if (lot.status == LotStatus.Returned) content.text("bank.auction.mineReturned")
-      else if (lot.unsold(now))                  content.text("bank.auction.mineUnsold")
-      else                                       content.format("bank.auction.mineOnSale", "hours" -> lot.hoursLeft(now).toString)
+      if (lot.unsold(now)) content.text("bank.auction.mineUnsold")
+      else                 content.format("bank.auction.mineOnSale", "hours" -> lot.hoursLeft(now).toString)
     content.format("bank.auction.mineLine",
       "id" -> lot.id.toString, "name" -> lot.item.displayTitle, "price" -> lot.priceLine, "state" -> state)
   }

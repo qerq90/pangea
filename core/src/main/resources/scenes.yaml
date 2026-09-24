@@ -851,8 +851,6 @@ bank:
     lotButton: "№{id} {name} — {price}"
     card: "Лот №{id}\n{title}\nЦена: {price}\nДо конца торгов: {hours} ч."
     noSuchLot: "Лота №{id} у Рахадима нет."
-    stateSold:     "Этот лот уже продан."
-    stateReturned: "Этот лот снят с торгов."
     stateUnsold:   "Срок вышел: лот не продан и ждёт хозяина."
     stateOwn:      "Это ваш лот."
     buyLabel:       "Купить за {price}"
@@ -884,14 +882,16 @@ bank:
     mineLine: "№{id} {name} — {price} · {state}"
     mineOnSale:  "в продаже, {hours} ч."
     mineUnsold:  "не продан"
-    mineSold:    "продан"
-    mineReturned: "снят"
     withdrawLabel: "Снять с торгов"
     reclaimLabel:  "Забрать вещь"
     withdrawOne: "Снять №{id} — {name}"
     reclaimOne:  "Забрать №{id} — {name}"
     reclaimed: "Лот №{id} снят: {name} снова у вас в сумке."
-    soldNotice: "🔔 Ваш лот №{id} купили: {name} ушёл за {price}. Деньги уже у вас."
+    soldNoticeVault: "🔔 Ваш лот №{id} купили: {name} ушёл за {price}. Деньги уже в вашей банковской ячейке."
+    soldNoticeCity:  "🔔 Ваш лот №{id} купили: {name} ушёл за {price}. Ячейка их не приняла — Рахадим передаст деньги, как только вы будете в городе."
+    payoutDelivered: "🔔 Рахадим нашёл вас в городе и передал выручку с аукциона: {money}."
+    needVault: "Рахадим качает головой: торговать на аукционе может лишь тот, у кого есть ячейка в Торговом доме."
+    tooManyLots: "На торгах и так {max} ваших лотов. Дождитесь продажи или заберите что-нибудь своё."
 
 marketSquare:
   enter:

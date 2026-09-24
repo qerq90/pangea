@@ -58,12 +58,15 @@ case class TradeHouseState(
       color = ChoiceColor.Positive, row = Some(0))
     val vaultBtn = Option.when(vault.open)(
       Choice("MyVault", content.text("bank.tradeHouse.myVault"), row = Some(0)))
+    // Аукцион — только для тех, у кого есть ячейка: деньги и вещи там ходят
+    // через неё.
+    val auction = Option.when(vault.open)(
+      Choice("Auction", content.text("bank.tradeHouse.auctionLabel"), row = Some(2)))
     val rest = List(
       Choice("BuyDoubloons",    content.text("bank.tradeHouse.doubloonsLabel"), row = Some(1)),
-      Choice("DepositInterest", content.text("bank.tradeHouse.interestLabel"),  row = Some(1)),
-      Choice("Auction",         content.text("bank.tradeHouse.auctionLabel"),   row = Some(2)),
+      Choice("DepositInterest", content.text("bank.tradeHouse.interestLabel"),  row = Some(1))
+    ) ++ auction :+
       Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(3))
-    )
     val text = content.format("bank.tradeHouse.menu",
       "cells" -> vault.cells.toString, "price" -> vault.nextCellPrice.toString)
     Screen(text, (buy :: vaultBtn.toList) ++ rest)

@@ -27,26 +27,32 @@ final class AuctionRepositoryLive(dao: AuctionDao) extends AuctionRepository {
   def mine(sellerId: HeroId, limit: Long): IO[AuctionRepoError, List[AuctionLot]] =
     dao.listBySeller(sellerId, limit).orElseFail(AuctionRepoError.Failed)
 
+  def mineCount(sellerId: HeroId): IO[AuctionRepoError, Long] =
+    dao.countBySeller(sellerId).orElseFail(AuctionRepoError.Failed)
+
   def sell(sellerId: HeroId, item: Item, price: Long, currency: AuctionCurrency, now: Long): IO[AuctionRepoError, AuctionLot] =
     for {
       _   <- ZIO.when(item.weightless)(ZIO.fail(AuctionRepoError.Weightless))
       _   <- ZIO.when(price < AuctionLot.MinPrice)(ZIO.fail(AuctionRepoError.PriceTooLow))
       _   <- ZIO.when(price > AuctionLot.MaxPrice)(ZIO.fail(AuctionRepoError.PriceTooHigh))
+      // Своих лотов на торгах — не больше десяти, считая непроданные.
+      mine <- mineCount(sellerId)
+      _   <- ZIO.when(mine >= AuctionLot.MaxLots.toLong)(ZIO.fail(AuctionRepoError.TooManyLots))
       lot <- dao.insert(AuctionLot.fresh(sellerId, item, price, currency, now))
                .orElseFail(AuctionRepoError.Failed)
     } yield lot
 
-  def buy(lotId: Long, buyerId: HeroId, now: Long): IO[AuctionRepoError, AuctionLot] =
+  def buy(lotId: Long, now: Long): IO[AuctionRepoError, AuctionLot] =
     for {
       lot  <- lot(lotId)
-      done <- dao.markSold(lotId, buyerId, now).orElseFail(AuctionRepoError.Failed)
+      done <- dao.sold(lotId, now).orElseFail(AuctionRepoError.Failed)
       _    <- ZIO.when(!done)(ZIO.fail(AuctionRepoError.LotGone))
     } yield lot
 
   def reclaim(lotId: Long, sellerId: HeroId): IO[AuctionRepoError, AuctionLot] =
     for {
       lot  <- lot(lotId)
-      done <- dao.markReturned(lotId, sellerId).orElseFail(AuctionRepoError.Failed)
+      done <- dao.returned(lotId, sellerId).orElseFail(AuctionRepoError.Failed)
       _    <- ZIO.when(!done)(ZIO.fail(AuctionRepoError.LotGone))
     } yield lot
 }

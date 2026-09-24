@@ -71,6 +71,7 @@ import pangea.repository.barrel.BarrelRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.service.payout.Payouts
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHouseState}
@@ -126,6 +127,7 @@ object StatesMap {
       with BarrelRepository
       with BankRepository
       with AuctionRepository
+      with Payouts
       with ItemRepository
       with UserRepository
       with Journal
@@ -142,6 +144,7 @@ object StatesMap {
         barrelRepo    <- ZIO.service[BarrelRepository]
         bankRepo      <- ZIO.service[BankRepository]
         auctionRepo   <- ZIO.service[AuctionRepository]
+        payouts       <- ZIO.service[Payouts]
         itemRepo      <- ZIO.service[ItemRepository]
         userRepo      <- ZIO.service[UserRepository]
         journal       <- ZIO.service[Journal]
@@ -196,7 +199,7 @@ object StatesMap {
           CityCenter -> CityCenterState(content),
           TradeHouse -> TradeHouseState(heroDao, bankRepo, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content),
-          Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, players, content, bank),
+          Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, bankRepo, payouts, players, content),
           TempleAzat -> TempleAzatState(heroDao, inventoryRepo, itemRepo, content),
           HallAzat   -> HallAzatState(heroDao, content, bank),
           Cube       -> CubeState(heroDao, inventoryRepo, itemRepo, content),
