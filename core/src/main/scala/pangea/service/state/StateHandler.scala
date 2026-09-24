@@ -9,13 +9,15 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
 import io.circe.syntax.EncoderOps
 import pangea.service.chat.ChatCommand
-import pangea.service.parcel.Parcels
+import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.state.states.parcel.TransferState
 import pangea.service.sender.Api
 import pangea.service.sender.vk.VkRenderer
 import pangea.service.state.states.StatesMap
 import zio.{Ref, Semaphore, Task, ZIO, ZLayer}
+
+import java.util.concurrent.TimeUnit
 
 class StateHandler(
   api: Api,
@@ -24,6 +26,7 @@ class StateHandler(
   heroDao: HeroDao,
   payouts: Payouts,
   parcels: Parcels,
+  transfers: Transfers,
   states: Map[StateType, State],
   lock: PlayerLock
 ) {
@@ -97,18 +100,32 @@ class StateHandler(
             api.sendMessage(sender, StateHandler.TransferNotInCity, List.empty, None)
           else
             for {
-              name <- api.getName(target).map(r => s"${r.response.head.firstName} ${r.response.head.lastName}")
-                        .orElse(ZIO.succeed(StateHandler.TransferSomeone))
-              scene = TransferState.TransferScene(
-                        toHeroId = theirHero.id.value,
-                        toUserId = target.userId.value,
-                        toName   = name,
-                        query    = ChatCommand.itemQuery(query),
-                        count    = ChatCommand.count(query))
-              _ <- heroDao.writeSceneData(sender.userId, scene.asJson)
-              // Куда вернуть после передачи — туда же, откуда позвали.
-              _ <- heroDao.writeReturnState(sender.userId, Some(hero.state))
-              _ <- enterState(sender, StateType.Transfer, renderer)
+              name   <- api.getName(target).map(r => s"${r.response.head.firstName} ${r.response.head.lastName}")
+                          .orElse(ZIO.succeed(StateHandler.TransferSomeone))
+              to      = TransferTarget(theirHero.id, target.userId, name)
+              item    = ChatCommand.itemQuery(query)
+              count   = ChatCommand.count(query)
+              now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+              // Понятное название уходит сразу; экран нужен только там, где
+              // вещь можно спутать, — в первую очередь у экипировки.
+              outcome <- transfers.quickSend(sender, hero, to, item, count, now)
+              _ <- outcome match {
+                case Transfers.Outcome.Sent(message) =>
+                  api.sendMessage(sender, message, List.empty, None)
+                case Transfers.Outcome.Empty =>
+                  api.sendMessage(sender, StateHandler.transferNothing(item), List.empty, None)
+                case Transfers.Outcome.NeedPick =>
+                  val scene = TransferState.TransferScene(
+                    toHeroId = theirHero.id.value,
+                    toUserId = target.userId.value,
+                    toName   = name,
+                    query    = item,
+                    count    = count)
+                  heroDao.writeSceneData(sender.userId, scene.asJson) *>
+                    // Куда вернуть после передачи — туда же, откуда позвали.
+                    heroDao.writeReturnState(sender.userId, Some(hero.state)) *>
+                    enterState(sender, StateType.Transfer, renderer)
+              }
             } yield ()
         case (Some(_), _, _) =>
           api.sendMessage(sender, StateHandler.TransferNoTarget, List.empty, None)
@@ -331,8 +348,11 @@ object StateHandler {
 
   val TransferSomeone: String = "искатель"
 
+  def transferNothing(query: String): String =
+    s"В сумке нет ничего похожего на «$query»."
+
   val live: ZLayer[
-    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels,
+    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels with Transfers,
     Nothing,
     StateHandler
   ] =
@@ -344,8 +364,9 @@ object StateHandler {
         heroDao   <- ZIO.service[HeroDao]
         payouts   <- ZIO.service[Payouts]
         parcels   <- ZIO.service[Parcels]
+        transfers <- ZIO.service[Transfers]
         statesMap <- ZIO.service[StatesMap]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
-      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, statesMap.states, lock)
+      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, statesMap.states, lock)
     )
 }
