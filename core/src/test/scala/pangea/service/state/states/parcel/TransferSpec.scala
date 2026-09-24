@@ -100,13 +100,22 @@ object TransferSpec extends ZIOSpecDefault {
                   m.contains("Надколотый череп")))
       },
 
-      test("экипировку всегда уточняем кнопками, даже если она одна") {
+      test("экипировка в единственном числе тоже уходит сразу") {
         for {
           f <- fixture(List(sword(1L)))
           (transfers, hero, inv, parcelDao, _) = f
           out <- transfers.quickSend(testUser, hero, target, "меч", 1, 0L)
+        } yield assertTrue(out.isInstanceOf[Transfers.Outcome.Sent]) &&
+                assertTrue(parcelDao.snapshot.map(_.item.id) == List(1L) && inv.snapshot.isEmpty)
+      },
+
+      test("двух мечей уже не спутать вслепую — уточняем кнопками") {
+        for {
+          f <- fixture(List(sword(1L).copy(attack = 12), sword(2L).copy(attack = 9)))
+          (transfers, hero, inv, parcelDao, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "меч", 1, 0L)
         } yield assertTrue(out == Transfers.Outcome.NeedPick) &&
-                assertTrue(parcelDao.snapshot.isEmpty && inv.snapshot.size == 1)
+                assertTrue(parcelDao.snapshot.isEmpty && inv.snapshot.size == 2)
       },
 
       test("подходит несколько разных вещей — тоже уточняем") {

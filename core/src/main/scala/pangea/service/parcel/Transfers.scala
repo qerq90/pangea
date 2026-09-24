@@ -36,13 +36,18 @@ final case class Transfers(
     if (exact.nonEmpty) exact else fit
   }
 
-  /** Можно ли отдать без уточнения. Экипировку уточняем всегда: два меча с
-    * одним именем и уровнем различаются только характеристиками. Остальное —
-    * если найденное не спутать: все вещи одинаковые. */
+  /** Можно ли отдать без уточнения: когда спутать не с чем. Одна-единственная
+    * подходящая вещь уходит сразу, даже если это экипировка. Уточняем, когда
+    * подходящих несколько: у экипировки они различаются характеристиками, а у
+    * прочего — тем, что это вообще разные вещи. */
   def unambiguous(items: List[Item]): Boolean =
-    items.nonEmpty &&
-      !items.exists(i => ItemType.equippable.contains(i.itemType)) &&
-      items.forall(i => sameStack(items.head, i))
+    items match {
+      case Nil            => false
+      case _ :: Nil       => true
+      case first :: _     =>
+        !items.exists(i => ItemType.equippable.contains(i.itemType)) &&
+          items.forall(i => sameStack(first, i))
+    }
 
   /** Вещи той же «стопки», что и выбранная: по ним считается «2 штуки». */
   def sameStack(a: Item, b: Item): Boolean =
