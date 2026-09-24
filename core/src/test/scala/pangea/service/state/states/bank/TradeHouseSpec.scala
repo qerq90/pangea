@@ -52,7 +52,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
 
     suite("Рахадим")(
 
-      test("без ячеек: приветствие, кнопка покупки за 10 000 и никакого хранилища") {
+      test("без ячеек: приветствие, кнопка покупки за 10 000, ни хранилища, ни аукциона") {
         for {
           t <- house(heroSilver = 0L)
           (state, _, _, renderer) = t
@@ -61,20 +61,22 @@ object TradeHouseSpec extends ZIOSpecDefault {
           menu     = screens.last
         } yield assertTrue(screens.head.text.contains("Рахадим")) &&
                 assertTrue(menu.choices.map(_.id) ==
-                  List("BuyCell", "BuyDoubloons", "DepositInterest", "Auction", "LeaveTradeHouse")) &&
+                  List("BuyCell", "BuyDoubloons", "DepositInterest", "LeaveTradeHouse")) &&
                 assertTrue(menu.choices.head.label.contains(BankVault.FirstCellPrice.toString)) &&
                 assertTrue(menu.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))
       },
 
-      test("купленная ячейка добавляет кнопку «Моё хранилище», и та ведёт в BankVault") {
+      test("купленная ячейка открывает «Моё хранилище» и аукцион") {
         for {
           t <- house(heroSilver = 0L, cells = 1)
           (state, _, _, renderer) = t
           _       <- state.enter(testUser, renderer)
           screens <- renderer.sentScreens
           next    <- state.action(testUser, tap("MyVault"), renderer)
-        } yield assertTrue(screens.last.choices.map(_.id).contains("MyVault")) &&
-                assertTrue(next == StateType.BankVault)
+          auction <- state.action(testUser, tap("Auction"), renderer)
+        } yield assertTrue(screens.last.choices.map(_.id) ==
+                  List("BuyCell", "MyVault", "BuyDoubloons", "DepositInterest", "Auction", "LeaveTradeHouse")) &&
+                assertTrue(next == StateType.BankVault && auction == StateType.Auction)
       },
 
       test("покупка первой ячейки: 10 000 с рук, 100 мест и 100 000 под серебро") {

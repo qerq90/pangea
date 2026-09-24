@@ -1,13 +1,14 @@
 package pangea.test
 
-import pangea.model.auction.{AuctionCurrency, AuctionLot, LotStatus}
+import pangea.model.auction.{AuctionCurrency, AuctionLot}
 import pangea.model.hero.HeroId
 import pangea.model.item.Item
 import pangea.repository.auction.{AuctionRepoError, AuctionRepository}
 import zio.{IO, ZIO}
 
 /** Аукцион в памяти: те же правила, что в проде, включая «кто первый, того и
-  * лот» — покупка закрывает лот и второму достаётся отказ. */
+  * лот» — покупка забирает лот, и второму достаётся отказ. Проданные и снятые
+  * лоты не хранятся. */
 class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends AuctionRepository {
 
   private var nextId: Long = lots.map(_.id).maxOption.getOrElse(0L) + 1L
@@ -27,10 +28,14 @@ class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends Au
   def mine(sellerId: HeroId, limit: Long): IO[AuctionRepoError, List[AuctionLot]] =
     ZIO.succeed(lots.filter(_.sellerId == sellerId).sortBy(-_.id).take(limit.toInt))
 
+  def mineCount(sellerId: HeroId): IO[AuctionRepoError, Long] =
+    ZIO.succeed(lots.count(_.sellerId == sellerId).toLong)
+
   def sell(sellerId: HeroId, item: Item, price: Long, currency: AuctionCurrency, now: Long): IO[AuctionRepoError, AuctionLot] =
     if (item.weightless)                  ZIO.fail(AuctionRepoError.Weightless)
     else if (price < AuctionLot.MinPrice) ZIO.fail(AuctionRepoError.PriceTooLow)
     else if (price > AuctionLot.MaxPrice) ZIO.fail(AuctionRepoError.PriceTooHigh)
+    else if (lots.count(_.sellerId == sellerId) >= AuctionLot.MaxLots) ZIO.fail(AuctionRepoError.TooManyLots)
     else ZIO.succeed {
       val lot = AuctionLot.fresh(sellerId, item, price, currency, now).copy(id = nextId)
       nextId += 1L
@@ -38,10 +43,10 @@ class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends Au
       lot
     }
 
-  def buy(lotId: Long, buyerId: HeroId, now: Long): IO[AuctionRepoError, AuctionLot] =
+  def buy(lotId: Long, now: Long): IO[AuctionRepoError, AuctionLot] =
     lots.find(_.id == lotId) match {
       case Some(lot) if lot.onSale(now) =>
-        lots = lots.map(l => if (l.id == lotId) l.copy(status = LotStatus.Sold, buyerId = Some(buyerId.value)) else l)
+        lots = lots.filterNot(_.id == lotId)
         ZIO.succeed(lot)
       case Some(_) => ZIO.fail(AuctionRepoError.LotGone)
       case None    => ZIO.fail(AuctionRepoError.LotNotFound)
@@ -49,8 +54,8 @@ class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends Au
 
   def reclaim(lotId: Long, sellerId: HeroId): IO[AuctionRepoError, AuctionLot] =
     lots.find(_.id == lotId) match {
-      case Some(lot) if lot.status == LotStatus.Active && lot.sellerId == sellerId =>
-        lots = lots.map(l => if (l.id == lotId) l.copy(status = LotStatus.Returned) else l)
+      case Some(lot) if lot.sellerId == sellerId =>
+        lots = lots.filterNot(_.id == lotId)
         ZIO.succeed(lot)
       case Some(_) => ZIO.fail(AuctionRepoError.LotGone)
       case None    => ZIO.fail(AuctionRepoError.LotNotFound)

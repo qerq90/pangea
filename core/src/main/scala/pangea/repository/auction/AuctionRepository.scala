@@ -16,6 +16,8 @@ object AuctionRepoError {
   case object LotNotFound  extends AuctionRepoError
   /** Лот только что купили, сняли или у него вышел срок. */
   case object LotGone      extends AuctionRepoError
+  /** У героя уже [[pangea.model.auction.AuctionLot.MaxLots]] лотов на торгах. */
+  case object TooManyLots  extends AuctionRepoError
   case object Failed       extends AuctionRepoError
 }
 
@@ -28,13 +30,15 @@ trait AuctionRepository {
   def onSale(now: Long): IO[AuctionRepoError, Long]
   def lot(id: Long): IO[AuctionRepoError, AuctionLot]
   def mine(sellerId: HeroId, limit: Long): IO[AuctionRepoError, List[AuctionLot]]
+  /** Сколько лотов героя сейчас на торгах (считая непроданные). */
+  def mineCount(sellerId: HeroId): IO[AuctionRepoError, Long]
 
   /** Выставить вещь. Плату за выставление берёт вызывающий. */
   def sell(sellerId: HeroId, item: Item, price: Long, currency: AuctionCurrency, now: Long): IO[AuctionRepoError, AuctionLot]
 
-  /** Купить: лот закрывается атомарно, поэтому второму покупателю придёт
+  /** Купить: лот удаляется атомарно, поэтому второму покупателю придёт
     * [[AuctionRepoError.LotGone]] и списывать с него нечего. */
-  def buy(lotId: Long, buyerId: HeroId, now: Long): IO[AuctionRepoError, AuctionLot]
+  def buy(lotId: Long, now: Long): IO[AuctionRepoError, AuctionLot]
 
   /** Снять свой лот с торгов или забрать непроданное: возвращает вещь. */
   def reclaim(lotId: Long, sellerId: HeroId): IO[AuctionRepoError, AuctionLot]

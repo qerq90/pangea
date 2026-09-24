@@ -3,6 +3,7 @@ package app
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
 import pangea.dao.auction.AuctionDao
+import pangea.dao.payout.PayoutDao
 import pangea.dao.bank.BankVaultDao
 import pangea.dao.barrel.BarrelDao
 import pangea.dao.hero.HeroDao
@@ -20,6 +21,7 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.service.payout.Payouts
 import pangea.service.schedule.{Scheduler, SchedulerPoller}
 import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
@@ -51,6 +53,7 @@ object Main extends ZIOAppDefault {
       BarrelDao.live,
       BankVaultDao.live,
       AuctionDao.live,
+      PayoutDao.live,
       ItemDao.live,
       ScheduledTaskDao.live,
       SendFailureDao.live,
@@ -64,6 +67,7 @@ object Main extends ZIOAppDefault {
       BarrelRepository.live,
       BankRepository.live,
       AuctionRepository.live,
+      Payouts.live,
       StateHandler.live,
       Scheduler.live,
       SchedulerPoller.live,
