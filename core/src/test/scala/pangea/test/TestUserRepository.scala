@@ -29,9 +29,11 @@ class TestUserRepository(usersRef: Ref[Map[UserId, User]], eventsRef: Ref[Set[(U
 }
 
 object TestUserRepository {
-  def withUser(user: User): Task[TestUserRepository] =
+  def withUser(user: User): Task[TestUserRepository] = withUsers(user)
+
+  def withUsers(users: User*): Task[TestUserRepository] =
     for {
-      usersRef  <- Ref.make(Map(user.userId -> user))
+      usersRef  <- Ref.make(users.map(u => u.userId -> u).toMap)
       eventsRef <- Ref.make(Set.empty[(UserId, Long)])
     } yield new TestUserRepository(usersRef, eventsRef)
 }

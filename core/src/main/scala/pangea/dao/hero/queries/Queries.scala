@@ -24,6 +24,9 @@ object Queries {
   def getHeroByUserId(userId: UserId): Fragment =
     selectAll ++ sql"where user_id = $userId"
 
+  def getHeroById(heroId: HeroId): Fragment =
+    selectAll ++ sql"where id = $heroId"
+
   def insert(hero: Hero): Fragment =
     sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.silver}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation}, ${hero.masterHornBoosts}, ${hero.doubloons}, ${hero.statBoosts.asJson}, ${hero.weaponDust.asJson}, ${hero.kills}, ${hero.achievements}, ${hero.squad.asJson}, ${hero.runes.asJson})"
 

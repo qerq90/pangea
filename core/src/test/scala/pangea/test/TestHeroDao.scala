@@ -26,6 +26,8 @@ class TestHeroDao(
 
   def getHeroByUserId(userId: UserId): Task[Option[Hero]] = heroRef.get.map(_.get(userId))
 
+  def getHeroById(heroId: HeroId): Task[Option[Hero]] = heroRef.get.map(_.values.find(_.id == heroId))
+
   def insertHero(hero: Hero): Task[HeroId] =
     heroRef.update(_.updated(hero.userId, hero)).as(hero.id)
 

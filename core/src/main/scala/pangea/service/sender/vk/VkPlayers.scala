@@ -13,6 +13,8 @@ class VkPlayers(api: Api) extends Players {
     }
 
   def announce(message: String): Task[Unit] = api.sendToChat(message)
+
+  def notify(user: User, message: String): Task[Unit] = api.sendMessage(user, message, Nil, None)
 }
 
 object VkPlayers {

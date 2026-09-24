@@ -12,6 +12,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.auction.AuctionRepository
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.user.UserRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.bank.AuctionState._
@@ -34,6 +35,7 @@ case class AuctionState(
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
   auctionRepo:   AuctionRepository,
+  userRepo:      UserRepository,
   players:       Players,
   content:       SceneContent,
   bank:          Option[pangea.repository.bank.BankRepository] = None
@@ -212,6 +214,7 @@ case class AuctionState(
         _ => auctionRepo.reclaim(lot.id, lot.sellerId).ignore *>
                renderer.show(user, Screen(content.text("bank.auction.noRoom"), backRow)),
         _ => payForLot(user, hero, lot) *>
+               tellSeller(lot) *>
                renderer.show(user, Screen(content.format("bank.auction.bought",
                  "name" -> lot.item.displayTitle, "price" -> lot.priceLine), Nil)) *>
                showMenu(user, renderer)
@@ -225,6 +228,16 @@ case class AuctionState(
         heroDao.updateDoubloons(user.userId, hero.doubloons - lot.price) *>
           heroDao.addDoubloons(lot.sellerId, lot.price)
     }
+
+  /** Колокольчик продавцу: лот купили, деньги уже пришли. Не дозвонились —
+    * молчим: покупка от этого не рушится, продажу видно и в «Моих лотах». */
+  private def tellSeller(lot: AuctionLot): Task[Unit] =
+    (for {
+      hero   <- heroDao.getHeroById(lot.sellerId).someOrFailException
+      seller <- userRepo.getUserById(hero.userId).someOrFailException
+      _      <- players.notify(seller, content.format("bank.auction.soldNotice",
+                  "id" -> lot.id.toString, "name" -> lot.item.displayTitle, "price" -> lot.priceLine))
+    } yield ()).ignore
 
   private def canPay(lot: AuctionLot, hero: Hero, silverAvailable: Long): Boolean =
     lot.currency match {

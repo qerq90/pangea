@@ -891,6 +891,7 @@ bank:
     withdrawOne: "Снять №{id} — {name}"
     reclaimOne:  "Забрать №{id} — {name}"
     reclaimed: "Лот №{id} снят: {name} снова у вас в сумке."
+    soldNotice: "🔔 Ваш лот №{id} купили: {name} ушёл за {price}. Деньги уже у вас."
 
 marketSquare:
   enter:

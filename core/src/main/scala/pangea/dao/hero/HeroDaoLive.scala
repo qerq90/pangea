@@ -25,6 +25,13 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
       .option
       .transact(xa)
 
+  override def getHeroById(heroId: HeroId): Task[Option[Hero]] =
+    Queries
+      .getHeroById(heroId)
+      .query[Hero]
+      .option
+      .transact(xa)
+
   override def deleteHero(userId: UserId): Task[Unit] =
     Queries.deleteHeroCascade(userId).transact(xa)
 

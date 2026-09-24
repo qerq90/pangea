@@ -20,6 +20,7 @@ object AuctionSpec extends ZIOSpecDefault {
   private val heroId   = HeroId(1L)
   private val seller   = HeroId(2L)
   private val sellerUs = UserId(2L)
+  private val sellerUser = User(sellerUs, VkId("vk_seller"), TelegramId("tg_seller"))
 
   private def tap(key: String, data: (String, String)*): UserAction =
     UserAction("", Some((("action" -> key) +: data).map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")))
@@ -47,10 +48,11 @@ object AuctionSpec extends ZIOSpecDefault {
       _       <- heroDao.insertHero(TestFixtures.hero(sellerUs).copy(id = seller, silver = 0L, doubloons = 0L))
       invRepo  = TestInventoryRepository.withItems(inventory)
       aucRepo  = new TestAuctionRepository(lots)
+      userRepo <- TestUserRepository.withUsers(testUser, sellerUser)
       players  = new TestPlayers
       renderer <- TestRenderer.make
       content <- ZIO.attempt(SceneContent.load())
-    } yield (AuctionState(heroDao, invRepo, TestItemRepository.make, aucRepo, players, content),
+    } yield (AuctionState(heroDao, invRepo, TestItemRepository.make, aucRepo, userRepo, players, content),
              heroDao, invRepo, aucRepo, players, renderer)
 
   override def spec = suite("Аукцион")(
@@ -156,10 +158,10 @@ object AuctionSpec extends ZIOSpecDefault {
 
     suite("Покупка")(
 
-      test("подтверждение, деньги продавцу, вещь покупателю") {
+      test("подтверждение, деньги продавцу, вещь покупателю, колокольчик в личку") {
         for {
           t <- auction(lots = List(lotOf(1L, price = 300L)), silver = 1000L)
-          (state, heroDao, inv, aucRepo, _, renderer) = t
+          (state, heroDao, inv, aucRepo, players, renderer) = t
           _        <- state.action(testUser, tap("BuyLot", "id" -> "1"), renderer)
           confirm  <- renderer.sentScreens
           _        <- state.action(testUser, tap("BuyLotYes", "id" -> "1"), renderer)
@@ -168,7 +170,20 @@ object AuctionSpec extends ZIOSpecDefault {
         } yield assertTrue(confirm.last.choices.map(_.id) == List("BuyLotYes", "Auction") && confirm.last.inline) &&
                 assertTrue(buyer.get.silver == 700L && sellerH.get.silver == 300L) &&
                 assertTrue(inv.snapshot.map(_.name) == List("Топор 1")) &&
-                assertTrue(aucRepo.snapshot.head.status == LotStatus.Sold)
+                assertTrue(aucRepo.snapshot.head.status == LotStatus.Sold) &&
+                // Продавцу — письмо с колокольчиком, покупателю — ничего лишнего.
+                assertTrue(players.sentLetters.map(_._1) == List(sellerUs)) &&
+                assertTrue(players.sentLetters.head._2.startsWith("🔔") &&
+                           players.sentLetters.head._2.contains("№1") &&
+                           players.sentLetters.head._2.contains("🪙 300"))
+      },
+
+      test("несостоявшаяся покупка писем не шлёт") {
+        for {
+          t <- auction(lots = List(lotOf(1L, status = LotStatus.Sold)), silver = 1000L)
+          (state, _, _, _, players, renderer) = t
+          _ <- state.action(testUser, tap("BuyLotYes", "id" -> "1"), renderer)
+        } yield assertTrue(players.sentLetters.isEmpty)
       },
 
       test("лот, купленный секунду назад, второму не достанется и денег не спишет") {
