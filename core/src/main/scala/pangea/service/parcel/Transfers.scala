@@ -24,8 +24,16 @@ final case class Transfers(
   content:       SceneContent
 ) {
 
-  /** Что вообще можно передать: вещь занимает место и не сюжетная. */
-  def sendable(item: Item): Boolean = !item.isQuestItem && !item.weightless
+  /** Что вообще можно передать: вещь занимает место, не сюжетная и не трофей.
+    * Трофеи — личная добыча: их сдают в Гильдии, а не передают друг другу. */
+  def sendable(item: Item): Boolean =
+    !item.isQuestItem && !item.weightless && item.itemType != ItemType.Trophy
+
+  /** Под запрос подошли только трофеи — о них стоит сказать отдельно, иначе
+    * «ничего не нашлось» сбивает с толку. */
+  def onlyTrophies(items: List[Item], query: String): Boolean =
+    items.exists(i => i.itemType == ItemType.Trophy && ChatCommand.matches(query, i.name)) &&
+      matching(items, query).isEmpty
 
   /** Подходящее под запрос. Точное совпадение по названию бьёт частичное:
     * «надколотый череп» отдаст именно череп, а не всё, где встретилось слово.
@@ -67,7 +75,9 @@ final case class Transfers(
     for {
       inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       fit  = matching(inv.items.data, query)
-      res <- if (fit.isEmpty) ZIO.succeed(Transfers.Outcome.Empty)
+      res <- if (onlyTrophies(inv.items.data, query))
+               ZIO.succeed(Transfers.Outcome.Forbidden(content.text("transfer.noTrophies")))
+             else if (fit.isEmpty) ZIO.succeed(Transfers.Outcome.Empty)
              else if (!unambiguous(fit)) ZIO.succeed(Transfers.Outcome.NeedPick)
              else send(sender, hero, target, fit.take(count.max(1)), now).map { sent =>
                Transfers.Outcome.Sent(content.format("transfer.sent",
@@ -123,6 +133,8 @@ object Transfers {
     final case class Sent(message: String) extends Outcome
     /** В сумке нет ничего похожего. */
     case object Empty extends Outcome
+    /** Нашлось, но такое не передают (трофеи). */
+    final case class Forbidden(message: String) extends Outcome
     /** Надо уточнить кнопками: экипировка или несколько разных вещей. */
     case object NeedPick extends Outcome
   }
