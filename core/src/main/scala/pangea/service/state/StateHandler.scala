@@ -112,6 +112,8 @@ class StateHandler(
               _ <- outcome match {
                 case Transfers.Outcome.Sent(message) =>
                   api.sendMessage(sender, message, List.empty, None)
+                case Transfers.Outcome.Forbidden(message) =>
+                  api.sendMessage(sender, message, List.empty, None)
                 case Transfers.Outcome.Empty =>
                   api.sendMessage(sender, StateHandler.transferNothing(item), List.empty, None)
                 case Transfers.Outcome.NeedPick =>

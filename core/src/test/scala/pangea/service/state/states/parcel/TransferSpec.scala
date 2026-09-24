@@ -29,8 +29,13 @@ object TransferSpec extends ZIOSpecDefault {
 
   private val target = TransferTarget(friend, friendUs, "Пётр")
 
+  /** «Надколотый череп» — камень-усилитель первого грейда. */
   private def skull(id: Long): Item =
-    Item(id, "Надколотый череп", 1L, Rarity.Gray, ItemType.Trophy, attack = 0, accuracy = 0,
+    pangea.generator.item.GemGenerator.item(pangea.model.item.GemKind.Skull, 1).copy(id = id)
+
+  /** Трофей с моба: такое не передаётся. */
+  private def trophy(id: Long): Item =
+    Item(id, "Клык белого волка", 1L, Rarity.Gray, ItemType.Trophy, attack = 0, accuracy = 0,
       energy = 0, armor = 0, defence = 0, evasion = 0)
 
   private def sword(id: Long, name: String = "Меч"): Item =
@@ -126,6 +131,15 @@ object TransferSpec extends ZIOSpecDefault {
         } yield assertTrue(out == Transfers.Outcome.NeedPick && parcelDao.snapshot.isEmpty)
       },
 
+      test("трофеи не передаются") {
+        for {
+          f <- fixture(List(trophy(1L)))
+          (transfers, hero, inv, parcelDao, _) = f
+          out <- transfers.quickSend(testUser, hero, target, "клык", 1, 0L)
+        } yield assertTrue(out.isInstanceOf[Transfers.Outcome.Forbidden]) &&
+                assertTrue(parcelDao.snapshot.isEmpty && inv.snapshot.size == 1)
+      },
+
       test("в сумке ничего похожего — так и говорим") {
         for {
           f <- fixture(List(sword(1L)))
@@ -145,6 +159,16 @@ object TransferSpec extends ZIOSpecDefault {
         ids      = screens.last.choices.map(_.id)
       } yield assertTrue(ids.contains("Give_1") && ids.contains("Give_2") && !ids.contains("Give_3")) &&
               assertTrue(screens.last.text.contains("Пётр"))
+    },
+
+    test("на пустой запрос показываем всю сумку, кроме того, что не передаётся") {
+      for {
+        t <- transfer(List(sword(1L), trophy(2L)), query = "")
+        (state, _, _, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+        ids      = screens.last.choices.map(_.id)
+      } yield assertTrue(ids.contains("Give_1") && !ids.contains("Give_2"))
     },
 
     test("выбор и подтверждение: вещи уходят посылками, получателю письмо") {
