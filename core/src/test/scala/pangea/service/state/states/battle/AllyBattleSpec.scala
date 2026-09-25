@@ -32,7 +32,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
 
   private val lvl = 10L
 
-  /** Йорген 10-го уровня: HP 1250, броня 1500, атака 200, энергия 1000. */
+  /** Йорген у своего потолка (5-й уровень): HP 625, броня 750, атака 100, энергия 500. */
   private def ally(kind: AllyKind = AllyKind.Human, pos: Int = 2, energy: Long = 0L,
                    hp: Option[Long] = None, armor: Option[Long] = None): Ally = {
     val s = kind.stats(lvl)
@@ -123,7 +123,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(entry.last.choices.exists(_.label == "Атака")) &&
               assertTrue(screens.contains("Вы наносите") && !screens.contains("атаковал вас сбоку")) &&
               assertTrue(after.monsterCurrentHp < 1000L && !after.group.paired && after.group.activePos == 1) &&
-              assertTrue(updated.fightStats.hp == 500000L && a.armor < 1500L)
+              assertTrue(updated.fightStats.hp == 500000L && a.armor < 750L)
     },
 
     test("герой убил своего моба: занятый союзником сосед к нему не шагает — напротив пусто, соседа бьёт по кнопке и добивает") {
@@ -247,9 +247,10 @@ object AllyBattleSpec extends ZIOSpecDefault {
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         a        = after.group.allies.head
-      } yield assertTrue(screens.contains("⚔ Йорген Кремень бьёт Орк раб на 300 урона.")) &&   // 200 × 1,1 (огонь по HP) + 80 плашмя
+      } yield assertTrue(screens.contains("⚔ Йорген Кремень бьёт Орк раб на 150 урона.")) &&   // 100 × 1,1 (огонь по HP) + 40 плашмя
               assertTrue(!screens.contains("плашмя") && screens.linesIterator.count(_.startsWith("⚔ Йорген")) == 1) &&
-              assertTrue(a.energy == 1000L - 160L + 70L)
+              // энергия и цены умений — по уровню наёмника, а не героя
+              assertTrue(a.energy == 500L - 80L + 35L)
     },
 
     test("герой обнулён при живом отряде — не смерть: бой идёт без него по таймеру, отряд добивает — герой приходит в себя с 1 HP") {
@@ -349,9 +350,10 @@ object AllyBattleSpec extends ZIOSpecDefault {
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         a        = after.group.allies.head
-      } yield assertTrue(screens.contains("выпивает из своей фляги и восстанавливает 375 хп")) &&
-              assertTrue(a.hp == 875L) &&
-              assertTrue(a.energy == 1000L - 80L + 70L)
+      } yield assertTrue(screens.contains("выпивает из своей фляги и восстанавливает 125 хп")) &&
+              // лечит до потолка и не выше: 500 было, 625 максимум
+              assertTrue(a.hp == 625L) &&
+              assertTrue(a.energy == 500L - 40L + 35L)
     },
 
     test("моб напротив союзника бьёт его, а не героя сбоку") {
@@ -367,7 +369,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         a        = after.group.allies.head
       } yield assertTrue(screens.contains("бьёт Йорген Кремень на")) &&
               assertTrue(!screens.contains("сбоку")) &&
-              assertTrue(a.armor < 1500L && a.hp == 1250L) &&
+              assertTrue(a.armor < 750L && a.hp == 625L) &&
               // герой получил только от моба в паре
               assertTrue(updated.fightStats.hp < 500000L)
     },
@@ -405,7 +407,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         second  <- state.action(testUser, tap("Attack"), r)
         updated <- dao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(first == StateType.Battle && second == StateType.Loot) &&
-              assertTrue(updated.squad.allyAt(2).exists(a => a.kind == AllyKind.Human && a.energy == 70L))
+              assertTrue(updated.squad.allyAt(2).exists(a => a.kind == AllyKind.Human && a.energy == 35L))
     },
 
     test("герой бьёт соседа, выбрав место 2: урон мобу на месте 2, отвечает моб в паре") {

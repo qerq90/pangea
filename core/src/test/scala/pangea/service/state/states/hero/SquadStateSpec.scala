@@ -61,8 +61,8 @@ object SquadStateSpec extends ZIOSpecDefault {
         _   <- state.enter(testUser, renderer)
         scr <- renderer.sentScreens.map(_.last)
       } yield assertTrue(scr.text.contains("1. Вы")) &&
-              assertTrue(scr.text.contains("2. Йорген Кремень — ❤ 1250/1250  🧥 1500/1500")) &&
-              assertTrue(scr.text.contains("3. Брамбл Медноус — ❤ 800/800  🧥 1750/1750")) &&
+              assertTrue(scr.text.contains("2. Йорген Кремень — ❤ 625/625  🧥 750/750")) &&
+              assertTrue(scr.text.contains("3. Брамбл Медноус — ❤ 560/560  🧥 1225/1225")) &&
               assertTrue(scr.text.contains("4. — пусто —")) &&
               assertTrue(scr.choices.map(_.label) == List("Йорген Кремень", "Брамбл Медноус", "↩ Назад")) &&
               assertTrue(scr.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))
@@ -76,7 +76,7 @@ object SquadStateSpec extends ZIOSpecDefault {
         scr <- renderer.sentScreens.map(_.last)
         moves = scr.choices.filter(_.id == "SquadMove").map(c => c.label -> c.data("pos"))
       } yield assertTrue(scr.text.startsWith("Йорген Кремень\nЧеловек, стихия 🔥 — позиция 2\n")) &&
-              assertTrue(scr.text.contains(" ❤ 1250/1250  🧥 Броня 1500/1500  ⚡ Энергия 1000/1000\n ⚔ Атк 200  🛡 Защ 400\n 🎯 Точн 1000  👁 Укл 1000")) &&
+              assertTrue(scr.text.contains(" ❤ 625/625  🧥 Броня 750/750  ⚡ Энергия 500/500\n ⚔ Атк 100  🛡 Защ 200\n 🎯 Точн 500  👁 Укл 500")) &&
               assertTrue(moves == List("На 1 (вы)" -> "1", "На 3 (Брамбл Медноус)" -> "3", "На 4 (пусто)" -> "4")) &&
               assertTrue(scr.choices.exists(_.id == "SquadDismiss") && scr.choices.exists(_.id == "SquadList")) &&
               assertTrue(scr.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))

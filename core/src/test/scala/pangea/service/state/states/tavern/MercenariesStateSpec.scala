@@ -46,26 +46,28 @@ object MercenariesStateSpec extends ZIOSpecDefault {
         card     = screens.last
       } yield assertTrue(list.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Human", "Murloc", "Gnome")) &&
               assertTrue(list.choices.exists(_.id == "BackFromMercs")) &&
-              assertTrue(card.text.contains("«Плюх. Плюх тут кружки мыл")) &&
-              assertTrue(card.text.contains("сегодня я возьму с тебя 2 флаконов!")) &&
+              assertTrue(card.text.contains("«Плюх. Плюх — береговик")) &&
+              assertTrue(card.text.contains("флаконов: 2.")) &&
               assertTrue(card.choices.exists(c => c.id == "MercHire" && c.data.get("kind").contains("Murloc")))
     },
 
-    test("Йорген: 500 серебра за уровень — мало серебра → отказ, хватает → нанят, серебро списано") {
+    test("Йорген: всегда 10 дублонов — мало → отказ, хватает → нанят, дублоны списаны") {
       for {
-        poor <- makeState(baseHero.copy(silver = 4999L))
+        poor <- makeState(baseHero.copy(doubloons = 9L))
         (ps, pdao, _, pr) = poor
         _     <- ps.action(testUser, pick("MercHire", AllyKind.Human), pr)
         pHero <- pdao.getHeroByUserId(userId).map(_.get)
         pScr  <- pr.sentScreens.map(_.map(_.text).mkString("\n"))
-        rich <- makeState(baseHero.copy(silver = 5000L))
+        rich <- makeState(baseHero.copy(doubloons = 12L, silver = 100000L))
         (rs, rdao, _, rr) = rich
         _     <- rs.action(testUser, pick("MercHire", AllyKind.Human), rr)
         rHero <- rdao.getHeroByUserId(userId).map(_.get)
         rScr  <- rr.sentScreens
-      } yield assertTrue(pScr.contains("Не хватает серебра: нужно 5000, у вас 4999")) &&
-              assertTrue(pHero.squad.isEmpty && pHero.silver == 4999L) &&
-              assertTrue(rHero.silver == 0L && rHero.squad.allyAt(2).exists(_.kind == AllyKind.Human)) &&
+      } yield assertTrue(pScr.contains("Не хватает дублонов: нужно 10, у вас 9")) &&
+              assertTrue(pHero.squad.isEmpty && pHero.doubloons == 9L) &&
+              // серебро при найме Йоргена не трогается вовсе
+              assertTrue(rHero.doubloons == 2L && rHero.silver == 100000L) &&
+              assertTrue(rHero.squad.allyAt(2).exists(_.kind == AllyKind.Human)) &&
               assertTrue(rScr.exists(_.text.contains("Йорген Кремень встаёт из-за стола"))) &&
               // за столом его больше нет
               assertTrue(rScr.last.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Murloc", "Gnome"))
@@ -103,7 +105,7 @@ object MercenariesStateSpec extends ZIOSpecDefault {
 
     test("наёмник отработал 12 часов: у стола уходит с репликой, его нет; через 12 часов снова здесь — без реплики о свитке") {
       for {
-        t <- makeState(baseHero.copy(silver = 5000L))
+        t <- makeState(baseHero.copy(doubloons = 10L))
         (state, dao, _, renderer) = t
         _     <- state.action(testUser, pick("MercHire", AllyKind.Human), renderer)
         _     <- TestClock.adjust(zio.Duration.fromMillis(12L * 60L * 60L * 1000L))

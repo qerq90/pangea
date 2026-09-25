@@ -8,12 +8,16 @@ import pangea.model.monster.Race
 import pangea.model.stats.FightStats
 
 /** Наёмник-союзник: кто он, чем бьёт и сколько стоит. Сила растёт с уровнем
- *  героя (`AliensLvL` = уровень героя): статы — ставка × уровень. Умения у всех
- *  одни и те же ([[AllySkill]]), различаются лишь числа и стихия удара. */
+ *  героя (`AliensLvL` = уровень героя): статы — ставка × уровень, но только до
+ *  своего потолка ([[maxLvl]]): дальше наёмник не растёт, и герой уходит
+ *  вперёд сам. Умения у всех одни и те же ([[AllySkill]]), различаются лишь
+ *  числа и стихия удара. */
 sealed abstract class AllyKind(
   val name:     String,
   val race:     Race,
   val element:  Element,
+  /** Выше этого уровня наёмник не становится сильнее. */
+  val maxLvl:   Long,
   val hpPerLvl:       Long,
   val armorPerLvl:    Long,
   val atkPerLvl:      Long,
@@ -23,26 +27,32 @@ sealed abstract class AllyKind(
   val evasionPerLvl:  Long
 ) extends EnumEntry {
 
-  def stats(lvl: Long): FightStats = FightStats(
-    atk      = atkPerLvl * lvl,
-    hp       = hpPerLvl * lvl,
-    armor    = armorPerLvl * lvl,
-    defence  = defencePerLvl * lvl,
-    evasion  = evasionPerLvl * lvl,
-    accuracy = accuracyPerLvl * lvl,
-    energy   = energyPerLvl * lvl
-  )
+  /** Уровень, по которому считаются статы: не выше потолка наёмника. */
+  def effectiveLvl(lvl: Long): Long = lvl.max(1L).min(maxLvl)
 
-  /** Сколько энергии восстанавливает за раунд. */
-  def energyRegen(lvl: Long): Long = AllyRates.EnergyRegenPerLvl * lvl
+  def stats(lvl: Long): FightStats = {
+    val l = effectiveLvl(lvl)
+    FightStats(
+      atk      = atkPerLvl * l,
+      hp       = hpPerLvl * l,
+      armor    = armorPerLvl * l,
+      defence  = defencePerLvl * l,
+      evasion  = evasionPerLvl * l,
+      accuracy = accuracyPerLvl * l,
+      energy   = energyPerLvl * l
+    )
+  }
+
+  /** Сколько энергии восстанавливает за раунд — тоже по своему потолку. */
+  def energyRegen(lvl: Long): Long = AllyRates.EnergyRegenPerLvl * effectiveLvl(lvl)
 }
 
 /** Числа союзников — отдельно от компаньона (см. FlaskRates). */
 object AllyRates {
   val EnergyRegenPerLvl: Long = 7L
 
-  /** Найм Йоргена: серебро за каждый уровень героя. */
-  val HumanSilverPerLvl: Long = 500L
+  /** Найм Йоргена: столько дублонов, сколько бы герой ни был силён. */
+  val HumanDoubloons: Long = 10L
   /** Найм Плюха и Брамбла: отваров — уровень героя на это, но не меньше одного. */
   val BrewPerLevels: Long = 5L
 
@@ -59,18 +69,19 @@ object AllyRates {
 
 object AllyKind extends Enum[AllyKind] {
 
-  /** Йорген Кремень: воин, бьёт огнём. */
-  case object Human extends AllyKind("Йорген Кремень", Race.Human, Element.Fire,
+  /** Йорген Кремень: воин, бьёт огнём. Растёт до пятого уровня — он и сам
+    * говорит, что помнит только строй, а не подвиги. */
+  case object Human extends AllyKind("Йорген Кремень", Race.Human, Element.Fire, maxLvl = 5L,
     hpPerLvl = 125L, armorPerLvl = 150L, atkPerLvl = 20L, energyPerLvl = 100L,
     accuracyPerLvl = 100L, defencePerLvl = 40L, evasionPerLvl = 100L)
 
-  /** Плюх: мурлок-ловкач, бьёт молнией. */
-  case object Murloc extends AllyKind("Плюх", Race.Murloc, Element.Lightning,
+  /** Плюх: мурлок-ловкач, бьёт молнией. Тянется дальше всех — до десятого. */
+  case object Murloc extends AllyKind("Плюх", Race.Murloc, Element.Lightning, maxLvl = 10L,
     hpPerLvl = 100L, armorPerLvl = 100L, atkPerLvl = 30L, energyPerLvl = 100L,
     accuracyPerLvl = 150L, defencePerLvl = 30L, evasionPerLvl = 150L)
 
-  /** Брамбл Медноус: гном-воин, бьёт холодом. */
-  case object Gnome extends AllyKind("Брамбл Медноус", Race.Gnome, Element.Cold,
+  /** Брамбл Медноус: гном-воин, бьёт холодом. Потолок — седьмой уровень. */
+  case object Gnome extends AllyKind("Брамбл Медноус", Race.Gnome, Element.Cold, maxLvl = 7L,
     hpPerLvl = 80L, armorPerLvl = 175L, atkPerLvl = 20L, energyPerLvl = 100L,
     accuracyPerLvl = 100L, defencePerLvl = 50L, evasionPerLvl = 60L)
 

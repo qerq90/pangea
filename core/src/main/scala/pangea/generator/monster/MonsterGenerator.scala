@@ -10,6 +10,11 @@ object MonsterGenerator {
 
   private val N = 1.1
 
+  // Прибавки к базовым ставкам защиты и брони: идут ДО умножения на уровень,
+  // редкость и расу, поэтому растут вместе с ними и чувствуются на всю игру.
+  private val DefenceBonus = 2.0
+  private val ArmorBonus   = 1.0
+
   // Модификатор «Отмеченный тьмой»: 7% шанс, +20% ко всем показателям.
   // Доступен только мобам редкости Rare и выше — обычные/необычные «отмеченными»
   // не бывают.
@@ -89,11 +94,11 @@ object MonsterGenerator {
     FightStats(
       atk = (10.0 * base * f.attackFactor).toLong.max(1L),
       hp = (40.0 * base * f.hpFactor).toLong.max(1L),
-      armor = (22.0 * base * f.armorFactor).toLong,
+      armor = ((22.0 + ArmorBonus) * base * f.armorFactor).toLong,
       // Защита — процентное снижение урона, третий слой поверх брони и HP.
       // Растёт линейно по уровню, как и пробитие героя, — поэтому доля
       // срезанного держится ровной всю игру (см. BattleState.pierce).
-      defence = (5.0 * base * f.defenceFactor).toLong,
+      defence = ((5.0 + DefenceBonus) * base * f.defenceFactor).toLong,
       evasion = (16.25 * base * f.evasionFactor).toLong,
       accuracy = (16.5 * base * f.accuracyFactor).toLong,
       // Потолок энергии — из него моб платит за свои умения (см. MonsterEnergy).
