@@ -11,8 +11,10 @@ import pangea.model.item.{Gem, GemKind, Item}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.schedule.Scheduler
 import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -32,7 +34,8 @@ case class ElementalSearchState(
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
   scheduler:     Scheduler,
-  content:       SceneContent
+  content:       SceneContent,
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
   import ElementalSearchState._
 
@@ -82,16 +85,22 @@ case class ElementalSearchState(
           for {
             gem       <- randomGem
             persisted <- itemRepo.persist(hero.id, gem)
-            // Сумка переполнена — камень просто теряется, как и прочая добыча.
-            added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
+            // Камень тут такая же добыча, как из боя: сперва его ловит Ларец
+            // Азата, и только потом он идёт в сумку. Сумка переполнена — камень
+            // теряется.
+            intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
             // Осмотр идёт долго и без участия игрока, поэтому каждый камень
             // сопровождаем остатком мест: сумка молча переполняется, и находки
             // начинают пропадать — лучше увидеть это сразу.
             slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
-            lost       = if (added) "" else "\n" + content.text("common.inventoryFull")
+            tail       = intake match {
+                           case Intake.ToArtifact(kind, free) =>
+                             "\n" + ArtifactIntake.line(content, persisted, kind, free)
+                           case Intake.ToInventory => "\n" + slots
+                           case Intake.Refused     => "\n" + content.text("common.inventoryFull") + "\n" + slots
+                         }
             _         <- renderer.show(user, Screen(
-                           content.format("elementalSearch.found", "gem" -> gem.displayTitle) +
-                             lost + "\n" + slots, Nil))
+                           content.format("elementalSearch.found", "gem" -> gem.displayTitle) + tail, Nil))
             left       = s.triesLeft - 1
             out <- if (left <= 0)
                      heroDao.writeSceneData(user.userId, Json.Null) *>
