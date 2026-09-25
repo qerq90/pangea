@@ -215,7 +215,7 @@ object StatesMap {
           Squad -> SquadState(heroDao, content),
           ElementalLair -> ElementalLairState(heroDao, content),
           RottenJoe     -> RottenJoeState(heroDao, content),
-          ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content),
+          ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
           TradeHouse -> TradeHouseState(heroDao, bankRepo, parcels, content),

@@ -20,7 +20,11 @@ object ElementalSearchStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
-  private def makeState(heroLvl: Long = 15L, bagFull: Boolean = false) = // BossLvL = 2
+  private def makeState(
+    heroLvl:   Long = 15L,
+    bagFull:   Boolean = false,
+    artifacts: Option[pangea.test.TestArtifactRepository] = None
+  ) = // BossLvL = 2
     for {
       dao       <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(lvl = heroLvl))
       invRepo    = if (bagFull) TestInventoryRepository.full else TestInventoryRepository.accepting
@@ -28,7 +32,8 @@ object ElementalSearchStateSpec extends ZIOSpecDefault {
       scheduler <- TestScheduler.make
       renderer  <- TestRenderer.make
       content   <- ZIO.attempt(SceneContent.load())
-    } yield (ElementalSearchState(dao, invRepo, itemRepo, scheduler, content), dao, invRepo, scheduler, renderer)
+    } yield (ElementalSearchState(dao, invRepo, itemRepo, scheduler, content, artifacts),
+             dao, invRepo, scheduler, renderer)
 
   private def sceneOf(dao: TestHeroDao) =
     dao.readSceneData(userId).map(_.flatMap(_.as[SearchScene].toOption))
@@ -84,6 +89,26 @@ object ElementalSearchStateSpec extends ZIOSpecDefault {
       } yield assertTrue(found.contains("Свободных слотов")) &&
               // сумка не переполнена — жалобы нет
               assertTrue(!found.contains("переполнена"))
+    },
+
+    test("найденный камень ловит Ларец Азата, а не сумка") {
+      import pangea.model.artifact.ArtifactKind
+      import pangea.test.TestArtifactRepository
+      val casket = TestArtifactRepository.of(
+        casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
+      for {
+        t <- makeState(artifacts = Some(casket))
+        (state, _, invRepo, _, renderer) = t
+        _       <- TestRandom.feedLongs(1L, 0L)
+        _       <- state.enter(testUser, renderer)
+        _       <- TestRandom.feedInts(0, 50)
+        _       <- TestRandom.feedLongs(0L)
+        _       <- state.action(testUser, tap("ElementalFind"), renderer)
+        screens <- renderer.sentScreens
+        found    = screens.map(_.text).find(_.contains("Вы нашли")).getOrElse("")
+      } yield assertTrue(casket.snapshot.of(ArtifactKind.Casket).items.data.size == 1) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(found.contains("Ларец Азата") && found.contains("Свободно мест"))
     },
 
     test("сумка переполнена — говорим об этом прямо в строке находки") {
