@@ -16,6 +16,7 @@ case class MarketSquareState(content: SceneContent) extends State {
       "MerchantRichelieu"  -> Target.Goto(StateType.Merchant),
       "Gustavo"            -> Target.Goto(StateType.Gustavo),
       "Construction"       -> Target.Goto(StateType.Construction),
+      "TradeHouse"         -> Target.Goto(StateType.TradeHouse),
       "BackToMarketSquare" -> Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.MarketSquare) },
       "BackToCity"         -> Target.Goto(StateType.GlobalMap)
     ),
@@ -29,7 +30,8 @@ case class MarketSquareState(content: SceneContent) extends State {
     val choices = List(
       byId("StreetMerchants").copy(row = Some(0)),
       byId("Construction").copy(row = Some(0)),
-      byId("BackToCity").copy(color = ChoiceColor.Negative, row = Some(1))
+      byId("TradeHouse").copy(row = Some(1)),
+      byId("BackToCity").copy(color = ChoiceColor.Negative, row = Some(2))
     )
     renderer.show(user, Screen(content.text("marketSquare.enter.text"), choices))
   }

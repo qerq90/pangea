@@ -12,7 +12,7 @@ import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.{Task, ZIO}
 
-/** Торговый дом возле Храма: банкир Рахадим продаёт ячейки хранилища, меняет
+/** Торговый дом на Торговой площади: банкир Рахадим продаёт ячейки хранилища, меняет
  *  дублоны (пока нет) и держит аукцион (пока нет). Каждая ячейка даёт место под
  *  вещи и серебро, первая стоит [[BankVault.FirstCellPrice]], каждая следующая —
  *  на [[BankVault.CellPriceStep]] дороже предыдущей. */
@@ -37,7 +37,7 @@ case class TradeHouseState(
       "Auction"         -> Target.Goto(StateType.Auction),
       "FetShop"         -> Target.Goto(StateType.FetShop),
       "Mail"            -> Target.Goto(StateType.Mail),
-      "LeaveTradeHouse" -> Target.Goto(StateType.CityCenter)
+      "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare)
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
   )
