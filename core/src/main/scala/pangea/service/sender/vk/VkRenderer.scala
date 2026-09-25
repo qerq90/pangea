@@ -30,7 +30,7 @@ class VkRenderer(api: Api) extends Renderer {
               .toList
               .sortBy(_._1)
               .map { case (_, items) => items.sortBy(_._2).map(_._1) }
-            grouped.foldLeft(kbInit) { (acc, rowChoices) =>
+            VkRenderer.fit(grouped).foldLeft(kbInit) { (acc, rowChoices) =>
               rowChoices.foldLeft(acc.addRow()) { (k, choice) => k.addButton(toButton(choice)) }
             }
           }
@@ -50,6 +50,21 @@ class VkRenderer(api: Api) extends Renderer {
 
 object VkRenderer {
   def apply(api: Api): VkRenderer = new VkRenderer(api)
+
+  /** Сколько рядов и кнопок в ряду принимает клавиатура ВК. Сообщение с более
+    * чем [[MaxRows]] рядами ВК отклоняет целиком, и игрок вместо экрана видит
+    * «Произошла ошибка». */
+  val MaxRows: Int           = 10
+  val MaxButtonsPerRow: Int  = 5
+
+  /** Ужимает раскладку под лимит ВК: если рядов больше, чем принимает
+    * клавиатура, кнопки перекладываются плотно — по пять в ряд. Это страховка:
+    * сцены и так считают ряды сами, но одна забытая кнопка не должна ронять
+    * экран целиком. Совсем не влезшее (свыше пятидесяти кнопок) отсекается —
+    * лучше показать экран без хвоста, чем не показать ничего. */
+  def fit(rows: List[List[Choice]]): List[List[Choice]] =
+    if (rows.sizeIs <= MaxRows) rows
+    else rows.flatten.grouped(MaxButtonsPerRow).toList.take(MaxRows)
 
   def toButtonColor(color: ChoiceColor): ButtonColor = color match {
     case ChoiceColor.Negative  => ButtonColor.Negative
