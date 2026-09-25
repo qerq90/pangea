@@ -46,8 +46,8 @@ object MercenariesStateSpec extends ZIOSpecDefault {
         card     = screens.last
       } yield assertTrue(list.choices.filter(_.id == "MercCard").flatMap(_.data.get("kind")) == List("Human", "Murloc", "Gnome")) &&
               assertTrue(list.choices.exists(_.id == "BackFromMercs")) &&
-              assertTrue(card.text.contains("«Плюх. Плюх тут кружки мыл")) &&
-              assertTrue(card.text.contains("сегодня я возьму с тебя 2 флаконов!")) &&
+              assertTrue(card.text.contains("«Плюх. Плюх — береговик")) &&
+              assertTrue(card.text.contains("флаконов: 2.")) &&
               assertTrue(card.choices.exists(c => c.id == "MercHire" && c.data.get("kind").contains("Murloc")))
     },
 
