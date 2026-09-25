@@ -12,13 +12,18 @@ object SquadSpec extends ZIOSpecDefault {
 
   override def spec = suite("Squad")(
 
-    test("статы союзника — ставка на уровень героя; отваров за найм — уровень на пять, но не меньше одного") {
-      val h = AllyKind.Human.stats(lvl)
-      val g = AllyKind.Gnome.stats(lvl)
-      assertTrue(h.hp == 1250L && h.armor == 1500L && h.atk == 200L && h.energy == 1000L) &&
-      assertTrue(h.accuracy == 1000L && h.defence == 400L && h.evasion == 1000L) &&
-      assertTrue(g.hp == 800L && g.armor == 1750L && g.defence == 500L && g.evasion == 600L) &&
-      assertTrue(AllyKind.Human.energyRegen(lvl) == 70L) &&
+    test("статы союзника — ставка на уровень героя, но не выше своего потолка") {
+      val h = AllyKind.Human.stats(lvl)    // потолок 5
+      val g = AllyKind.Gnome.stats(lvl)    // потолок 7
+      val m = AllyKind.Murloc.stats(lvl)   // потолок 10 — растёт до конца
+      assertTrue(AllyKind.Human.maxLvl == 5L && AllyKind.Gnome.maxLvl == 7L && AllyKind.Murloc.maxLvl == 10L) &&
+      assertTrue(h.hp == 625L && h.armor == 750L && h.atk == 100L && h.energy == 500L) &&
+      assertTrue(h.accuracy == 500L && h.defence == 200L && h.evasion == 500L) &&
+      assertTrue(g.hp == 560L && g.armor == 1225L && g.defence == 350L && g.evasion == 420L) &&
+      assertTrue(m.hp == 1000L && m.armor == 1000L && m.atk == 300L) &&
+      // выше потолка сильнее не становятся, ниже — растут как раньше
+      assertTrue(AllyKind.Human.stats(50L) == h && AllyKind.Human.stats(3L).hp == 375L) &&
+      assertTrue(AllyKind.Human.energyRegen(lvl) == 35L && AllyKind.Murloc.energyRegen(lvl) == 70L) &&
       assertTrue(AllyKind.brewsFor(1L) == 1L && AllyKind.brewsFor(4L) == 1L && AllyKind.brewsFor(5L) == 1L &&
                  AllyKind.brewsFor(10L) == 2L && AllyKind.brewsFor(23L) == 4L) &&
       assertTrue(AllyKind.Human.element == pangea.model.battle.Element.Fire &&
@@ -31,7 +36,7 @@ object SquadSpec extends ZIOSpecDefault {
       val s2 = s1.hire(AllyKind.Murloc, lvl, 0L)
       val s3 = s2.hire(AllyKind.Gnome, lvl, 0L)
       val s4 = s3.hire(AllyKind.Human, lvl, 0L)
-      assertTrue(s1.allyAt(2).exists(a => a.kind == AllyKind.Human && a.hp == 1250L && a.armor == 1500L && a.energy == 1000L)) &&
+      assertTrue(s1.allyAt(2).exists(a => a.kind == AllyKind.Human && a.hp == 625L && a.armor == 750L && a.energy == 500L)) &&
       assertTrue(s2.allyAt(3).exists(_.kind == AllyKind.Murloc) && s3.allyAt(4).exists(_.kind == AllyKind.Gnome)) &&
       assertTrue(s4 == s3 && s3.freePosition.isEmpty) &&
       assertTrue(s3.inOrder.map(_.position) == List(2, 3, 4))
@@ -73,8 +78,8 @@ object SquadSpec extends ZIOSpecDefault {
       val s = Squad.empty.hire(AllyKind.Human, lvl, 0L).update(AllyKind.Human)(_.copy(hp = 1L, armor = 0L, energy = 5L))
       val r = s.restored(lvl)
       val c = Ally(AllyKind.Human, 2, 99999L, -5L, 99999L).clamped(lvl)
-      assertTrue(r.allyAt(2).exists(a => a.hp == 1250L && a.armor == 1500L && a.energy == 1000L)) &&
-      assertTrue(c.hp == 1250L && c.armor == 0L && c.energy == 1000L)
+      assertTrue(r.allyAt(2).exists(a => a.hp == 625L && a.armor == 750L && a.energy == 500L)) &&
+      assertTrue(c.hp == 625L && c.armor == 0L && c.energy == 500L)
     },
 
     test("найм на 12 часов: отработавший уходит из отряда и садится за стол через 12 часов; реплики о свитке ему не положено") {

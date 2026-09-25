@@ -21,7 +21,10 @@ final case class BattleAlly(kind: AllyKind, position: Int, hp: Long, armor: Long
 object BattleAlly {
   def of(a: Ally, lvl: Long): BattleAlly = {
     val c = a.clamped(lvl)
-    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.kind.stats(lvl), lvl)
+    // В бою наёмник живёт по своему уровню, а не по геройскому: по нему и
+    // статы, и цены умений, и восстановление энергии (см. AllyKind.maxLvl).
+    val own = a.kind.effectiveLvl(lvl)
+    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.kind.stats(lvl), own)
   }
 
   implicit val encoder: Encoder[BattleAlly] = deriveEncoder

@@ -8,8 +8,6 @@ import pangea.model.squad.{AllyKind, AllyRates, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.repository.bank.BankRepository
-import pangea.service.purse.Purse
 import pangea.service.state.{SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -23,13 +21,9 @@ import java.util.concurrent.TimeUnit
 case class MercenariesState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
-  content:       SceneContent,
-  bank:          Option[BankRepository] = None
+  content:       SceneContent
 ) extends State {
   import MercenariesState._
-
-  /** Кошель: своё серебро, а следом — то, что лежит в ячейке Торгового дома. */
-  private val purse = Purse(heroDao, bank)
 
   private val branch = new Branch(
     routes = Map(
@@ -73,7 +67,7 @@ case class MercenariesState(
     getHero(user).flatMap { hero =>
       val story = content.text(s"mercenaries.${key(kind)}.story")
       val price = kind match {
-        case AllyKind.Human => content.format("mercenaries.human.price", "cost" -> silverCost(hero).toString)
+        case AllyKind.Human => content.format("mercenaries.human.price", "cost" -> AllyRates.HumanDoubloons.toString)
         case k              => content.format(s"mercenaries.${key(k)}.price", "n" -> AllyKind.brewsFor(hero.lvl).toString)
       }
       renderer.show(user, Screen(story + "\n\n" + price, List(
@@ -103,12 +97,13 @@ case class MercenariesState(
   private def pay(user: User, hero: Hero, kind: AllyKind): Task[Option[String]] =
     kind match {
       case AllyKind.Human =>
-        val cost = silverCost(hero)
-        purse.wallet(hero).flatMap { wallet =>
-          if (!wallet.canAfford(cost))
-            ZIO.succeed(Some(content.format("mercenaries.notEnoughSilver", "cost" -> cost.toString, "silver" -> wallet.total.toString)))
-          else purse.charge(user.userId, hero, cost).as(None)
-        }
+        // Йорген берёт дублонами и всегда одну и ту же цену: в ячейке их не
+        // держат, так что кошель тут ни при чём.
+        val cost = AllyRates.HumanDoubloons
+        if (hero.doubloons < cost)
+          ZIO.succeed(Some(content.format("mercenaries.notEnoughDoubloons",
+            "cost" -> cost.toString, "have" -> hero.doubloons.toString)))
+        else heroDao.updateDoubloons(user.userId, hero.doubloons - cost).as(None)
       case k =>
         val brew = brewFor(k)
         val n    = AllyKind.brewsFor(hero.lvl).toInt
@@ -149,7 +144,6 @@ object MercenariesState {
   def available(squad: Squad, nowMs: Long): List[AllyKind] =
     AllyKind.values.filterNot(k => squad.has(k) || squad.isAway(k, nowMs)).toList
 
-  def silverCost(hero: Hero): Long = AllyRates.HumanSilverPerLvl * hero.lvl
 
   /** Чем берут Плюх и Брамбл. */
   def brewFor(kind: AllyKind): BrewKind = kind match {

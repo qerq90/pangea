@@ -40,15 +40,18 @@ object MonsterGeneratorSpec extends ZIOSpecDefault {
       assertTrue(legendaryAvg > commonAvg * 2.0)
     },
 
-    test("статы считаются по базе 10/40/22/5 и расовым множителям") {
+    test("статы считаются по базе 10/40/23/7 и расовым множителям") {
       // base = уровень × rarity.factor × 1.1; на 10 уровне у обычного = 8.8.
+      // К броне и защите прибавлено +1 и +2 ДО умножения на базу и расу.
       val (m, _) = MonsterGenerator.generateOfRace(10, Race.Murloc, Rng(7L))
       val base   = 10.0 * m.rarity.factor * 1.1
       val f      = MonsterRaceFactor.of(Race.Murloc)
       assertTrue(m.fightStats.atk     == (10.0 * base * f.attackFactor).toLong) &&
       assertTrue(m.fightStats.hp      == (40.0 * base * f.hpFactor).toLong) &&
-      assertTrue(m.fightStats.armor   == (22.0 * base * f.armorFactor).toLong) &&
-      assertTrue(m.fightStats.defence == (5.0  * base * f.defenceFactor).toLong)
+      assertTrue(m.fightStats.armor   == (23.0 * base * f.armorFactor).toLong) &&
+      assertTrue(m.fightStats.defence == (7.0  * base * f.defenceFactor).toLong) &&
+      // прибавка именно до умножений: на бумаге она растёт вместе с уровнем
+      assertTrue(m.fightStats.defence > (5.0 * base * f.defenceFactor).toLong)
     },
 
     test("защита есть у всех рас и идёт по своему ряду, а не по броневому") {
