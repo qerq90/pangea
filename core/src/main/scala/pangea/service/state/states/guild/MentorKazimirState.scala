@@ -293,18 +293,22 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
     val buttons = MerchantState.JunkRarityGroups.zipWithIndex.map { case (g, i) =>
       val on = g.rarities.forall(r.burns)
       Choice("BurnRarity", content.format("merchant.junk.rarity", "emoji" -> g.emoji, "state" -> state(on)),
-        color = if (on) ChoiceColor.Positive else ChoiceColor.Negative, data = Map("g" -> g.id), row = Some(i))
+        color = if (on) ChoiceColor.Positive else ChoiceColor.Negative, data = Map("g" -> g.id),
+        row = Some(i / MerchantState.JunkRaritiesPerRow))
     }
+    val rarityRows = (MerchantState.JunkRarityGroups.size + MerchantState.JunkRaritiesPerRow - 1) /
+                       MerchantState.JunkRaritiesPerRow
     // Рунные камни редкости не имеют — у каждого размера свой переключатель,
     // и по умолчанию оба выключены.
     val stoneButtons = RuneStoneSize.values.toList.zipWithIndex.map { case (size, i) =>
       val on = r.burnsStones(size)
       Choice("BurnStones", content.format("kazimir.deepen.settingsStones", "name" -> size.prefix, "state" -> state(on)),
         color = if (on) ChoiceColor.Positive else ChoiceColor.Negative,
-        data = Map("s" -> size.entryName), row = Some(buttons.size + i))
+        data = Map("s" -> size.entryName), row = Some(rarityRows + i))
     }
     val all = buttons ++ stoneButtons
-    Screen(content.text("kazimir.deepen.settings"), all :+ content.choice("Deepen", "kazimir.back").copy(row = Some(all.size)))
+    Screen(content.text("kazimir.deepen.settings"),
+      all :+ content.choice("Deepen", "kazimir.back").copy(row = Some(rarityRows + stoneButtons.size)))
   }
 
   private def toggleBurnStones(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

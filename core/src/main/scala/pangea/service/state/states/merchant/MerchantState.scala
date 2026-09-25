@@ -298,6 +298,10 @@ case class MerchantState(
     def state(on: Boolean) = content.text(if (on) "merchant.junk.on" else "merchant.junk.off")
     def color(on: Boolean) = if (on) ChoiceColor.Positive else ChoiceColor.Negative
 
+    // Каждая редкость своим рядом не помещается: шесть редкостей, четыре
+    // переключателя и «Назад» — это одиннадцать рядов, а ВК держит десять, и
+    // такое сообщение он просто отклоняет. Подписи у редкостей короткие, так
+    // что кладём их по трое в ряд.
     val rarityButtons = JunkRarityGroups.zipWithIndex.map { case (g, i) =>
       val on = s.groupOn(g)
       Choice(
@@ -305,9 +309,10 @@ case class MerchantState(
         label = content.format("merchant.junk.rarity", "emoji" -> g.emoji, "state" -> state(on)),
         color = color(on),
         data  = Map("g" -> g.id),
-        row   = Some(i)
+        row   = Some(i / JunkRaritiesPerRow)
       )
     }
+    val rarityRows = (JunkRarityGroups.size + JunkRaritiesPerRow - 1) / JunkRaritiesPerRow
     // Переключатели, не привязанные к редкости: защита способностей и трофеи.
     val flags = List(
       ("JunkPassives", "merchant.junk.passives", s.passives),
@@ -317,13 +322,13 @@ case class MerchantState(
     )
     val flagButtons = flags.zipWithIndex.map { case ((id, key, on), i) =>
       Choice(id, content.format(key, "state" -> state(on)), color = color(on),
-        row = Some(JunkRarityGroups.size + i))
+        row = Some(rarityRows + i))
     }
     Screen(
       content.text("merchant.junk.header"),
       rarityButtons ++ flagButtons :+
         content.choice("BackFromJunk", "merchant.junk.back")
-          .copy(row = Some(JunkRarityGroups.size + flags.size))
+          .copy(row = Some(rarityRows + flags.size))
     )
   }
 
@@ -538,6 +543,9 @@ object MerchantState {
   final case class JunkRarityGroup(id: String, rarities: List[Rarity]) {
     def emoji: String = rarities.head.emoji
   }
+
+  /** Сколько переключателей редкости помещается в один ряд клавиатуры. */
+  val JunkRaritiesPerRow: Int = 3
 
   val JunkRarityGroups: List[JunkRarityGroup] = List(
     JunkRarityGroup("Gray",   List(Rarity.Gray)),

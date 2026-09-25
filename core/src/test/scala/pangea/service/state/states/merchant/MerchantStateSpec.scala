@@ -218,6 +218,20 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(btns.filter(_.id == "JunkPassives").forall(_.label.endsWith("Вкл")))
     },
 
+    test("экран настройки влезает в клавиатуру ВК: не больше десяти рядов и пяти кнопок в ряду") {
+      for {
+        t <- makeState(richHero)
+        (state, _, _, renderer) = t
+        _       <- state.action(testUser, tap("JunkSettings"), renderer)
+        screens <- renderer.sentScreens
+        rows     = screens.last.choices.groupBy(_.row.getOrElse(Int.MaxValue))
+      } yield // каждой редкости свой ряд было бы одиннадцать рядов — ВК такое отклоняет
+              assertTrue(rows.size <= pangea.service.sender.vk.VkRenderer.MaxRows) &&
+              assertTrue(rows.values.forall(_.size <= pangea.service.sender.vk.VkRenderer.MaxButtonsPerRow)) &&
+              // ряды идут подряд, без дыр
+              assertTrue(rows.keys.toList.sorted == (0 until rows.size).toList)
+    },
+
     test("нажатие на переключатель редкости сохраняется в merchant_data и переключает обратно") {
       for {
         t <- makeState(richHero)
