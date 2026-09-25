@@ -81,7 +81,7 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
       assertTrue(rewards.forall(!_.materials.exists(_.material.exists(_.isHerb)))) &&   // без знания трав нет
         assertTrue(with_ > known.size * 10 / 100 && with_ < known.size * 20 / 100) &&
         assertTrue(herbs.forall(h => h.isEmpty || h.size == zone.tier || h.size == 1 + zone.tier)) &&
-        assertTrue(herbs.flatten.flatMap(_.material).toSet == MaterialKind.herbsOfRank(2).toSet) &&
+        assertTrue(herbs.flatten.flatMap(_.material).toSet == MaterialKind.commonHerbs(2).toSet) &&
         // снаряжение и серебро от знания не меняются
         assertTrue(known.take(500).map(r => (r.silver, r.items.map(_.name))) == rewards.map(r => (r.silver, r.items.map(_.name))))
     },

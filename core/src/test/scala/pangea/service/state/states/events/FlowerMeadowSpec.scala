@@ -122,13 +122,29 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
         t <- meadow(hero(), LoreData.empty.learn(Knowledge.FlowersRank1, alone = false))
         (state, dao, inv, _, r) = t
         _   <- dao.writeSceneData(userId, MeadowScene(left = 5, nextAt = 0L).asJson)
-        _   <- TestRandom.feedInts(50, 2, 0) *> TestRandom.feedLongs(120000L)   // без волка; ранг 2, вид 0; знаний 1 ранга хватает → без броска догадки
+        _   <- TestRandom.feedInts(50, 2, 50, 0) *> TestRandom.feedLongs(120000L)   // без волка; ранг 2, не роза, вид 0; знаний 1 ранга хватает → без броска догадки
         _   <- state.action(testUser, tap("FlowerFind"), r)
         _   <- dao.writeLoreData(userId, LoreData.empty.learn(Knowledge.FlowersRank1, alone = false).learn(Knowledge.FlowersRank2, alone = false).asJson)
-        _   <- TestRandom.feedInts(50, 2, 0) *> TestRandom.feedLongs(120000L)
+        _   <- TestRandom.feedInts(50, 2, 50, 0) *> TestRandom.feedLongs(120000L)
         _   <- state.action(testUser, tap("FlowerFind"), r)
         names = inv.snapshot.map(_.name)
-      } yield assertTrue(names == List("Странный цветок", MaterialKind.herbsOfRank(2)(0).displayName))
+      } yield assertTrue(names == List("Странный цветок", MaterialKind.commonHerbs(2)(0).displayName))
+    },
+
+    test("Нераскрытая роза — отдельным броском внутри редкой находки, в общий список не попадает") {
+      for {
+        t <- meadow(hero(), LoreData.empty
+               .learn(Knowledge.FlowersRank1, alone = false).learn(Knowledge.FlowersRank2, alone = false))
+        (state, dao, inv, _, r) = t
+        _   <- dao.writeSceneData(userId, MeadowScene(left = 5, nextAt = 0L).asJson)
+        // без волка; ранг 2; бросок на розу удался; вид из общего списка не берётся
+        _   <- TestRandom.feedInts(50, 2, 1, 0) *> TestRandom.feedLongs(120000L)
+        _   <- state.action(testUser, tap("FlowerFind"), r)
+        names = inv.snapshot.map(_.name)
+      } yield assertTrue(names == List(MaterialKind.UnopenedRose.displayName)) &&
+              // в общем списке редких трав розы нет — её ищут только этим броском
+              assertTrue(!MaterialKind.commonHerbs(2).contains(MaterialKind.UnopenedRose)) &&
+              assertTrue(MaterialKind.UnopenedRose.herbRank == 2 && MaterialKind.UnopenedRose.herbModifier == 30)
     },
 
     test("возврат из меню персонажа: созревший цветок выдаётся сразу, несозревший — таймер заново") {

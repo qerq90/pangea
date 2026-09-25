@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, TrophyKind}
+import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, RoseKind, TrophyKind}
 import pangea.model.monster.MiniBoss
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 
@@ -195,6 +195,19 @@ object CubeCraft {
     }
   }
 
+  // Нераскрытая роза + пыль самоцвета, в котором дремала стихия → раскрывшаяся
+  // роза этой стихии. Пыль аметиста и черепа розу не берут: стихии в них нет,
+  // и цветок остаётся закрытым — это часть загадки, а не дырка в рецептах.
+  private object RoseBloom extends Recipe {
+    val size = 2
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
+      for {
+        rose <- pool.find(_.material.contains(MaterialKind.UnopenedRose))
+        dust <- pool.find(i => i != rose && i.material.flatMap(RoseKind.fromDust).isDefined)
+        kind <- dust.material.flatMap(RoseKind.fromDust)
+      } yield (List(rose, dust), RoseKind.item(kind), rng)
+  }
+
   // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты делят
   // травы между собой, поэтому жадный «первый подходящий» сварил бы три
   // костоправных из трав, сложенных под три разных отвара. Вместо этого по
@@ -248,6 +261,7 @@ object CubeCraft {
     SetSalvage,                                            // 3
     HerbBrew,                                              // 3
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
+    RoseBloom,                                             // 2
     SetInfusion                                            // 2
   )
 

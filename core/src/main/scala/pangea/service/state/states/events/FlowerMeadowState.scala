@@ -105,11 +105,16 @@ case class FlowerMeadowState(
             wolfRoll <- Random.nextIntBetween(1, 101)
             wolf      = wolfRoll <= WolfChancePct
             rankRoll <- Random.nextIntBetween(1, 101)
-            rank      = if (rankRoll <= HerbLore.RareHerbPct) 2 else 1
-            pool      = MaterialKind.herbsOfRank(rank)
+            rare      = rankRoll <= HerbLore.RareHerbPct
+            // Роза реже самих редких: ещё один бросок внутри редкой находки,
+            // а не лишняя строка в общем списке.
+            roseRoll <- if (rare) Random.nextIntBetween(1, 101) else ZIO.succeed(101)
+            rose      = rare && roseRoll <= HerbLore.RosePct
+            pool      = MaterialKind.commonHerbs(if (rare) 2 else 1)
             idx      <- Random.nextIntBounded(pool.size)
             lore     <- HerbLore.readLore(heroDao, user.userId)
-            kind      = HerbLore.recognised(lore, pool(idx))
+            found     = if (rose) MaterialKind.UnopenedRose else pool(idx)
+            kind      = HerbLore.recognised(lore, found)
             item      = MaterialGenerator.item(kind)
             persisted <- itemRepo.persist(hero.id, item)
             intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)

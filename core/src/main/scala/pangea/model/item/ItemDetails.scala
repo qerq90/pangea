@@ -95,6 +95,12 @@ object ItemDetails {
     def withCharges(n: Int): Divine = copy(charges = n)
   }
 
+  /** Раскрывшаяся роза (см. [[RoseKind]]): носится в доп. слоте и бьёт по всему
+   *  полю, пока не кончатся раскрытия. */
+  case class Rose(kind: RoseKind, charges: Int, maxCharges: Int) extends Charged {
+    def withCharges(n: Int): Rose = copy(charges = n)
+  }
+
   // --- Покодечная сериализация с диспатчем по "type" ---
 
   private val weaponEnc: Encoder[Weapon]           = deriveEncoder
@@ -128,6 +134,8 @@ object ItemDetails {
   private val brewDec:   Decoder[Brew]             = deriveDecoder
   private val divineEnc:  Encoder[Divine]            = deriveEncoder
   private val divineDec:  Decoder[Divine]            = deriveDecoder
+  private val roseEnc:    Encoder[Rose]              = deriveEncoder
+  private val roseDec:    Decoder[Rose]              = deriveDecoder
   private val runeEnc:    Encoder[RuneStone]         = deriveEncoder
   private val runeDec:    Decoder[RuneStone]         = deriveDecoder
 
@@ -148,6 +156,7 @@ object ItemDetails {
     case q: Quest       => tagged("Quest", questEnc(q))
     case b: Brew        => tagged("Brew", brewEnc(b))
     case d: Divine      => tagged("Divine", divineEnc(d))
+    case r: Rose        => tagged("Rose", roseEnc(r))
     case r: RuneStone   => tagged("RuneStone", runeEnc(r))
   }
 
@@ -166,6 +175,7 @@ object ItemDetails {
       case "Quest"       => questDec(c)
       case "Brew"        => brewDec(c)
       case "Divine"      => divineDec(c)
+      case "Rose"        => roseDec(c)
       case "RuneStone"   => runeDec(c)
       case other         => Left(DecodingFailure(s"Unknown ItemDetails type: $other", c.history))
     }
