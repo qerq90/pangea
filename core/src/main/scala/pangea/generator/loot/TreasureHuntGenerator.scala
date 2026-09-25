@@ -63,7 +63,7 @@ object TreasureHuntGenerator {
       else                   (0L, r4)                              // 20% — без дублонов
     val (ingredients, r6) = rollHandful(IngredientChancePct, bossIngredients, zone, r5)
     val (herbs, r7)       =
-      if (knowsRareHerbs) rollHandful(RareHerbChancePct, MaterialKind.commonHerbs(2).toList, zone, r6)
+      if (knowsRareHerbs) rollHandful(RareHerbChancePct, MaterialKind.herbsOfRank(2).toList, zone, r6)
       else (Nil, r6)
     (Reward(items, gems, silver, doubloons, ingredients ++ herbs), r7)
   }
