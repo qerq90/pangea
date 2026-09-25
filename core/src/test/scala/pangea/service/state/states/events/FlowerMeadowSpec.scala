@@ -131,6 +131,22 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
       } yield assertTrue(names == List("Странный цветок", MaterialKind.herbsOfRank(2)(0).displayName))
     },
 
+    test("Нераскрытая роза — обычная трава второго ранга: седьмая в общем списке редких") {
+      val rare = MaterialKind.herbsOfRank(2)
+      for {
+        t <- meadow(hero(), LoreData.empty
+               .learn(Knowledge.FlowersRank1, alone = false).learn(Knowledge.FlowersRank2, alone = false))
+        (state, dao, inv, _, r) = t
+        _   <- dao.writeSceneData(userId, MeadowScene(left = 5, nextAt = 0L).asJson)
+        // без волка; ранг 2; вид — последний в списке, это роза
+        _   <- TestRandom.feedInts(50, 2, rare.size - 1) *> TestRandom.feedLongs(120000L)
+        _   <- state.action(testUser, tap("FlowerFind"), r)
+        names = inv.snapshot.map(_.name)
+      } yield assertTrue(names == List(MaterialKind.UnopenedRose.displayName)) &&
+              assertTrue(rare.size == 7 && rare.contains(MaterialKind.UnopenedRose)) &&
+              assertTrue(MaterialKind.UnopenedRose.herbRank == 2 && MaterialKind.UnopenedRose.herbModifier == 30)
+    },
+
     test("возврат из меню персонажа: созревший цветок выдаётся сразу, несозревший — таймер заново") {
       for {
         t <- meadow(hero(), LoreData.empty.learn(Knowledge.FlowersRank1, alone = false))

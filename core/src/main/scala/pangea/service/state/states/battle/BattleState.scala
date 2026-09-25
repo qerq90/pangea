@@ -62,6 +62,7 @@ case class BattleState(
       "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r)(flaskTurn)),
       "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
       "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r)(divineTurn)),
+      "UseRose"      -> Target.Run((u, _, r) => resolve(u, r)(roseTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
@@ -3276,14 +3277,52 @@ case class BattleState(
         ZIO.succeed(TurnResult(heroAfter, hasted.copy(divineUsedThisRound = true), log, outcome, endsRound = false))
     }
 
+  /** Раскрытие розы: тот же удар по всему полю, что у божественного оружия, и
+    * по тем же правилам (раз в раунд, раунд не завершает, «Быстрые руки» его не
+    * ускоряют). Разница одна: силу роза берёт от уровня хозяина, а не от своего
+    * — своего у цветка нет. Последнее раскрытие осыпает её лепестками. */
+  private def roseTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    hero.equipment.additionalWeapon.rose match {
+      case None                                  => cont(hero, battle, content.text("battle.rose.none"))
+      case Some(_) if battle.divineUsedThisRound => cont(hero, battle, content.text("battle.rose.alreadyUsed"))
+      case Some(rose)                            =>
+        val item = hero.equipment.additionalWeapon
+        val kind = rose.kind
+        val blow = DivineRates.DamagePerLvl * hero.lvl
+        val (swept, _, foes) = sweep(battle, blow, kind.element, kind.poisons)
+
+        // Заряд потрачен; последнее раскрытие осыпает цветок — слот пустеет.
+        val spent     = rose.spent
+        val crumbles  = spent.charges <= 0
+        val slot      = if (crumbles) Item.NoItem else item.copy(details = spent)
+        val heroAfter0 = hero.copy(equipment = hero.equipment.copy(additionalWeapon = slot))
+
+        val line = content.format(s"battle.rose.${kind.entryName}",
+          "damage" -> blow.toString, "foes" -> foes.toString)
+        val log  = Vector(line) ++
+          (if (crumbles) Vector(content.format("battle.rose.withered", "name" -> kind.itemName)) else Vector.empty)
+
+        val outcome   = if (swept.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
+        val heroAfter = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) regainEnergy(heroAfter0, nowMs) else heroAfter0
+        ZIO.succeed(TurnResult(heroAfter, swept.copy(divineUsedThisRound = true), log, outcome, endsRound = false))
+    }
+
   /** Проход божественного оружия по всему полю: каждому врагу — удар, который
     * сперва сносит броню и лишь остатком идёт в HP (защита его не режет,
     * сопротивление минибосса в силе), и прок стихии со стопроцентным шансом;
     * змеиный клинок вдобавок травит. Павшие уходят в добычу. Возвращает бой,
     * суммарный нанесённый урон и число задетых врагов. */
-  private def divineSweep(battle: SoloPveBattle, damage: Long, kind: DivineKind): (SoloPveBattle, Long, Int) = {
-    val element = kind.element
-    val poisons = kind == DivineKind.SnakeGodBlade
+  private def divineSweep(battle: SoloPveBattle, damage: Long, kind: DivineKind): (SoloPveBattle, Long, Int) =
+    sweep(battle, damage, kind.element, poisons = kind == DivineKind.SnakeGodBlade)
+
+  /** Сам проход: врагов бьёт одинаково, кто бы ни замахнулся — клинок или
+    * цветок. Отличаются только стихия удара и то, травит ли он. */
+  private def sweep(
+    battle:  SoloPveBattle,
+    damage:  Long,
+    element: Option[Element],
+    poisons: Boolean
+  ): (SoloPveBattle, Long, Int) = {
 
     def strike(b: SoloPveBattle): (SoloPveBattle, Long) = {
       val resist = element.map(e => b.boss.map(_.damageTakenMult(e)).getOrElse(1.0))
@@ -3461,6 +3500,14 @@ case class BattleState(
                 else pangea.engine.ChoiceColor.Positive,
         row = Some(3))
     }
+    // Роза в доп. слоте — своя кнопка на том же месте: раскрыть её можно раз
+    // в раунд, как и ударить божественным оружием.
+    val roseButton = hero.equipment.additionalWeapon.rose.map { _ =>
+      pangea.engine.Choice("UseRose", pangea.engine.Choice.fit(hero.equipment.additionalWeapon.name),
+        color = if (battle0.divineUsedThisRound) pangea.engine.ChoiceColor.Negative
+                else pangea.engine.ChoiceColor.Positive,
+        row = Some(3))
+    }
     // Бить некого (напротив пусто, соседей нет) — вместо атаки «Переместиться»
     // (поменяться местами с союзником), а без союзников — «Ждать».
     val attackButton =
@@ -3471,6 +3518,7 @@ case class BattleState(
       (List(attackButton, flaskButton)) ++
         beltButton.toList ++
         divineButton.toList ++
+        roseButton.toList ++
         List(
           pangea.engine.Choice(
             "Flee",
