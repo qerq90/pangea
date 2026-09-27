@@ -335,6 +335,8 @@ object SoloPveBattle {
     monsterCurrentArmor = monster.fightStats.armor,
     monsterMarked       = monster.marked,
     skillSlots          = hero.activeSkillSlots,
+    // Зеркальный настой выпит до боя — копии входят в бой вместе с героем.
+    effects             = BattleEffects(heroMirrors = hero.weaponDust.mirrors),
     monsterCurrentEnergy = monster.fightStats.energy,
     // Отряд встаёт по своим позициям без пустот (герой один — на месте 1); моб
     // обычной встречи всегда появляется на месте 1, где бы ни стоял герой.

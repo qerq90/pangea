@@ -15,7 +15,8 @@ import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItem
 import zio.ZIO
 import zio.test._
 
-/** Отвары из трав первого ранга: рецепты в кубе и что даёт каждый глоток. */
+/** Отвары: рецепты в кубе и что даёт каждый глоток. Из простых трав выходит
+  * по две склянки, из редких второго ранга — по одной. */
 object BrewSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
@@ -62,6 +63,69 @@ object BrewSpec extends ZIOSpecDefault {
         assertTrue(all.zip(BrewKind.values).forall { case (r, k) => r.chargesUsed == 1 && r.items.head.brew.contains(k) }) &&
         // рецепты не совпадают между собой
         assertTrue(BrewKind.values.map(_.recipe.toSet).distinct.size == BrewKind.values.size)
+    },
+
+    test("редкая трава в рецепте → одна склянка вместо двух") {
+      val rng = Rng(7L)
+      def brewFrom(kind: BrewKind) =
+        CubeCraft.craft(kind.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng)
+      val mix    = brewFrom(BrewKind.MushroomMix)
+      val call   = brewFrom(BrewKind.WolfCall)
+      val mirror = brewFrom(BrewKind.MirrorBrew)
+      val simple = brewFrom(BrewKind.BoneSetter)
+      assertTrue(List(mix, call, mirror).forall(r => r.chargesUsed == 1 && r.items.size == 1)) &&
+      assertTrue(mix.items.head.brew.contains(BrewKind.MushroomMix)) &&
+      assertTrue(call.items.head.brew.contains(BrewKind.WolfCall)) &&
+      assertTrue(mirror.items.head.brew.contains(BrewKind.MirrorBrew)) &&
+      assertTrue(simple.items.size == 2) &&
+      // все три — из трав второго ранга, и каждая трава своя
+      assertTrue(List(BrewKind.MushroomMix, BrewKind.WolfCall, BrewKind.MirrorBrew)
+        .flatMap(_.recipe.filter(_.herbRank == 2)) ==
+        List(MaterialKind.GlaiveMushroom, MaterialKind.WolfHops, MaterialKind.MirageFlower))
+    },
+
+    test("зеркальный настой выпивается и оставляет копии до ближайшего боя") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.MirrorBrew, 1L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(1L), r)
+        card  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("DrinkBrew"), r)
+        said  <- texts(r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(card.choices.map(_.id).contains("DrinkBrew")) &&
+              assertTrue(hero.weaponDust.mirrors == BrewRates.MirrorCopies) &&
+              assertTrue(said.contains("отражения") && inv.snapshot.isEmpty)
+    },
+
+    test("волчий зов держится час и ничего не прибавляет к характеристикам") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.WolfCall, 1L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(1L), r)
+        _     <- state.action(testUser, tap("DrinkBrew"), r)
+        said  <- texts(r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        now   <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+      } yield assertTrue(hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now)) &&
+              assertTrue(!hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now + BrewRates.WolfCallMs)) &&
+              assertTrue(hero.statBoosts.strFactor(now) == 1.0 && hero.statBoosts.agiFactor(now) == 1.0) &&
+              assertTrue(said.contains("запах идёт от вас") && inv.snapshot.isEmpty) &&
+              // снять его можно и досрочно — так он и сгорает на встрече
+              assertTrue(!hero.statBoosts.without(BrewRates.WolfCallBoost).hasActive(BrewRates.WolfCallBoost, now))
+    },
+
+    test("грибную смесь не пьют: у неё нет кнопки «Выпить»") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.MushroomMix, 1L)))
+        (state, _, inv, r) = t
+        _    <- state.action(testUser, selectItem(1L), r)
+        card <- r.sentScreens.map(_.last)
+        _    <- state.action(testUser, tap("DrinkBrew"), r)
+      } yield assertTrue(!card.choices.map(_.id).contains("DrinkBrew")) &&
+              assertTrue(card.text.contains("бросают под ноги")) &&
+              // склянка на месте: выпить её не вышло
+              assertTrue(inv.snapshot.size == 1)
     },
 
     test("травы под три разных отвара в одной куче → три разных отвара, а не три одинаковых") {

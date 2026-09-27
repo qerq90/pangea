@@ -3,7 +3,7 @@ package pangea.service.state.states
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import pangea.model.item.{BrewEffect, BrewRates}
-import pangea.model.stats.StatBoost
+import pangea.model.stats.{ParamsBuff, StatBoost}
 import pangea.model.trauma.Trauma
 import pangea.service.state.AzatData
 import io.circe.{Decoder, Encoder, jawn}
@@ -223,6 +223,19 @@ case class InventoryState(
             res  <- consume(user, item, hero, content.format("brew.rests",
                       "count" -> BrewRates.InstantRests.toString,
                       "total" -> (azat.instantRests + BrewRates.InstantRests).toString), renderer)
+          } yield res
+        // Зеркальный настой: копии ждут ближайшего боя там же, где пыль и
+        // смазка, — и сходят вместе с ними, когда бой кончится.
+        case Some(BrewEffect.Mirror(copies)) =>
+          heroDao.updateWeaponDust(user.userId, hero.weaponDust.copy(mirrors = copies)) *>
+            consume(user, item, hero, content.format("brew.mirrors", "count" -> copies.toString), renderer)
+        // Волчий зов: запах держится час, но сгорает на первой же встрече.
+        case Some(BrewEffect.WolfCall) =>
+          for {
+            now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            _   <- heroDao.updateStatBoosts(user.userId, hero.statBoosts.add(
+                     StatBoost(BrewRates.WolfCallBoost, ParamsBuff.zero, now + BrewRates.WolfCallMs), now))
+            res <- consume(user, item, hero, content.text("brew.wolfCall"), renderer)
           } yield res
         case Some(BrewEffect.Boost(name, buff, label)) =>
           for {

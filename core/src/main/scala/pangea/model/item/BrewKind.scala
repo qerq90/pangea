@@ -23,22 +23,36 @@ object BrewEffect {
   case object Inert extends BrewEffect
   /** Не пьётся — продаётся Трактирщику за `price` серебра (шнапс). */
   final case class Sellable(price: Long) extends BrewEffect
+  /** Бросок в бою: взрыв по всему полю, каждому врагу поровну. */
+  case object Bomb extends BrewEffect
+  /** Запах, на который приходит Белый волк: ближайшая встреча в лабиринте — он. */
+  case object WolfCall extends BrewEffect
+  /** Призрачные копии: первые `copies` ударов по герою уходят в них. */
+  final case class Mirror(copies: Int) extends BrewEffect
 }
 
-/** Отвары из трав первого ранга: три травы в кубе Азата → две порции. Лежит в
- *  инвентаре как [[ItemType.Brew]], складывается в стопку, пьётся с карточки
- *  предмета. Все числа — здесь ([[BrewRates]] — те, что читаются в конструкторах). */
+/** Отвары: три травы в кубе Азата → порции ([[portions]]). Из трав первого
+ *  ранга выходит по две, из редких второго — по одной: такие травы штучные, и
+ *  отвары у них под стать. Лежит в инвентаре как [[ItemType.Brew]],
+ *  складывается в стопку, пьётся с карточки предмета. Все числа — здесь
+ *  ([[BrewRates]] — те, что читаются в конструкторах). */
 sealed abstract class BrewKind(
   val label:       String,
   val recipe:      List[MaterialKind],
   val description: String,
   val effect:      BrewEffect
 ) extends EnumEntry {
-  /** Пьётся ли с карточки (кнопка «Выпить»). Заправка и смазка — свои кнопки. */
+  /** Пьётся ли с карточки (кнопка «Выпить»). Заправка и смазка — свои кнопки,
+   *  а грибную смесь не пьют вовсе: её бросают под ноги врагам в бою. */
   def drinkable: Boolean = effect match {
     case BrewEffect.CureTrauma | BrewEffect.InstantRest | BrewEffect.Boost(_, _, _) => true
+    case BrewEffect.WolfCall | BrewEffect.Mirror(_)                                 => true
     case _                                                                           => false
   }
+
+  /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна. */
+  def portions: Int =
+    if (recipe.exists(_.herbRank >= 2)) BrewRates.RarePortions else BrewRates.Portions
 
   /** Какие фляги заправляет. */
   def refills: Set[RefillSource] = effect match {
@@ -60,6 +74,22 @@ object BrewRates {
   val InstantRests: Int = 5
   /** Сколько порций даёт один рецепт в кубе. */
   val Portions: Int = 2
+
+  /** Столько выходит из рецепта с редкой травой второго ранга. */
+  val RarePortions: Int = 1
+
+  /** Зеркальный настой: сколько ударов по герою уходит в призрачные копии. */
+  val MirrorCopies: Int = 3
+
+  /** Волчий зов: сколько держится запах, на который приходит волк (час). */
+  val WolfCallMs: Long = 60L * 60L * 1000L
+
+  /** Грибная смесь: сколько урона достаётся каждому врагу за уровень героя.
+    * Вдвое меньше, чем у раскрывшейся розы, — зато варится из трав. */
+  val MushroomDamagePerLvl: Long = 25L
+
+  /** Имя бафа «на запах пришёл волк» в [[pangea.model.stats.StatBoosts]]. */
+  val WolfCallBoost: String = "brew:wolfCall"
 }
 
 object BrewKind extends Enum[BrewKind] {
@@ -124,6 +154,26 @@ object BrewKind extends Enum[BrewKind] {
     List(Nettle, Sage, Wormwood),
     "Едкая мазь, от которой не затягиваются раны. Смазать клинок — и в ближайшем бою каждый удар по HP пускает врагу кровь; заодно заправляет флягу крови до краёв.",
     BrewEffect.Coat(WeaponCoat.Bleed, RefillSource.Bleed))
+
+  // ── Отвары из редких трав второго ранга: по одной склянке за рецепт ──────
+
+  case object MushroomMix extends BrewKind(
+    "Грибная смесь",
+    List(GlaiveMushroom, Nettle, Sage),
+    "Толчёные глефовые грибы в склянке, переложенные крапивой, чтобы не рвануло раньше времени. Её не пьют — её бросают под ноги: в бою достаётся всем, кто стоит в поле, и споры травят выживших.",
+    BrewEffect.Bomb)
+
+  case object WolfCall extends BrewKind(
+    "Волчий зов",
+    List(WolfHops, Sage, Wormwood),
+    "Жжёный хмель, от которого тянет палёной шерстью. Выпить — и запах пойдёт от вас самих: тот, кто ходит за спиной по лабиринту, выйдет навстречу сам. Час, не больше: потом выветрится.",
+    BrewEffect.WolfCall)
+
+  case object MirrorBrew extends BrewKind(
+    "Зеркальный настой",
+    List(MirageFlower, Valerian, Eyebright),
+    s"Мутная вода, в которой отражаешься трижды. Выпить перед боем — и первые ${BrewRates.MirrorCopies} удара уйдут в призрачные копии; копии тают одна за другой, а вы остаётесь.",
+    BrewEffect.Mirror(BrewRates.MirrorCopies))
 
   val values: IndexedSeq[BrewKind] = findValues
 

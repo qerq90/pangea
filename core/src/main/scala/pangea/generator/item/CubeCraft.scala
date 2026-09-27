@@ -30,8 +30,11 @@ object CubeCraft {
     def size: Int
     /** Попытаться забрать из пула ингредиенты и произвести результат. */
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)]
-    /** Сколько одинаковых результатов даёт одно применение (отвары идут по две порции). */
+    /** Сколько одинаковых результатов даёт одно применение. */
     def portions: Int = 1
+    /** То же, но с оглядкой на результат: у отваров число склянок своё
+      * (из редких трав выходит одна, из простых — две). */
+    def portionsFor(@annotation.unused result: Item): Int = portions
   }
 
   private def isHead(i: Item): Boolean = i.details match {
@@ -217,6 +220,7 @@ object CubeCraft {
   private object HerbBrew extends Recipe {
     val size = 3
     override def portions: Int = BrewRates.Portions
+    override def portionsFor(result: Item): Int = result.brew.map(_.portions).getOrElse(BrewRates.Portions)
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val herbs  = pool.flatMap(i => i.material.filter(_.isHerb))
       val counts = herbs.groupBy(identity).view.mapValues(_.size).toMap
@@ -288,7 +292,7 @@ object CubeCraft {
         recipe.tryMatch(pool, r) match {
           case Some((consumed, result, r2)) =>
             pool = removeEach(pool, consumed)
-            results = results ++ List.fill(recipe.portions)(result)
+            results = results ++ List.fill(recipe.portionsFor(result))(result)
             r = r2
             remaining -= 1
           case None => continue = false

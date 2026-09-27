@@ -12,7 +12,7 @@ import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.NpcQuest
-import pangea.model.item.{FlaskEffect, FlaskRates, Item, ItemDetails, PassiveKind, PotionKind, DivineKind, DivineRates}
+import pangea.model.item.{BrewKind, BrewRates, FlaskEffect, FlaskRates, Item, ItemDetails, PassiveKind, PotionKind, DivineKind, DivineRates}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
@@ -63,6 +63,7 @@ case class BattleState(
       "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
       "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r)(divineTurn)),
       "UseRose"      -> Target.Run((u, _, r) => resolve(u, r)(roseTurn)),
+      "ThrowMix"     -> Target.Run((u, _, r) => resolve(u, r)(mixTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
@@ -271,8 +272,8 @@ case class BattleState(
       case Outcome.Continue =>
         (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
           showLog *> showGroup *>
-          renderer
-            .show(user, buildBattleScreen(res.hero, res.battle, res.hero.effectiveMaxHp(nowMs), nowMs))
+          mixCount(res.hero).flatMap(mixes =>
+            renderer.show(user, buildBattleScreen(res.hero, res.battle, res.hero.effectiveMaxHp(nowMs), nowMs, mixes)))
             .as(StateType.Battle)
       case Outcome.Victory =>
         for {
@@ -1463,7 +1464,21 @@ case class BattleState(
     * побочные строки (Непробиваемый, Крепкость, шипы, поджог, яд, проки
     * порошка) и бой после удара (шипы, порошок). Строку «наносит N урона»
     * собирает вызывающий — у активного моба и у бьющего сбоку она разная. */
-  private def mobStrike(hero: Hero, battle: SoloPveBattle, buffedEff: FightStats, nowMs: Long): Task[MobStrike] = {
+  private def mobStrike(hero: Hero, battle: SoloPveBattle, buffedEff: FightStats, nowMs: Long): Task[MobStrike] =
+    // Зеркальный настой: пока копии целы, удар достаётся им, а не герою.
+    if (battle.effects.heroMirrors > 0) {
+      val left = battle.effects.heroMirrors - 1
+      ZIO.succeed(MobStrike(
+        newHp      = hero.fightStats.hp,
+        newArmor   = hero.fightStats.armor,
+        damage     = 0L,
+        extraLines = List(content.format("battle.mirrorTook",
+                       "monster" -> battle.monsterName, "left" -> left.toString)),
+        battle     = battle.copy(effects = battle.effects.copy(heroMirrors = left)),
+        mirrored   = true))
+    } else plainMobStrike(hero, battle, buffedEff, nowMs)
+
+  private def plainMobStrike(hero: Hero, battle: SoloPveBattle, buffedEff: FightStats, nowMs: Long): Task[MobStrike] = {
     val monster = battle.toMonster
     for {
             spread <- Random.nextLongBetween(80L, 121L)
@@ -1588,8 +1603,9 @@ case class BattleState(
       atkResult <-
         if (hitRoll > dodge)
           mobStrike(hero, ticked, buffedEff, nowMs).map { st =>
-            val line = content.format("battle.mobHit", "damage" -> st.damage.toString, "monster" -> ticked.monsterName)
-            (st.newHp, st.newArmor, (line :: st.extraLines).mkString("\n"), st.battle)
+            val line  = content.format("battle.mobHit", "damage" -> st.damage.toString, "monster" -> ticked.monsterName)
+            val lines = if (st.mirrored) st.extraLines else line :: st.extraLines
+            (st.newHp, st.newArmor, lines.mkString("\n"), st.battle)
           }
         else
           ZIO.succeed(
@@ -2769,8 +2785,9 @@ case class BattleState(
             if (hitRoll > dodge)
               mobStrike(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs).map { st =>
                 val line = content.format("battle.group.sideHit", "monster" -> tmp.monsterName, "damage" -> st.damage.toString)
+                val head = if (st.mirrored) Vector.empty[String] else Vector(line)
                 (hero.copy(fightStats = hero.fightStats.copy(hp = st.newHp, armor = st.newArmor)), st.battle,
-                  Vector(line) ++ st.extraLines)
+                  head ++ st.extraLines)
               }
             else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
         } yield out
@@ -3290,6 +3307,28 @@ case class BattleState(
     * по тем же правилам (раз в раунд, раунд не завершает, «Быстрые руки» его не
     * ускоряют). Разница одна: силу роза берёт от уровня хозяина, а не от своего
     * — своего у цветка нет. Последнее раскрытие осыпает её лепестками. */
+  /** Бросок грибной смеси: склянка лопается под ногами врагов, достаётся всем
+    * в поле, и споры травят выживших. Считается расходником раунда — как
+    * глоток фляги, только вместо себя выручает по площади. Склянку берём из
+    * сумки: в доп. слоте, в отличие от розы, ей не место. */
+  private def mixTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    if (battle.consumableUsedThisRound) cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
+    else
+      inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).flatMap { inv =>
+        inv.items.data.find((i: Item) => i.brew.contains(BrewKind.MushroomMix)) match {
+          case None => cont(hero, battle, content.text("battle.mixNone"))
+          case Some(mix) =>
+            val blow             = BrewRates.MushroomDamagePerLvl * hero.lvl
+            val (swept, _, foes) = sweep(battle, blow, None, poisons = true)
+            val outcome = if (swept.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
+            val after   = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) regainEnergy(hero, nowMs) else hero
+            inventoryRepo.removeItem(mix.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+              ZIO.succeed(TurnResult(after, swept.copy(consumableUsedThisRound = true),
+                Vector(content.format("battle.mixThrown", "damage" -> blow.toString, "foes" -> foes.toString)),
+                outcome, endsRound = false))
+        }
+      }
+
   private def roseTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
     hero.equipment.additionalWeapon.rose match {
       case None                                  => cont(hero, battle, content.text("battle.rose.none"))
@@ -3380,10 +3419,11 @@ case class BattleState(
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
+      mixes  <- mixCount(hero)
       _ <- ZIO.when(battle.group.hasFormation)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
       _ <- renderer.show(
         user,
-        buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now)
+        buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now, mixes)
       )
     } yield ()
 
@@ -3391,7 +3431,8 @@ case class BattleState(
       hero: Hero,
       battle0: SoloPveBattle,
       maxHp: Long,
-      nowMs: Long
+      nowMs: Long,
+      mixes: Int
   ): Screen = {
     // Напротив пусто — шансы героя считаем против последней его цели (кто в
     // полях, тот в этот момент дерётся не с ним).
@@ -3511,6 +3552,14 @@ case class BattleState(
     }
     // Роза в доп. слоте — своя кнопка на том же месте: раскрыть её можно раз
     // в раунд, как и ударить божественным оружием.
+    // Грибная смесь лежит в сумке, а не в слоте, — кнопка появляется, только
+    // когда склянка при герое.
+    val mixButton = Option.when(mixes > 0)(
+      pangea.engine.Choice("ThrowMix",
+        pangea.engine.Choice.fit(content.format("battle.mixLabel", "count" -> mixes.toString)),
+        color = if (battle0.consumableUsedThisRound) pangea.engine.ChoiceColor.Negative
+                else pangea.engine.ChoiceColor.Positive,
+        row = Some(2)))
     val roseButton = hero.equipment.additionalWeapon.rose.map { _ =>
       pangea.engine.Choice("UseRose", pangea.engine.Choice.fit(hero.equipment.additionalWeapon.name),
         color = if (battle0.divineUsedThisRound) pangea.engine.ChoiceColor.Negative
@@ -3526,6 +3575,7 @@ case class BattleState(
     val mainButtons =
       (List(attackButton, flaskButton)) ++
         beltButton.toList ++
+        mixButton.toList ++
         divineButton.toList ++
         roseButton.toList ++
         List(
@@ -3538,6 +3588,13 @@ case class BattleState(
         )
     Screen(text, skillButtons ++ mainButtons)
   }
+
+  /** Сколько склянок грибной смеси в сумке героя. Сумка может быть недоступна
+    * (стаб в тестах) — тогда кнопки просто не будет. */
+  private def mixCount(hero: Hero): Task[Int] =
+    inventoryRepo.get(hero.id)
+      .map(_.items.data.count((i: Item) => i.brew.contains(BrewKind.MushroomMix)))
+      .orElseSucceed(0)
 
   private def getHero(user: User): Task[Hero] =
     heroDao
@@ -3633,7 +3690,14 @@ object BattleState {
   /** Результат чистого вычисления хода: итоговый герой и бой (для персиста),
     * накопленный лог сообщений (склеивается и показывается один раз) и исход. */
   /** Итог обычной атаки моба по герою — см. `BattleState.mobStrike`. */
-  final case class MobStrike(newHp: Long, newArmor: Long, damage: Long, extraLines: List[String], battle: SoloPveBattle)
+  final case class MobStrike(
+    newHp:      Long,
+    newArmor:   Long,
+    damage:     Long,
+    extraLines: List[String],
+    battle:     SoloPveBattle,
+    /** Удар ушёл в призрачную копию: героя он не тронул, и строки об уроне не будет. */
+    mirrored:   Boolean = false)
 
   /** Удар союзника: бой после него, кого бил, сколько снял, добил ли соседа. */
   final case class AllyBlow(battle: SoloPveBattle, target: Option[String], damage: Long, slew: Boolean)
