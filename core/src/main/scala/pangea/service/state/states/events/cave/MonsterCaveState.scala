@@ -463,7 +463,8 @@ case class MonsterCaveState(
   // ── Зачистка и уход ────────────────────────────────────────────────────────
 
   /** Последний обитатель пал — пещера отдаёт вдвое больше опыта, чем герой взял
-    * со всех её мобов. Награда одна на пещеру. */
+    * со всех её мобов. Награда одна на пещеру. Из пещеры это героя не выводит:
+    * необысканные углы остаются на месте, и уходит он сам, когда захочет. */
   private def reward(user: User, scene: CaveScene, renderer: Renderer): Task[CaveScene] =
     if (!scene.cleared || scene.rewarded || scene.expEarned <= 0L) ZIO.succeed(scene)
     else {
@@ -475,6 +476,8 @@ case class MonsterCaveState(
         _      <- renderer.show(user, Screen(content.format("cave.cleared", "exp" -> bonus.toString), Nil))
         _      <- ZIO.when(leveled.lvl > hero.lvl)(
                     renderer.show(user, Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)))
+        // Отдельной строкой, чтобы это не потерялось среди опыта и уровня.
+        _      <- renderer.show(user, Screen(content.text("cave.allClear"), Nil))
         done    = scene.copy(rewarded = true)
         _      <- writeScene(user, done)
       } yield done

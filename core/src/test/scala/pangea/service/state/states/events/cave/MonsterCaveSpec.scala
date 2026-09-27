@@ -329,9 +329,14 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         scene  <- sceneOf(dao)
         _      <- state.enter(testUser, r)
         twice  <- dao.getHeroByUserId(userId).map(_.get)
+        screen <- r.sentScreens.map(_.last)
       } yield assertTrue(said.contains("+40 опыта") && after.exp == 40L) &&
+              assertTrue(said.contains("Кажется, теперь всё чисто.")) &&
               assertTrue(scene.exists(_.rewarded)) &&
-              assertTrue(twice.exp == 40L)
+              assertTrue(twice.exp == 40L) &&
+              // зачистка не выталкивает из пещеры: герой в той же комнате и ходит дальше
+              assertTrue(screen.choices.map(_.id).contains("CaveForward")) &&
+              assertTrue(scene.exists(_.inside))
     },
 
     test("сперва драка, потом находка: вернувшись с добычи, герой стоит там же") {
