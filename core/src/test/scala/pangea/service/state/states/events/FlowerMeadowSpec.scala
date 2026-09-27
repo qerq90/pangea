@@ -54,7 +54,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
     test("в пуле событий: 2% (по одному у боя и у находки), билеты дальше по списку не сдвинулись") {
       val ev = StateType.events
       assertTrue(ev.count(_ == StateType.FlowerMeadow) == 2) &&
-      assertTrue(ev.count(_ == StateType.Battle) == 38 && ev.count(_ == StateType.FoundItem) == 19) &&
+      assertTrue(ev.count(_ == StateType.Battle) == 37 && ev.count(_ == StateType.FoundItem) == 19) &&
       assertTrue(ev.size == 100) &&
       assertTrue(ev(67) == StateType.Spring && ev(38) == StateType.FlowerMeadow && ev(99) == StateType.ElementalLair)
     },
