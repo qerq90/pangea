@@ -14,7 +14,7 @@ import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.artifact.{ArtifactIntake, Intake}
+import pangea.service.artifact.ArtifactIntake
 import pangea.service.schedule.Scheduler
 import pangea.service.state.{InventoryFeedback, State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -89,18 +89,12 @@ case class ElementalSearchState(
             // Азата, и только потом он идёт в сумку. Сумка переполнена — камень
             // теряется.
             intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
-            // Осмотр идёт долго и без участия игрока, поэтому каждый камень
-            // сопровождаем остатком мест: сумка молча переполняется, и находки
-            // начинают пропадать — лучше увидеть это сразу.
-            slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
-            tail       = intake match {
-                           case Intake.ToArtifact(kind, free) =>
-                             "\n" + ArtifactIntake.line(content, persisted, kind, free)
-                           case Intake.ToInventory => "\n" + slots
-                           case Intake.Refused     => "\n" + content.text("common.inventoryFull") + "\n" + slots
-                         }
+            // Осмотр идёт долго и без участия игрока, поэтому каждую находку
+            // сопровождаем остатком мест: хранилище молча переполняется, и
+            // камни начинают пропадать — лучше увидеть это сразу.
+            where     <- InventoryFeedback.intakeLine(inventoryRepo, content, hero.id, persisted, intake)
             _         <- renderer.show(user, Screen(
-                           content.format("elementalSearch.found", "gem" -> gem.displayTitle) + tail, Nil))
+                           content.format("elementalSearch.found", "gem" -> gem.displayTitle) + "\n" + where, Nil))
             left       = s.triesLeft - 1
             out <- if (left <= 0)
                      heroDao.writeSceneData(user.userId, Json.Null) *>

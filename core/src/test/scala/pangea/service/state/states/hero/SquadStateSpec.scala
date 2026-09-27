@@ -17,8 +17,10 @@ object SquadStateSpec extends ZIOSpecDefault {
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
-  private def pick(key: String, kind: AllyKind, extra: (String, String)*): UserAction = {
-    val fields = (("action" -> key) +: ("ally" -> kind.entryName) +: extra).map { case (k, v) => s""""$k":"$v"""" }
+  /** Союзник в кнопках адресуется местом в строю: поднятых с алтаря бывает
+    * несколько, и вид их не различает. */
+  private def pick(key: String, at: Int, extra: (String, String)*): UserAction = {
+    val fields = (("action" -> key) +: ("pos" -> at.toString) +: extra).map { case (k, v) => s""""$k":"$v"""" }
     UserAction("", Some(fields.mkString("{", ",", "}")))
   }
 
@@ -72,12 +74,15 @@ object SquadStateSpec extends ZIOSpecDefault {
       for {
         t <- makeState(baseHero)
         (state, _, renderer) = t
-        _   <- state.action(testUser, pick("SquadAlly", AllyKind.Human), renderer)
+        _   <- state.action(testUser, pick("SquadAlly", 2), renderer)
         scr <- renderer.sentScreens.map(_.last)
-        moves = scr.choices.filter(_.id == "SquadMove").map(c => c.label -> c.data("pos"))
+        moves = scr.choices.filter(_.id == "SquadMove").map(c => c.label -> c.data("to"))
       } yield assertTrue(scr.text.startsWith("Йорген Кремень\nЧеловек, стихия 🔥 — позиция 2\n")) &&
               assertTrue(scr.text.contains(" ❤ 625/625  🧥 Броня 750/750  ⚡ Энергия 500/500\n ⚔ Атк 100  🛡 Защ 200\n 🎯 Точн 500  👁 Укл 500")) &&
-              assertTrue(moves == List("На 1 (вы)" -> "1", "На 3 (Брамбл Медноус)" -> "3", "На 4 (пусто)" -> "4")) &&
+              assertTrue(moves.take(3) == List("На 1 (вы)" -> "1", "На 3 (Брамбл Медноус)" -> "3", "На 4 (пусто)" -> "4")) &&
+              // мест в строю одиннадцать: кнопка на каждое, кроме своего
+              assertTrue(moves.size == pangea.model.squad.AllyRates.Positions - 1) &&
+              assertTrue(scr.choices.flatMap(_.row).groupBy(identity).forall(_._2.size <= 5)) &&
               assertTrue(scr.choices.exists(_.id == "SquadDismiss") && scr.choices.exists(_.id == "SquadList")) &&
               assertTrue(scr.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))
     },
@@ -86,9 +91,9 @@ object SquadStateSpec extends ZIOSpecDefault {
       for {
         t <- makeState(baseHero)
         (state, dao, renderer) = t
-        r1 <- state.action(testUser, pick("SquadMove", AllyKind.Human, "pos" -> "1"), renderer)
+        r1 <- state.action(testUser, pick("SquadMove", 2, "to" -> "1"), renderer)
         h1 <- dao.getHeroByUserId(userId).map(_.get)
-        _  <- state.action(testUser, pick("SquadMove", AllyKind.Gnome, "pos" -> "1"), renderer)
+        _  <- state.action(testUser, pick("SquadMove", 3, "to" -> "1"), renderer)
         h2 <- dao.getHeroByUserId(userId).map(_.get)
         scr <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(r1 == StateType.Squad) &&
@@ -101,11 +106,11 @@ object SquadStateSpec extends ZIOSpecDefault {
       for {
         t <- makeState(baseHero)
         (state, dao, renderer) = t
-        _   <- state.action(testUser, pick("SquadDismiss", AllyKind.Human), renderer)
+        _   <- state.action(testUser, pick("SquadDismiss", 2), renderer)
         ask <- renderer.sentScreens.map(_.last)
-        _   <- state.action(testUser, pick("SquadAlly", AllyKind.Human), renderer)
+        _   <- state.action(testUser, pick("SquadAlly", 2), renderer)
         kept <- dao.getHeroByUserId(userId).map(_.get)
-        _   <- state.action(testUser, pick("SquadDismissDo", AllyKind.Human), renderer)
+        _   <- state.action(testUser, pick("SquadDismissDo", 2), renderer)
         gone <- dao.getHeroByUserId(userId).map(_.get)
         back <- state.action(testUser, tap("BackFromSquad"), renderer)
       } yield assertTrue(ask.text.contains("Выгнать Йорген Кремень из отряда?")) &&

@@ -8,7 +8,7 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
-import pangea.model.squad.{AllyKind, AllySkill}
+import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.NpcQuest
@@ -342,12 +342,15 @@ case class BattleState(
   /** «Переместиться»: с кем из союзников поменяться местами. */
   private def moveRoute(user: User, renderer: Renderer): Task[StateType] =
     getBattle(user).flatMap { battle =>
+      // Союзников в строю бывает до десяти — по двое в ряд, иначе клавиатура
+      // ВК не примет столько рядов (см. VkRenderer.MaxRows).
       val choices = battle.group.allies.filter(_.alive).sortBy(_.position).zipWithIndex.map { case (a, i) =>
         pangea.engine.Choice("MoveTo", pangea.engine.Choice.fit(content.format("battle.group.moveTo", "n" -> a.position.toString, "name" -> a.name)),
-          data = Map("target" -> a.position.toString), row = Some(i))
+          data = Map("target" -> a.position.toString), row = Some(i / BattleState.AlliesPerRow))
       }
       val cancel = pangea.engine.Choice("CancelTarget", content.text("battle.group.cancelTarget"),
-        color = pangea.engine.ChoiceColor.Negative, row = Some(choices.size))
+        color = pangea.engine.ChoiceColor.Negative,
+        row = Some((choices.size + BattleState.AlliesPerRow - 1) / BattleState.AlliesPerRow))
       renderer.show(user, Screen(content.text("battle.group.moveWhom"), choices :+ cancel)).as(StateType.Battle)
     }
 
@@ -359,7 +362,7 @@ case class BattleState(
       case None => cont(hero, battle, content.text("battle.group.targetGone"))
       case Some(ally) =>
         val from    = battle.group.heroPos
-        val swapped = battle.copy(group = battle.group.updateAlly(ally.kind)(_.copy(position = from)))
+        val swapped = battle.copy(group = battle.group.updateAlly(ally.position)(_.copy(position = from)))
         val moved   = if (swapped.group.hasMonster(ally.position)) swapped.moveHeroTo(ally.position)
                       else swapped.copy(group = swapped.group.copy(heroPos = ally.position))
         val line    = content.format("battle.group.moved", "name" -> ally.name, "n" -> ally.position.toString)
@@ -1853,7 +1856,7 @@ case class BattleState(
           pangea.engine.Choice(choiceId,
             pangea.engine.Choice.fit(content.format("battle.group.targetAlly",
               "n" -> a.position.toString, "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString)),
-            data = Map("target" -> a.position.toString), row = Some(i + 1))
+            data = Map("target" -> a.position.toString), row = Some(1 + i / BattleState.AlliesPerRow))
         }
       } else
         battle.group.attackTargets.zipWithIndex.flatMap { case (pos, i) =>
@@ -2079,7 +2082,7 @@ case class BattleState(
             else       { val na = (ally.armor + full).min(ally.stats.armor); (ally.copy(armor = na), na - ally.armor) }
           val line = content.format("battle.group.supportAlly", "name" -> ally.name,
             "skill" -> slot.skill.label, "amount" -> gained.toString, "what" -> (if (heals) "HP" else "брони"))
-          next(hero, bumped.copy(group = bumped.group.updateAlly(ally.kind)(_ => updated)), Vector(line))
+          next(hero, bumped.copy(group = bumped.group.updateAlly(ally.position)(_ => updated)), Vector(line))
 
         case Skill.Effect.Heal =>
           // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
@@ -2548,7 +2551,7 @@ case class BattleState(
         if (options.isEmpty) ZIO.succeed((AllyBlow(b1, None, 0L, slew = false), Vector.empty[String]))
         else Random.nextIntBetween(0, options.size).flatMap { i =>
           val skill = options(i)
-          val paid  = b1.copy(group = b1.group.updateAlly(a1.kind)(x => x.copy(energy = x.energy - skill.cost(a1.lvl))))
+          val paid  = b1.copy(group = b1.group.updateAlly(a1.position)(x => x.copy(energy = x.energy - skill.cost(a1.lvl))))
           skill match {
             case AllySkill.QuickStrike =>
               allyHits(a1, paid, target2.get, (a1.stats.atk * AllySkill.QuickStrikeFactor).toLong.max(1L),
@@ -2559,19 +2562,19 @@ case class BattleState(
             case AllySkill.HealingFlask =>
               val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
               val newHp = (a1.hp + heal).min(a1.stats.hp)
-              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.kind)(_.copy(hp = newHp))), None, 0L, slew = false),
+              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(_.copy(hp = newHp))), None, 0L, slew = false),
                 Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
             case AllySkill.EmergencyRepair =>
               val fix = (a1.stats.armor * AllySkill.RepairPct / 100L).max(1L)
               val newArmor = (a1.armor + fix).min(a1.stats.armor)
-              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.kind)(_.copy(armor = newArmor))), None, 0L, slew = false),
+              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(_.copy(armor = newArmor))), None, 0L, slew = false),
                 Vector(content.format("battle.ally.emergencyRepair", "name" -> a1.name, "armor" -> (newArmor - a1.armor).toString))))
           }
         }
       (blow2, aidLog) = casted
       b2 = blow2.battle
       // 3) энергия копится
-      b3 = b2.copy(group = b2.group.updateAlly(a.kind)(x =>
+      b3 = b2.copy(group = b2.group.updateAlly(a.position)(x =>
              x.copy(energy = (x.energy + x.kind.energyRegen(x.lvl)).min(x.stats.energy))))
       // Лог — одной строкой на цель, с суммарным уроном удара и умения; проки и
       // раны считаются, но экран не засоряют. Промах — только если не попало ничем.
@@ -2656,19 +2659,25 @@ case class BattleState(
           hurt     = a.copy(armor = a.armor - armorDmg, hp = (a.hp - hpDmg).max(0L))
           line     = content.format("battle.ally.mobHit", "monster" -> tmp.monsterName, "name" -> a.name, "damage" -> (armorDmg + hpDmg).toString)
           result   =
-            if (hurt.alive) (tmp.copy(group = tmp.group.updateAlly(a.kind)(_ => hurt)), Vector(line))
-            else (tmp.copy(group = tmp.group.withoutAlly(a.kind)),
+            if (hurt.alive) (tmp.copy(group = tmp.group.updateAlly(a.position)(_ => hurt)), Vector(line))
+            else (tmp.copy(group = tmp.group.withoutAlly(a.position)),
                   Vector(line, content.format("battle.ally.scroll", "name" -> a.name)))
         } yield result
     } yield out
 
-  /** Отряд после боя: состояние союзников из боя, ушедшие по свитку — в отлучку. */
+  /** Отряд после боя: состояние союзников из боя, выбывшие — кто в отлучку,
+    * кто насовсем. Наёмника уносит свиток на сутки, а поднятый с алтаря
+    * рассыпается прахом — возвращаться ему неоткуда. */
   private def squadAfterBattle(hero: Hero, battle: SoloPveBattle, nowMs: Long): pangea.model.squad.Squad = {
     // Позиции могли поменяться за бой (Таран, «Переместиться») — вместе с героем.
     val synced = battle.group.allies.foldLeft(hero.squad.copy(heroPos = battle.group.heroPos)) { (s, a) =>
-      s.update(a.kind)(old => a.toAlly.copy(hiredUntil = old.hiredUntil))
+      s.updateAt(a.home)(old => a.toAlly.copy(hiredUntil = old.hiredUntil))
     }
-    battle.group.alliesGone.flatMap(AllyKind.withNameOption).foldLeft(synced)((s, k) => s.sentAway(k, nowMs))
+    // Павших убираем разом: по одному нельзя — строй смыкается, и вторая
+    // позиция указала бы уже не на того.
+    val (raised, hired) = battle.group.alliesGone.partition(_.undead.isDefined)
+    val withoutRaised   = synced.dismissAll(raised.map(_.home).toSet)
+    hired.foldLeft(withoutRaised)((s, a) => s.sentAway(a.kind, nowMs))
   }
 
   /** Ход мобов вне пары. Сосед героя (номер 2) достаёт его сбоку: обычная
@@ -3586,6 +3595,10 @@ case class BattleState(
 }
 
 object BattleState {
+
+  /** Сколько союзников помещается в ряд клавиатуры: их бывает до десяти, а
+    * рядов у ВК всего десять. */
+  val AlliesPerRow: Int = 2
 
   /** Исход хода — определяет переход и терминальные действия в [[BattleState.commit]]. */
   sealed trait Outcome

@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{BattleAlly, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
@@ -190,8 +190,9 @@ object AllyBattleSpec extends ZIOSpecDefault {
       // Герой стоял третьим за двумя союзниками; оба ушли по свиткам — один против моба на месте 1.
       val h = hero(heroPos = 3, allies = List(ally(pos = 1), ally(AllyKind.Gnome, pos = 2)))
       val b = SoloPveBattle.from(monster(100000L), h)
+      val gone = List(ally(pos = 1), ally(AllyKind.Gnome, pos = 2)).map(BattleAlly.of(_, lvl))
       for {
-        t <- makeState(h, b.copy(group = b.group.copy(allies = Nil, alliesGone = List("Human", "Gnome"))))
+        t    <- makeState(h, b.copy(group = b.group.copy(allies = Nil, alliesGone = gone)))
         (state, dao, r) = t
         _       <- state.enter(testUser, r)
         entry   <- r.sentScreens.map(_.last)
@@ -389,7 +390,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         updated <- dao.getHeroByUserId(userId).map(_.get)
         now     <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
       } yield assertTrue(screens.contains("Йорген Кремень воспользовался свитком и телепортировался с боя")) &&
-              assertTrue(after.group.allies.isEmpty && after.group.alliesGone == List("Human")) &&
+              assertTrue(after.group.allies.isEmpty && after.group.alliesGone.map(_.kind) == List(AllyKind.Human)) &&
               assertTrue(fled == StateType.Dungeon) &&
               assertTrue(!updated.squad.has(AllyKind.Human)) &&
               assertTrue(updated.squad.isAway(AllyKind.Human, now)) &&

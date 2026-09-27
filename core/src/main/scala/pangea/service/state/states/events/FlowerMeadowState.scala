@@ -16,7 +16,7 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
 import pangea.repository.artifact.ArtifactRepository
-import pangea.service.artifact.{ArtifactIntake, Intake}
+import pangea.service.artifact.ArtifactIntake
 import pangea.service.state.states.LootState
 import pangea.service.state.states.events.FlowerMeadowState._
 import pangea.service.state.{CharacterMenu, HerbLore, InventoryFeedback, State, UserAction}
@@ -113,16 +113,16 @@ case class FlowerMeadowState(
             item      = MaterialGenerator.item(kind)
             persisted <- itemRepo.persist(hero.id, item)
             intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
-            added      = intake != Intake.Refused
-            slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
-            lost       = if (added) "" else "\n" + content.text("common.inventoryFull")
+            // Живая сумка ловит травы сама — скажем, что цветок ушёл туда и
+            // сколько в ней ещё места, иначе он пропадает на глазах у игрока.
+            where     <- InventoryFeedback.intakeLine(inventoryRepo, content, hero.id, persisted, intake)
             maxEnergy  = hero.maxEnergy(now)
             regained   = (maxEnergy * EnergyPctPerFlower / 100L).max(1L).min((maxEnergy - hero.fightStats.energy).max(0L))
             _         <- ZIO.when(regained > 0L)(
                            heroDao.updateFightStats(user.userId, hero.fightStats.copy(energy = hero.fightStats.energy + regained)))
             energyLine = if (regained > 0L) "\n" + content.format("flowerMeadow.energy", "energy" -> regained.toString) else ""
             _         <- renderer.show(user, Screen(
-                           content.format("flowerMeadow.found", "flower" -> item.name) + energyLine + lost + "\n" + slots, Nil))
+                           content.format("flowerMeadow.found", "flower" -> item.name) + energyLine + "\n" + where, Nil))
             // Странный цветок — шанс самому понять, что к чему (только пока не знаешь простых трав).
             _         <- ZIO.when(kind == MaterialKind.StrangeFlower && !lore.knows(Knowledge.FlowersRank1))(
                            insight(user, hero, lore, now, renderer))

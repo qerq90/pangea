@@ -53,6 +53,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object FlowerMeadow extends TaskKind
   // Раунд боя без героя (он обнулён, отряд дерётся дальше) — каждые 30 секунд.
   case object SquadFight extends TaskKind
+  // Привал в пещере с монстрами (30 секунд) — один раз за пещеру.
+  case object CaveRest extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

@@ -13,15 +13,17 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val encoder: Encoder[StateType] = (s: StateType) => s.entryName.asJson
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
-  // Battle 38% · FlowerMeadow 2% · FoundItem 19% · Spring 18% · Girl 2% · SilverVein 10% ·
-  // TreasureMobs 5% · TreasureDig 5% · ElementalLair 1% (вес = число повторов в пуле,
-  // сумма = 100). Процент под логово элементаля забран у боя, под девушку — у ручья,
-  // под поляну цветов — по одному у боя и у находки. Поляна стоит сразу за боем,
-  // чтобы билеты событий дальше по списку не сдвигались.
-  val BattleTickets: Int = 38
+  // Battle 37% · MonsterCave 1% · FlowerMeadow 2% · FoundItem 19% · Spring 18% · Girl 2% ·
+  // SilverVein 10% · TreasureMobs 5% · TreasureDig 5% · ElementalLair 1% (вес = число
+  // повторов в пуле, сумма = 100). Процент под логово элементаля забран у боя, под
+  // девушку — у ручья, под поляну цветов — по одному у боя и у находки, под пещеру с
+  // монстрами — снова у боя. Пещера и поляна стоят сразу за боем, чтобы билеты событий
+  // дальше по списку не сдвигались.
+  val BattleTickets: Int = 37
 
   val events: List[StateType] =
-    List.fill(BattleTickets)(Battle) ++ List.fill(2)(FlowerMeadow) ++ List.fill(19)(FoundItem) ++
+    List.fill(BattleTickets)(Battle) ++ List.fill(1)(MonsterCave) ++
+      List.fill(2)(FlowerMeadow) ++ List.fill(19)(FoundItem) ++
       List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
       List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
       List.fill(1)(ElementalLair)
@@ -97,6 +99,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object TreasureDig      extends StateType // прикопанный схрон (раскопки по таймеру)
   case object Girl             extends StateType // девушка с криком «Помогите!» и трое вооружённых
   case object FlowerMeadow     extends StateType // поляна цветов: сбор трав по таймеру
+  case object MonsterCave      extends StateType // пещера с монстрами: комнаты, кучки мобов, находки
   case object Knowledge        extends StateType // знания героя (меню персонажа)
   case object GustavoHerbs     extends StateType // Густаво: рассказ о травах и трактаты
   case object Squad            extends StateType // отряд героя (меню персонажа)

@@ -3,9 +3,9 @@ package pangea.model.squad
 import io.circe.syntax.EncoderOps
 import zio.test._
 
-/** Отряд: позиции 1..4 на героя и союзников, найм на первую свободную,
-  * перестановки (с союзником — меняются, с героем — герой на прежнюю),
-  * отлучка по свитку на сутки. */
+/** Отряд: места в строю на героя и до десяти союзников, найм на первую
+  * свободную, перестановки (с союзником — меняются, с героем — герой на
+  * прежнюю), отлучка по свитку на сутки и поднятые с алтаря. */
 object SquadSpec extends ZIOSpecDefault {
 
   private val lvl = 10L
@@ -31,15 +31,38 @@ object SquadSpec extends ZIOSpecDefault {
                  AllyKind.Gnome.element == pangea.model.battle.Element.Cold)
     },
 
-    test("найм: на первую свободную позицию, здоровым; повторно — нет; на полный отряд — нет") {
+    test("найм: на первую свободную позицию, здоровым; повторно — нет") {
       val s1 = Squad.empty.hire(AllyKind.Human, lvl, 0L)
       val s2 = s1.hire(AllyKind.Murloc, lvl, 0L)
       val s3 = s2.hire(AllyKind.Gnome, lvl, 0L)
       val s4 = s3.hire(AllyKind.Human, lvl, 0L)
       assertTrue(s1.allyAt(2).exists(a => a.kind == AllyKind.Human && a.hp == 625L && a.armor == 750L && a.energy == 500L)) &&
       assertTrue(s2.allyAt(3).exists(_.kind == AllyKind.Murloc) && s3.allyAt(4).exists(_.kind == AllyKind.Gnome)) &&
-      assertTrue(s4 == s3 && s3.freePosition.isEmpty) &&
+      assertTrue(s4 == s3) &&
       assertTrue(s3.inOrder.map(_.position) == List(2, 3, 4))
+    },
+
+    test("в строю десять мест для союзников: одиннадцатому вставать некуда") {
+      val full = (1 to AllyRates.Positions - 1).foldLeft(Squad.empty) { (s, i) =>
+        s.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), lvl)
+      }
+      assertTrue(full.allies.size == 10 && full.full && full.freePosition.isEmpty) &&
+      // одиннадцатый не встаёт сам — его место освобождают заменой
+      assertTrue(full.raise(UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl) == full) &&
+      assertTrue(full.replaceAt(3, UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl)
+                   .allyAt(3).exists(_.name == "Лишний"))
+    },
+
+    test("поднятый живёт своими статами, не уходит по времени и убирается по месту") {
+      val form = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(3L))
+      val s    = Squad.empty.hire(AllyKind.Human, lvl, 1000L).raise(form, lvl)
+      val up   = s.allyAt(3).get
+      assertTrue(up.name == "Гоблин немощный раб" && up.statsAt(lvl) == AllyKind.Human.stats(3L)) &&
+      assertTrue(up.lvlAt(lvl) == 16L && !up.expired(Long.MaxValue)) &&
+      // наёмник рядом с ним свой срок всё так же отрабатывает
+      assertTrue(s.expire(1000L + AllyRates.HireMs)._2 == List(AllyKind.Human)) &&
+      assertTrue(s.dismissAt(3).allies.map(_.kind) == List(AllyKind.Human)) &&
+      assertTrue(s.dismissAll(Set(2, 3)).allies.isEmpty)
     },
 
     test("герой на позиции 3: наём обходит его место") {
@@ -55,14 +78,14 @@ object SquadSpec extends ZIOSpecDefault {
       assertTrue(toFree.allyAt(4).exists(_.kind == AllyKind.Human) && toFree.allyAt(2).isEmpty) &&
       assertTrue(swap.allyAt(3).exists(_.kind == AllyKind.Human) && swap.allyAt(2).exists(_.kind == AllyKind.Murloc)) &&
       assertTrue(toHero.heroPos == 3 && toHero.allyAt(1).exists(_.kind == AllyKind.Murloc)) &&
-      assertTrue(s.move(AllyKind.Human, 2) == s && s.move(AllyKind.Human, 5) == s && s.move(AllyKind.Gnome, 4) == s)
+      assertTrue(s.move(AllyKind.Human, 2) == s && s.move(AllyKind.Human, 99) == s && s.move(AllyKind.Gnome, 4) == s)
     },
 
     test("герой шагает на позицию союзника — тот встаёт на его прежнюю") {
       val s = Squad.empty.hire(AllyKind.Human, lvl, 0L)
       val m = s.moveHero(2)
       assertTrue(m.heroPos == 2 && m.allyAt(1).exists(_.kind == AllyKind.Human)) &&
-      assertTrue(s.moveHero(1) == s && s.moveHero(9) == s)
+      assertTrue(s.moveHero(1) == s && s.moveHero(99) == s)
     },
 
     test("свиток: из отряда вон, сутки в отлучке, потом возвращается — и встречается один раз") {
