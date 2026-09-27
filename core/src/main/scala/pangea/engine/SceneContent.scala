@@ -7,6 +7,10 @@ trait SceneContent {
   def screen(key: String): Screen
   def text(key: String): String
   def format(key: String, args: (String, String)*): String
+
+  /** Список строк по ключу (yaml-массив): там, где на одно и то же место есть
+   *  несколько описаний и выбирать между ними — дело сцены. */
+  def list(key: String): List[String]
   def beats(key: String): List[(String, Beat)]
 
   /** Кнопка для динамических экранов: метку и цвет берём из yaml-ключа
@@ -27,6 +31,10 @@ object SceneContent {
 
     def format(key: String, args: (String, String)*): String =
       args.foldLeft(text(key)) { case (s, (k, v)) => s.replace(s"{$k}", v) }
+
+    def list(key: String): List[String] =
+      at(key).asArray.map(_.toList.flatMap(_.asString))
+        .getOrElse(sys.error(s"SceneContent: missing array at '$key'"))
 
     def screen(key: String): Screen = {
       val node = at(key)

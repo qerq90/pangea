@@ -2906,7 +2906,8 @@ case class BattleState(
       val b0 = res.battle.copy(group = res.battle.group.copy(round = res.battle.group.round + 1))
       for {
         // подкрепление: сородич первого моба, редкость как обычно (сюжетный бой — нет)
-        comes <- chanceRoll(b0.group.aliveCount < GroupState.MaxMonsters && b0.story.isEmpty, GroupState.ReinforcementChancePct)
+        comes <- chanceRoll(b0.group.aliveCount < GroupState.MaxMonsters && b0.story.isEmpty && !b0.noKin,
+                   GroupState.ReinforcementChancePct)
         withMore <-
           if (!comes) ZIO.succeed((b0, Vector.empty[String]))
           else for {
@@ -2923,7 +2924,7 @@ case class BattleState(
         // призыв: в конце первого раунда легендарные и мифические зовут сородичей
         // (сюжетный бой — нет); кому не хватило места — в очередь за строем
         summoned <-
-          if (b1a.group.round != 1 || b1a.story.isDefined) ZIO.succeed((b1a, Vector.empty[String]))
+          if (b1a.group.round != 1 || b1a.story.isDefined || b1a.noKin) ZIO.succeed((b1a, Vector.empty[String]))
           else ZIO.foldLeft(b1a.monstersInOrder.filter(m => BattleState.summons(Rarity.withName(m.rarity))))((b1a, Vector.empty[String])) {
             case ((b, log), caller) => summonKin(b, caller, res.hero.dungeonLevel).map { case (b2, line) => (b2, log :+ line) }
           }

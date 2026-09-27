@@ -337,7 +337,7 @@ case class MonsterCaveState(
       if (!scene.inside) showGate(user, scene, renderer)
       else scene.neighbour(dir) match {
         case None =>
-          renderer.show(user, Screen(content.text("cave.wall"), Nil)) *> showRoom(user, scene, renderer)
+          wall.flatMap(line => renderer.show(user, Screen(line, Nil))) *> showRoom(user, scene, renderer)
         case Some(idx) =>
           val moved = scene.copy(at = idx)
           if (moved.room.monsters > 0) getHero(user).flatMap(fight(user, _, moved, idx, renderer))
@@ -346,6 +346,12 @@ case class MonsterCaveState(
             showRoom(user, moved, renderer)
       }
     }
+
+  /** Стена, в которую упёрся герой: пещера каждый раз показывает её по-своему. */
+  private def wall: Task[String] = {
+    val walls = content.list("cave.walls")
+    Random.nextIntBounded(walls.size).map(walls(_))
+  }
 
   /** Экран комнаты: что здесь есть и куда отсюда ведут ходы. Направления видны
     * все четыре — зелёные там, где проход, красные там, где камень. */
@@ -428,7 +434,7 @@ case class MonsterCaveState(
       gained    = monsters.map(expFor).sum
       next      = scene.withRoom(idx, _.copy(monsters = 0)).copy(expEarned = scene.expEarned + gained)
       routing   = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
-      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeActiveBattle(user.userId, battle.copy(noKin = true).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format("cave.ambush", "count" -> count.toString), Nil))
     } yield StateType.Battle

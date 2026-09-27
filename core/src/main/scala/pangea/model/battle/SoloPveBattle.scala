@@ -64,7 +64,10 @@ case class SoloPveBattle(
   divineUsedThisRound: Boolean = false,
   // Приговорённый: сколько раундов он терпит, прежде чем удрать. 0 — противник
   // никуда не денется и дерётся до конца, как все.
-  escapesAfter:   Int     = 0
+  escapesAfter:   Int     = 0,
+  // Звать некого: ни подкрепления со стороны, ни сородичей на клич. Так дерутся
+  // обитатели пещеры — она посчитана до последнего, и лишним взяться неоткуда.
+  noKin:          Boolean = false
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -393,8 +396,9 @@ object SoloPveBattle {
       customName          <- c.getOrElse[Option[String]]("customName")(None)
       divineUsed          <- c.getOrElse[Boolean]("divineUsedThisRound")(false)
       escapesAfter        <- c.getOrElse[Int]("escapesAfter")(0)
+      noKin               <- c.getOrElse[Boolean]("noKin")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName, divineUsed, escapesAfter)
+                         story, customName, divineUsed, escapesAfter, noKin)
 }
