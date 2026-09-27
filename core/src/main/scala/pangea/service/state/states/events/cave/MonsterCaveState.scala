@@ -21,7 +21,7 @@ import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.artifact.{ArtifactIntake, Intake}
+import pangea.service.artifact.ArtifactIntake
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.events.cave.MonsterCaveState._
@@ -368,10 +368,9 @@ case class MonsterCaveState(
       item      = MaterialGenerator.item(HerbLore.recognised(lore, pool(idx)))
       persisted <- itemRepo.persist(hero.id, item)
       intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
-      slots     <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
-      lost       = if (intake == Intake.Refused) "\n" + content.text("common.inventoryFull") else ""
+      where     <- InventoryFeedback.intakeLine(inventoryRepo, content, hero.id, persisted, intake)
       _ <- renderer.show(user, Screen(
-             content.format("cave.herb", "flower" -> persisted.name) + lost + "\n" + slots, Nil))
+             content.format("cave.herb", "flower" -> persisted.name) + "\n" + where, Nil))
       done = scene.withRoom(scene.at, _.copy(done = true))
       res <- showRoom(user, done, renderer)
     } yield res

@@ -955,7 +955,7 @@ fet:
   upgraded: "Фет колдует над артефактом добрую минуту. {title}: ступень {tier}/{maxTier}, мест внутри: {capacity}."
 
 artifact:
-  intakeLine: "{name} — в {artifact}. Свободно мест: {free}"
+  intakeLine: "{name} → «{artifact}». Свободно мест: {free}"
   menu: "{title} · сборка {tier}/{maxTier}\n📦 {items}/{capacity} · ⚡ Заряды: {charges}/{maxCharges}"
   menuPlain: "{title} · сборка {tier}/{maxTier}\n📦 {items}/{capacity}"
   putLabel:  "Положить"

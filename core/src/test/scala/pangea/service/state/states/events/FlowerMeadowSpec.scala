@@ -32,7 +32,8 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
 
   private def content = ZIO.attempt(SceneContent.load())
 
-  private def meadow(h: Hero, lore: LoreData = LoreData.empty) =
+  private def meadow(h: Hero, lore: LoreData = LoreData.empty,
+                     artifacts: Option[TestArtifactRepository] = None) =
     for {
       dao   <- TestHeroDao.withHero(userId, h)
       _     <- dao.writeLoreData(userId, lore.asJson)
@@ -40,7 +41,7 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
       sched <- TestScheduler.make
       r     <- TestRenderer.make
       c     <- content
-    } yield (FlowerMeadowState(dao, inv, TestItemRepository.make, sched, c), dao, inv, sched, r)
+    } yield (FlowerMeadowState(dao, inv, TestItemRepository.make, sched, c, artifacts), dao, inv, sched, r)
 
   private def loreOf(dao: TestHeroDao): Task[LoreData] = HerbLore.readLore(dao, userId)
   private def texts(r: TestRenderer): Task[String] = r.sentScreens.map(_.map(_.text).mkString("\n"))
@@ -85,6 +86,21 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(stay == StateType.FlowerMeadow && !stayed.text.contains("поляна шепчет")) && // описание не повторяется
               assertTrue(left == StateType.Dungeon && after.contains(io.circe.Json.Null)) &&
               assertTrue(cancelled.contains(userId -> TaskKind.FlowerMeadow))
+    },
+
+    test("с Живой сумкой цветок уходит в неё, и об этом сказано вместе с остатком мест") {
+      val bag = TestArtifactRepository.of(
+        bag = TestArtifactRepository.artifact(pangea.model.artifact.ArtifactKind.LivingBag, tier = 1))
+      for {
+        t <- meadow(hero(), artifacts = Some(bag))
+        (state, dao, inv, _, r) = t
+        _     <- dao.writeSceneData(userId, MeadowScene(2, 0L).asJson)
+        _     <- state.action(testUser, tap("FlowerFind"), r)
+        said  <- texts(r)
+      } yield assertTrue(said.contains("Живая сумка") && said.contains("Свободно мест")) &&
+              // цветок и правда в сумке, а не в инвентаре героя
+              assertTrue(bag.snapshot.of(pangea.model.artifact.ArtifactKind.LivingBag).items.data.size == 1) &&
+              assertTrue(inv.snapshot.isEmpty)
     },
 
     test("без знаний любая трава — «Странный цветок»; догадка (интеллект ÷ 4) даёт знания 1 ранга") {

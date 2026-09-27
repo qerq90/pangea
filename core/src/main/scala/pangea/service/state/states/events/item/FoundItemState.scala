@@ -88,11 +88,12 @@ case class FoundItemState(
       _ <- journal.append(GameEvent(user.userId,
               if (added) "item_taken" else "item_cant_take",
               Json.obj("name" -> item.name.asJson)))
+      // Ларец и Живая сумка могут перехватить находку — тогда и место считаем в них.
+      where <- InventoryFeedback.intakeLine(inventoryRepository, content, hero.id, item, intake)
       _ <- if (added)
-             InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id).flatMap(slots =>
-               renderer.show(user, Screen(content.format("foundItem.taken", "name" -> item.name) + "\n" + slots, Nil)))
+             renderer.show(user, Screen(content.format("foundItem.taken", "name" -> item.name) + "\n" + where, Nil))
            else
-             renderer.show(user, Screen(content.text("common.inventoryFull"), Nil))
+             renderer.show(user, Screen(where, Nil))
     } yield StateType.Dungeon
 
   private def dontTakeItem(user: User, renderer: Renderer): Task[StateType] =

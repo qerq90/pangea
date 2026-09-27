@@ -6,6 +6,7 @@ import pangea.engine.{ChoiceColor, SceneContent}
 import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
+import pangea.model.artifact.ArtifactKind
 import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind}
 import pangea.model.hero.Hero
 import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MaterialKind, Rarity => ItemRarity}
@@ -32,14 +33,15 @@ object MonsterCaveSpec extends ZIOSpecDefault {
 
   private def content = ZIO.attempt(SceneContent.load())
 
-  private def cave(h: Hero = hero(), items: List[Item] = Nil) =
+  private def cave(h: Hero = hero(), items: List[Item] = Nil,
+                   artifacts: Option[TestArtifactRepository] = None) =
     for {
       dao   <- TestHeroDao.withHero(userId, h)
       inv    = TestInventoryRepository.withItems(items)
       sched <- TestScheduler.make
       r     <- TestRenderer.make
       c     <- content
-    } yield (MonsterCaveState(dao, inv, TestItemRepository.make, sched, c), dao, inv, sched, r)
+    } yield (MonsterCaveState(dao, inv, TestItemRepository.make, sched, c, artifacts), dao, inv, sched, r)
 
   /** Пещерка на три комнаты: вход (0,0), к северу — мобы, к востоку — находка. */
   private def smallCave(
@@ -278,6 +280,19 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       } yield assertTrue(next == StateType.MonsterCave && said.contains("Вы сорвали")) &&
               assertTrue(inv.snapshot.exists(_.material.isDefined)) &&
               assertTrue(scene.exists(_.rooms(2).done))
+    },
+
+    test("сорванная трава уходит в Живую сумку — и герой об этом слышит") {
+      val bag = TestArtifactRepository.of(
+        bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1))
+      for {
+        t <- cave(artifacts = Some(bag))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, smallCave(kind = RoomKind.Herb).copy(at = 2))
+        _     <- state.action(testUser, tap("CaveSearch"), r)
+        said  <- texts(r)
+      } yield assertTrue(said.contains("Живая сумка") && said.contains("Свободно мест")) &&
+              assertTrue(bag.snapshot.of(ArtifactKind.LivingBag).items.data.size == 1 && inv.snapshot.isEmpty)
     },
 
     test("привал: полминуты, один раз за пещеру, поднимает и героя, и отряд") {
