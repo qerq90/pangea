@@ -185,7 +185,11 @@ case class BattleEffects(
   heroSmokeTurns:       Int                        = 0,
   // Грань аметистовой божественного оружия: сколько раундов герой бьёт почти без промаха
   // (шанс попасть — DivineRates.TrueStrikePct).
-  heroTrueStrikeTurns:  Int                        = 0
+  heroTrueStrikeTurns:  Int                        = 0,
+  // Зеркальный настой: столько ударов по герою ещё уйдёт в призрачные копии.
+  // Приходит с героя при сборке боя (см. SoloPveBattle.from) и тратится
+  // ударами, а не временем.
+  heroMirrors:          Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
@@ -226,7 +230,8 @@ case class BattleEffects(
     heroVampiricHits     = heroVampiricHits,
     heroPoisonCoatTurns  = heroPoisonCoatTurns,
     heroBleedCoatTurns   = heroBleedCoatTurns,
-    heroSmokeTurns       = heroSmokeTurns
+    heroSmokeTurns       = heroSmokeTurns,
+    heroMirrors          = heroMirrors
   )
 
   /** Своя геройская половина плюс мобовая половина другого набора. */

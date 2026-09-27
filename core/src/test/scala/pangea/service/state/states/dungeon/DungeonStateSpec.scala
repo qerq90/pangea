@@ -97,6 +97,63 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(isValidFindOutcome(result))
     },
 
+    test("приговор: навстречу выходит именное существо названного рода на четверти сил") {
+      val race   = pangea.model.monster.Race.Orc
+      val doomed = TestFixtures.hero(userId).copy(statBoosts = pangea.model.stats.StatBoosts.none.add(
+        pangea.model.stats.StatBoost(pangea.model.item.BrewRates.SentenceBoost + race.entryName,
+          pangea.model.stats.ParamsBuff.zero, pangea.model.item.BrewRates.SentenceMs), 0L))
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, doomed)
+        renderer  <- TestRenderer.make
+        content   <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
+        state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
+        _         <- TestRandom.feedInts(67)
+        result    <- state.action(testUser, tap("FindEvent"), renderer)
+        battle    <- heroDao.readActiveBattle(userId)
+                       .map(_.flatMap(_.as[pangea.model.battle.SoloPveBattle].toOption).get)
+        updated   <- heroDao.getHeroByUserId(userId).map(_.get)
+        now       <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+        screens   <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+        full       = pangea.generator.monster.MonsterGenerator
+                       .generateOfRaceAndRarity(doomed.dungeonLevel, race, pangea.model.monster.Rarity.Legendary)
+      } yield assertTrue(result == StateType.Battle) &&
+              // именное существо этого рода — легендарное, и оно уже изранено
+              assertTrue(battle.monsterRace == race.entryName && battle.rarity == pangea.model.monster.Rarity.Legendary) &&
+              assertTrue(battle.monsterCurrentHp == full.fightStats.hp * pangea.model.item.BrewRates.SentenceHpPct / 100L) &&
+              assertTrue(battle.monsterCurrentArmor == full.fightStats.armor * pangea.model.item.BrewRates.SentenceHpPct / 100L) &&
+              assertTrue(battle.escapesAfter == pangea.model.item.BrewRates.SentenceRounds) &&
+              assertTrue(screens.contains("кровавому следу") && screens.contains(full.name)) &&
+              // приговор сгорел на встрече
+              assertTrue(!updated.statBoosts.hasActive(
+                pangea.model.item.BrewRates.SentenceBoost + race.entryName, now))
+    },
+
+    test("волчий зов: вместо обычного события выходит Белый волк, и запах сгорает") {
+      val called = TestFixtures.hero(userId).copy(statBoosts = pangea.model.stats.StatBoosts.none.add(
+        pangea.model.stats.StatBoost(pangea.model.item.BrewRates.WolfCallBoost,
+          pangea.model.stats.ParamsBuff.zero, pangea.model.item.BrewRates.WolfCallMs), 0L))
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, called)
+        renderer  <- TestRenderer.make
+        content   <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
+        state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
+        // что бы ни выпало в пуле событий, на запах выходит волк
+        _        <- TestRandom.feedInts(67)
+        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        battle   <- heroDao.readActiveBattle(userId)
+                      .map(_.flatMap(_.as[pangea.model.battle.SoloPveBattle].toOption))
+        updated  <- heroDao.getHeroByUserId(userId).map(_.get)
+        now      <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+        screens  <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(result == StateType.Battle) &&
+              assertTrue(battle.exists(_.bossKind.contains(pangea.model.monster.MiniBoss.WhiteWolf.entryName))) &&
+              assertTrue(screens.contains("Белый волк")) &&
+              // запах сгорел: второй раз волк сам не придёт
+              assertTrue(!updated.statBoosts.hasActive(pangea.model.item.BrewRates.WolfCallBoost, now))
+    },
+
     test("FindEvent Spring (индекс 67) → восстанавливает HP, без засады остаётся в Dungeon") {
       val lowHpHero = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L)

@@ -51,6 +51,10 @@ case class StatBoosts(boosts: List[StatBoost]) {
   /** Добавляет баф, попутно выкидывая протухшие и прежний баф с тем же именем. */
   def add(boost: StatBoost, nowMs: Long): StatBoosts =
     StatBoosts(boosts.filter(b => b.until > nowMs && b.name != boost.name) :+ boost)
+
+  /** Снимает баф с этим именем: одни эффекты сходят по времени, другие
+    * сгорают, когда сработали (волчий зов — на первой же встрече). */
+  def without(name: String): StatBoosts = StatBoosts(boosts.filterNot(_.name == name))
 }
 
 object StatBoosts {

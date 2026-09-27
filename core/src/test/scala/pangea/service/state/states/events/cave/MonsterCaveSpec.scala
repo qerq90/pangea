@@ -80,6 +80,9 @@ object MonsterCaveSpec extends ZIOSpecDefault {
 
   private def texts(r: TestRenderer): Task[String] = r.sentScreens.map(_.map(_.text).mkString("\n"))
 
+  /** Все описания стен: пещера выбирает из них наугад. */
+  private val walls: List[String] = SceneContent.load().list("cave.walls")
+
   private def brew(kind: BrewKind, id: Long): Item = BrewKind.item(kind).copy(id = id)
 
   /** Трофей расы `race` с уровнем `lvl` — такой падает с обычного моба. */
@@ -167,11 +170,15 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         room  <- r.sentScreens.map(_.last)
         byId   = room.choices.map(c => c.id -> c.color).toMap
         stay  <- state.action(testUser, tap("CaveLeft"), r)
-        wall  <- texts(r)
+        wall  <- r.sentScreens.map(_.dropRight(1).last.text)
+        // в стену можно упираться сколько угодно — описание всякий раз своё
+        _     <- ZIO.foreachDiscard(1 to 20)(_ => state.action(testUser, tap("CaveBack"), r))
+        seen  <- r.sentScreens.map(_.map(_.text).filter(walls.contains).distinct)
         scene <- sceneOf(dao)
       } yield assertTrue(byId("CaveForward") == ChoiceColor.Positive && byId("CaveRight") == ChoiceColor.Positive) &&
               assertTrue(byId("CaveLeft") == ChoiceColor.Negative && byId("CaveBack") == ChoiceColor.Negative) &&
-              assertTrue(stay == StateType.MonsterCave && wall.contains("глухая стена")) &&
+              assertTrue(stay == StateType.MonsterCave && walls.contains(wall)) &&
+              assertTrue(walls.size > 3 && seen.size > 1) &&
               assertTrue(scene.exists(_.at == 0))
     },
 
@@ -189,6 +196,8 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(battle.exists(b => (b.rarity :: b.group.others.map(s => Rarity.withName(s.rarity)))
                 .forall(_ != Rarity.Legendary))) &&
               assertTrue(loot.exists(_.returnState.contains(StateType.MonsterCave))) &&
+              // звать в пещере некого: ни подкрепления со стороны, ни клича сородичам
+              assertTrue(battle.exists(_.noKin)) &&
               // комната зачищена заранее: вернуться из боя можно только победив
               assertTrue(back.exists(s => s.rooms(1).monsters == 0 && s.at == 1 && s.expEarned > 0L))
     },

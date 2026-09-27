@@ -24,7 +24,10 @@ final case class WeaponDust(
   penalty: Boolean            = false,
   // Смазка из отвара: на ближайший бой удары по HP травят или пускают кровь.
   // Сходит вместе с пылью, когда бой кончился.
-  coat:    Option[WeaponCoat] = None
+  coat:    Option[WeaponCoat] = None,
+  // Призрачные копии из зеркального настоя: столько ударов по герою уйдёт в
+  // них в ближайшем бою. Тают вместе с пылью, когда бой кончился.
+  mirrors: Int                = 0
 ) {
 
   /** Слои как камни грейда 1 — в этом виде их читает [[HeroGems]]. */
@@ -36,7 +39,7 @@ final case class WeaponDust(
   /** Множитель урона героя: всполох магии и перебор с покрытием стоят четверти. */
   def damageMult: Double = if (penalty) 1.0 - WeaponDust.PenaltyPct / 100.0 else 1.0
 
-  def isEmpty: Boolean = layers.isEmpty && !penalty && coat.isEmpty
+  def isEmpty: Boolean = layers.isEmpty && !penalty && coat.isEmpty && mirrors <= 0
 
   def poisonCoated: Boolean = coat.contains(WeaponCoat.Poison)
   def bleedCoated: Boolean  = coat.contains(WeaponCoat.Bleed)
@@ -106,7 +109,8 @@ object WeaponDust {
       layers  <- c.getOrElse[List[MaterialKind]]("layers")(Nil)
       penalty <- c.getOrElse[Boolean]("penalty")(false)
       coat    <- c.getOrElse[Option[WeaponCoat]]("coat")(None)
-    } yield WeaponDust(layers, penalty, coat)
+      mirrors <- c.getOrElse[Int]("mirrors")(0)
+    } yield WeaponDust(layers, penalty, coat, mirrors)
 
   implicit val meta: Meta[WeaponDust] = new Meta(pgDecoderGet, pgEncoderPut)
 }

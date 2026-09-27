@@ -8,6 +8,8 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
+import pangea.model.item.BrewRates
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.hero.Hero
 import pangea.model.schedule.TaskKind
 import pangea.model.skill.MonsterEnergy
@@ -107,16 +109,66 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       _      <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil))
+      // Волчий зов: пока от героя пахнет палёным хмелем, навстречу выходит
+      // Белый волк — и запах на этом кончается.
+      called  = hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now)
+      // Приговор: имя рода держится час, и первая же встреча — его именное
+      // существо, которое кто-то уже почти добил.
+      doomed  = sentencedRace(hero, now)
       // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле.
       pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
-      result <- event match {
-        case StateType.Battle => startBattle(user, hero)
-        case StateType.Spring => healAtSpring(user, hero, now, renderer)
-        case other            => ZIO.succeed(other)
-      }
+      result <- if (doomed.isDefined) sentencedPrey(user, hero, doomed.get, renderer)
+                else if (called) wolfOnCall(user, hero, renderer)
+                else event match {
+                  case StateType.Battle => startBattle(user, hero)
+                  case StateType.Spring => healAtSpring(user, hero, now, renderer)
+                  case other            => ZIO.succeed(other)
+                }
     } yield result
+
+  /** Какой род приговорён, если приговор ещё держится. */
+  private def sentencedRace(hero: Hero, nowMs: Long): Option[Race] =
+    hero.statBoosts.active(nowMs).map(_.name)
+      .find(_.startsWith(BrewRates.SentenceBoost))
+      .flatMap(n => Race.withNameOption(n.drop(BrewRates.SentenceBoost.length)))
+
+  /** Приговорённый: именное существо названного рода, до которого кто-то
+    * добрался первым. Стоит на четверти сил и драться не хочет — если за
+    * [[BrewRates.SentenceRounds]] раунда его не добить, уйдёт. */
+  private def sentencedPrey(user: User, hero: Hero, race: Race, renderer: Renderer): Task[StateType] = {
+    val monster = MonsterGenerator.generateOfRaceAndRarity(hero.dungeonLevel, race, Rarity.Legendary)
+    val hp      = (monster.fightStats.hp * BrewRates.SentenceHpPct / 100L).max(1L)
+    val armor   = monster.fightStats.armor * BrewRates.SentenceHpPct / 100L
+    val battle  = SoloPveBattle.from(monster, hero).copy(
+      monsterCurrentHp    = hp,
+      monsterCurrentArmor = armor,
+      escapesAfter        = BrewRates.SentenceRounds)
+    for {
+      _ <- heroDao.updateStatBoosts(user.userId,
+             hero.statBoosts.without(BrewRates.SentenceBoost + race.entryName))
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _ <- renderer.show(user, Screen(content.format("dungeon.sentenced",
+             "monster" -> monster.name, "rounds" -> BrewRates.SentenceRounds.toString), Nil))
+    } yield StateType.Battle
+  }
+
+  /** На запах вышел Белый волк: тот же зверь, что подкрадывается на поляне, но
+    * здесь герой знает, за кем шёл, — и успел приготовиться. */
+  private def wolfOnCall(user: User, hero: Hero, renderer: Renderer): Task[StateType] = {
+    val wolf    = MiniBoss.WhiteWolf
+    val lvl     = wolf.bossLvl(hero.lvl)
+    val monster = Monster(0L, lvl, wolf.race, Rarity.Legendary, wolf.stats(lvl))
+    val battle  = SoloPveBattle.from(monster, hero).copy(bossKind = Some(wolf.entryName))
+    for {
+      _ <- heroDao.updateStatBoosts(user.userId, hero.statBoosts.without(BrewRates.WolfCallBoost))
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _ <- renderer.show(user, Screen(content.text("dungeon.wolfCall"), Nil))
+    } yield StateType.Battle
+  }
 
   private def healAtSpring(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[StateType] = {
     val maxHp    = hero.effectiveMaxHp(nowMs)
