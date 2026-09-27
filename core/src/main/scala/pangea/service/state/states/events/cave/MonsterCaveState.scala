@@ -9,7 +9,7 @@ import pangea.generator.item.MaterialGenerator
 import pangea.generator.loot.{LootGenerator, SchronGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{Poison, SoloPveBattle}
-import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveScene, RoomKind}
+import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind}
 import pangea.model.hero.Hero
 import pangea.generator.item.GemGenerator
 import pangea.model.item.{GemKind, Item, ItemDetails, MaterialKind}
@@ -357,7 +357,7 @@ case class MonsterCaveState(
     * все четыре — зелёные там, где проход, красные там, где камень. */
   private def showRoom(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] = {
     val room = scene.room
-    val text = content.text(roomKey(scene))
+    val text = roomText(scene)
     def dirChoice(id: String, key: String, dir: CaveDir, row: Int): Choice =
       content.choice(id, key).copy(
         color = if (scene.neighbour(dir).isDefined) ChoiceColor.Positive else ChoiceColor.Negative,
@@ -379,18 +379,26 @@ case class MonsterCaveState(
     writeScene(user, scene) *> renderer.show(user, Screen(text, choices)).as(StateType.MonsterCave)
   }
 
-  /** Описание комнаты: обысканная выглядит голой, как и пустая с самого начала. */
-  private def roomKey(scene: CaveScene): String = {
+  /** Описание комнаты. Обысканная показывает, что от находки осталось, — сорванную
+    * трещину, откинутую крышку, разрытые камни; пустая с самого начала берёт одно
+    * из описаний [[emptyRoom]]. */
+  private def roomText(scene: CaveScene): String = {
     val room = scene.room
-    if (room.done) "cave.room.empty"
-    else room.kind match {
-      case RoomKind.Empty => "cave.room.empty"
-      case RoomKind.Herb  => "cave.room.herb"
-      case RoomKind.Chest => "cave.room.chest"
-      case RoomKind.Stash => "cave.room.stash"
-      case RoomKind.Rest  => if (scene.restUsed) "cave.room.restUsed" else "cave.room.rest"
-      case RoomKind.Altar => if (scene.altarSpent) "cave.room.altarSpent" else "cave.room.altar"
+    room.kind match {
+      case RoomKind.Rest  => content.text(if (scene.restUsed) "cave.room.restUsed" else "cave.room.rest")
+      case RoomKind.Altar => content.text(if (scene.altarSpent) "cave.room.altarSpent" else "cave.room.altar")
+      case RoomKind.Herb  => content.text(if (room.done) "cave.room.herbTaken" else "cave.room.herb")
+      case RoomKind.Chest => content.text(if (room.done) "cave.room.chestOpen" else "cave.room.chest")
+      case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
+      case RoomKind.Empty => emptyRoom(room)
     }
+  }
+
+  /** Описание пустой комнаты. Вариант закреплён за местом, а не тянется наугад:
+    * вернувшись, герой должен узнать комнату, в которой уже был. */
+  private def emptyRoom(room: CaveRoom): String = {
+    val lines = content.list("cave.rooms.empty")
+    lines(math.floorMod(room.x * 31 + room.y * 17, lines.size))
   }
 
   private def actionKey(kind: RoomKind): Option[String] = kind match {
