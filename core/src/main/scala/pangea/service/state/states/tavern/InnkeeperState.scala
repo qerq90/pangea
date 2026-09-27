@@ -359,7 +359,16 @@ object InnkeeperState {
   val WolfLorePrice: Long = 1500L
 
   /** Бутылки шнапса из красавки в сумке. */
-  def schnapps(items: List[Item]): List[Item] = items.filter(_.brew.contains(BrewKind.Schnapps))
+  /** Что Трактирщик берёт себе: любой отвар, который не пьют, а продают
+    * (шнапс, самогон). Цена — на самом отваре. */
+  def schnapps(items: List[Item]): List[Item] =
+    items.filter(_.brew.exists(k => price(k).isDefined))
+
+  /** Почём бутылка этого отвара, если Трактирщик её вообще берёт. */
+  def price(kind: BrewKind): Option[Long] = kind.effect match {
+    case pangea.model.item.BrewEffect.Sellable(p) => Some(p)
+    case _                                        => None
+  }
 
   /** Сколько серебра Трактирщик даёт за первый трофей. */
   val QuestSilver: Long = 100L

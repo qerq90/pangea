@@ -7,7 +7,7 @@ import pangea.model.hero.{Hero, WeaponDust}
 import pangea.model.item.{BrewKind, BrewRates, Item}
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.state.StateType
-import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.stats.{BaseStats, FightStats, ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.schedule.Scheduler
 import pangea.service.state.UserAction
@@ -52,7 +52,47 @@ object BrewBattleSpec extends ZIOSpecDefault {
 
   private def texts(r: TestRenderer): Task[String] = r.sentScreens.map(_.map(_.text).mkString("\n"))
 
+  private def bubbled: Hero =
+    hero().copy(
+      fightStats = hero().fightStats.copy(hp = 1L, armor = 0L),
+      statBoosts = StatBoosts.none.add(StatBoost(BrewRates.BubbleBoost, ParamsBuff.zero, Long.MaxValue), 0L))
+
   override def spec = suite("Отвары в бою")(
+
+    test("пузырьковый нектар отменяет смерть, оставляет один HP и на этом кончается") {
+      val deadly = monster(100000L, atk = 100000L)
+      for {
+        t <- makeState(bubbled, SoloPveBattle.from(deadly, bubbled))
+        (state, dao, _, r) = t
+        // герой промахивается, моб бьёт наверняка — такой удар должен был добить
+        _     <- TestRandom.feedInts(1, 99) *> TestRandom.feedLongs(100L, 100L)
+        res   <- state.action(testUser, tap("Attack"), r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        said  <- texts(r)
+      } yield assertTrue(res == StateType.Battle && said.contains("плёнку")) &&
+              assertTrue(hero.fightStats.hp == 1L) &&
+              // плёнка лопнула: второй раз она не выручит
+              assertTrue(!hero.statBoosts.hasActive(BrewRates.BubbleBoost, 0L))
+    },
+
+    test("приговорённый уходит, если не добить его за отпущенные раунды") {
+      val prey = SoloPveBattle.from(monster(100000L), hero()).copy(escapesAfter = 2)
+      for {
+        t <- makeState(hero(), prey)
+        (state, dao, _, r) = t
+        // первый раунд: он ещё здесь
+        _     <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
+        first <- state.action(testUser, tap("Attack"), r)
+        alive <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+        // второй — уходит
+        _     <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
+        gone  <- state.action(testUser, tap("Attack"), r)
+        after <- dao.readActiveBattle(userId)
+        said  <- texts(r)
+      } yield assertTrue(first == StateType.Battle && alive.exists(_.group.round == 1)) &&
+              assertTrue(gone == StateType.Dungeon && after.forall(_.isNull)) &&
+              assertTrue(said.contains("уходит в темноту"))
+    },
 
     test("грибная смесь: кнопка есть только со склянкой в сумке") {
       val b = SoloPveBattle.from(monster(1000L), hero())

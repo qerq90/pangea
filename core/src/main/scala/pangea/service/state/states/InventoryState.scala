@@ -13,6 +13,7 @@ import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
 import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
+import pangea.model.monster.Race
 import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 import pangea.model.state.StateType
@@ -55,6 +56,7 @@ case class InventoryState(
       "RefillByBrew"      -> Target.Run { (u, _,  r) => refillByBrew(u, r) },
       "CoatWeapon"        -> Target.Run { (u, _,  r) => coatWeapon(u, r) },
       "CureTraumaPick"    -> Target.Run { (u, ua, r) => cureTrauma(u, ua, r) },
+      "SentencePick"      -> Target.Run { (u, ua, r) => sentenceRace(u, ua, r) },
       // «Письмо Марисе»: вскрыть письмо, отправиться по карте Кельвина.
       "OpenLetter"        -> Target.Run { (u, _,  r) => openLetter(u, r) },
       "UseKelvinMap"      -> Target.Run { (u, _,  r) => useKelvinMap(u, r) },
@@ -224,6 +226,15 @@ case class InventoryState(
                       "count" -> BrewRates.InstantRests.toString,
                       "total" -> (azat.instantRests + BrewRates.InstantRests).toString), renderer)
           } yield res
+        // Пузырьковый нектар: плёнка ждёт своего часа и срока не имеет.
+        case Some(BrewEffect.Bubble) =>
+          for {
+            _   <- heroDao.updateStatBoosts(user.userId, hero.statBoosts.add(
+                     StatBoost(BrewRates.BubbleBoost, ParamsBuff.zero, Long.MaxValue), 0L))
+            res <- consume(user, item, hero, content.text("brew.bubble"), renderer)
+          } yield res
+        // Приговор: сперва герой называет род, и только потом пьёт.
+        case Some(BrewEffect.Sentence) => offerSentence(user, renderer)
         // Зеркальный настой: копии ждут ближайшего боя там же, где пыль и
         // смазка, — и сходят вместе с ними, когда бой кончится.
         case Some(BrewEffect.Mirror(copies)) =>
@@ -246,6 +257,36 @@ case class InventoryState(
                      "brew" -> item.name, "pct" -> BrewRates.BoostPct.toString, "stat" -> label), renderer)
           } yield res
         case _ => showItem(user, item.id, renderer)
+      }
+    }
+
+  /** Кого приговорить: восемь родов кнопками, по трое в ряд. Склянка при этом
+    * ещё цела — она уйдёт, когда род назовут. */
+  private def offerSentence(user: User, renderer: Renderer): Task[StateType] = {
+    val races = Race.mortals.toList
+    val buttons = races.zipWithIndex.map { case (race, i) =>
+      Choice("SentencePick", race.toString, data = Map("race" -> race.entryName),
+        color = ChoiceColor.Positive, row = Some(i / InventoryState.RacesPerRow))
+    }
+    val rows = (races.size + InventoryState.RacesPerRow - 1) / InventoryState.RacesPerRow
+    renderer.show(user, Screen(content.text("brew.whichRace"),
+      buttons :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(rows), color = ChoiceColor.Negative)))
+      .as(StateType.Inventory)
+  }
+
+  /** Род назван: имя ложится в баф, склянка пустеет. */
+  private def sentenceRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      payloadField(ua, "race").flatMap(Race.withNameOption).filter(Race.mortals.contains) match {
+        case None => showItem(user, item.id, renderer)
+        case Some(race) =>
+          for {
+            now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            _   <- heroDao.updateStatBoosts(user.userId, hero.statBoosts.add(
+                     StatBoost(BrewRates.SentenceBoost + race.entryName, ParamsBuff.zero,
+                       now + BrewRates.SentenceMs), now))
+            res <- consume(user, item, hero, content.format("brew.sentenced", "race" -> race.toString), renderer)
+          } yield res
       }
     }
 
@@ -835,6 +876,10 @@ case class InventoryState(
 }
 
 object InventoryState {
+
+  /** Сколько родов помещается в ряд на экране приговора. */
+  val RacesPerRow: Int = 3
+
 
   val ItemActionPrefix = "InventoryItem_"
 

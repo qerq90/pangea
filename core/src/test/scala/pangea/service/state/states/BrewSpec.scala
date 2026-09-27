@@ -26,6 +26,8 @@ object BrewSpec extends ZIOSpecDefault {
     UserAction("", Some(s"""{"action":"${InventoryState.ItemActionPrefix}$id"}"""))
   private def pickTrauma(name: String): UserAction =
     UserAction("", Some(s"""{"action":"CureTraumaPick","trauma":"$name"}"""))
+  private def pickRace(race: pangea.model.monster.Race): UserAction =
+    UserAction("", Some(s"""{"action":"SentencePick","race":"${race.entryName}"}"""))
 
   private def herb(kind: MaterialKind, id: Long): Item = MaterialGenerator.item(kind).copy(id = id)
   private def brew(kind: BrewKind, id: Long): Item     = BrewKind.item(kind).copy(id = id)
@@ -54,15 +56,17 @@ object BrewSpec extends ZIOSpecDefault {
       val rng = Rng(7L)
       val boneSetter = List(herb(MaterialKind.Nettle, 1L), herb(MaterialKind.Chamomile, 2L), herb(MaterialKind.Calendula, 3L))
       val result     = CubeCraft.craft(boneSetter, charges = 5, rng)
-      val all        = BrewKind.values.map(k => CubeCraft.craft(k.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng))
+      // Перегонке нужна готовая склянка — она варится не из одних трав (см. отдельный тест).
+      val fromHerbs  = BrewKind.values.filter(_.base.isEmpty)
+      val all        = fromHerbs.map(k => CubeCraft.craft(k.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng))
       // один рецепт — две порции, заряд один
       assertTrue(result.chargesUsed == 1 && result.items.size == 2) &&
         assertTrue(result.items.forall(_.brew.contains(BrewKind.BoneSetter))) &&
         assertTrue(result.items.head.itemType == ItemType.Brew && !ItemType.equippable.contains(ItemType.Brew)) &&
         // все восемь рецептов варятся
-        assertTrue(all.zip(BrewKind.values).forall { case (r, k) => r.chargesUsed == 1 && r.items.head.brew.contains(k) }) &&
+        assertTrue(all.zip(fromHerbs).forall { case (r, k) => r.chargesUsed == 1 && r.items.head.brew.contains(k) }) &&
         // рецепты не совпадают между собой
-        assertTrue(BrewKind.values.map(_.recipe.toSet).distinct.size == BrewKind.values.size)
+        assertTrue(fromHerbs.map(_.recipe.toSet).distinct.size == fromHerbs.size)
     },
 
     test("редкая трава в рецепте → одна склянка вместо двух") {
@@ -82,6 +86,74 @@ object BrewSpec extends ZIOSpecDefault {
       assertTrue(List(BrewKind.MushroomMix, BrewKind.WolfCall, BrewKind.MirrorBrew)
         .flatMap(_.recipe.filter(_.herbRank == 2)) ==
         List(MaterialKind.GlaiveMushroom, MaterialKind.WolfHops, MaterialKind.MirageFlower))
+    },
+
+    test("перегонка: шнапс с травами даёт самогон, из одних трав он не выходит") {
+      val rng    = Rng(7L)
+      val herbs  = BrewKind.Moonshine.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }
+      val withIt = CubeCraft.craft(brew(BrewKind.Schnapps, 9L) :: herbs, charges = 5, rng)
+      val plain  = CubeCraft.craft(herbs, charges = 5, rng)
+      // кристалл Живой сумки умеет и перегонку
+      val inBag  = CubeCraft.brewHerbs(brew(BrewKind.Schnapps, 9L) :: herbs, charges = 5, rng)
+      assertTrue(BrewKind.Moonshine.base.contains(BrewKind.Schnapps)) &&
+      assertTrue(withIt.chargesUsed == 1 && withIt.items.count(_.brew.contains(BrewKind.Moonshine)) == 1) &&
+      // склянку шнапса перегонка забрала
+      assertTrue(!withIt.items.exists(_.brew.contains(BrewKind.Schnapps))) &&
+      assertTrue(inBag.items.exists(_.brew.contains(BrewKind.Moonshine))) &&
+      // без шнапса эти травы уходят на обычные отвары, самогона нет
+      assertTrue(!plain.items.exists(_.brew.contains(BrewKind.Moonshine)))
+    },
+
+    test("волчье пиво: одна склянка и +10% к выносливости на час") {
+      val rng  = Rng(7L)
+      val beer = CubeCraft.craft(
+        BrewKind.WolfBeer.recipe.zipWithIndex.map { case (h, i) => herb(h, i.toLong + 1L) }, charges = 5, rng)
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.WolfBeer, 1L)))
+        (state, dao, _, r) = t
+        _    <- state.action(testUser, selectItem(1L), r)
+        _    <- state.action(testUser, tap("DrinkBrew"), r)
+        hero <- dao.getHeroByUserId(userId).map(_.get)
+        now  <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+      } yield assertTrue(beer.items.size == 1 && beer.items.head.brew.contains(BrewKind.WolfBeer)) &&
+              // выносливость до сих пор не бустил ни один отвар
+              assertTrue(hero.statBoosts.vitFactor(now) > 1.0) &&
+              assertTrue(hero.statBoosts.strFactor(now) == 1.0 && hero.statBoosts.agiFactor(now) == 1.0)
+    },
+
+    test("пузырьковый нектар: плёнка ложится без срока и ждёт своего часа") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.Bubble, 1L)))
+        (state, dao, inv, r) = t
+        _    <- state.action(testUser, selectItem(1L), r)
+        _    <- state.action(testUser, tap("DrinkBrew"), r)
+        said <- texts(r)
+        hero <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(hero.statBoosts.hasActive(BrewRates.BubbleBoost, 0L)) &&
+              assertTrue(said.contains("плёнкой") && inv.snapshot.isEmpty) &&
+              // и ничего не прибавляет к характеристикам
+              assertTrue(hero.statBoosts.vitFactor(0L) == 1.0)
+    },
+
+    test("зелье приговора: сперва называют род, и только потом склянка пустеет") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.Sentence, 1L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(1L), r)
+        _     <- state.action(testUser, tap("DrinkBrew"), r)
+        ask   <- r.sentScreens.map(_.last)
+        // пока род не назван, склянка на месте
+        kept   = inv.snapshot.size
+        _     <- state.action(testUser, pickRace(pangea.model.monster.Race.Orc), r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        now   <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+        said  <- texts(r)
+      } yield assertTrue(ask.text.contains("Назовите род") && ask.choices.count(_.id == "SentencePick") == 8) &&
+              assertTrue(ask.choices.flatMap(_.row).groupBy(identity).forall(_._2.size <= 5)) &&
+              assertTrue(kept == 1 && inv.snapshot.isEmpty) &&
+              assertTrue(hero.statBoosts.hasActive(BrewRates.SentenceBoost + pangea.model.monster.Race.Orc.entryName, now)) &&
+              assertTrue(!hero.statBoosts.hasActive(BrewRates.SentenceBoost + pangea.model.monster.Race.Orc.entryName, now + BrewRates.SentenceMs)) &&
+              assertTrue(said.contains("приговор") || said.contains("след"))
     },
 
     test("зеркальный настой выпивается и оставляет копии до ближайшего боя") {

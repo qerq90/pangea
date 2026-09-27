@@ -211,6 +211,26 @@ object CubeCraft {
       } yield (List(rose, dust), RoseKind.item(kind), rng)
   }
 
+  // Готовая склянка + травы → отвар, который из одних трав не выходит
+  // (самогон из шнапса). Рецепт отвара называет и основу ([[BrewKind.base]]),
+  // и травы к ней; стоит перед варкой, иначе травы уйдут на обычные отвары.
+  private object BrewDistill extends Recipe {
+    val size = 3
+
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
+      BrewKind.values.toList.flatMap(k => k.base.map(k -> _)).collectFirst(Function.unlift {
+        case (kind, base) =>
+          val bottle = pool.find(_.brew.contains(base))
+          val herbs  = kind.recipe.foldLeft(Option(List.empty[Item])) { (acc, herb) =>
+            acc.flatMap(taken => pool.find(i => i.material.contains(herb) && !taken.contains(i)).map(taken :+ _))
+          }
+          for {
+            b <- bottle
+            h <- herbs
+          } yield (b :: h, BrewKind.item(kind), rng)
+      })
+  }
+
   // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты делят
   // травы между собой, поэтому жадный «первый подходящий» сварил бы три
   // костоправных из трав, сложенных под три разных отвара. Вместо этого по
@@ -240,7 +260,8 @@ object CubeCraft {
       def better(a: List[BrewKind], b: List[BrewKind]): Boolean =
         a.size > b.size || (a.size == b.size && a.distinct.size > b.distinct.size)
       def go(c: Map[MaterialKind, Int]): List[BrewKind] = memo.getOrElseUpdate(c, {
-        BrewKind.values.toList.foldLeft(List.empty[BrewKind]) { (best, kind) =>
+        // Отвары, которым нужна готовая склянка, из одних трав не варятся.
+        BrewKind.values.toList.filter(_.base.isEmpty).foldLeft(List.empty[BrewKind]) { (best, kind) =>
           val need = kind.recipe.groupBy(identity).view.mapValues(_.size).toMap
           if (!need.forall { case (h, n) => c.getOrElse(h, 0) >= n }) best
           else {
@@ -263,6 +284,7 @@ object CubeCraft {
     GemUpgrade,                                            // 3
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
+    BrewDistill,                                           // 3 (склянка + травы)
     HerbBrew,                                              // 3
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     RoseBloom,                                             // 2
@@ -276,9 +298,10 @@ object CubeCraft {
   def upgradeGems(items: List[Item], charges: Int, rng: Rng): Result =
     craftWith(List(GemUpgrade), items, charges, rng)
 
-  /** Кристалл Живой сумки: только варка отваров из трав. */
+  /** Кристалл Живой сумки: варка отваров и перегонка — всё, что делают из трав
+    * и склянок. */
   def brewHerbs(items: List[Item], charges: Int, rng: Rng): Result =
-    craftWith(List(HerbBrew), items, charges, rng)
+    craftWith(List(BrewDistill, HerbBrew), items, charges, rng)
 
   private def craftWith(recipes: List[Recipe], items: List[Item], charges: Int, rng: Rng): Result = {
     var pool      = items

@@ -29,6 +29,11 @@ object BrewEffect {
   case object WolfCall extends BrewEffect
   /** Призрачные копии: первые `copies` ударов по герою уходят в них. */
   final case class Mirror(copies: Int) extends BrewEffect
+  /** Приговор: герой называет расу, и следующая встреча — её именное существо,
+    * добитое кем-то до него. */
+  case object Sentence extends BrewEffect
+  /** Пузырь: ближайшая смерть героя не состоится — он останется с одним HP. */
+  case object Bubble extends BrewEffect
 }
 
 /** Отвары: три травы в кубе Азата → порции ([[portions]]). Из трав первого
@@ -47,7 +52,17 @@ sealed abstract class BrewKind(
   def drinkable: Boolean = effect match {
     case BrewEffect.CureTrauma | BrewEffect.InstantRest | BrewEffect.Boost(_, _, _) => true
     case BrewEffect.WolfCall | BrewEffect.Mirror(_)                                 => true
+    case BrewEffect.Sentence | BrewEffect.Bubble                                     => true
     case _                                                                           => false
+  }
+
+  /** Отвар, который идёт в рецепт вместе с травами: перегонка берёт готовую
+    * склянку и доводит её до ума. Метод, а не поле с умолчанием: значение по
+    * умолчанию в конструкторе живёт в компаньоне, и вариант ждал бы его
+    * инициализации — дедлок на ровном месте (см. заметку у `poisons` розы). */
+  def base: Option[BrewKind] = this match {
+    case BrewKind.Moonshine => Some(BrewKind.Schnapps)
+    case _                  => None
   }
 
   /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна. */
@@ -90,6 +105,22 @@ object BrewRates {
 
   /** Имя бафа «на запах пришёл волк» в [[pangea.model.stats.StatBoosts]]. */
   val WolfCallBoost: String = "brew:wolfCall"
+
+  /** Приговор: префикс бафа (за ним — раса) и сколько он держится. */
+  val SentenceBoost: String = "brew:sentence:"
+  val SentenceMs: Long      = 60L * 60L * 1000L
+
+  /** Сколько процентов HP и брони остаётся у приговорённого к встрече. */
+  val SentenceHpPct: Long = 25L
+
+  /** Сколько ходов он терпит, прежде чем удрать. */
+  val SentenceRounds: Int = 3
+
+  /** Пузырь: имя бафа. Срока у него нет — он ждёт смерти, сколько бы её ни ждать. */
+  val BubbleBoost: String = "brew:bubble"
+
+  /** Самогон: во сколько раз Трактирщик платит за него больше, чем за шнапс. */
+  val MoonshineFactor: Long = 3L
 }
 
 object BrewKind extends Enum[BrewKind] {
@@ -166,8 +197,32 @@ object BrewKind extends Enum[BrewKind] {
   case object WolfCall extends BrewKind(
     "Волчий зов",
     List(WolfHops, Sage, Wormwood),
-    "Жжёный хмель, от которого тянет палёной шерстью. Выпить — и запах пойдёт от вас самих: тот, кто ходит за спиной по лабиринту, выйдет навстречу сам. Час, не больше: потом выветрится.",
+    "Жжёный хмель с чем-то ещё, чего не разобрать. Выпить — и запах пойдёт от вас самих: тот, кто держится позади и не показывается, подойдёт ближе. Час, не больше: потом выветрится.",
     BrewEffect.WolfCall)
+
+  case object Sentence extends BrewKind(
+    "Зелье приговора",
+    List(DoomFlower, Belladonna, Chamomile),
+    "Чёрная взвесь, в которой что-то шевелится, стоит отвести взгляд. Выпивший называет род — и тот, кого назвали, уже приговорён: кто-то доберётся до него первым, а герою останется добить. Час, пока имя держится на языке.",
+    BrewEffect.Sentence)
+
+  case object Bubble extends BrewKind(
+    "Пузырьковый нектар",
+    List(BubbleLily, Chamomile, Valerian),
+    "Сладкий нектар, заключённый в тонкую плёнку, — она не лопается даже на языке. Выпившего он от чего-то бережёт; от чего именно, травники не сходятся, а те, кто проверил, рассказывают об этом неохотно.",
+    BrewEffect.Bubble)
+
+  case object WolfBeer extends BrewKind(
+    "Волчье пиво",
+    List(WolfHops, Calendula, Chamomile),
+    s"Тёмное, густое, с горчинкой от жжёного хмеля. Пьётся тяжело, зато после него и стоится, и держится крепче: +${BrewRates.BoostPct}% к выносливости на час; с зельями Густаво складывается.",
+    BrewEffect.Boost("herb:vit", ParamsBuff(0, BrewRates.BoostPct, 0, 0), "Выносливость"))
+
+  case object Moonshine extends BrewKind(
+    "Самогон из красавки",
+    List(Wormwood, Sage),
+    s"Шнапс, перегнанный ещё раз и ещё немного. Пить это не стоит тем более, а вот Трактирщик берёт по ${BrewRates.SchnappsPrice * BrewRates.MoonshineFactor} серебра за бутыль — и не спрашивает, из чего гнали.",
+    BrewEffect.Sellable(BrewRates.SchnappsPrice * BrewRates.MoonshineFactor))
 
   case object MirrorBrew extends BrewKind(
     "Зеркальный настой",
@@ -177,9 +232,11 @@ object BrewKind extends Enum[BrewKind] {
 
   val values: IndexedSeq[BrewKind] = findValues
 
-  /** Отвары первого ранга — все из трав первого ранга; за полный набор
-   *  сваренных даётся «Зельевар I» (см. Achievement.Brewer1). */
-  val rank1: IndexedSeq[BrewKind] = values
+  /** Отвары первого ранга — те, что варятся из одних простых трав; за полный
+   *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Отвары на
+   *  редкой траве и перегонка сюда не входят: до них зельевару ещё расти. */
+  val rank1: IndexedSeq[BrewKind] =
+    values.filter(k => k.base.isEmpty && k.recipe.forall(_.herbRank <= 1))
 
   /** Отвар, который варится из этого набора трав (порядок не важен), если такой есть. */
   def forHerbs(herbs: List[MaterialKind]): Option[BrewKind] =

@@ -249,9 +249,12 @@ case class BattleState(
     // «Упырь» (порог 12): победа — это пир, герой сразу восстанавливает часть HP
     // и брони. Считаем ДО persistHero, чтобы восстановленное сохранилось вместе с
     // остальным исходом боя, а сообщение попало в тот же лог.
-    val res     = ghoulFeast(raw, nowMs)
+    // Пузырьковый нектар: смерть, которой не будет. Считаем до persistHero,
+    // чтобы спасённый герой сохранился вместе с остальным исходом.
+    val (res, bubbled) = bubbleRescue(ghoulFeast(raw, nowMs), nowMs)
     val persistHero =
-      heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+      heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
+        ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
     // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
     val persistSquad =
       ZIO.when(res.hero.squad.nonEmpty || res.battle.group.alliesGone.nonEmpty)(
@@ -269,6 +272,13 @@ case class BattleState(
     val showGroup = ZIO.when(groupMsg.nonEmpty && (res.outcome == Outcome.Continue || res.outcome == Outcome.Death))(
       renderer.show(user, Screen(groupMsg, Nil)))
     res.outcome match {
+      // Приговорённый дотерпел свои раунды и ушёл: добычи с него нет, но и
+      // герой цел — событие просто кончилось.
+      case Outcome.Continue if res.battle.escapesAfter > 0 && res.battle.group.round >= res.battle.escapesAfter =>
+        (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
+          showLog *> showGroup *>
+          renderer.show(user, Screen(content.format("battle.preyEscaped", "monster" -> res.battle.monsterName), Nil))
+            .as(StateType.Dungeon)
       case Outcome.Continue =>
         (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
           showLog *> showGroup *>
@@ -3589,6 +3599,20 @@ case class BattleState(
     Screen(text, skillButtons ++ mainButtons)
   }
 
+  /** Пузырьковый нектар: если герой обнулился, а плёнка на нём ещё цела —
+    * смерть не состоится, останется один HP, и нектар на этом кончится.
+    * Возвращает исход и то, сработал ли нектар (тогда надо сохранить бафы). */
+  private def bubbleRescue(res: TurnResult, nowMs: Long): (TurnResult, Boolean) =
+    if (res.outcome != Outcome.Death || !res.hero.statBoosts.hasActive(BrewRates.BubbleBoost, nowMs))
+      (res, false)
+    else {
+      val saved = res.hero.copy(
+        fightStats = res.hero.fightStats.copy(hp = BattleState.BubbleHp),
+        statBoosts = res.hero.statBoosts.without(BrewRates.BubbleBoost))
+      (res.copy(hero = saved, outcome = Outcome.Continue,
+        log = res.log :+ content.text("battle.bubbleSaved")), true)
+    }
+
   /** Сколько склянок грибной смеси в сумке героя. Сумка может быть недоступна
     * (стаб в тестах) — тогда кнопки просто не будет. */
   private def mixCount(hero: Hero): Task[Int] =
@@ -3710,6 +3734,9 @@ object BattleState {
   val SquadTickAction: String = """{"action":"SquadTick"}"""
   /** С каким HP герой приходит в себя, когда отряд добил всех без него. */
   val DownReviveHp: Long = 1L
+
+  /** С каким HP остаётся тот, кого вытащил пузырьковый нектар. */
+  val BubbleHp: Long = 1L
 
   final case class TurnResult(
       hero: Hero,

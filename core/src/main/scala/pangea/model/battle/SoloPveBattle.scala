@@ -61,7 +61,10 @@ case class SoloPveBattle(
   // Имя моба от сюжета («Коллектор») вместо имени по расе и редкости.
   customName: Option[String] = None,
   // Божественное оружие бьёт раз в раунд — и своего счётчика ни с кем не делит.
-  divineUsedThisRound: Boolean = false
+  divineUsedThisRound: Boolean = false,
+  // Приговорённый: сколько раундов он терпит, прежде чем удрать. 0 — противник
+  // никуда не денется и дерётся до конца, как все.
+  escapesAfter:   Int     = 0
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -389,8 +392,9 @@ object SoloPveBattle {
       story               <- c.getOrElse[Option[String]]("story")(None)
       customName          <- c.getOrElse[Option[String]]("customName")(None)
       divineUsed          <- c.getOrElse[Boolean]("divineUsedThisRound")(false)
+      escapesAfter        <- c.getOrElse[Int]("escapesAfter")(0)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName, divineUsed)
+                         story, customName, divineUsed, escapesAfter)
 }
