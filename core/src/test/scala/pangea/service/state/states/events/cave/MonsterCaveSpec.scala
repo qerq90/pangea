@@ -83,6 +83,9 @@ object MonsterCaveSpec extends ZIOSpecDefault {
   /** Все описания стен: пещера выбирает из них наугад. */
   private val walls: List[String] = SceneContent.load().list("cave.walls")
 
+  /** Описания пустых комнат: у каждой своё, закреплённое за местом. */
+  private val emptyRooms: List[String] = SceneContent.load().list("cave.rooms.empty")
+
   private def brew(kind: BrewKind, id: Long): Item = BrewKind.item(kind).copy(id = id)
 
   /** Трофей расы `race` с уровнем `lvl` — такой падает с обычного моба. */
@@ -306,6 +309,49 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       } yield assertTrue(next == StateType.MonsterCave && said.contains("Вы сорвали")) &&
               assertTrue(inv.snapshot.exists(_.material.isDefined)) &&
               assertTrue(scene.exists(_.rooms(2).done))
+    },
+
+    test("у пустых комнат описания разные, но за комнатой закреплено своё") {
+      // Ряд пустых комнат в одну линию: (0,0) вход, дальше на север.
+      val rooms = (0 to 6).toList.map(y => CaveRoom(0, y, 0, RoomKind.Empty))
+      val line  = CaveScene(Race.Goblin.entryName, rooms, at = 0, inside = true)
+      for {
+        t <- cave()
+        (state, dao, _, _, r) = t
+        _      <- put(dao, line)
+        _      <- state.enter(testUser, r)
+        first  <- r.sentScreens.map(_.last.text)
+        // проходим до конца и обратно, запоминая, что видели в каждой комнате
+        _      <- ZIO.foreachDiscard(1 to 6)(_ => state.action(testUser, tap("CaveForward"), r))
+        there  <- r.sentScreens.map(_.map(_.text).filter(emptyRooms.contains))
+        _      <- ZIO.foreachDiscard(1 to 6)(_ => state.action(testUser, tap("CaveBack"), r))
+        back   <- r.sentScreens.map(_.map(_.text).filter(emptyRooms.contains))
+        home   <- r.sentScreens.map(_.last.text)
+      } yield assertTrue(emptyRooms.size >= 8 && emptyRooms.contains(first)) &&
+              // соседние комнаты выглядят по-разному
+              assertTrue(there.distinct.size > 3) &&
+              // на обратном пути каждая узнаётся: описание то же, что и в первый раз
+              assertTrue(back == there ++ there.reverse.tail) &&
+              assertTrue(home == first)
+    },
+
+    test("обысканная комната показывает, что от находки осталось") {
+      for {
+        t <- cave()
+        (state, dao, _, _, r) = t
+        _      <- put(dao, smallCave(kind = RoomKind.Chest).copy(at = 2))
+        _      <- state.enter(testUser, r)
+        before <- r.sentScreens.map(_.last.text)
+        _      <- put(dao, smallCave(kind = RoomKind.Chest).copy(at = 2)
+                    .withRoom(2, _.copy(done = true)))
+        _      <- state.enter(testUser, r)
+        after  <- r.sentScreens.map(_.last.text)
+        _      <- put(dao, smallCave(kind = RoomKind.Stash).copy(at = 2).withRoom(2, _.copy(done = true)))
+        _      <- state.enter(testUser, r)
+        stash  <- r.sentScreens.map(_.last.text)
+      } yield assertTrue(before.contains("окованный сундук")) &&
+              assertTrue(after.contains("Вскрытый сундук") && !emptyRooms.contains(after)) &&
+              assertTrue(stash.contains("Разрытые камни"))
     },
 
     test("сорванная трава уходит в Живую сумку — и герой об этом слышит") {
