@@ -3,26 +3,62 @@ package pangea.model.squad
 import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.generic.semiauto.deriveEncoder
-import io.circe.{Decoder, Encoder, HCursor}
+import io.circe.syntax.EncoderOps
+import io.circe.{Decoder, Encoder, HCursor, Json}
+import pangea.model.stats.FightStats
+
+/** Поднятый с алтаря тёмных сил: он не растёт с героем и не нанимается, а
+ *  живёт тем, что было в трофее, — поэтому имя, уровень и потолки статов лежат
+ *  прямо на нём. Раса у всех такая нежить одна (см. [[AllyKind.Undead]]), а
+ *  имя остаётся от того, кем он был при жизни. */
+final case class UndeadForm(name: String, lvl: Long, stats: FightStats)
+
+object UndeadForm {
+  implicit val encoder: Encoder[UndeadForm] = (u: UndeadForm) =>
+    Json.obj("name" -> u.name.asJson, "lvl" -> u.lvl.asJson, "stats" -> u.stats.asJson)
+
+  implicit val decoder: Decoder[UndeadForm] = (c: HCursor) =>
+    for {
+      name  <- c.get[String]("name")
+      lvl   <- c.getOrElse[Long]("lvl")(1L)
+      stats <- c.get[FightStats]("stats")
+    } yield UndeadForm(name, lvl, stats)
+}
 
 /** Союзник в отряде: кто, на какой позиции, что с ним сейчас и до какого
  *  момента нанят (`hiredUntil`, epoch ms). Потолки считаются от уровня героя
- *  ([[AllyKind.stats]]), здесь — только текущее. */
-final case class Ally(kind: AllyKind, position: Int, hp: Long, armor: Long, energy: Long, hiredUntil: Long = 0L) {
-  def name: String = kind.name
+ *  ([[AllyKind.stats]]), здесь — только текущее. У поднятого с алтаря вместо
+ *  этого своя форма ([[UndeadForm]]): его статы от уровня героя не зависят. */
+final case class Ally(
+  kind:       AllyKind,
+  position:   Int,
+  hp:         Long,
+  armor:      Long,
+  energy:     Long,
+  hiredUntil: Long               = 0L,
+  undead:     Option[UndeadForm] = None
+) {
+  def name: String = undead.map(_.name).getOrElse(kind.name)
 
-  /** Найм истёк — отработал свой день. */
-  def expired(nowMs: Long): Boolean = hiredUntil <= nowMs
+  /** Потолки статов: у наёмника — по уровню героя, у поднятого — свои. */
+  def statsAt(lvl: Long): FightStats = undead.map(_.stats).getOrElse(kind.stats(lvl))
+
+  /** Уровень, по которому он дерётся. */
+  def lvlAt(heroLvl: Long): Long = undead.map(_.lvl).getOrElse(kind.effectiveLvl(heroLvl))
+
+  /** Найм истёк — отработал свой день. Поднятого это не касается: он не нанят,
+    * а поднят, и уйти ему некуда. */
+  def expired(nowMs: Long): Boolean = undead.isEmpty && hiredUntil <= nowMs
 
   /** Полностью здоров на этом уровне героя. */
   def restored(lvl: Long): Ally = {
-    val s = kind.stats(lvl)
+    val s = statsAt(lvl)
     copy(hp = s.hp, armor = s.armor, energy = s.energy)
   }
 
   /** Текущее не выше потолков (герой мог понизиться — не бывает, но и выше не держим). */
   def clamped(lvl: Long): Ally = {
-    val s = kind.stats(lvl)
+    val s = statsAt(lvl)
     copy(hp = hp.min(s.hp).max(0L), armor = armor.min(s.armor).max(0L), energy = energy.min(s.energy).max(0L))
   }
 }
@@ -37,10 +73,12 @@ object Ally {
       armor    <- c.getOrElse[Long]("armor")(0L)
       energy   <- c.getOrElse[Long]("energy")(0L)
       until    <- c.getOrElse[Long]("hiredUntil")(0L)
-    } yield Ally(kind, position, hp, armor, energy, until)
+      undead   <- c.getOrElse[Option[UndeadForm]]("undead")(None)
+    } yield Ally(kind, position, hp, armor, energy, until, undead)
 }
 
-/** Отряд героя: позиции 1..4 делят герой (`heroPos`) и союзники. В бою позиция
+/** Отряд героя: места в строю (см. [[AllyRates.Positions]]) делят герой
+ *  (`heroPos`) и союзники — до десяти. В бою позиция
  *  — это место в строю напротив врагов: союзник на позиции N стоит против
  *  врага на месте N и достаёт соседние места. `away` — кто ушёл по свитку и
  *  когда вернётся в таверну (ключ — вид); `offDuty` — кто отработал свой найм и
@@ -90,6 +128,32 @@ final case class Squad(
 
   def dismiss(kind: AllyKind): Squad = copy(allies = allies.filterNot(_.kind == kind)).compact
 
+  /** Убрать союзника с этой позиции. Позиция — единственный надёжный ключ:
+    * поднятых с алтаря в отряде может быть несколько, и вид их не различает. */
+  def dismissAt(pos: Int): Squad = dismissAll(Set(pos))
+
+  /** Убрать сразу всех с этих позиций: по одному нельзя — [[compact]] сдвигает
+    * оставшихся, и вторая позиция указала бы уже не на того. */
+  def dismissAll(positions: Set[Int]): Squad =
+    if (positions.isEmpty) this
+    else copy(allies = allies.filterNot(a => positions.contains(a.position))).compact
+
+  def updateAt(pos: Int)(f: Ally => Ally): Squad =
+    copy(allies = allies.map(a => if (a.position == pos) f(a) else a))
+
+  /** Поднятый встаёт на свободное место. Мест нет — отряд как был; заменой
+    * заведует [[replaceAt]]. */
+  def raise(form: UndeadForm, lvl: Long): Squad =
+    freePosition.fold(this)(p => copy(allies = allies :+ Ally(AllyKind.Undead, p, 0L, 0L, 0L, undead = Some(form)).restored(lvl)))
+
+  /** Поднятый занимает место того, кто на нём стоял. */
+  def replaceAt(pos: Int, form: UndeadForm, lvl: Long): Squad =
+    copy(allies = allies.filterNot(_.position == pos) :+
+      Ally(AllyKind.Undead, pos, 0L, 0L, 0L, undead = Some(form)).restored(lvl)).compact
+
+  /** Все места заняты — новому нужно потеснить кого-то из своих. */
+  def full: Boolean = freePosition.isEmpty
+
   /** Союзник ушёл по свитку: из отряда — вон, вернётся через сутки. */
   def sentAway(kind: AllyKind, nowMs: Long): Squad =
     dismiss(kind).copy(away = away.updated(kind.entryName, nowMs + AllyRates.AwayMs))
@@ -107,23 +171,26 @@ final case class Squad(
       allies  = placed.collect { case (Some(a), p) => a.copy(position = p) })
   }
 
-  /** Переставить союзника на позицию `pos`: занята другим — меняются местами,
-    * занята героем — герой встаёт на его прежнюю. */
-  def move(kind: AllyKind, pos: Int): Squad =
-    allies.find(_.kind == kind) match {
+  /** Переставить союзника с позиции `from` на позицию `pos`: занята другим —
+    * меняются местами, занята героем — герой встаёт на его прежнюю. */
+  def moveAt(from: Int, pos: Int): Squad =
+    allies.find(_.position == from) match {
       case None => this
-      case Some(a) if pos < 1 || pos > AllyRates.Positions || pos == a.position => this
-      case Some(a) =>
-        val from = a.position
+      case Some(_) if pos < 1 || pos > AllyRates.Positions || pos == from => this
+      case Some(_) =>
         if (pos == heroPos)
-          copy(heroPos = from, allies = allies.map(x => if (x.kind == kind) x.copy(position = pos) else x))
+          copy(heroPos = from, allies = allies.map(x => if (x.position == from) x.copy(position = pos) else x))
         else
           copy(allies = allies.map { x =>
-            if (x.kind == kind) x.copy(position = pos)
+            if (x.position == from) x.copy(position = pos)
             else if (x.position == pos) x.copy(position = from)
             else x
           })
     }
+
+  /** То же по виду наёмника — им пользуются экраны, где союзник один такой. */
+  def move(kind: AllyKind, pos: Int): Squad =
+    allies.find(_.kind == kind).fold(this)(a => moveAt(a.position, pos))
 
   /** Герой встаёт на позицию `pos`: союзник оттуда — на его прежнюю. */
   def moveHero(pos: Int): Squad =

@@ -5,6 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.domain.Rng
 import pangea.model.monster.Rarity
+import pangea.model.squad.UndeadForm
 
 /** Что найдётся в комнате пещеры, когда её мобы полягут. */
 sealed trait RoomKind extends EnumEntry
@@ -16,6 +17,7 @@ object RoomKind extends Enum[RoomKind] {
   case object Chest extends RoomKind // окованный сундук
   case object Stash extends RoomKind // чей-то схрон
   case object Rest  extends RoomKind // сухой угол, где можно перевести дух
+  case object Altar extends RoomKind // алтарь тёмных сил: поднимает добычу обратно
 
   implicit val encoder: Encoder[RoomKind] = (k: RoomKind) => k.entryName.asJson
   implicit val decoder: Decoder[RoomKind] = (c: HCursor) => c.as[String].map(RoomKind.withName)
@@ -69,6 +71,9 @@ object CaveDir extends Enum[CaveDir] {
   * @param restUsed  привал в пещере уже устроен, второго не будет
   * @param restUntil момент, когда привал закончится (0 — герой не спит)
   * @param rewarded  награда за зачистку уже выдана
+  * @param altarSpent алтарь отдал свою силу: поднимать больше некого
+  * @param pending   кто ждёт места в отряде, пока герой решает, кем пожертвовать
+  * @param pendingTrophy id трофея, за который этот поднятый встанет
   */
 final case class CaveScene(
   race:      String,
@@ -81,7 +86,10 @@ final case class CaveScene(
   expEarned: Long    = 0L,
   restUsed:  Boolean = false,
   restUntil: Long    = 0L,
-  rewarded:  Boolean = false
+  rewarded:  Boolean = false,
+  altarSpent: Boolean = false,
+  pending:    Option[UndeadForm] = None,
+  pendingTrophy: Long = 0L
 ) {
 
   def room: CaveRoom = rooms.lift(at).getOrElse(rooms.head)
@@ -113,7 +121,10 @@ object CaveScene {
       "expEarned" -> s.expEarned.asJson,
       "restUsed"  -> s.restUsed.asJson,
       "restUntil" -> s.restUntil.asJson,
-      "rewarded"  -> s.rewarded.asJson)
+      "rewarded"  -> s.rewarded.asJson,
+      "altarSpent" -> s.altarSpent.asJson,
+      "pending"      -> s.pending.asJson,
+      "pendingTrophy" -> s.pendingTrophy.asJson)
 
   implicit val decoder: Decoder[CaveScene] = (c: HCursor) =>
     for {
@@ -128,7 +139,11 @@ object CaveScene {
       restUsed  <- c.getOrElse[Boolean]("restUsed")(false)
       restUntil <- c.getOrElse[Long]("restUntil")(0L)
       rewarded  <- c.getOrElse[Boolean]("rewarded")(false)
-    } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil, rewarded)
+      spent     <- c.getOrElse[Boolean]("altarSpent")(false)
+      pending   <- c.getOrElse[Option[UndeadForm]]("pending")(None)
+      trophy    <- c.getOrElse[Long]("pendingTrophy")(0L)
+    } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil,
+                      rewarded, spent, pending, trophy)
 }
 
 /** Числа пещеры. Вынесены из компаньонов нарочно — их читают и генератор, и
@@ -170,6 +185,10 @@ object CaveRates {
 
   /** Привал в пещере длится столько же, сколько у костра в лабиринте. */
   val RestMs: Long = 30_000L
+
+  /** Шанс (в %), что в пещере окажется алтарь тёмных сил. Больше одного на
+    * пещеру не бывает. */
+  val AltarChancePct: Int = 50
 
   /** Во сколько раз итоговая награда больше опыта, взятого с мобов пещеры. */
   val ClearExpFactor: Long = 2L
@@ -265,14 +284,21 @@ object CaveGenerator {
     (picked, next)
   }
 
-  /** Виды комнат: вход пустой, одна случайная — привал, остальным свой бросок. */
+  /** Виды комнат: вход пустой, одна случайная — привал, ещё одна (в половине
+    * пещер) — алтарь тёмных сил, остальным свой бросок. */
   private def kindsFor(roomCount: Int, rng: Rng): (Map[Int, RoomKind], Rng) = {
-    val (shift, r1) = roll(rng, (roomCount - 1).max(1))
-    val restIdx     = shift + 1
-    val start: Map[Int, RoomKind] = Map(0 -> RoomKind.Empty, restIdx -> RoomKind.Rest)
-    (1 until roomCount).foldLeft((start, r1)) {
+    val (shift, r1)     = roll(rng, (roomCount - 1).max(1))
+    val restIdx         = shift + 1
+    val (altarRoll, r2) = roll(r1, 100)
+    val (altarShift, r3) = roll(r2, (roomCount - 1).max(1))
+    val altarIdx        = altarShift + 1
+    val withAltar       = altarRoll < CaveRates.AltarChancePct && altarIdx != restIdx
+    val start: Map[Int, RoomKind] =
+      Map(0 -> RoomKind.Empty, restIdx -> RoomKind.Rest) ++
+        (if (withAltar) Map(altarIdx -> RoomKind.Altar) else Map.empty[Int, RoomKind])
+    (1 until roomCount).foldLeft((start, r3)) {
       case ((acc, r), i) =>
-        if (i == restIdx) (acc, r)
+        if (acc.contains(i)) (acc, r)
         else {
           val (k, next) = roll(r, CaveRates.KindPool.size)
           (acc + (i -> CaveRates.KindPool(k)), next)

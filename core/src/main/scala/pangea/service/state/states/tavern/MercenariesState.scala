@@ -133,16 +133,18 @@ case class MercenariesState(
 
 object MercenariesState {
 
-  /** Ключ в scenes.yaml: `mercenaries.<key>`. */
+  /** Ключ в scenes.yaml: `mercenaries.<key>`. Нежити здесь нет — её не нанимают,
+   *  а поднимают на алтаре в пещере. */
   def key(kind: AllyKind): String = kind match {
     case AllyKind.Human  => "human"
     case AllyKind.Murloc => "murloc"
     case AllyKind.Gnome  => "gnome"
+    case AllyKind.Undead => "undead"
   }
 
   /** Кто сейчас за столом. */
   def available(squad: Squad, nowMs: Long): List[AllyKind] =
-    AllyKind.values.filterNot(k => squad.has(k) || squad.isAway(k, nowMs)).toList
+    AllyKind.hireable.filterNot(k => squad.has(k) || squad.isAway(k, nowMs))
 
 
   /** Чем берут Плюх и Брамбл. */

@@ -3,19 +3,32 @@ package pangea.model.battle
 import io.circe.generic.semiauto.deriveEncoder
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.model.monster.{Monster, Race, Rarity}
-import pangea.model.squad.{Ally, AllyKind}
+import pangea.model.squad.{Ally, AllyKind, UndeadForm}
 import pangea.model.stats.FightStats
 
 /** Союзник в бою: позиция в строю (напротив места врага с тем же номером),
   * текущее состояние и потолки на этот бой. Эффектов на союзниках нет. */
-final case class BattleAlly(kind: AllyKind, position: Int, hp: Long, armor: Long, energy: Long, stats: FightStats, lvl: Long) {
-  def name: String  = kind.name
+final case class BattleAlly(
+  kind:     AllyKind,
+  position: Int,
+  hp:       Long,
+  armor:    Long,
+  energy:   Long,
+  stats:    FightStats,
+  lvl:      Long,
+  undead:   Option[UndeadForm] = None,
+  /** Место, с которого союзник вошёл в бой: за бой он мог сойти с него
+    * (Таран, «Переместиться»), а в отряде он записан под прежним — по нему
+    * его там и находят. */
+  home:     Int                = 0
+) {
+  def name: String  = undead.map(_.name).getOrElse(kind.name)
   def alive: Boolean = hp > 0L
   def hpPct: Long    = if (stats.hp <= 0L) 0L else hp * 100L / stats.hp
   def armorPct: Long = if (stats.armor <= 0L) 0L else armor * 100L / stats.armor
 
   /** Обратно в отряд — с тем, что осталось. */
-  def toAlly: Ally = Ally(kind, position, hp, armor, energy)
+  def toAlly: Ally = Ally(kind, position, hp, armor, energy, undead = undead)
 }
 
 object BattleAlly {
@@ -23,8 +36,8 @@ object BattleAlly {
     val c = a.clamped(lvl)
     // В бою наёмник живёт по своему уровню, а не по геройскому: по нему и
     // статы, и цены умений, и восстановление энергии (см. AllyKind.maxLvl).
-    val own = a.kind.effectiveLvl(lvl)
-    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.kind.stats(lvl), own)
+    // У поднятого с алтаря и уровень, и статы свои — от трофея.
+    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.statsAt(lvl), a.lvlAt(lvl), a.undead, a.position)
   }
 
   implicit val encoder: Encoder[BattleAlly] = deriveEncoder
@@ -37,7 +50,9 @@ object BattleAlly {
       energy   <- c.get[Long]("energy")
       stats    <- c.get[FightStats]("stats")
       lvl      <- c.getOrElse[Long]("lvl")(1L)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl)
+      undead   <- c.getOrElse[Option[UndeadForm]]("undead")(None)
+      home     <- c.getOrElse[Int]("home")(position)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home)
 }
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее
@@ -129,8 +144,8 @@ object SlainMonster {
   *  - `pendingMove` — Таран: место, на которое герой шагнёт в конце раунда;
   *  - `originRace` — раса первого моба: подкрепление приходит той же расы;
   *  - `allies`  — союзники героя по своим позициям (см. [[BattleAlly]]);
-  *  - `alliesGone` — кто ушёл по свитку за этот бой (виды): после боя они
-  *    выбывают из отряда на сутки.
+  *  - `alliesGone` — кого за этот бой унесло из строя: наёмник после боя
+  *    выбывает из отряда на сутки, поднятый рассыпается совсем.
   *
   * Обычный бой 1 на 1 — это группа из одного: `others` пуст. */
 final case class GroupState(
@@ -142,7 +157,7 @@ final case class GroupState(
   heroPos:     Int                = 1,
   places:      List[Int]          = Nil,
   allies:      List[BattleAlly]   = Nil,
-  alliesGone:  List[String]       = Nil,
+  alliesGone:  List[BattleAlly]   = Nil,
   activePos:   Int                = 1,
   lastTarget:  Option[MonsterSlot] = None,
   heroDown:    Boolean            = false,
@@ -173,12 +188,17 @@ final case class GroupState(
   /** Строй для показа — до самого дальнего занятого места по обеим сторонам. */
   def rows: Int = (size :: allies.map(_.position)).max
 
-  def updateAlly(kind: AllyKind)(f: BattleAlly => BattleAlly): GroupState =
-    copy(allies = allies.map(a => if (a.kind == kind) f(a) else a))
+  /** Союзника в строю опознаём по МЕСТУ: поднятых с алтаря в отряде может быть
+    * несколько, и вид у них общий — по нему удар пришёлся бы сразу по всем. */
+  def updateAlly(pos: Int)(f: BattleAlly => BattleAlly): GroupState =
+    copy(allies = allies.map(a => if (a.position == pos) f(a) else a))
 
-  /** Союзник ушёл по свитку. */
-  def withoutAlly(kind: AllyKind): GroupState =
-    copy(allies = allies.filterNot(_.kind == kind), alliesGone = alliesGone :+ kind.entryName)
+  /** Союзника с этого места унесло из боя. */
+  def withoutAlly(pos: Int): GroupState =
+    allyAt(pos) match {
+      case None    => this
+      case Some(a) => copy(allies = allies.filterNot(_.position == pos), alliesGone = alliesGone :+ a)
+    }
 
   /** Сколько мобов ещё на ногах, включая активного. */
   def aliveCount: Int = 1 + others.count(_.alive)
@@ -258,7 +278,7 @@ object GroupState {
       // Без мест (старая запись) — строй сплошной: слева от героя, потом справа.
       places      <- c.getOrElse[List[Int]]("places")(others.indices.map(i => if (i < heroPos - 1) i + 1 else i + 2).toList)
       allies      <- c.getOrElse[List[BattleAlly]]("allies")(Nil)
-      gone        <- c.getOrElse[List[String]]("alliesGone")(Nil)
+      gone        <- c.getOrElse[List[BattleAlly]]("alliesGone")(Nil)
       activePos   <- c.getOrElse[Int]("activePos")(heroPos)
       lastTarget  <- c.getOrElse[Option[MonsterSlot]]("lastTarget")(None)
       heroDown    <- c.getOrElse[Boolean]("heroDown")(false)

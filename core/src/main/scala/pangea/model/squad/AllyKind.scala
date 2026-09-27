@@ -63,8 +63,10 @@ object AllyRates {
   val HireMs: Long = 12L * 60L * 60L * 1000L
   val OffDutyMs: Long = 12L * 60L * 60L * 1000L
 
-  /** Мест в отряде вместе с героем. */
-  val Positions: Int = 4
+  /** Мест в строю вместе с героем: герой и до десяти союзников. Столько же
+    * мест и у мобов ([[pangea.model.battle.GroupState.MaxMonsters]]), так что
+    * строй сходится место в место. */
+  val Positions: Int = 11
 }
 
 object AllyKind extends Enum[AllyKind] {
@@ -85,7 +87,17 @@ object AllyKind extends Enum[AllyKind] {
     hpPerLvl = 80L, armorPerLvl = 175L, atkPerLvl = 20L, energyPerLvl = 100L,
     accuracyPerLvl = 100L, defencePerLvl = 50L, evasionPerLvl = 60L)
 
+  /** Поднятый с алтаря: раса, имя и статы у него свои — они лежат на самом
+    * союзнике ([[UndeadForm]]), а не на виде. Здесь только то, что общее у всей
+    * нежити: она бьёт холодом и в таверне не сидит. */
+  case object Undead extends AllyKind("Поднятый", Race.Undead, Element.Cold, maxLvl = 1L,
+    hpPerLvl = 0L, armorPerLvl = 0L, atkPerLvl = 0L, energyPerLvl = 0L,
+    accuracyPerLvl = 0L, defencePerLvl = 0L, evasionPerLvl = 0L)
+
   val values: IndexedSeq[AllyKind] = findValues
+
+  /** Кого можно нанять за столом таверны. Нежить туда не садится. */
+  val hireable: List[AllyKind] = List(Human, Murloc, Gnome)
 
   /** Сколько отваров берут Плюх и Брамбл на этом уровне героя. */
   def brewsFor(lvl: Long): Long = (lvl / AllyRates.BrewPerLevels).max(1L)

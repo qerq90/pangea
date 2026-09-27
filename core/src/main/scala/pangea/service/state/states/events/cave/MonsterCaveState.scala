@@ -11,9 +11,11 @@ import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{Poison, SoloPveBattle}
 import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveScene, RoomKind}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails, MaterialKind}
+import pangea.generator.item.GemGenerator
+import pangea.model.item.{GemKind, Item, ItemDetails, MaterialKind}
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.rune.{RuneStone, RuneStoneSize}
+import pangea.model.squad.UndeadForm
 import pangea.model.schedule.TaskKind
 import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
@@ -57,7 +59,8 @@ case class MonsterCaveState(
     routes = Map(
       "CaveEnter"     -> Target.Run { (u, _, r) => enterCave(u, r) },
       "CaveSupply"    -> Target.Run { (u, _, r) => withScene(u)(s => showSupplies(u, s, r).as(StateType.MonsterCave)) },
-      "CaveSupplyOut" -> Target.Run { (u, _, r) => withScene(u)(s => showGate(u, s, r)) },
+      "CaveSupplyOut" -> Target.Run { (u, _, r) =>
+        withScene(u)(s => if (s.inside) showRoom(u, s, r) else showGate(u, s, r)) },
       "CavePrev"      -> Target.Run { (u, _, r) => turnPage(u, r, -1) },
       "CaveNext"      -> Target.Run { (u, _, r) => turnPage(u, r, +1) },
       "CaveForward"   -> Target.Run { (u, _, r) => awake(u, r)(go(u, CaveDir.Forward, r)) },
@@ -65,6 +68,9 @@ case class MonsterCaveState(
       "CaveLeft"      -> Target.Run { (u, _, r) => awake(u, r)(go(u, CaveDir.Left, r)) },
       "CaveRight"     -> Target.Run { (u, _, r) => awake(u, r)(go(u, CaveDir.Right, r)) },
       "CaveSearch"    -> Target.Run { (u, _, r) => awake(u, r)(search(u, r)) },
+      "CaveAltar"     -> Target.Run { (u, _, r) => awake(u, r)(withScene(u)(s => showSupplies(u, s, r).as(StateType.MonsterCave))) },
+      "CaveSwap"      -> Target.Run { (u, ua, r) => swap(u, ua, r) },
+      "CaveSwapNo"    -> Target.Run { (u, _, r) => withScene(u)(s => cancelSwap(u, s, r)) },
       "CaveRest"      -> Target.Run { (u, _, r) => startRest(u, r) },
       "CaveRested"    -> Target.Run { (u, _, r) => wake(u, r) },
       "CaveOut"       -> Target.Run { (u, _, r) => askLeave(u, r) },
@@ -149,7 +155,7 @@ case class MonsterCaveState(
              renderer.show(user, Screen(content.text("cave.supply.empty"), List(backToGate)))
            else {
              val (pageItems, pages, p) = ItemMenu.page(all, scene.page)
-             val text = content.format("cave.supply.pick",
+             val text = content.format(if (atAltar(scene)) "cave.altar.pick" else "cave.supply.pick",
                "page" -> (p + 1).toString, "total" -> pages.toString)
              val buttons = pageItems.zipWithIndex.map { case (item, i) =>
                Choice(s"$UsePrefix${item.id}", ItemMenu.itemButtonLabel(item), row = Some(i))
@@ -185,7 +191,8 @@ case class MonsterCaveState(
         case Some(item) if item.isQuestItem =>
           renderer.show(user, Screen(content.format("cave.supply.quest", "name" -> item.displayTitle), Nil)) *>
             showSupplies(user, scene, renderer).as(StateType.MonsterCave)
-        case Some(item) => spend(user, hero, scene, item, renderer)
+        case Some(item) if atAltar(scene) => offer(user, hero, scene, item, renderer)
+        case Some(item)                   => spend(user, hero, scene, item, renderer)
       }
     } yield res
 
@@ -219,6 +226,98 @@ case class MonsterCaveState(
       } yield StateType.MonsterCave
     }
   }
+
+  // ── Алтарь тёмных сил ──────────────────────────────────────────────────────
+
+  /** Что камень делает с положенной на него вещью. Камни-усилители он
+    * переплавляет в черепа, трофеи поднимает обратно; всё прочее ему
+    * безразлично — такую вещь герой уносит с собой. */
+  private def offer(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer): Task[StateType] =
+    if (scene.altarSpent) say(user, scene, "cave.altar.spent", renderer)
+    else item.gem match {
+      case Some(gem) if gem.kind == GemKind.Skull => say(user, scene, "cave.altar.skullAlready", renderer)
+      case Some(gem)                              => forgeSkull(user, hero, scene, item, gem.grade, renderer)
+      case None => DarkAltar.formOf(item) match {
+        case Some(form) => raise(user, hero, scene, item, form, renderer)
+        case None       => say(user, scene, "cave.altar.indifferent", renderer)
+      }
+    }
+
+  /** Камень-усилитель уходит в камень алтаря и возвращается черепом того же
+    * достоинства — тем самым, что выкапывают из свежих могил. */
+  private def forgeSkull(user: User, hero: Hero, scene: CaveScene, item: Item, grade: Int, renderer: Renderer): Task[StateType] = {
+    val skull = GemGenerator.item(GemKind.Skull, grade).copy(id = item.id)
+    for {
+      _   <- inventoryRepo.updateItem(hero.id, skull).mapError(asThrowable)
+      _   <- renderer.show(user, Screen(content.format("cave.altar.skull",
+               "gem" -> item.displayTitle, "skull" -> skull.displayTitle), Nil))
+      _   <- showSupplies(user, scene, renderer)
+    } yield StateType.MonsterCave
+  }
+
+  /** Трофей встаёт с камня тем, кем был при жизни. Мест в отряде нет — сперва
+    * спросим, кем герой готов пожертвовать; трофей до ответа цел. */
+  private def raise(user: User, hero: Hero, scene: CaveScene, trophy: Item, form: UndeadForm, renderer: Renderer): Task[StateType] =
+    if (hero.squad.full) {
+      val waiting = scene.copy(pending = Some(form), pendingTrophy = trophy.id)
+      writeScene(user, waiting) *> askSwap(user, hero, form, renderer)
+    } else
+      for {
+        _ <- inventoryRepo.removeItem(trophy.id, hero.id).mapError(asThrowable)
+        _ <- heroDao.updateSquad(user.userId, hero.squad.raise(form, hero.lvl))
+        _ <- renderer.show(user, Screen(content.format("cave.altar.risen", "name" -> form.name), Nil))
+        res <- burnOut(user, scene, renderer)
+      } yield res
+
+  /** Экран «кем жертвуем»: весь отряд кнопками и отказ. */
+  private def askSwap(user: User, hero: Hero, form: UndeadForm, renderer: Renderer): Task[StateType] = {
+    val buttons = hero.squad.inOrder.zipWithIndex.map { case (a, i) =>
+      Choice("CaveSwap", Choice.fit(a.name), data = Map("pos" -> a.position.toString), row = Some(i / SwapPerRow))
+    }
+    val rows = (hero.squad.allies.size + SwapPerRow - 1) / SwapPerRow
+    renderer.show(user, Screen(content.format("cave.altar.full", "name" -> form.name),
+      buttons :+ content.choice("CaveSwapNo", "cave.altar.keepSquad")
+        .copy(color = ChoiceColor.Negative, row = Some(rows)))).as(StateType.MonsterCave)
+  }
+
+  /** Выбран тот, кто уступит место поднятому. */
+  private def swap(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    withScene(user) { scene =>
+      val pos = payloadField(ua, "pos").flatMap(_.toIntOption)
+      (scene.pending, pos) match {
+        case (Some(form), Some(p)) =>
+          for {
+            hero <- getHero(user)
+            res <- hero.squad.allyAt(p) match {
+              case None => showRoom(user, scene, renderer)
+              case Some(old) =>
+                for {
+                  _ <- inventoryRepo.removeItem(scene.pendingTrophy, hero.id).mapError(asThrowable).ignore
+                  _ <- heroDao.updateSquad(user.userId, hero.squad.replaceAt(p, form, hero.lvl))
+                  _ <- renderer.show(user, Screen(content.format("cave.altar.swapped",
+                         "old" -> old.name, "name" -> form.name), Nil))
+                  out <- burnOut(user, scene.copy(pending = None, pendingTrophy = 0L), renderer)
+                } yield out
+            }
+          } yield res
+        case _ => showRoom(user, scene, renderer)
+      }
+    }
+
+  /** Герой передумал жертвовать своими: трофей цел, алтарь ещё ждёт. */
+  private def cancelSwap(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text("cave.altar.kept"), Nil)) *>
+      showRoom(user, scene.copy(pending = None, pendingTrophy = 0L), renderer)
+
+  /** Алтарь отдал свою силу — больше он не отзовётся. */
+  private def burnOut(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text("cave.altar.spent"), Nil)) *>
+      showRoom(user, scene.copy(altarSpent = true), renderer)
+
+  /** Короткая реплика камня и обратно к сумке. */
+  private def say(user: User, scene: CaveScene, key: String, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text(key), Nil)) *>
+      showSupplies(user, scene, renderer).as(StateType.MonsterCave)
 
   /** Заряд — из фляги (хоть надетой, хоть из сумки), всё прочее — из сумки целиком. */
   private def takeFrom(user: User, hero: Hero, item: Item, charged: Option[ItemDetails.Charged]): Task[Unit] =
@@ -258,9 +357,10 @@ case class MonsterCaveState(
         color = if (scene.neighbour(dir).isDefined) ChoiceColor.Positive else ChoiceColor.Negative,
         row   = Some(row))
     // Пока в комнате есть кому драться, до находки дело не доходит.
-    val action = Option.when(room.monsters <= 0 && !room.done && actionKey(room.kind).isDefined)(
-      content.choice(if (room.kind == RoomKind.Rest) "CaveRest" else "CaveSearch",
-        actionKey(room.kind).get).copy(row = Some(3)))
+    // Алтарь «обысканным» не становится: он гаснет, отдав силу (`altarSpent`).
+    val spent  = room.kind == RoomKind.Altar && scene.altarSpent
+    val action = Option.when(room.monsters <= 0 && !room.done && !spent && actionKey(room.kind).isDefined)(
+      content.choice(actionId(room.kind), actionKey(room.kind).get).copy(row = Some(3)))
     val choices = List(
       dirChoice("CaveForward", "cave.dir.forward", CaveDir.Forward, 0),
       dirChoice("CaveLeft",    "cave.dir.left",    CaveDir.Left,    1),
@@ -283,6 +383,7 @@ case class MonsterCaveState(
       case RoomKind.Chest => "cave.room.chest"
       case RoomKind.Stash => "cave.room.stash"
       case RoomKind.Rest  => if (scene.restUsed) "cave.room.restUsed" else "cave.room.rest"
+      case RoomKind.Altar => if (scene.altarSpent) "cave.room.altarSpent" else "cave.room.altar"
     }
   }
 
@@ -291,8 +392,20 @@ case class MonsterCaveState(
     case RoomKind.Chest => Some("cave.act.chest")
     case RoomKind.Stash => Some("cave.act.stash")
     case RoomKind.Rest  => Some("cave.act.rest")
+    case RoomKind.Altar => Some("cave.act.altar")
     case RoomKind.Empty => None
   }
+
+  /** Кнопка находки: у привала и алтаря свои маршруты, прочее обыскивают. */
+  private def actionId(kind: RoomKind): String = kind match {
+    case RoomKind.Rest  => "CaveRest"
+    case RoomKind.Altar => "CaveAltar"
+    case _              => "CaveSearch"
+  }
+
+  /** Герой стоит у алтаря — значит вещи из сумки идут не в пещеру, а на камень. */
+  private def atAltar(scene: CaveScene): Boolean =
+    scene.inside && scene.room.kind == RoomKind.Altar
 
   // ── Бой в комнате ──────────────────────────────────────────────────────────
 
@@ -539,6 +652,9 @@ case class MonsterCaveState(
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
+  private def payloadField(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
+
   private def nowMs: Task[Long] = ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
 
   private def getHero(user: User): Task[Hero] =
@@ -551,6 +667,9 @@ case class MonsterCaveState(
 object MonsterCaveState {
   /** Префикс кнопки «пустить эту вещь в дело» перед входом. */
   val UsePrefix: String = "CaveUse_"
+
+  /** Сколько своих помещается в ряд на экране «кем жертвуем». */
+  val SwapPerRow: Int = 2
 
   /** payload синтетического действия, которым поллер будит героя после привала. */
   val RestAction: String = """{"action":"CaveRested"}"""

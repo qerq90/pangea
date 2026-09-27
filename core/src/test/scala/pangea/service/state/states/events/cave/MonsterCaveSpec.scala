@@ -5,9 +5,13 @@ import pangea.domain.Rng
 import pangea.engine.{ChoiceColor, SceneContent}
 import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
 import pangea.generator.monster.MonsterGenerator
+import pangea.model.monster.MiniBoss
 import pangea.model.battle.SoloPveBattle
 import pangea.model.artifact.ArtifactKind
 import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind}
+import pangea.generator.item.GemGenerator
+import pangea.model.item.{GemKind, ItemType, TrophyKind}
+import pangea.model.squad.{AllyKind, AllyRates, Squad, UndeadForm}
 import pangea.model.hero.Hero
 import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MaterialKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
@@ -77,6 +81,19 @@ object MonsterCaveSpec extends ZIOSpecDefault {
   private def texts(r: TestRenderer): Task[String] = r.sentScreens.map(_.map(_.text).mkString("\n"))
 
   private def brew(kind: BrewKind, id: Long): Item = BrewKind.item(kind).copy(id = id)
+
+  /** Трофей расы `race` с уровнем `lvl` — такой падает с обычного моба. */
+  private def trophy(kind: TrophyKind, race: Race, lvl: Long): Item =
+    Item(id = 1L, name = s"${kind.displayName} ($race)", lvl = lvl, rarity = ItemRarity.Gray,
+      itemType = ItemType.Trophy, attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Trophy(race.entryName, kind))
+
+  /** Пещера, где герой стоит прямо у алтаря. */
+  private def altarCave(): CaveScene =
+    smallCave(kind = RoomKind.Altar).copy(at = 2)
+
+  private def swapTo(pos: Int): UserAction =
+    UserAction("", Some(s"""{"action":"CaveSwap","pos":"$pos"}"""))
 
   override def spec = suite("Пещера с монстрами")(
 
@@ -373,6 +390,144 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       } yield assertTrue(fight == StateType.Battle) &&
               assertTrue(scene.exists(s => s.at == 1 && s.rooms(1).monsters == 0)) &&
               assertTrue(screen.text.contains("сундук") && screen.choices.map(_.id).contains("CaveSearch"))
+    },
+
+    // ── Алтарь тёмных сил ───────────────────────────────────────────────────
+
+    test("алтарь встречается не чаще чем в половине пещер и всегда один") {
+      val caves = (1L to 300L).toList.map(seed => CaveGenerator.generate(Race.Orc.entryName, Rng(seed))._1)
+      val withAltar = caves.count(_.rooms.exists(_.kind == RoomKind.Altar))
+      assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Altar) <= 1)) &&
+      // половина с поправкой на случайность выборки
+      assertTrue(withAltar > 90 && withAltar < 210) &&
+      // привал алтарём не вытесняется: угол для отдыха в пещере всё равно один
+      assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Rest) == 1))
+    },
+
+    test("трофеи поднимают нежить по своей ценности, а клык — того самого волка") {
+      val sack  = trophy(TrophyKind.Sack, Race.Goblin, lvl = 16L)
+      val relic = trophy(TrophyKind.Relic, Race.Orc, lvl = 20L)
+      val fang  = pangea.generator.loot.LootGenerator.wolfFang(bossLvl = 5L, floorLvl = 30L)
+      val goblin = DarkAltar.formOf(sack)
+      val orc    = DarkAltar.formOf(relic)
+      val wolf   = DarkAltar.formOf(fang)
+      // мешок — раб, реликвия — вожак: имя то же, что у моба этого тира
+      val rawGoblin = MonsterGenerator.generateOfRaceAndRarity(16, Race.Goblin, Rarity.Common)
+      assertTrue(goblin.exists(f => f.name == rawGoblin.name && f.lvl == 16L)) &&
+      assertTrue(goblin.exists(_.stats.atk == rawGoblin.fightStats.atk * 80L / 100L)) &&
+      assertTrue(orc.exists(_.name == MonsterGenerator.generateOfRaceAndRarity(20, Race.Orc, Rarity.Mythical).name)) &&
+      assertTrue(DarkAltar.rarityOf(TrophyKind.Head).contains(Rarity.Uncommon) &&
+                 DarkAltar.rarityOf(TrophyKind.Talisman).contains(Rarity.Rare)) &&
+      // волк встаёт тем, каким его убили: уровень босса зашит в самом клыке
+      assertTrue(wolf.exists(f => f.name == DarkAltar.DarkWolfName && f.lvl == 5L)) &&
+      assertTrue(wolf.exists(_.stats.hp == MiniBoss.WhiteWolf.stats(5L).hp * 80L / 100L))
+    },
+
+    test("камень-усилитель уходит в алтарь и возвращается черепом того же достоинства") {
+      val ruby = GemGenerator.item(GemKind.Ruby, 3).copy(id = 11L)
+      for {
+        t <- cave(items = List(ruby))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, altarCave())
+        _     <- state.action(testUser, tap("CaveAltar"), r)
+        list  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CaveUse_11"), r)
+        said  <- texts(r)
+        after  = inv.snapshot.find(_.id == 11L)
+      } yield assertTrue(list.choices.map(_.id).contains("CaveUse_11")) &&
+              assertTrue(after.exists(_.gem.exists(g => g.kind == GemKind.Skull && g.grade == 3))) &&
+              assertTrue(said.contains("выплёвывает"))
+    },
+
+    test("трофей поднимает союзника, и алтарь после этого гаснет") {
+      val sack = trophy(TrophyKind.Sack, Race.Goblin, lvl = 16L).copy(id = 21L)
+      for {
+        t <- cave(items = List(sack))
+        (state, dao, inv, _, r) = t
+        _      <- put(dao, altarCave())
+        _      <- state.action(testUser, tap("CaveAltar"), r)
+        _      <- state.action(testUser, tap("CaveUse_21"), r)
+        said   <- texts(r)
+        hero   <- dao.getHeroByUserId(userId).map(_.get)
+        scene  <- sceneOf(dao)
+        room   <- r.sentScreens.map(_.last)
+        // второй трофей алтарь уже не примет
+        _      <- state.action(testUser, tap("CaveAltar"), r)
+        closed <- r.sentScreens.map(_.last)
+      } yield assertTrue(inv.snapshot.isEmpty && said.contains("поднимается")) &&
+              assertTrue(hero.squad.allies.size == 1) &&
+              assertTrue(hero.squad.allies.head.kind == AllyKind.Undead) &&
+              assertTrue(hero.squad.allies.head.undead.exists(_.lvl == 16L)) &&
+              // поднятый не уходит по времени и полон сил
+              assertTrue(!hero.squad.allies.head.expired(Long.MaxValue)) &&
+              assertTrue(hero.squad.allies.head.hp > 0L) &&
+              assertTrue(said.contains("Сила алтаря израсходована")) &&
+              assertTrue(scene.exists(_.altarSpent)) &&
+              // кнопки алтаря на остывшей плите больше нет
+              assertTrue(!room.choices.map(_.id).contains("CaveAltar")) &&
+              assertTrue(!closed.choices.map(_.id).contains("CaveAltar"))
+    },
+
+    test("поднятый идёт в бой своими статами и под своим именем") {
+      val form  = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(4L))
+      val risen = hero().copy(squad = Squad.empty.raise(form, 10L))
+      for {
+        t <- cave(risen)
+        (state, dao, _, _, r) = t
+        _      <- put(dao, smallCave(monsters = 3))
+        _      <- state.action(testUser, tap("CaveForward"), r)
+        battle <- battleOf(dao)
+        ally    = battle.flatMap(_.group.allies.headOption)
+      } yield assertTrue(ally.exists(a => a.name == "Гоблин немощный раб" && a.lvl == 16L)) &&
+              assertTrue(ally.exists(a => a.stats == AllyKind.Human.stats(4L) && a.hp == a.stats.hp)) &&
+              assertTrue(ally.exists(_.kind.race == Race.Undead))
+    },
+
+    test("полный отряд: алтарь спрашивает, кем пожертвовать; отказ бережёт и трофей, и своих") {
+      val sack = trophy(TrophyKind.Sack, Race.Goblin, lvl = 16L).copy(id = 31L)
+      val full = (1 to AllyRates.Positions - 1).foldLeft(Squad.empty) { (sq, i) =>
+        sq.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), 10L)
+      }
+      for {
+        t <- cave(hero().copy(squad = full), items = List(sack))
+        (state, dao, inv, _, r) = t
+        _      <- put(dao, altarCave())
+        _      <- state.action(testUser, tap("CaveAltar"), r)
+        _      <- state.action(testUser, tap("CaveUse_31"), r)
+        ask    <- r.sentScreens.map(_.last)
+        // сперва отказываемся — трофей и отряд целы
+        _      <- state.action(testUser, tap("CaveSwapNo"), r)
+        kept   <- dao.getHeroByUserId(userId).map(_.get)
+        // снимок сумки берём сразу: стаб отдаёт текущее состояние, а не копию
+        keptBag = inv.snapshot.map(_.id)
+        // потом соглашаемся: место уступает тот, кого выбрали
+        _      <- state.action(testUser, tap("CaveAltar"), r)
+        _      <- state.action(testUser, tap("CaveUse_31"), r)
+        _      <- state.action(testUser, swapTo(3), r)
+        after  <- dao.getHeroByUserId(userId).map(_.get)
+        scene  <- sceneOf(dao)
+      } yield assertTrue(ask.text.contains("некуда встать") && ask.choices.map(_.id).contains("CaveSwap")) &&
+              assertTrue(ask.choices.flatMap(_.row).groupBy(identity).forall(_._2.size <= 5)) &&
+              assertTrue(kept.squad.allies.size == 10 && keptBag == List(31L)) &&
+              assertTrue(after.squad.allies.size == 10 && inv.snapshot.isEmpty) &&
+              assertTrue(after.squad.allyAt(3).exists(_.undead.exists(_.lvl == 16L))) &&
+              assertTrue(!after.squad.allies.exists(_.name == "Поднятый 2")) &&
+              assertTrue(scene.exists(_.altarSpent))
+    },
+
+    test("чужое алтарю безразлично: вещь остаётся у героя") {
+      val herb = MaterialGenerator.item(MaterialKind.GlaiveMushroom).copy(id = 41L)
+      for {
+        t <- cave(items = List(herb))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, altarCave())
+        _     <- state.action(testUser, tap("CaveAltar"), r)
+        _     <- state.action(testUser, tap("CaveUse_41"), r)
+        said  <- texts(r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        scene <- sceneOf(dao)
+      } yield assertTrue(said.contains("равнодушен") && inv.snapshot.map(_.id) == List(41L)) &&
+              assertTrue(hero.squad.allies.isEmpty && scene.exists(!_.altarSpent))
     },
 
     test("уход из пещеры — с подтверждением, и пещера закрывается") {
