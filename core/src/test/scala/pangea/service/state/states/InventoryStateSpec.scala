@@ -106,6 +106,22 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(choices.count(_.id.startsWith(InventoryState.ItemActionPrefix)) == 2)
     },
 
+    test("рунные камни одного узора — одна кнопка; малые и большие порознь") {
+      val quick = pangea.model.rune.Rune.Active(pangea.model.skill.Skill.QuickStrike)
+      val runes = (1 to 5).map(i =>
+        pangea.model.rune.RuneStone.item(quick, pangea.model.rune.RuneStoneSize.Small).copy(id = 300L + i)).toList :+
+        pangea.model.rune.RuneStone.item(quick, pangea.model.rune.RuneStoneSize.Big).copy(id = 320L)
+      for {
+        quad                    <- makeState(baseHero, runes)
+        (state, _, _, renderer)  = quad
+        _       <- state.enter(testUser, renderer)
+        choices <- renderer.sentScreens.map(_.last.choices)
+        labels   = choices.filter(_.id.startsWith(InventoryState.ItemActionPrefix)).map(_.label)
+      } yield assertTrue(labels.size == 2) &&
+              assertTrue(labels.exists(l => l.contains("Малая руна") && l.contains("(5 шт)"))) &&
+              assertTrue(labels.exists(l => l.contains("Большая руна") && !l.contains("шт")))
+    },
+
     test("разные грейды одного камня стоят порознь") {
       val stones = List(
         GemGenerator.item(GemKind.Ruby, 1).copy(id = 210L),
