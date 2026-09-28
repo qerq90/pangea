@@ -36,6 +36,9 @@ POSTGRES_USER=pangea
 POSTGRES_PASSWORD=your_strong_password
 
 VK_TOKEN=your_vk_token_here
+
+# Необязательно: пароль админ-панели. Пусто — панель выключена.
+ADMIN_PASSWORD=
 ```
 
 ### 4. Запустить

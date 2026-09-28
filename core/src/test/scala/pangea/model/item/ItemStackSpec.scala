@@ -1,6 +1,8 @@
 package pangea.model.item
 
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
+import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+import pangea.model.skill.Skill
 import zio.test._
 
 /** Складывание одинаковых вещей в одну строку экрана. Складывание ЭКРАННОЕ:
@@ -17,6 +19,9 @@ object ItemStackSpec extends ZIOSpecDefault {
     Item(id, s"${kind.displayName} ($race)", lvl, Rarity.Gray, ItemType.Trophy,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Trophy(race, kind))
+
+  private def rune(kind: Rune, size: RuneStoneSize, id: Long): Item =
+    RuneStone.item(kind, size).copy(id = id)
 
   private def sword(id: Long): Item =
     Item(id, "Меч", 10L, Rarity.Blue, ItemType.Weapon,
@@ -60,6 +65,23 @@ object ItemStackSpec extends ZIOSpecDefault {
       )
       assertTrue(groups.size == 4) &&
       assertTrue(groups.head._2 == 2)
+    },
+
+    test("рунные камни складываются по узору и размеру") {
+      val quick   = Rune.Active(Skill.QuickStrike)
+      val sweeping = Rune.Active(Skill.SweepingStrike)
+      val items = List(
+        rune(quick, RuneStoneSize.Small, 1L),
+        rune(quick, RuneStoneSize.Small, 2L),
+        rune(quick, RuneStoneSize.Small, 3L),
+        rune(quick, RuneStoneSize.Big, 4L),      // тот же узор, но большая
+        rune(sweeping, RuneStoneSize.Small, 5L)) // другой узор
+      val groups = ItemStack.grouped(items)
+      assertTrue(groups.size == 3) &&
+      assertTrue(groups.head._2 == 3 && groups.head._1.id == 3L) &&
+      // малая и большая одного узора — разные строки
+      assertTrue(groups.map(_._2) == List(3, 1, 1)) &&
+      assertTrue(items.forall(ItemStack.stackable))
     },
 
     test("экипировка не складывается никогда — у каждой вещи своя судьба") {

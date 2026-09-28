@@ -1,0 +1,15 @@
+# Секреты и локальное — в образ не попадают.
+.env
+.git
+.idea
+.vscode
+.metals
+.bloop
+.bsp
+
+# Сборочный мусор: внутри контейнера всё собирается заново.
+target
+*/target
+project/target
+project/project
+logs
