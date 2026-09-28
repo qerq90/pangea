@@ -126,19 +126,18 @@ class AdminPanelLive(
           case (AdminScreen.EquipRarity(t), Some(r)) => goTo(user, AdminScreen.EquipLevel(t, r), renderer)
           case _                                     => goTo(user, AdminScreen.EquipType, renderer)
         }
-      case Some(a) if a.startsWith(LevelPrefix) =>
-        (screen, a.drop(LevelPrefix.length).toLongOption) match {
-          case (AdminScreen.EquipLevel(t, r), Some(lvl)) => forge(user, hero, t, r, lvl, renderer)
-          case _                                         => goTo(user, AdminScreen.EquipType, renderer)
-        }
       case Some(a) if a.startsWith(SilverPrefix) =>
         a.drop(SilverPrefix.length).toLongOption.fold(show(user, screen, renderer))(addSilver(user, hero, _, renderer))
       case Some(a) if a.startsWith(DoubloonPrefix) =>
         a.drop(DoubloonPrefix.length).toLongOption.fold(show(user, screen, renderer))(addDoubloons(user, hero, _, renderer))
       case Some(PrevId)                         => turn(user, screen, -1, renderer)
       case Some(NextId)                         => turn(user, screen, +1, renderer)
-      // Текст без кнопки — это поиск по названию.
-      case _ if text.nonEmpty                   => goTo(user, AdminScreen.Found(text, 0), renderer)
+      // Текст без кнопки: на экране уровня это сам уровень, в остальных
+      // местах — поиск по названию.
+      case _ if text.nonEmpty                   => screen match {
+        case AdminScreen.EquipLevel(t, r) => level(user, hero, t, r, text, renderer)
+        case _                            => goTo(user, AdminScreen.Found(text, 0), renderer)
+      }
       case _                                    => show(user, screen, renderer)
     }
   }
@@ -213,11 +212,9 @@ class AdminPanelLive(
       renderer.show(user, Screen(s"${typeLabel(t)}: какая редкость?", buttons :+ back("AdminEquip", rows)))
 
     case AdminScreen.EquipLevel(t, r) =>
-      val buttons = Levels.zipWithIndex.map { case (lvl, i) =>
-        Choice(s"$LevelPrefix$lvl", s"Ур. $lvl", row = Some(i / LevelsPerRow))
-      }
-      val rows = (Levels.size + LevelsPerRow - 1) / LevelsPerRow
-      renderer.show(user, Screen(s"${r.emoji} ${typeLabel(t)}: какой уровень?", buttons :+ back("AdminEquip", rows)))
+      renderer.show(user, Screen(
+        s"${r.emoji} ${typeLabel(t)}: пришлите уровень числом (1–$MaxLevel).",
+        List(back("AdminEquip", 0))))
 
     case AdminScreen.Money =>
       val silver = SilverSteps.zipWithIndex.map { case (n, i) =>
@@ -254,6 +251,15 @@ class AdminPanelLive(
     AdminCatalog.find(entryId) match {
       case None        => show(user, screen, renderer)
       case Some(entry) => handOver(user, hero, entry.item, screen, renderer)
+    }
+
+  /** Уровень, присланный числом. Не число или не в диапазоне — так и скажем,
+    * а экран оставим на месте: переспрашивать удобнее, чем начинать сначала. */
+  private def level(user: User, hero: Hero, itemType: ItemType, rarity: Rarity, text: String, renderer: Renderer): Task[Unit] =
+    text.trim.toLongOption.filter(l => l >= 1L && l <= MaxLevel) match {
+      case Some(lvl) => forge(user, hero, itemType, rarity, lvl, renderer)
+      case None      =>
+        renderer.show(user, Screen(BadLevel, Nil)) *> show(user, AdminScreen.EquipLevel(itemType, rarity), renderer)
     }
 
   /** Собрать экипировку по частям и выдать. */
@@ -329,17 +335,15 @@ object AdminPanel {
   val SectionPrefix: String  = "AdminSection_"
   val TypePrefix: String     = "AdminType_"
   val RarityPrefix: String   = "AdminRarity_"
-  val LevelPrefix: String    = "AdminLevel_"
   val SilverPrefix: String   = "AdminSilver_"
   val DoubloonPrefix: String = "AdminDoubloon_"
 
   /** Раскладка кнопок: панель служебная, но в клавиатуру ВК влезать обязана. */
-  val PerRow: Int       = 2
-  val TypesPerRow: Int  = 3
-  val LevelsPerRow: Int = 4
+  val PerRow: Int      = 2
+  val TypesPerRow: Int = 3
 
-  /** Уровни, на которых панель собирает экипировку. */
-  val Levels: List[Long] = List(1L, 10L, 25L, 50L, 75L, 100L, 150L)
+  /** Выше этого уровня вещей в игре не бывает (см. `Hero.MaxLevel`). */
+  val MaxLevel: Long = 150L
 
   /** Номиналы кнопок «начислить себе». */
   val SilverSteps: List[Long]   = List(1000L, 10000L, 100000L)
@@ -361,6 +365,7 @@ object AdminPanel {
   val MoneyText: String     = "💰 Начислить себе."
   val Given: String         = "✅ Выдано:"
   val BagFull: String       = "❌ Сумка полна — вещь не влезла."
+  val BadLevel: String      = s"Нужно число от 1 до $MaxLevel."
 
   def nothingFound(query: String): String = s"По «$query» ничего не нашлось."
 

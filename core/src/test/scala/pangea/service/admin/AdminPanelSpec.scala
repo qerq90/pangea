@@ -145,10 +145,18 @@ object AdminPanelSpec extends ZIOSpecDefault {
         _    <- p.intercept(testUser, hero, tap(s"${AdminPanel.TypePrefix}${ItemType.Weapon.entryName}"), r)
         _    <- p.intercept(testUser, hero, tap(s"${AdminPanel.RarityPrefix}${Rarity.Orange.entryName}"), r)
         ask  <- r.sentScreens.map(_.last)
-        _    <- p.intercept(testUser, hero, tap(s"${AdminPanel.LevelPrefix}75"), r)
+        // уровень пишем числом
+        _    <- p.intercept(testUser, hero, text("75"), r)
         made  = inv.snapshot.headOption
-      } yield assertTrue(ask.choices.exists(_.id == s"${AdminPanel.LevelPrefix}75")) &&
-              assertTrue(made.exists(i => i.itemType == ItemType.Weapon && i.rarity == Rarity.Orange && i.lvl == 75L))
+        // чепуха и запредельный уровень не проходят, экран остаётся на месте
+        _     <- p.intercept(testUser, hero, text("сто"), r)
+        _     <- p.intercept(testUser, hero, text("500"), r)
+        scold <- said(r)
+      } yield assertTrue(ask.text.contains("пришлите уровень числом")) &&
+              assertTrue(made.exists(i => i.itemType == ItemType.Weapon && i.rarity == Rarity.Orange && i.lvl == 75L)) &&
+              assertTrue(scold.contains(AdminPanel.BadLevel)) &&
+              // ни одна из двух неудачных попыток вещь не создала
+              assertTrue(inv.snapshot.size == 1)
     },
 
     test("деньги начисляются кнопками номиналов") {
