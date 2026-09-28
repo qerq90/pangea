@@ -25,7 +25,8 @@ object AdminPanelSpec extends ZIOSpecDefault {
   private val stubStats = AdminStats(
     heroes = 7L, active24h = 3L, active7d = 5L,
     heroSilver = 1000L, vaultSilver = 500L, doubloons = 42L,
-    sets = List(AdminStats.SetRow(ItemSet.Hunter, 6, 54L), AdminStats.SetRow(ItemSet.Ghoul, 8, 32L)))
+    sets = List(AdminStats.SetRow(ItemSet.Hunter, 6, 54L), AdminStats.SetRow(ItemSet.Ghoul, 8, 32L)),
+    levels = AdminStats.levelRows(List(3L, 17L, 40L, 99L, 150L), AdminDao.LevelStep, AdminDao.MaxLevel))
 
   private val stubDao: AdminDao = new AdminDao {
     def stats: Task[AdminStats] = ZIO.succeed(stubStats)
@@ -184,7 +185,10 @@ object AdminPanelSpec extends ZIOSpecDefault {
       } yield assertTrue(stats.text.contains("всего героев: 7")) &&
               assertTrue(stats.text.contains("заходили за сутки: 3") && stats.text.contains("заходили за неделю: 5")) &&
               assertTrue(stats.text.contains("серебро всего: 1 500") && stats.text.contains("дублоны: 42")) &&
-              assertTrue(stats.text.contains("Охотник на 6: 54") && stats.text.contains("Упырь на 8: 32"))
+              assertTrue(stats.text.contains("Охотник на 6: 54") && stats.text.contains("Упырь на 8: 32")) &&
+              // полосы уровней по 25, включая пустые
+              assertTrue(stats.text.contains("1–25: 2") && stats.text.contains("26–50: 1")) &&
+              assertTrue(stats.text.contains("51–75: 0") && stats.text.contains("126–150: 1"))
     },
 
     test("панель не трогает ни состояние героя, ни сцену") {
@@ -201,6 +205,16 @@ object AdminPanelSpec extends ZIOSpecDefault {
         scene <- dao.readSceneData(userId)
       } yield assertTrue(hero.state == StateType.Battle) &&
               assertTrue(scene.exists(_.hcursor.get[String]("важное").contains("значение")))
+    },
+
+    test("уровни живых героев раскладываются по полосам в 25 уровней") {
+      val rows = AdminStats.levelRows(List(1L, 25L, 26L, 150L, 151L), AdminDao.LevelStep, AdminDao.MaxLevel)
+      assertTrue(rows.map(r => (r.from, r.to)) ==
+        List((1L, 25L), (26L, 50L), (51L, 75L), (76L, 100L), (101L, 125L), (126L, 150L))) &&
+      assertTrue(rows.head.heroes == 2L) &&                       // 1 и 25
+      assertTrue(rows(1).heroes == 1L) &&                          // 26
+      assertTrue(rows.last.heroes == 1L) &&                        // 150; 151 за потолком и не в счёт
+      assertTrue(rows.map(_.heroes).sum == 4L)
     },
 
     test("пароль не попадает в лог входящих сообщений") {

@@ -48,6 +48,7 @@ import pangea.model.state.StateType.{
   Girl,
   FlowerMeadow,
   MonsterCave,
+  RaceRevenge,
   Knowledge,
   Squad,
   Mercenaries,
@@ -90,7 +91,7 @@ import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHous
 import pangea.service.state.states.parcel.{MailState, TransferState}
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
-import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RottenJoeState, SilverVeinState}
+import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RaceRevengeState, RottenJoeState, SilverVeinState}
 import pangea.service.state.states.events.cave.MonsterCaveState
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
@@ -260,6 +261,7 @@ object StatesMap {
           Girl              -> GirlState(heroDao, inventoryRepo, itemRepo, barrelRepo, scheduler, content, bank),
           FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           MonsterCave       -> MonsterCaveState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
+          RaceRevenge       -> RaceRevengeState(heroDao, content),
           MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
           MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content, bank),
           MurlocElder       -> MurlocElderState(heroDao, inventoryRepo, itemRepo, content),

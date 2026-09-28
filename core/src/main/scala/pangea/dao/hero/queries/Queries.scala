@@ -162,6 +162,12 @@ object Queries {
   def readLoreData(userId: UserId): Fragment =
     sql"select lore_data from $tableName where user_id = $userId"
 
+  def writeKillLog(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set kill_log = $data where user_id = $userId"
+
+  def readKillLog(userId: UserId): Fragment =
+    sql"select kill_log from $tableName where user_id = $userId"
+
   def writeNpcQuests(userId: UserId, data: Json): Fragment =
     sql"update $tableName set npc_quests = $data where user_id = $userId"
 

@@ -253,7 +253,7 @@ case class Hero(
     val curEn    = fightStats.energy.min(maxEn)
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
     val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
-    s"""${race.toString}, Уровень $lvl
+    s"""${race.toString}, Уровень $lvl  ☠ Убито: $kills
        | $getLvlExp/$getNeededExp опыта$blessingLine$restsLine
        |
        | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
