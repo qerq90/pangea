@@ -100,6 +100,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Girl             extends StateType // девушка с криком «Помогите!» и трое вооружённых
   case object FlowerMeadow     extends StateType // поляна цветов: сбор трав по таймеру
   case object MonsterCave      extends StateType // пещера с монстрами: комнаты, кучки мобов, находки
+  case object RaceRevenge      extends StateType // раса пришла за расплатой: именной и двое старших
   case object Knowledge        extends StateType // знания героя (меню персонажа)
   case object GustavoHerbs     extends StateType // Густаво: рассказ о травах и трактаты
   case object Squad            extends StateType // отряд героя (меню персонажа)

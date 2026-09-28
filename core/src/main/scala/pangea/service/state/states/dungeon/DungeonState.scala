@@ -16,7 +16,8 @@ import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{CharacterMenu, InstantRest, MurlocQuest, NpcQuestLog, SquadDuty, State, UserAction}
+import pangea.service.state.{CharacterMenu, InstantRest, KillLogData, MurlocQuest, NpcQuestLog, SquadDuty, State, UserAction}
+import pangea.service.state.states.events.RaceRevengeState.RevengeScene
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -115,11 +116,16 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       // Приговор: имя рода держится час, и первая же встреча — его именное
       // существо, которое кто-то уже почти добил.
       doomed  = sentencedRace(hero, now)
+      // Расплата: раса, которой герой проредил ряды, ждёт своей очереди.
+      // Таких рас может накопиться несколько — выходят по одной за осмотр.
+      killLog <- KillLogData.read(heroDao, user.userId)
+      avengers = killLog.owed(KillLogData.RevengeEvery).headOption
       // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле.
       pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
-      result <- if (doomed.isDefined) sentencedPrey(user, hero, doomed.get, renderer)
+      result <- if (avengers.isDefined) revenge(user, avengers.get, killLog)
+                else if (doomed.isDefined) sentencedPrey(user, hero, doomed.get, renderer)
                 else if (called) wolfOnCall(user, hero, renderer)
                 else event match {
                   case StateType.Battle => startBattle(user, hero)
@@ -127,6 +133,18 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
                   case other            => ZIO.succeed(other)
                 }
     } yield result
+
+  /** Раса пришла за расплатой. Долг отмечаем сразу, на входе в событие: оно
+    * случилось, чем бы ни кончилось — боем, уговорами или бегством. Следующая
+    * расплата от этой расы — ещё через [[KillLogData.RevengeEvery]] убитых. */
+  private def revenge(
+    user: User, race: pangea.model.monster.Race, log: pangea.model.hero.KillLog
+  ): Task[StateType] =
+    for {
+      scene <- Random.nextIntBounded(1000).map(RevengeScene(race.entryName, _, log.count(race)))
+      _     <- KillLogData.write(heroDao, user.userId, log.markAvenged(race))
+      _     <- heroDao.writeSceneData(user.userId, scene.asJson)
+    } yield StateType.RaceRevenge
 
   /** Какой род приговорён, если приговор ещё держится. */
   private def sentencedRace(hero: Hero, nowMs: Long): Option[Race] =

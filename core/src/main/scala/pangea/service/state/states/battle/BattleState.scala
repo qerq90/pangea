@@ -26,7 +26,7 @@ import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction}
+import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction, KillLogData}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -3151,6 +3151,8 @@ case class BattleState(
       // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе (сотый
       // зовёт старейшину мурлоков — см. выше).
       _ <- heroDao.updateKills(user.userId, kills)
+      // Кого именно положили — в журнал: по нему раса потом придёт за расплатой.
+      _ <- KillLogData.add(heroDao, user.userId, fallen.map(_.race))
       letterFound <- if (hero.kills < NpcQuest.MarisaLetterKill && kills >= NpcQuest.MarisaLetterKill)
                        MarisaQuest.giveLetter(heroDao, inventoryRepo, itemRepo, user.userId, hero)
                      else ZIO.succeed(false)

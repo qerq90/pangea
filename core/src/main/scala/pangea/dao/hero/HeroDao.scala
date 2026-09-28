@@ -80,6 +80,9 @@ trait HeroDao {
    *  трактирщика. Durable, живёт в `heroes.lore_data`. */
   def writeLoreData(userId: UserId, data: Json): Task[Unit]
   def readLoreData(userId: UserId): Task[Option[Json]]
+  /** Журнал убийств по расам (см. [[pangea.model.hero.KillLog]]). */
+  def writeKillLog(userId: UserId, data: Json): Task[Unit]
+  def readKillLog(userId: UserId): Task[Option[Json]]
 
   /** Сюжетные задания горожан ([[pangea.model.quest.NpcQuests]]). Durable,
     * живёт в `heroes.npc_quests`. */

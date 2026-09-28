@@ -219,11 +219,14 @@ object BattleStateSpec extends ZIOSpecDefault {
         updatedHero          <- heroDao.getHeroByUserId(userId)
         remainingBattle      <- heroDao.readActiveBattle(userId)
         loot                 <- heroDao.readSceneData(userId)
+        killLog              <- pangea.service.state.KillLogData.read(heroDao, userId)
       } yield assertTrue(result == StateType.Loot) &&
               assertTrue(screens.exists(_.text.contains("опыта"))) &&
               assertTrue(updatedHero.exists(_.exp > 0L)) &&
               assertTrue(remainingBattle.isEmpty) &&
-              assertTrue(loot.flatMap(_.as[LootData].toOption).isDefined)
+              assertTrue(loot.flatMap(_.as[LootData].toOption).isDefined) &&
+              // павший записан в журнал: по нему его раса потом придёт за расплатой
+              assertTrue(killLog.byRace.values.sum == 1L)
     },
 
     test("Attack убивает Отмеченного тьмой на максимальном этаже → открывается путь вглубь") {
