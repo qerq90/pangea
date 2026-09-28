@@ -302,6 +302,15 @@ class AdminPanelLive(
 
 object AdminPanel {
 
+  /** Чем заменяется пароль в логах. */
+  val Masked: String = "<скрыто>"
+
+  /** Текст входящего сообщения для лога. Пароль панели пишется игроком обычным
+    * сообщением, а входящие мы логируем целиком — и лог отдаётся наружу
+    * (`GET /logs`). Поэтому ровно это значение в логе подменяется. */
+  def maskSecrets(text: String, password: Option[String]): String =
+    password.filter(p => p.nonEmpty && text.trim == p).fold(text)(_ => Masked)
+
   /** Команда входа. Как и `/home`, ловится на голый текст без payload. */
   def isCommand(action: UserAction): Boolean =
     action.payload.isEmpty && action.text.trim.equalsIgnoreCase("/admin")

@@ -195,6 +195,17 @@ object AdminPanelSpec extends ZIOSpecDefault {
               assertTrue(scene.exists(_.hcursor.get[String]("важное").contains("значение")))
     },
 
+    test("пароль не попадает в лог входящих сообщений") {
+      val secret = "s3cret"
+      assertTrue(AdminPanel.maskSecrets(secret, Some(secret)) == AdminPanel.Masked) &&
+      // с пробелами по краям — тоже пароль
+      assertTrue(AdminPanel.maskSecrets(s"  $secret ", Some(secret)) == AdminPanel.Masked) &&
+      // прочие сообщения в логе остаются как есть
+      assertTrue(AdminPanel.maskSecrets("/admin", Some(secret)) == "/admin") &&
+      assertTrue(AdminPanel.maskSecrets("обычное сообщение", Some(secret)) == "обычное сообщение") &&
+      assertTrue(AdminPanel.maskSecrets(secret, None) == secret)
+    },
+
     test("наборы считаются по надетому, одиночный предмет не в счёт") {
       val six   = TestFixtures.wearingSet(ItemSet.Hunter, 6)
       val eight = TestFixtures.wearingSet(ItemSet.Ghoul, 8)

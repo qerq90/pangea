@@ -9,6 +9,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes}
 import pangea.model.user.VkId
+import pangea.service.admin.{AdminConfig, AdminPanel}
 import pangea.service.state.{StateHandler, UserAction}
 import pangea.service.chat.ChatCommand
 import server.model.{ServerConfig, VkEvent}
@@ -17,7 +18,8 @@ import zio.{Task, UIO, ZIO}
 
 final class ServerLive(
   config: ServerConfig,
-  stateHandler: StateHandler
+  stateHandler: StateHandler,
+  adminConfig: AdminConfig
 ) extends Server {
 
   private val dsl = Http4sDsl[Task]
@@ -42,7 +44,10 @@ final class ServerLive(
         _ <- (event match {
           case Some(value) =>
             val msg = value.`object`.message
-            ZIO.logInfo(s"peer=${msg.peerId} from=${msg.fromId.getOrElse(0L)} text=${msg.text} payload=${msg.payload.getOrElse("")}") *>
+            // Пароль админ-панели приходит обычным сообщением, а лог отдаётся
+            // наружу — в логе от него остаётся только метка.
+            val logged = AdminPanel.maskSecrets(msg.text, adminConfig.password)
+            ZIO.logInfo(s"peer=${msg.peerId} from=${msg.fromId.getOrElse(0L)} text=$logged payload=${msg.payload.getOrElse("")}") *>
               // Беседа — не игрок: её peer_id за героя принимать нельзя, оттуда
               // мы слушаем только команды вроде «Передать».
               (if (msg.fromChat) handleChat(msg)
