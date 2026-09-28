@@ -23,7 +23,7 @@ object RaceRevengeSpec extends ZIOSpecDefault {
 
   private def hero(lvl: Long = 20L): Hero = TestFixtures.hero(userId).copy(lvl = lvl)
 
-  private def state(h: Hero = hero(), scene: Option[RevengeScene] = Some(RevengeScene(Race.Orc.entryName, 0, 250L))) =
+  private def state(h: Hero = hero(), scene: Option[RevengeScene] = Some(RevengeScene(Race.Orc.entryName, 0))) =
     for {
       dao <- TestHeroDao.withHero(userId, h)
       _   <- ZIO.foreachDiscard(scene)(s => dao.writeSceneData(userId, s.asJson))
@@ -83,13 +83,14 @@ object RaceRevengeSpec extends ZIOSpecDefault {
         _      <- s.enter(testUser, r)
         screen <- r.sentScreens.map(_.last)
         // другой номер сцены — другой текст, и там род назван прямо
-        t2 <- state(scene = Some(RevengeScene(Race.Orc.entryName, 1, 250L)))
+        t2 <- state(scene = Some(RevengeScene(Race.Orc.entryName, 1)))
         (s2, _, r2) = t2
         _      <- s2.enter(testUser, r2)
         other  <- r2.sentScreens.map(_.last)
       } yield assertTrue(screen.choices.map(_.id) == List("RevengeFight", "RevengePersuade", "OpenCharacter")) &&
-              // в тексте — имя пришедшего и сколько их сочтено
-              assertTrue(screen.text.contains("Каркан") && screen.text.contains("250")) &&
+              // в тексте — имя пришедшего, а числа убитых нет ни в одной сцене
+              assertTrue(screen.text.contains("Каркан")) &&
+              assertTrue(!screen.text.exists(_.isDigit) && !other.text.exists(_.isDigit)) &&
               assertTrue(other.text != screen.text && other.text.contains("Орк"))
     },
 

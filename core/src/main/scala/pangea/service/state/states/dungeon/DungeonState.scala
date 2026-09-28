@@ -141,7 +141,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     user: User, race: pangea.model.monster.Race, log: pangea.model.hero.KillLog
   ): Task[StateType] =
     for {
-      scene <- Random.nextIntBounded(1000).map(RevengeScene(race.entryName, _, log.count(race)))
+      scene <- Random.nextIntBounded(1000).map(RevengeScene(race.entryName, _))
       _     <- KillLogData.write(heroDao, user.userId, log.markAvenged(race))
       _     <- heroDao.writeSceneData(user.userId, scene.asJson)
     } yield StateType.RaceRevenge

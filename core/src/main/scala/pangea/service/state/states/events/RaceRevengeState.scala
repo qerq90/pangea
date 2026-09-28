@@ -64,7 +64,6 @@ case class RaceRevengeState(heroDao: HeroDao, content: SceneContent) extends Sta
       text  = lines(scene.scene % lines.size)
                 .replace("{race}", race.toString)
                 .replace("{name}", named.name)
-                .replace("{kills}", scene.kills.toString)
       _ <- renderer.show(user, Screen(text, List(
              content.choice("RevengeFight", "revenge.fight").copy(color = ChoiceColor.Negative, row = Some(0)),
              content.choice("RevengePersuade", "revenge.persuade").copy(row = Some(1)),
@@ -129,8 +128,9 @@ object RaceRevengeState {
   /** Сколько старших приходит с именным. */
   val Elders: Int = 2
 
-  /** Кто пришёл, каким текстом и за скольких: сцена переживает уход в «Персонаж». */
-  final case class RevengeScene(race: String, scene: Int, kills: Long)
+  /** Кто пришёл и каким текстом: сцена переживает уход в «Персонаж». Сколько
+    * их сочтено, в сцене не хранится — вслух это число всё равно не называют. */
+  final case class RevengeScene(race: String, scene: Int)
 
   object RevengeScene {
     implicit val encoder: Encoder[RevengeScene] = deriveEncoder
