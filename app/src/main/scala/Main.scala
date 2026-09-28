@@ -2,6 +2,7 @@ package app
 
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
+import pangea.dao.admin.AdminDao
 import pangea.dao.artifact.ArtifactDao
 import pangea.dao.parcel.ParcelDao
 import pangea.dao.auction.AuctionDao
@@ -24,6 +25,7 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.service.admin.{AdminConfig, AdminPanel}
 import pangea.service.parcel.{Parcels, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.schedule.{Scheduler, SchedulerPoller}
@@ -61,6 +63,9 @@ object Main extends ZIOAppDefault {
       PayoutDao.live,
       ParcelDao.live,
       ItemDao.live,
+      AdminDao.live,
+      AdminConfig.live,
+      AdminPanel.live,
       ScheduledTaskDao.live,
       SendFailureDao.live,
       ItemRepository.live,

@@ -59,7 +59,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
       transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states, lock), heroDao, heroRepo, api)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
+                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, heroRepo, api)
 
   /** Обвязка для отложенной выручки: герой, диспетчер и склад невыданных денег. */
   private def makePayoutHandler(startState: StateType) =
@@ -78,7 +79,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
         StateType.GlobalMap -> GlobalMapState(heroDao, content),
         StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content))
       lock      <- PlayerLock.make
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states, lock), heroDao, api, payoutDao)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
+                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, api, payoutDao)
 
   override def spec = suite("StateHandler /home")(
 
@@ -255,5 +257,6 @@ object StateHandlerSpec extends ZIOSpecDefault {
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
       transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
-    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states, lock), heroDao, api)
+    } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
+                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, api)
 }

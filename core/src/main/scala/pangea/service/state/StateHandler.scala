@@ -8,6 +8,7 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
 import io.circe.syntax.EncoderOps
+import pangea.service.admin.AdminPanel
 import pangea.service.chat.ChatCommand
 import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.payout.Payouts
@@ -28,6 +29,7 @@ class StateHandler(
   parcels: Parcels,
   transfers: Transfers,
   states: Map[StateType, State],
+  admin: AdminPanel,
   lock: PlayerLock
 ) {
 
@@ -206,8 +208,12 @@ class StateHandler(
       // Посылки ложатся в банковскую ячейку откуда угодно: она не при герое.
       _ <- parcels.deliver(user, hero, renderer).ignore
       hero <- heroRepo.getHero(user.userId).map(_.getOrElse(hero))
+      // Админ-панель стоит перед игровым автоматом: пока она открыта, ввод
+      // идёт ей, а состояние героя и сцена остаются нетронутыми.
+      inPanel <- admin.intercept(user, hero, action, renderer)
       _ <-
-        if (StateHandler.isHomeCommand(action))
+        if (inPanel) ZIO.unit
+        else if (StateHandler.isHomeCommand(action))
           goHome(user, renderer)
         else if (StateHandler.isRestartCommand(action))
           offerRestart(user, renderer)
@@ -354,7 +360,8 @@ object StateHandler {
     s"В сумке нет ничего похожего на «$query»."
 
   val live: ZLayer[
-    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels with Transfers,
+    Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels
+      with Transfers with AdminPanel,
     Nothing,
     StateHandler
   ] =
@@ -368,7 +375,9 @@ object StateHandler {
         parcels   <- ZIO.service[Parcels]
         transfers <- ZIO.service[Transfers]
         statesMap <- ZIO.service[StatesMap]
+        admin     <- ZIO.service[AdminPanel]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
-      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, statesMap.states, lock)
+      } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, statesMap.states,
+                               admin, lock)
     )
 }

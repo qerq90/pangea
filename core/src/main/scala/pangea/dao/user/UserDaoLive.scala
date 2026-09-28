@@ -32,7 +32,9 @@ class UserDaoLive(xa: Transactor[Task]) extends UserDao {
       .transact(xa)
 
   override def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean] =
-    sql"""UPDATE users SET last_event_id = $eventId
+    // Заодно отмечаем, что игрок был здесь: по этой метке админ-панель считает,
+    // сколько народу заходило за сутки и за неделю.
+    sql"""UPDATE users SET last_event_id = $eventId, last_seen_at = now()
           WHERE id = ${userId.value} AND (last_event_id IS NULL OR last_event_id <> $eventId)"""
       .update.run.transact(xa).map(_ > 0)
 }
