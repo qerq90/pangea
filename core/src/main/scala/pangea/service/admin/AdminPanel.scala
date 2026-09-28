@@ -385,6 +385,9 @@ object AdminPanel {
     val sets =
       if (s.sets.isEmpty) "  никто не собрал и двух предметов набора"
       else s.sets.map(r => s"  ${r.set.label} на ${r.worn}: ${r.heroes}").mkString("\n")
+    val levels =
+      if (s.levels.forall(_.heroes == 0L)) "  за неделю никто не заходил"
+      else s.levels.map(r => s"  ${r.from}–${r.to}: ${r.heroes}").mkString("\n")
     s"""📊 Сервер
        |
        |👥 Игроки
@@ -397,6 +400,9 @@ object AdminPanel {
        |  серебро в ячейках: ${amount(s.vaultSilver)}
        |  серебро всего: ${amount(s.silverTotal)}
        |  дублоны: ${amount(s.doubloons)}
+       |
+       |📈 Уровни тех, кто заходил за неделю
+       |$levels
        |
        |🛡 Наборы (сколько предметов надето: сколько героев)
        |$sets""".stripMargin

@@ -16,6 +16,7 @@ import zio.{Task, ZLayer}
   * @param vaultSilver серебро, лежащее в банковских ячейках
   * @param doubloons   дублоны на руках
   * @param sets        кто в наборах: набор, сколько его предметов надето, сколько таких героев
+  * @param levels      по каким уровням разошлись те, кто заходил за неделю
   */
 final case class AdminStats(
   heroes:      Long,
@@ -24,7 +25,8 @@ final case class AdminStats(
   heroSilver:  Long,
   vaultSilver: Long,
   doubloons:   Long,
-  sets:        List[AdminStats.SetRow]
+  sets:        List[AdminStats.SetRow],
+  levels:      List[AdminStats.LevelRow]
 ) {
   def silverTotal: Long = heroSilver + vaultSilver
 }
@@ -33,7 +35,19 @@ object AdminStats {
   /** «54 игрока держат набор Охотника на шести предметах». */
   final case class SetRow(set: ItemSet, worn: Int, heroes: Long)
 
-  val empty: AdminStats = AdminStats(0L, 0L, 0L, 0L, 0L, 0L, Nil)
+  /** «С 26 по 50 уровень — двенадцать живых героев». */
+  final case class LevelRow(from: Long, to: Long, heroes: Long)
+
+  val empty: AdminStats = AdminStats(0L, 0L, 0L, 0L, 0L, 0L, Nil, Nil)
+
+  /** Разложить уровни по полосам шириной `step`: 1–25, 26–50 и так далее до
+    * `maxLvl`. Пустые полосы остаются в списке — по ним видно, где никого нет. */
+  def levelRows(levels: List[Long], step: Long, maxLvl: Long): List[LevelRow] = {
+    val bands = (0L until ((maxLvl + step - 1) / step)).toList.map(i => (i * step + 1, ((i + 1) * step).min(maxLvl)))
+    bands.map { case (from, to) =>
+      LevelRow(from, to, levels.count(l => l >= from && l <= to).toLong)
+    }
+  }
 
   /** Кто сколько носит: по каждому набору — сколько героев держат столько-то
     * его предметов. Один предмет набором не считается: это ещё не
@@ -66,6 +80,11 @@ class AdminDaoLive(xa: transactor.Transactor[Task]) extends AdminDao {
                      .query[(Long, Long)].unique.transact(xa)
       inVaults  <- sql"select coalesce(sum(silver), 0) from bank_vaults".query[Long].unique.transact(xa)
       equipment <- sql"select equipment from heroes".query[Equipment].to[List].transact(xa)
+      // Уровни только живых: тех, кто заходил за неделю.
+      alive     <- sql"""select h.lvl from heroes h
+                         join users u on u.id = h.user_id
+                         where u.last_seen_at > now() - interval '7 days'"""
+                     .query[Long].to[List].transact(xa)
     } yield AdminStats(
       heroes      = heroes,
       active24h   = day,
@@ -73,7 +92,8 @@ class AdminDaoLive(xa: transactor.Transactor[Task]) extends AdminDao {
       heroSilver  = money._1,
       vaultSilver = inVaults,
       doubloons   = money._2,
-      sets        = AdminStats.setRows(equipment, AdminDao.MinWorn))
+      sets        = AdminStats.setRows(equipment, AdminDao.MinWorn),
+      levels      = AdminStats.levelRows(alive, AdminDao.LevelStep, AdminDao.MaxLevel))
 
   /** Сколько игроков заходило за этот срок. `interval` подставляется не
     * параметром, а строкой — но строку задаём здесь сами, снаружи она не
@@ -87,6 +107,10 @@ class AdminDaoLive(xa: transactor.Transactor[Task]) extends AdminDao {
 object AdminDao {
   /** Со скольких надетых предметов считаем, что герой держит набор. */
   val MinWorn: Int = 2
+
+  /** Ширина полосы уровней в сводке и потолок, до которого их считать. */
+  val LevelStep: Long = 25L
+  val MaxLevel: Long  = 150L
 
   val live: ZLayer[transactor.Transactor[Task], Nothing, AdminDao] =
     ZLayer.fromFunction(new AdminDaoLive(_))
