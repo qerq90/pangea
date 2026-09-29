@@ -9,6 +9,7 @@ import zio.test._
 object SquadSpec extends ZIOSpecDefault {
 
   private val lvl = 10L
+  private val now = 1_000L
 
   override def spec = suite("Squad")(
 
@@ -44,25 +45,50 @@ object SquadSpec extends ZIOSpecDefault {
 
     test("в строю десять мест для союзников: одиннадцатому вставать некуда") {
       val full = (1 to AllyRates.Positions - 1).foldLeft(Squad.empty) { (s, i) =>
-        s.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), lvl)
+        s.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), lvl, now)
       }
       assertTrue(full.allies.size == 10 && full.full && full.freePosition.isEmpty) &&
       // одиннадцатый не встаёт сам — его место освобождают заменой
-      assertTrue(full.raise(UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl) == full) &&
-      assertTrue(full.replaceAt(3, UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl)
+      assertTrue(full.raise(UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl, now) == full) &&
+      assertTrue(full.replaceAt(3, UndeadForm("Лишний", 1L, AllyKind.Human.stats(1L)), lvl, now)
                    .allyAt(3).exists(_.name == "Лишний"))
     },
 
-    test("поднятый живёт своими статами, не уходит по времени и убирается по месту") {
+    test("поднятый живёт своими статами и убирается по месту") {
       val form = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(3L))
-      val s    = Squad.empty.hire(AllyKind.Human, lvl, 1000L).raise(form, lvl)
+      val s    = Squad.empty.hire(AllyKind.Human, lvl, 1000L).raise(form, lvl, 1000L)
       val up   = s.allyAt(3).get
       assertTrue(up.name == "Гоблин немощный раб" && up.statsAt(lvl) == AllyKind.Human.stats(3L)) &&
-      assertTrue(up.lvlAt(lvl) == 16L && !up.expired(Long.MaxValue)) &&
+      assertTrue(up.lvlAt(lvl) == 16L) &&
+      // «отработал найм» — это не про него: он рассыпается, а не уходит
+      assertTrue(!up.expired(Long.MaxValue)) &&
       // наёмник рядом с ним свой срок всё так же отрабатывает
-      assertTrue(s.expire(1000L + AllyRates.HireMs)._2 == List(AllyKind.Human)) &&
+      assertTrue(s.expire(1000L + AllyRates.HireMs)._2.map(_.kind) == List(AllyKind.Human)) &&
       assertTrue(s.dismissAt(3).allies.map(_.kind) == List(AllyKind.Human)) &&
       assertTrue(s.dismissAll(Set(2, 3)).allies.isEmpty)
+    },
+
+    test("поднятого держит тёмная сила ровно сутки, и ждать его потом неоткуда") {
+      val form = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(3L))
+      val s    = Squad.empty.raise(form, lvl, 1000L)
+      val up   = s.allyAt(2).get
+      val (before, still) = s.expire(1000L + AllyRates.UndeadMs - 1L)
+      val (after,  dust)  = s.expire(1000L + AllyRates.UndeadMs)
+      assertTrue(up.hiredUntil == 1000L + AllyRates.UndeadMs && AllyRates.UndeadMs == 24L * 60L * 60L * 1000L) &&
+      assertTrue(still.isEmpty && before == s) &&
+      assertTrue(dust.map(_.name) == List("Гоблин немощный раб") && after.allies.isEmpty) &&
+      // в отлучку он не садится: возвращаться ему неоткуда
+      assertTrue(after.offDuty.isEmpty && after.away.isEmpty)
+    },
+
+    test("поднятый до того, как завёлся срок, получает его с этой минуты, а не рассыпается") {
+      val form  = UndeadForm("Старый скелет", 5L, AllyKind.Human.stats(3L))
+      val old   = Squad.empty.raise(form, lvl, 1000L).updateAt(2)(_.copy(hiredUntil = 0L))
+      val dated = old.settleUndead(5000L)
+      assertTrue(old.expire(Long.MaxValue - 1L)._2.isEmpty) &&
+      assertTrue(dated.allyAt(2).exists(_.hiredUntil == 5000L + AllyRates.UndeadMs)) &&
+      // уже посчитанному срок второй раз не переставляют
+      assertTrue(dated.settleUndead(9000L) == dated)
     },
 
     test("герой на позиции 3: наём обходит его место") {
@@ -112,7 +138,7 @@ object SquadSpec extends ZIOSpecDefault {
       val back = 1000L + AllyRates.HireMs + AllyRates.OffDutyMs
       assertTrue(s.allyAt(2).exists(_.hiredUntil == 1000L + AllyRates.HireMs)) &&
       assertTrue(same == s && none.isEmpty) &&
-      assertTrue(who == List(AllyKind.Human) && !gone.has(AllyKind.Human)) &&
+      assertTrue(who.map(_.kind) == List(AllyKind.Human) && !gone.has(AllyKind.Human)) &&
       assertTrue(gone.isAway(AllyKind.Human, back - 1L) && !gone.isAway(AllyKind.Human, back)) &&
       assertTrue(gone.returned(back).isEmpty && gone.welcomeBack(AllyKind.Human).offDuty.isEmpty) &&
       assertTrue(AllyRates.HireMs == 12L * 60L * 60L * 1000L && AllyRates.OffDutyMs == AllyRates.HireMs)

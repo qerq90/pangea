@@ -6,19 +6,28 @@ import pangea.model.hero.Hero
 import pangea.model.user.User
 import zio.{Task, ZIO}
 
-/** Найм союзника кончается через [[pangea.model.squad.AllyRates.HireMs]]: при
-  * следующем визите героя в любое из мест, где отряд на виду, отработавшие
-  * уходят из отряда с репликой и садятся за стол таверны снова через
-  * [[pangea.model.squad.AllyRates.OffDutyMs]]. Возвращает героя уже без них. */
+/** Срок в отряде выходит у всех, только по-разному. Найм наёмника кончается
+  * через [[pangea.model.squad.AllyRates.HireMs]]: он уходит с репликой и
+  * садится за стол таверны снова через [[pangea.model.squad.AllyRates.OffDutyMs]].
+  * Поднятого с алтаря держит тёмная сила, и её хватает на
+  * [[pangea.model.squad.AllyRates.UndeadMs]] — потом кости рассыпаются, и
+  * ждать его неоткуда.
+  *
+  * Считается это при следующем визите героя в любое из мест, где отряд на
+  * виду. Возвращает героя уже без ушедших. */
 object SquadDuty {
 
   def settle(heroDao: HeroDao, content: SceneContent, user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[Hero] = {
-    val (squad, gone) = hero.squad.expire(nowMs)
-    if (gone.isEmpty) ZIO.succeed(hero)
+    // Поднятые до того, как у нежити завёлся срок, получают его с этой минуты.
+    val dated         = hero.squad.settleUndead(nowMs)
+    val (squad, gone) = dated.expire(nowMs)
+    if (gone.isEmpty && dated == hero.squad) ZIO.succeed(hero)
     else
       heroDao.updateSquad(user.userId, squad) *>
-        ZIO.foreachDiscard(gone)(k =>
-          renderer.show(user, Screen(content.format("squad.dayOver", "name" -> k.name), Nil))) *>
+        ZIO.foreachDiscard(gone)(a =>
+          renderer.show(user, Screen(
+            content.format(if (a.undead.isDefined) "squad.undeadCrumbled" else "squad.dayOver",
+              "name" -> a.name), Nil))) *>
         ZIO.succeed(hero.copy(squad = squad))
   }
 }

@@ -2,12 +2,12 @@ package pangea.service.state.states.hero
 
 import pangea.engine.SceneContent
 import pangea.model.hero.Hero
-import pangea.model.squad.{AllyKind, Squad}
+import pangea.model.squad.{AllyKind, AllyRates, Squad, UndeadForm}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
 import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
-import zio.ZIO
+import zio.{Duration, ZIO}
 import zio.test._
 
 /** «Отряд» в меню персонажа: строй по позициям, карточка союзника,
@@ -36,6 +36,27 @@ object SquadStateSpec extends ZIOSpecDefault {
     } yield (SquadState(heroDao, content), heroDao, renderer)
 
   override def spec = suite("SquadState")(
+
+    test("поднятого хватает на сутки: потом кости рассыпаются, и отряд его не ждёт") {
+      val form  = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(3L))
+      val risen = baseHero.copy(squad = Squad.empty.raise(form, lvl, 0L))
+      def open(after: Long) =
+        for {
+          t <- makeState(risen)
+          (state, dao, r) = t
+          _     <- TestClock.adjust(Duration.fromMillis(after))
+          _     <- state.enter(testUser, r)
+          said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          squad <- dao.getHeroByUserId(userId).map(_.get.squad)
+        } yield (said, squad)
+      for {
+        early <- open(AllyRates.UndeadMs - 1L)
+        late  <- open(AllyRates.UndeadMs)
+      } yield assertTrue(early._2.allies.size == 1 && !early._1.contains("истощилась")) &&
+              assertTrue(late._1.contains(
+                "💀 Тёмная энергия что держала кости Гоблин немощный раб вместе истощилась и они развалились.")) &&
+              assertTrue(late._2.allies.isEmpty && late._2.offDuty.isEmpty && late._2.away.isEmpty)
+    },
 
     test("кнопка «Отряд» в профиле есть только с союзниками") {
       for {

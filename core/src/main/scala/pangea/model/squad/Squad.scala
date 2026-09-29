@@ -26,9 +26,11 @@ object UndeadForm {
 }
 
 /** Союзник в отряде: кто, на какой позиции, что с ним сейчас и до какого
- *  момента нанят (`hiredUntil`, epoch ms). Потолки считаются от уровня героя
- *  ([[AllyKind.stats]]), здесь — только текущее. У поднятого с алтаря вместо
- *  этого своя форма ([[UndeadForm]]): его статы от уровня героя не зависят. */
+ *  момента он при герое (`hiredUntil`, epoch ms). Потолки считаются от уровня
+ *  героя ([[AllyKind.stats]]), здесь — только текущее. У поднятого с алтаря
+ *  вместо этого своя форма ([[UndeadForm]]): его статы от уровня героя не
+ *  зависят, а срок — не найм, а то, насколько хватит тёмной силы
+ *  ([[AllyRates.UndeadMs]]). */
 final case class Ally(
   kind:       AllyKind,
   position:   Int,
@@ -46,9 +48,17 @@ final case class Ally(
   /** Уровень, по которому он дерётся. */
   def lvlAt(heroLvl: Long): Long = undead.map(_.lvl).getOrElse(kind.effectiveLvl(heroLvl))
 
-  /** Найм истёк — отработал свой день. Поднятого это не касается: он не нанят,
-    * а поднят, и уйти ему некуда. */
+  /** Найм истёк — отработал свой день. Поднятый не уходит, а рассыпается:
+    * у него свой срок, см. [[crumbled]]. */
   def expired(nowMs: Long): Boolean = undead.isEmpty && hiredUntil <= nowMs
+
+  /** Тёмная сила в костях кончилась. Поднятый без срока — из тех, кого
+    * подняли до того, как срок вообще завели: такому его ставит
+    * [[Squad.settleUndead]], а не рассыпает на месте. */
+  def crumbled(nowMs: Long): Boolean = undead.isDefined && hiredUntil > 0L && hiredUntil <= nowMs
+
+  /** Уходит из отряда прямо сейчас — по любой из двух причин. */
+  def leaving(nowMs: Long): Boolean = expired(nowMs) || crumbled(nowMs)
 
   /** Полностью здоров на этом уровне героя. */
   def restored(lvl: Long): Ally = {
@@ -117,14 +127,27 @@ final case class Squad(
     else freePosition.fold(this)(p =>
       copy(allies = allies :+ Ally(kind, p, 0L, 0L, 0L, hiredUntil = nowMs + AllyRates.HireMs).restored(lvl)))
 
-  /** Кто отработал свой найм к этому моменту: они уходят из отряда и сядут за
-    * стол снова через [[AllyRates.OffDutyMs]]. Возвращает отряд и ушедших. */
-  def expire(nowMs: Long): (Squad, List[AllyKind]) = {
-    val gone = allies.filter(_.expired(nowMs)).map(_.kind)
+  /** Кто покидает отряд к этому моменту: наёмник отработал свой найм и сядет
+    * за стол снова через [[AllyRates.OffDutyMs]], а поднятый рассыпался — его
+    * ждать неоткуда. Возвращает отряд и ушедших целиком: наверху по ним
+    * решают, что сказать игроку. */
+  def expire(nowMs: Long): (Squad, List[Ally]) = {
+    val gone = allies.filter(_.leaving(nowMs))
     if (gone.isEmpty) (this, Nil)
-    else (copy(allies = allies.filterNot(_.expired(nowMs)),
-               offDuty = offDuty ++ gone.map(k => k.entryName -> (nowMs + AllyRates.OffDutyMs))).compact, gone)
+    else {
+      val hired = gone.filter(_.undead.isEmpty).map(_.kind)
+      (copy(allies = allies.filterNot(_.leaving(nowMs)),
+            offDuty = offDuty ++ hired.map(k => k.entryName -> (nowMs + AllyRates.OffDutyMs))).compact, gone)
+    }
   }
+
+  /** Поднятые до того, как у них завёлся срок, получают его с этой минуты:
+    * иначе они рассыпались бы все разом при первом же заходе героя. */
+  def settleUndead(nowMs: Long): Squad =
+    if (!allies.exists(a => a.undead.isDefined && a.hiredUntil <= 0L)) this
+    else copy(allies = allies.map { a =>
+      if (a.undead.isDefined && a.hiredUntil <= 0L) a.copy(hiredUntil = nowMs + AllyRates.UndeadMs) else a
+    })
 
   def dismiss(kind: AllyKind): Squad = copy(allies = allies.filterNot(_.kind == kind)).compact
 
@@ -141,15 +164,18 @@ final case class Squad(
   def updateAt(pos: Int)(f: Ally => Ally): Squad =
     copy(allies = allies.map(a => if (a.position == pos) f(a) else a))
 
-  /** Поднятый встаёт на свободное место. Мест нет — отряд как был; заменой
-    * заведует [[replaceAt]]. */
-  def raise(form: UndeadForm, lvl: Long): Squad =
-    freePosition.fold(this)(p => copy(allies = allies :+ Ally(AllyKind.Undead, p, 0L, 0L, 0L, undead = Some(form)).restored(lvl)))
+  /** Поднятый встаёт на свободное место — и держится [[AllyRates.UndeadMs]] с
+    * этой минуты. Мест нет — отряд как был; заменой заведует [[replaceAt]]. */
+  def raise(form: UndeadForm, lvl: Long, nowMs: Long): Squad =
+    freePosition.fold(this)(p => copy(allies = allies :+ risen(form, p, lvl, nowMs)))
 
   /** Поднятый занимает место того, кто на нём стоял. */
-  def replaceAt(pos: Int, form: UndeadForm, lvl: Long): Squad =
-    copy(allies = allies.filterNot(_.position == pos) :+
-      Ally(AllyKind.Undead, pos, 0L, 0L, 0L, undead = Some(form)).restored(lvl)).compact
+  def replaceAt(pos: Int, form: UndeadForm, lvl: Long, nowMs: Long): Squad =
+    copy(allies = allies.filterNot(_.position == pos) :+ risen(form, pos, lvl, nowMs)).compact
+
+  private def risen(form: UndeadForm, pos: Int, lvl: Long, nowMs: Long): Ally =
+    Ally(AllyKind.Undead, pos, 0L, 0L, 0L,
+      hiredUntil = nowMs + AllyRates.UndeadMs, undead = Some(form)).restored(lvl)
 
   /** Все места заняты — новому нужно потеснить кого-то из своих. */
   def full: Boolean = freePosition.isEmpty
