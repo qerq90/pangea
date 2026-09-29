@@ -84,8 +84,8 @@ object AuctionSpec extends ZIOSpecDefault {
         browse  <- f.renderer.sentScreens
         back    <- f.state.action(testUser, tap("LeaveAuction"), f.renderer)
       } yield assertTrue(screens.last.text.contains("ячейка в Торговом доме")) &&
-              assertTrue(screens.last.choices.map(_.id) == List("LeaveAuction")) &&
-              assertTrue(browse.last.choices.map(_.id) == List("LeaveAuction")) &&
+              assertTrue(screens.last.choices.map(_.id) == List("LeaveAuction", "GoToCity")) &&
+              assertTrue(browse.last.choices.map(_.id) == List("LeaveAuction", "GoToCity")) &&
               assertTrue(back == StateType.TradeHouse)
     },
 
@@ -95,7 +95,7 @@ object AuctionSpec extends ZIOSpecDefault {
         _       <- f.state.enter(testUser, f.renderer)
         screens <- f.renderer.sentScreens
       } yield assertTrue(screens.last.choices.map(_.id) ==
-                List("AuctionBrowse", "AuctionSell", "MyLots", "LeaveAuction"))
+                List("AuctionBrowse", "AuctionSell", "MyLots", "LeaveAuction", "GoToCity"))
     },
 
     test("витрина: восемь лотов на страницу, подписи в лимите кнопки") {

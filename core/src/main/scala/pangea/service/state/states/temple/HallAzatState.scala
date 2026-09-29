@@ -10,7 +10,7 @@ import pangea.model.artifact.{ArtifactKind, HeroArtifacts}
 import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{AzatData, State, UserAction}
+import pangea.service.state.{AzatData, CityExit, State, UserAction}
 import java.util.concurrent.TimeUnit
 import zio.{Task, ZIO}
 
@@ -33,6 +33,7 @@ case class HallAzatState(
       "Recharge"             -> Target.Run { (u, _, r) => showRecharge(u, r) },
       "RechargeArtifact"     -> Target.Run { (u, ua, r) => rechargeArtifact(u, ua, r) },
       "BackToTempleFromHall" -> Target.Goto(StateType.TempleAzat),
+      CityExit.route,
       "BuyCube"              -> Target.Run { (u, _, r) => buyCube(u, r) },
       "ActivateCube"         -> Target.Run { (u, _, r) => activateCube(u, r) },
       "OpenCube"             -> Target.Goto(StateType.Cube),
@@ -50,7 +51,8 @@ case class HallAzatState(
     val choices = List(
       byId("ApproachCube").copy(color = ChoiceColor.Positive, row = Some(0)),
       byId("Recharge").copy(row = Some(0)),
-      byId("BackToTempleFromHall").copy(color = ChoiceColor.Negative, row = Some(1))
+      byId("BackToTempleFromHall").copy(color = ChoiceColor.Negative, row = Some(1)),
+      CityExit.button(content, Some(1))
     )
     renderer.show(user, Screen(content.text("hall.enter.text"), choices))
   }

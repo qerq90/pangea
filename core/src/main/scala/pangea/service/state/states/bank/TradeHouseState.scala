@@ -9,7 +9,7 @@ import pangea.model.user.User
 import pangea.repository.bank.BankRepository
 import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Торговый дом на Торговой площади: банкир Рахадим продаёт ячейки хранилища, меняет
@@ -37,7 +37,8 @@ case class TradeHouseState(
       "Auction"         -> Target.Goto(StateType.Auction),
       "FetShop"         -> Target.Goto(StateType.FetShop),
       "Mail"            -> Target.Goto(StateType.Mail),
-      "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare)
+      "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
   )
@@ -80,7 +81,8 @@ case class TradeHouseState(
       Option.when(mail > 0L)(Choice("Mail",
         content.format("bank.tradeHouse.mailLabel", "count" -> mail.toString),
         color = ChoiceColor.Positive, row = Some(3))) :+
-      Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(4))
+      Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(4)) :+
+      CityExit.button(content, Some(4))
     val text = content.format("bank.tradeHouse.menu",
       "cells" -> vault.cells.toString, "price" -> vault.nextCellPrice.toString)
     Screen(text, (buy :: vaultBtn.toList) ++ rest)

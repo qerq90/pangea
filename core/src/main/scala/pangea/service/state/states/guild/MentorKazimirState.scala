@@ -10,7 +10,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.InventoryState
 import pangea.service.state.states.merchant.MerchantState
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Наставник Казимир — руны на теле. Снимает узор руны с вещи из сумки и
@@ -45,7 +45,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
       "BurnRarity"         -> Target.Run { (u, ua, r) => toggleBurnRarity(u, ua, r) },
       "BurnStones"         -> Target.Run { (u, ua, r) => toggleBurnStones(u, ua, r) },
       "Runes"              -> Target.Run { (u, ua, r) => runesView(u, ua, r) },
-      "LeaveMentorKazimir" -> Target.Goto(StateType.TrainingHall)
+      "LeaveMentorKazimir" -> Target.Goto(StateType.TrainingHall),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.MentorKazimir) }
   )
@@ -57,7 +58,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
       content.choice("Brand", "kazimir.brandLabel").copy(row = Some(0)),
       content.choice("Deepen", "kazimir.deepenLabel").copy(row = Some(1)),
       Choice("Runes", content.text("kazimir.runesLabel"), row = Some(2)),
-      content.choice("LeaveMentorKazimir", "kazimir.back").copy(row = Some(3)))))
+      content.choice("LeaveMentorKazimir", "kazimir.back").copy(row = Some(3)),
+      CityExit.button(content, Some(3)))))
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)

@@ -12,7 +12,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{CharacterMenu, NpcQuestDialog, NpcQuestLog, State, UserAction}
+import pangea.service.state.{CharacterMenu, CityExit, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Трактирщик. Принимает квестовые предметы: из подходящих трофеев инвентаря
@@ -62,7 +62,8 @@ case class InnkeeperState(
       "WolfLore"          -> Target.Run { (user, _, renderer) => offerWolfLore(user, renderer) },
       "SellSchnapps"      -> Target.Run { (user, _, renderer) => sellSchnapps(user, renderer) },
       "PayWolfLore"       -> Target.Run { (user, _, renderer) => payWolfLore(user, renderer) },
-      "BackFromInnkeeper" -> Target.Goto(StateType.Tavern)
+      "BackFromInnkeeper" -> Target.Goto(StateType.Tavern),
+      CityExit.route
     ),
     fallback = Target.Run { (user, _, renderer) =>
       showMenu(user, renderer).as(StateType.Innkeeper)
@@ -121,7 +122,8 @@ case class InnkeeperState(
             wolfBtn,
             schnappsBtn,
             Some(content.choice("OpenCharacter", "common.character")),
-            Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel"))
+            Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel")),
+            Some(CityExit.button(content))
           ).flatten
         )
       )

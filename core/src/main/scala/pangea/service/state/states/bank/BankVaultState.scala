@@ -5,16 +5,17 @@ import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
-import pangea.model.bank.BankVault
+import pangea.model.bank.{BankVault, StowGroup, StowSettings}
 import pangea.model.hero.Hero
 import pangea.model.item.ItemStack
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.bank.{BankRepoError, BankRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.bank.BankVaultState._
-import pangea.service.state.{InventoryFeedback, State, UserAction}
+import pangea.service.state.{CityExit, InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /** «Моё хранилище» в Торговом доме: ячейки, выкупленные у Рахадима. Работает
@@ -25,7 +26,8 @@ case class BankVaultState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
   bankRepo:      BankRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
 
   private val branch = new Branch(
@@ -41,7 +43,10 @@ case class BankVaultState(
       "VaultDepositAll"     -> Target.Run { (u, _, r) => depositAllSilver(u, r).as(StateType.BankVault) },
       "VaultWithdrawSilver" -> Target.Run { (u, _, r) => writeScene(u, VaultScene(vaultMode = Some(ModeWithdrawSilver))) *> showWithdrawSilver(u, r).as(StateType.BankVault) },
       "VaultWithdrawAll"    -> Target.Run { (u, _, r) => withdrawAllSilver(u, r).as(StateType.BankVault) },
-      "LeaveVault"          -> Target.Goto(StateType.TradeHouse)
+      "VaultStowAll"        -> Target.Run { (u, _, r) => stowAll(u, r).as(StateType.BankVault) },
+      "VaultStowSettings"   -> Target.Run { (u, _, r) => showStowSettings(u, r).as(StateType.BankVault) },
+      "LeaveVault"          -> Target.Goto(StateType.TradeHouse),
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -72,7 +77,12 @@ case class BankVaultState(
                    Choice("VaultWithdrawItems",  content.text("bank.vault.menu.withdrawItems"),  row = Some(0)),
                    Choice("VaultDepositSilver",  content.text("bank.vault.menu.depositSilver"),  row = Some(1)),
                    Choice("VaultWithdrawSilver", content.text("bank.vault.menu.withdrawSilver"), row = Some(1)),
-                   Choice("LeaveVault",          content.text("bank.vault.menu.leave"), color = ChoiceColor.Negative, row = Some(2))
+                   Choice("VaultStowAll",        content.text("bank.vault.stow.label"),
+                     color = ChoiceColor.Positive, row = Some(2)),
+                   Choice("VaultStowSettings",   content.text("bank.vault.stow.settingsLabel"),
+                     color = ChoiceColor.Secondary, row = Some(2)),
+                   Choice("LeaveVault",          content.text("bank.vault.menu.leave"), color = ChoiceColor.Negative, row = Some(3)),
+                   CityExit.button(content, Some(3))
                  )
                  renderer.show(user, Screen(text, choices))
                }
@@ -145,6 +155,76 @@ case class BankVaultState(
       _     <- showWithdrawItems(user, renderer)
     } yield ()
 
+  // --- «Положить всё» и его настройка ---
+
+  /** Сгрузить в ячейку всё отмеченное разом — и из сумки, и из других
+    * хранилищ, если герой их отметил. Отчёт показываем одной сводкой: по
+    * вещи на экран здесь никому не нужно. */
+  private def stowAll(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero     <- getHero(user)
+      vault    <- getVault(user)
+      settings <- VaultStow.read(heroDao, user.userId)
+      _ <- if (!vault.open) renderer.show(user, Screen(content.text("bank.vault.none"), leaveRow))
+           else
+             for {
+               report <- VaultStow.run(heroDao, inventoryRepo, bankRepo, artifacts,
+                           user.userId, hero, settings)
+               _      <- renderer.show(user, Screen(stowReportText(report), Nil))
+               _      <- showMenu(user, renderer)
+             } yield ()
+    } yield ()
+
+  /** Сводка укладки: сперва что легло, потом откуда, и сколько места осталось. */
+  private def stowReportText(report: StowReport): String =
+    // «Нечего класть» — только когда и правда нечего: забитая ячейка это
+    // другая беда, и говорить о ней надо своими словами.
+    if (report.empty && !report.full) content.text("bank.vault.stow.nothing")
+    else {
+      val kinds = StowGroup.itemGroups.flatMap { g =>
+        report.byGroup.get(g).map(n => s"${content.text(s"bank.vault.stow.name.${g.id}")} $n")
+      }
+      val head = Option.when(report.items > 0)(content.format("bank.vault.stow.done",
+        "count" -> report.items.toString,
+        "kinds" -> (if (kinds.isEmpty) "" else kinds.mkString(" (", ", ", ")"))))
+      val silver = Option.when(report.silver > 0L)(
+        content.format("bank.vault.stow.silverLine", "silver" -> report.silver.toString))
+      val fromStorages = VaultStow.storages.flatMap { case (group, kind) =>
+        report.fromArtifact.get(kind).map(n =>
+          s"${content.text(s"bank.vault.stow.name.${group.id}")} $n")
+      }
+      val storages = Option.when(fromStorages.nonEmpty)(
+        content.format("bank.vault.stow.fromStorages", "list" -> fromStorages.mkString(" · ")))
+      val full = Option.when(report.full)(content.text("bank.vault.stow.full"))
+      List(head, silver, storages, full).flatten.mkString("\n")
+    }
+
+  private def showStowSettings(user: User, renderer: Renderer): Task[Unit] =
+    VaultStow.read(heroDao, user.userId).flatMap(s => renderer.show(user, stowSettingsScreen(s)))
+
+  /** Экран настройки: переключатели по трое в ряд — так все четырнадцать
+    * укладываются в пять рядов, и остаётся место под «Назад» (у ВК рядов
+    * всего десять, и лишний он не прощает — отклоняет весь экран). */
+  private def stowSettingsScreen(s: StowSettings): Screen = {
+    val groups = StowGroup.itemGroups ++ List(StowGroup.Silver) ++ StowGroup.storageGroups
+    val buttons = groups.zipWithIndex.map { case (g, i) =>
+      val on = s.on(g)
+      Choice(
+        id    = s"$StowTogglePrefix${g.id}",
+        label = content.format(g.key, "state" ->
+                  content.text(if (on) "bank.vault.stow.on" else "bank.vault.stow.off")),
+        color = if (on) ChoiceColor.Positive else ChoiceColor.Negative,
+        row   = Some(i / StowTogglesPerRow))
+    }
+    val rows = (groups.size + StowTogglesPerRow - 1) / StowTogglesPerRow
+    Screen(content.text("bank.vault.stow.header"),
+      buttons :+ Choice("VaultMenu", content.text("bank.vault.stow.back"),
+        color = ChoiceColor.Negative, row = Some(rows)))
+  }
+
+  private def toggleStow(user: User, group: StowGroup, renderer: Renderer): Task[Unit] =
+    VaultStow.toggle(heroDao, user.userId, group).flatMap(s => renderer.show(user, stowSettingsScreen(s)))
+
   private def backRow: List[Choice] =
     List(Choice("VaultMenu", content.text("bank.vault.back"), color = ChoiceColor.Negative, row = Some(0)))
 
@@ -190,6 +270,10 @@ case class BankVaultState(
           .as(StateType.BankVault)
       case Some(a) if a.startsWith(WithdrawItemPrefix) =>
         a.drop(WithdrawItemPrefix.length).toLongOption.fold(showMenu(user, renderer))(withdrawItem(user, _, renderer))
+          .as(StateType.BankVault)
+      case Some(a) if a.startsWith(StowTogglePrefix) =>
+        StowGroup.withId(a.drop(StowTogglePrefix.length))
+          .fold(showStowSettings(user, renderer))(toggleStow(user, _, renderer))
           .as(StateType.BankVault)
       case _ =>
         readScene(user).flatMap { scene =>
@@ -345,8 +429,13 @@ case class BankVaultState(
 object BankVaultState {
   val DepositItemPrefix  = "VaultPut_"
   val WithdrawItemPrefix = "VaultTake_"
+  val StowTogglePrefix   = "VaultStow_"
   val ModeDepositSilver  = "vaultDepositSilver"
   val ModeWithdrawSilver = "vaultWithdrawSilver"
+
+  /** По трое в ряд: столько переключателей в десять рядов иначе не уложить, а
+    * подписи под такую ширину короткие — название и значок. */
+  val StowTogglesPerRow: Int = 3
 
   case class VaultScene(
     vaultMode:    Option[String] = None,

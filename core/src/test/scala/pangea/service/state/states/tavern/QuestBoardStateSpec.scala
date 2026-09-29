@@ -42,7 +42,7 @@ object QuestBoardStateSpec extends ZIOSpecDefault {
       } yield assertTrue(data.remaining == 3) &&
               assertTrue(data.current.isDefined) &&
               assertTrue(data.active.isEmpty) &&
-              assertTrue(ids.toSet == Set("TakeQuest", "AbandonQuest", "BackFromQuest"))
+              assertTrue(ids.toSet == Set("TakeQuest", "AbandonQuest", "BackFromQuest", "GoToCity"))
     },
 
     test("старая запись доски без новых полей читается, а не теряет активное задание") {

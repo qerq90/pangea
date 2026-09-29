@@ -17,7 +17,7 @@ import pangea.repository.item.ItemRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{CharacterMenu, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
+import pangea.service.state.{CharacterMenu, CityExit, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -67,12 +67,15 @@ case class MerchantState(
       "CancelSellItem"  -> Target.Run { (u, _,  r) => currentSellPage(u).flatMap(p => showSellList(u, r, p)) },
       "BackFromSell"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "OpenCharacter"   -> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
-      "Back"            -> Target.Goto(StateType.MarketSquare)
+      "Back"            -> Target.Goto(StateType.MarketSquare),
+      CityExit.route,
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.MarketSquare, StateType.Merchant, StateType.HeroStats)
+  override def targetStates: Set[StateType] =
+    Set(StateType.MarketSquare, StateType.Merchant, StateType.HeroStats, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -401,7 +404,8 @@ case class MerchantState(
       content.choice("SellJunk",      "merchant.sellJunkLabel"),
       content.choice("JunkSettings",  "merchant.junk.settingsLabel"),
       content.choice("OpenCharacter", "common.character"),
-      content.choice("Back",          "merchant.backLabel")
+      content.choice("Back",          "merchant.backLabel"),
+      CityExit.button(content)
     )
     Screen(text, choices)
   }

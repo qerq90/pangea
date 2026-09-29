@@ -63,9 +63,22 @@ object TradeHouseSpec extends ZIOSpecDefault {
           menu     = screens.last
         } yield assertTrue(screens.head.text.contains("Рахадим")) &&
                 assertTrue(menu.choices.map(_.id) ==
-                  List("BuyCell", "BuyDoubloons", "DepositInterest", "FetShop", "LeaveTradeHouse")) &&
+                  List("BuyCell", "BuyDoubloons", "DepositInterest", "FetShop", "LeaveTradeHouse", "GoToCity")) &&
                 assertTrue(menu.choices.head.label.contains(BankVault.FirstCellPrice.toString)) &&
                 assertTrue(menu.choices.forall(_.label.length <= pangea.engine.Choice.MaxLabelLength))
+      },
+
+      test("«В город» уводит прямо на площадь — и от Рахадима, и из хранилища за его дверью") {
+        for {
+          t <- house(heroSilver = 0L, cells = 1)
+          (state, _, _, renderer) = t
+          _     <- state.enter(testUser, renderer)
+          out   <- state.action(testUser, tap("GoToCity"), renderer)
+          v     <- vaultState(inventory = Nil, cells = 1)
+          (vault, _, _, _, vr) = v
+          _     <- vault.enter(testUser, vr)
+          fromVault <- vault.action(testUser, tap("GoToCity"), vr)
+        } yield assertTrue(out == StateType.GlobalMap && fromVault == StateType.GlobalMap)
       },
 
       test("купленная ячейка открывает «Моё хранилище» и аукцион") {
@@ -77,7 +90,8 @@ object TradeHouseSpec extends ZIOSpecDefault {
           next    <- state.action(testUser, tap("MyVault"), renderer)
           auction <- state.action(testUser, tap("Auction"), renderer)
         } yield assertTrue(screens.last.choices.map(_.id) ==
-                  List("BuyCell", "MyVault", "BuyDoubloons", "DepositInterest", "FetShop", "Auction", "LeaveTradeHouse")) &&
+                  List("BuyCell", "MyVault", "BuyDoubloons", "DepositInterest", "FetShop", "Auction",
+                       "LeaveTradeHouse", "GoToCity")) &&
                 assertTrue(next == StateType.BankVault && auction == StateType.Auction)
       },
 
@@ -135,14 +149,15 @@ object TradeHouseSpec extends ZIOSpecDefault {
 
     suite("Хранилище")(
 
-      test("меню: пять кнопок, вместимость растёт с числом ячеек") {
+      test("меню: вещи, серебро, «Положить всё» с настройкой; вместимость растёт с числом ячеек") {
         for {
           t <- vaultState(inventory = Nil, cells = 2)
           (state, _, _, _, renderer) = t
           _       <- state.enter(testUser, renderer)
           screens <- renderer.sentScreens
         } yield assertTrue(screens.last.choices.map(_.id).toSet ==
-                  Set("VaultDepositItems", "VaultWithdrawItems", "VaultDepositSilver", "VaultWithdrawSilver", "LeaveVault")) &&
+                  Set("VaultDepositItems", "VaultWithdrawItems", "VaultDepositSilver", "VaultWithdrawSilver",
+                      "VaultStowAll", "VaultStowSettings", "LeaveVault", "GoToCity")) &&
                 assertTrue(screens.last.text.contains("200") && screens.last.text.contains("200000"))
       },
 

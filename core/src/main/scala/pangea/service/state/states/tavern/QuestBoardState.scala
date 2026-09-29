@@ -9,7 +9,7 @@ import pangea.model.quest.QuestData
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.state.states.tavern.QuestBoardState._
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -26,7 +26,8 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
     routes = Map(
       "TakeQuest"     -> Target.Run { (user, _, renderer) => takeQuest(user, renderer) },
       "AbandonQuest"  -> Target.Run { (user, _, renderer) => abandonQuest(user, renderer) },
-      "BackFromQuest" -> Target.Goto(StateType.Tavern)
+      "BackFromQuest" -> Target.Goto(StateType.Tavern),
+      CityExit.route
     ),
     fallback = Target.Run { (user, _, renderer) => showBoard(user, renderer).as(StateType.QuestBoard) }
   )
@@ -60,14 +61,16 @@ case class QuestBoardState(heroDao: HeroDao, content: SceneContent) extends Stat
         Screen(text, List(
           content.choice("TakeQuest",     "quest.takeLabel"),
           content.choice("AbandonQuest",  "quest.abandonLabel"),
-          content.choice("BackFromQuest", "quest.backLabel")))
+          content.choice("BackFromQuest", "quest.backLabel"),
+          CityExit.button(content)))
       case None =>
         val text = content.format("quest.empty",
           "remaining" -> formatRemaining(data.refreshAt - now),
           "active"    -> activeLine)
         val buttons =
           (if (data.active.isDefined) List(content.choice("AbandonQuest", "quest.abandonLabel")) else Nil) ++ List(
-            content.choice("BackFromQuest", "quest.backLabel"))
+            content.choice("BackFromQuest", "quest.backLabel"),
+            CityExit.button(content))
         Screen(text, buttons)
     }
   }

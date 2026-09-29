@@ -9,7 +9,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -33,15 +33,16 @@ case class CardSellerState(
       "HowMuch"       -> Target.Run { (u, _, r) => showPrice(u, r) },
       "BuyCard"       -> Target.Run { (u, _, r) => buyCard(u, r) },
       "DeclineCard"   -> Target.Goto(StateType.Tavern),
-      "NeedDoubloons" -> Target.Goto(StateType.Tavern)
+      "NeedDoubloons" -> Target.Goto(StateType.Tavern),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.CardSeller) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Tavern, StateType.CardSeller)
+  override def targetStates: Set[StateType] = Set(StateType.Tavern, StateType.CardSeller, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, content.screen("cardSeller.intro")).unit
+    renderer.show(user, CityExit.on(content.screen("cardSeller.intro"), content)).unit
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)

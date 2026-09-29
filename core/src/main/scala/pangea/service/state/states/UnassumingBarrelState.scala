@@ -14,7 +14,7 @@ import pangea.repository.barrel.{BarrelRepoError, BarrelRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.UnassumingBarrelState._
-import pangea.service.state.{InventoryFeedback, State, UserAction}
+import pangea.service.state.{CityExit, InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Неприметная бочка в Портовом квартале — личное хранилище игрока: до
@@ -41,7 +41,9 @@ case class UnassumingBarrelState(
       "DepositSilverAll"    -> Target.Run { (u, _, r) => depositAllSilver(u, r).as(StateType.UnassumingBarrel) },
       "WithdrawSilverMenu"  -> Target.Run { (u, _, r) => writeScene(u, BarrelScene(barrelMode = Some(ModeWithdrawSilver))) *> showWithdrawSilver(u, r).as(StateType.UnassumingBarrel) },
       "WithdrawSilverAll"   -> Target.Run { (u, _, r) => withdrawAllSilver(u, r).as(StateType.UnassumingBarrel) },
-      "LeaveBarrel"         -> Target.Goto(StateType.HarborQuarter)
+      "LeaveBarrel"         -> Target.Goto(StateType.HarborQuarter),
+      CityExit.route,
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -69,7 +71,8 @@ case class UnassumingBarrelState(
         Choice("WithdrawItemsMenu",  content.text("barrel.menu.withdrawItems"), row = Some(0)),
         Choice("DepositSilverMenu",  content.text("barrel.menu.depositSilver"),   row = Some(1)),
         Choice("WithdrawSilverMenu", content.text("barrel.menu.withdrawSilver"),  row = Some(1)),
-        Choice("LeaveBarrel",        content.text("barrel.menu.leave"),         color = ChoiceColor.Negative, row = Some(2))
+        Choice("LeaveBarrel",        content.text("barrel.menu.leave"),         color = ChoiceColor.Negative, row = Some(2)),
+        CityExit.button(content, Some(2))
       )
       _ <- renderer.show(user, Screen(text, choices))
     } yield ()

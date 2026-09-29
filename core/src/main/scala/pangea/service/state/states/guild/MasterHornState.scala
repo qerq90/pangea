@@ -12,7 +12,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{NpcQuestDialog, State, UserAction}
+import pangea.service.state.{CityExit, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -52,7 +52,8 @@ case class MasterHornState(
       "ImproveInventory"     -> Target.Run { (u, _, r) => askImprove(u, r, Stat.Inventory) },
       "ConfirmImprove"       -> Target.Run { (u, _, r) => confirmImprove(u, r) },
       "CancelImprove"        -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) },
-      "LeaveMasterHorn"      -> Target.Goto(StateType.TrainingHall)
+      "LeaveMasterHorn"      -> Target.Goto(StateType.TrainingHall),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) }
   )
@@ -66,7 +67,7 @@ case class MasterHornState(
       quest.load(user).flatMap { quests =>
         val base = content.screen("guild.masterHorn.menu")
         val (front, back) = base.choices.partition(_.id != "LeaveMasterHorn")
-        renderer.show(user, base.copy(choices = front ++ quest.button(quests).toList ++ back))
+        renderer.show(user, CityExit.on(base.copy(choices = front ++ quest.button(quests).toList ++ back), content))
       }
 
   // ── Задание Горна ──────────────────────────────────────────────────────────

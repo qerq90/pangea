@@ -9,7 +9,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Random, Task}
 
 /** Экран зелья лечения травм Густаво. За 100 × уровень серебра снимает случайную активную
@@ -27,12 +27,13 @@ case class GustavoHealState(
   private val branch = new Branch(
     routes = Map(
       "BuyPotion" -> Target.Run { (u, _, r) => buy(u, r) },
-      "Back"      -> Target.Goto(StateType.Gustavo)
+      "Back"      -> Target.Goto(StateType.Gustavo),
+      CityExit.route
     ),
     fallback = Target.Goto(StateType.Gustavo)
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Gustavo)
+  override def targetStates: Set[StateType] = Set(StateType.Gustavo, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = show(user, renderer)
 
@@ -51,7 +52,8 @@ case class GustavoHealState(
              case None =>
                val choices = List(
                  content.choice("BuyPotion", "gustavo.buyLabel"),
-                 content.choice("Back",      "gustavo.offerBack")
+                 content.choice("Back",      "gustavo.offerBack"),
+                 CityExit.button(content)
                )
                renderer.show(user, Screen(content.format("gustavo.offer", "cost" -> cost(hero).toString), choices, inline = true))
            }

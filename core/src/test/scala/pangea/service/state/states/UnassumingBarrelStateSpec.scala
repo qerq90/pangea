@@ -44,7 +44,8 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
         _      <- state.enter(testUser, renderer)
         screens <- renderer.sentScreens
       } yield assertTrue(screens.last.choices.map(_.id).toSet ==
-        Set("DepositItemsMenu", "WithdrawItemsMenu", "DepositSilverMenu", "WithdrawSilverMenu", "LeaveBarrel"))
+        Set("DepositItemsMenu", "WithdrawItemsMenu", "DepositSilverMenu", "WithdrawSilverMenu",
+            "LeaveBarrel", "GoToCity"))
     },
 
     test("LeaveBarrel → переход в HarborQuarter") {

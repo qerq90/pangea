@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.state.{AzatData, NpcQuestDialog, State, UserAction}
+import pangea.service.state.{AzatData, CityExit, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -42,6 +42,7 @@ case class TempleAzatState(
       "Priest"       -> Target.Run { (u, _, r) => showPriest(u, r) },
       "Hall"         -> Target.Goto(StateType.HallAzat),
       "LeaveTemple"  -> Target.Goto(StateType.CityCenter),
+      CityExit.route,
       "WhoIsAzat"    -> Target.Run { (u, _, r) => showWho(u, r) },
       "AskBlessing"  -> Target.Run { (u, _, r) => showBlessing(u, r) },
       "Donate"       -> Target.Run { (u, _, r) => donate(u, r) },
@@ -58,7 +59,8 @@ case class TempleAzatState(
     val choices = List(
       byId("Priest").copy(row = Some(0)),
       byId("Hall").copy(color = ChoiceColor.Positive, row = Some(0)),
-      byId("LeaveTemple").copy(color = ChoiceColor.Negative, row = Some(1))
+      byId("LeaveTemple").copy(color = ChoiceColor.Negative, row = Some(1)),
+      CityExit.button(content, Some(1))
     )
     renderer.show(user, Screen(content.text("temple.enter.text"), choices))
   }

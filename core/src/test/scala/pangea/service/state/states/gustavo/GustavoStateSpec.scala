@@ -73,7 +73,19 @@ object GustavoStateSpec extends ZIOSpecDefault {
           ids      = screens.last.choices.map(_.id)
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Positive)) &&
-                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest", "Back"))
+                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest", "Back", "GoToCity"))
+      },
+
+      test("«В город» уводит прямо на площадь — и от прилавка, и с предложения зелья") {
+        for {
+          t <- env(hero())
+          (heroDao, renderer, content) = t
+          menu   <- GustavoState(heroDao, TestInventoryRepository.accepting, content)
+                      .action(testUser, tap("GoToCity"), renderer)
+          heal   <- GustavoHealState(heroDao, content).action(testUser, tap("GoToCity"), renderer)
+          boost  <- GustavoBoostState(heroDao, content).action(testUser, tap("GoToCity"), renderer)
+        } yield assertTrue(menu == StateType.GlobalMap && heal == StateType.GlobalMap) &&
+                assertTrue(boost == StateType.GlobalMap)
       },
 
       test("Herbs → заглушка, остаёмся в меню; Supplies → GustavoSupplies") {
@@ -125,7 +137,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id).toSet
         } yield assertTrue(screens.last.text.contains("1000")) &&
-                assertTrue(ids == Set("BuyPotion", "Back"))
+                assertTrue(ids == Set("BuyPotion", "Back", "GoToCity"))
       },
 
       test("BuyPotion с травмой → снимает травму, списывает цену, ставит кулдаун, уходит в меню") {
@@ -189,7 +201,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id)
           str      = screens.last.choices.find(_.data.get("stat").contains("str"))
-        } yield assertTrue(ids == List("BoostBuy", "BoostBuy", "BoostBuy", "BoostBuy", "Back")) &&
+        } yield assertTrue(ids == List("BoostBuy", "BoostBuy", "BoostBuy", "BoostBuy", "Back", "GoToCity")) &&
                 assertTrue(str.exists(_.color == ChoiceColor.Positive))
       },
 
@@ -263,7 +275,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           _       <- GustavoSuppliesState(heroDao, content).enter(testUser, renderer)
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id)
-        } yield assertTrue(ids == List("Flask", "Belt", "Back"))
+        } yield assertTrue(ids == List("Flask", "Belt", "Back", "GoToCity"))
       },
 
       test("Flask → GustavoFlask; Belt → GustavoBelt; Back → Gustavo") {
