@@ -6,15 +6,24 @@ import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Targe
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.service.state.{AzatData, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
-case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State {
+/** Меню «Персонаж». Первая кнопка ведёт в рюкзак, но только тому, кому есть что
+  * в нём открывать: пока ларца, живой сумки и шкафа нет, рюкзак показал бы одну
+  * сумку — и герой идёт прямо в инвентарь, как до Лавки Фета. */
+case class HeroStatsState(
+  heroDao:   HeroDao,
+  content:   SceneContent,
+  artifacts: Option[ArtifactRepository] = None
+) extends State {
 
   private val branch = new Branch(
     routes = Map(
       "Back"           -> Target.Run { (user, _, _) => returnToCaller(user) },
       "OpenInventory"  -> Target.Goto(StateType.Backpack),
+      "OpenBag"        -> Target.Goto(StateType.Inventory),
       "OpenEquipment"  -> Target.Goto(StateType.Equipment),
       "OpenSkills"     -> Target.Goto(StateType.Skills),
       "OpenKnowledge"  -> Target.Goto(StateType.Knowledge),
@@ -47,19 +56,27 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
       hero0 <- getHero(user)
       hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
       azat  <- AzatData.load(heroDao, user.userId, now)
-      _     <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now), azat.instantRests))
+      keeps <- hasStorage(hero)
+      _     <- renderer.show(user, buildStatsScreen(hero, now, azat.blessingActive(now), azat.instantRests, keeps))
     } yield ()
+
+  /** Есть ли у героя хранилище сверх сумки. Репозитория нет — значит и хранилищ
+    * нет: так живут тесты и сборки без Лавки Фета. */
+  private def hasStorage(hero: Hero): Task[Boolean] =
+    artifacts.fold(ZIO.succeed(false): Task[Boolean])(
+      _.get(hero.id).map(_.anyOwned).orElseSucceed(false))
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
 
   private def showUpgradeScreen(user: User, renderer: Renderer): Task[Unit] =
     for {
-      now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-      hero <- getHero(user)
+      now   <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero  <- getHero(user)
+      keeps <- hasStorage(hero)
       _    <- if (hero.upgradePoints <= 0)
                 renderer.show(user, Screen(content.text("heroStats.noPoints"),
-                  buildStatsScreen(hero, now, blessed = false, instantRests = 0).choices))
+                  buildStatsScreen(hero, now, blessed = false, instantRests = 0, keeps).choices))
               else {
                 val text = content.format("heroStats.upgradeScreen", "points" -> hero.upgradePoints.toString)
                 val choices = List(
@@ -117,7 +134,8 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
     }
   }
 
-  private def buildStatsScreen(hero: Hero, nowMs: Long, blessed: Boolean, instantRests: Int): Screen = {
+  private def buildStatsScreen(hero: Hero, nowMs: Long, blessed: Boolean, instantRests: Int,
+                               hasStorage: Boolean): Screen = {
     val traumaLine = hero.traumaRemainingText(nowMs).map { remaining =>
       val names = hero.activeTraumas(nowMs).map(_.name)
       val namesStr = if (names.isEmpty) "Травмы" else names.mkString(", ")
@@ -126,7 +144,9 @@ case class HeroStatsState(heroDao: HeroDao, content: SceneContent) extends State
         "remaining"   -> remaining)
     }.getOrElse("")
     val choices = List(
-      Some(content.choice("OpenInventory", "heroStats.inventory").copy(row = Some(0))),
+      Some(
+        if (hasStorage) content.choice("OpenInventory", "heroStats.inventory").copy(row = Some(0))
+        else content.choice("OpenBag", "heroStats.bag").copy(row = Some(0))),
       Some(content.choice("OpenEquipment", "heroStats.equipment").copy(row = Some(0))),
       Some(content.choice("OpenSkills", "heroStats.skills").copy(row = Some(0))),
       Some(content.choice("OpenKnowledge", "heroStats.knowledge").copy(row = Some(1))),

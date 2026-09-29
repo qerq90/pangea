@@ -196,7 +196,7 @@ object StatesMap {
             content
           ),
           Dungeon   -> DungeonState(heroDao, inventoryRepo, scheduler, content),
-          HeroStats -> HeroStatsState(heroDao, content),
+          HeroStats -> HeroStatsState(heroDao, content, artifacts),
           FoundItem -> FoundItemState(
             heroDao,
             inventoryRepo,
@@ -212,7 +212,8 @@ object StatesMap {
             heroDao,
             inventoryRepo,
             itemRepo,
-            content
+            content,
+            artifacts
           ),
           Equipment -> EquipmentState(heroDao, inventoryRepo, content),
           Skills    -> SkillsState(heroDao, content),

@@ -92,6 +92,10 @@ object Artifact {
 /** Артефакты героя одной записью (таблица `hero_artifacts`). */
 final case class HeroArtifacts(heroId: HeroId, casket: Artifact, bag: Artifact, wardrobe: Artifact) {
 
+  /** Куплено ли хоть одно хранилище: ларец, живая сумка или шкаф. Пока их нет,
+    * рюкзак герою показывать незачем — в нём была бы одна сумка. */
+  def anyOwned: Boolean = ArtifactKind.values.exists(k => of(k).owned)
+
   def of(kind: ArtifactKind): Artifact = kind match {
     case ArtifactKind.Casket    => casket
     case ArtifactKind.LivingBag => bag

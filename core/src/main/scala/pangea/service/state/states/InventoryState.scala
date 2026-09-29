@@ -19,6 +19,7 @@ import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
@@ -31,12 +32,15 @@ case class InventoryState(
   heroDao:        HeroDao,
   inventoryRepo:  InventoryRepository,
   itemRepository: ItemRepository,
-  content:        SceneContent
+  content:        SceneContent,
+  artifacts:      Option[ArtifactRepository] = None
 ) extends State {
 
   private val branch = new Branch(
     routes = Map(
-      "BackFromInventory" -> Target.Goto(StateType.Backpack),
+      // Есть хранилища — назад в рюкзак, откуда сюда и зашли; нет — сразу в
+      // «Персонаж»: рюкзак такому герою не показывают.
+      "BackFromInventory" -> Target.Run { (u, _, _) => backTarget(u) },
       "InventoryList"     -> Target.Run { (u, _, r) => writeScene(u, InventoryScene(page = Some(0))) *> showList(u, r).as(StateType.Inventory) },
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
@@ -71,7 +75,15 @@ case class InventoryState(
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.HeroStats, StateType.Inventory, StateType.Socketing, StateType.MarisaHunt, StateType.MurlocVillage)
+    Set(StateType.HeroStats, StateType.Backpack, StateType.Inventory, StateType.Socketing,
+        StateType.MarisaHunt, StateType.MurlocVillage)
+
+  private def backTarget(user: User): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      keeps <- artifacts.fold(ZIO.succeed(false): Task[Boolean])(
+                 _.get(hero.id).map(_.anyOwned).orElseSucceed(false))
+    } yield if (keeps) StateType.Backpack else StateType.HeroStats
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit

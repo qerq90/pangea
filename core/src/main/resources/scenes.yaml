@@ -1618,6 +1618,7 @@ equipment:
 
 heroStats:
   inventory: "Рюкзак"
+  bag: "Инвентарь"
   equipment: "Снаряжение"
   skills: "Эффекты"
   knowledge: "Знания"

@@ -6,10 +6,11 @@ import pangea.model.hero.Hero
 import pangea.engine.ChoiceColor
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
 import pangea.model.item.{Gem, GemKind, Item, ItemType, MapZone, MaterialKind, Rarity}
+import pangea.model.artifact.ArtifactKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
+import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -66,14 +67,15 @@ object InventoryStateSpec extends ZIOSpecDefault {
   private def heroWithBothRings = baseHero.copy(
     equipment = TestFixtures.emptyEquipment.copy(firstRing = wornRing1, secondRing = wornRing2))
 
-  private def makeState(hero: Hero, items: List[Item]) =
+  private def makeState(hero: Hero, items: List[Item],
+                        artifacts: Option[TestArtifactRepository] = None) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       invRepo   = TestInventoryRepository.withItems(items)
       itemRepo  = TestItemRepository.make
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (InventoryState(heroDao, invRepo, itemRepo, content), heroDao, invRepo, renderer)
+    } yield (InventoryState(heroDao, invRepo, itemRepo, content, artifacts), heroDao, invRepo, renderer)
 
   override def spec = suite("InventoryState")(
 
@@ -392,9 +394,20 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("Нужна вторая половина")))
     },
 
-    test("BackFromInventory → возврат в HeroStats") {
+    test("BackFromInventory без хранилищ → сразу в «Персонаж»: рюкзака такому герою не показывают") {
       for {
-        quad                    <- makeState(baseHero, List(sword))
+        quad                    <- makeState(baseHero, List(sword), Some(TestArtifactRepository.empty))
+        (state, _, _, renderer)  = quad
+        _                       <- state.enter(testUser, renderer)
+        result                  <- state.action(testUser, tap("BackFromInventory"), renderer)
+      } yield assertTrue(result == StateType.HeroStats)
+    },
+
+    test("BackFromInventory с ларцом → возврат в рюкзак, откуда сюда и зашли") {
+      val casket = TestArtifactRepository.of(
+        casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
+      for {
+        quad                    <- makeState(baseHero, List(sword), Some(casket))
         (state, _, _, renderer)  = quad
         _                       <- state.enter(testUser, renderer)
         result                  <- state.action(testUser, tap("BackFromInventory"), renderer)
