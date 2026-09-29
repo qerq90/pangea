@@ -38,6 +38,10 @@ object MonsterCaveSpec extends ZIOSpecDefault {
 
   private def content = ZIO.attempt(SceneContent.load())
 
+  /** Момент, когда поднялись кости: тесты идут при нулевых часах, так что
+    * ставим срок заведомо впереди. */
+  private val nowStamp = 0L
+
   private def cave(h: Hero = hero(), items: List[Item] = Nil,
                    artifacts: Option[TestArtifactRepository] = None) =
     for {
@@ -608,7 +612,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
 
     test("поднятый идёт в бой своими статами и под своим именем") {
       val form  = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(4L))
-      val risen = hero().copy(squad = Squad.empty.raise(form, 10L))
+      val risen = hero().copy(squad = Squad.empty.raise(form, 10L, nowStamp))
       for {
         t <- cave(risen)
         (state, dao, _, _, r) = t
@@ -624,7 +628,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
     test("полный отряд: алтарь спрашивает, кем пожертвовать; отказ бережёт и трофей, и своих") {
       val sack = trophy(TrophyKind.Sack, Race.Goblin, lvl = 16L).copy(id = 31L)
       val full = (1 to AllyRates.Positions - 1).foldLeft(Squad.empty) { (sq, i) =>
-        sq.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), 10L)
+        sq.raise(UndeadForm(s"Поднятый $i", 1L, AllyKind.Human.stats(1L)), 10L, nowStamp)
       }
       for {
         t <- cave(hero().copy(squad = full), items = List(sack))

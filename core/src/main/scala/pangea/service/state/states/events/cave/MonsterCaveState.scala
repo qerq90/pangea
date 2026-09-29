@@ -285,8 +285,9 @@ case class MonsterCaveState(
       writeScene(user, waiting) *> askSwap(user, hero, form, renderer)
     } else
       for {
+        now <- nowMs
         _ <- inventoryRepo.removeItem(trophy.id, hero.id).mapError(asThrowable)
-        _ <- heroDao.updateSquad(user.userId, hero.squad.raise(form, hero.lvl))
+        _ <- heroDao.updateSquad(user.userId, hero.squad.raise(form, hero.lvl, now))
         _ <- renderer.show(user, Screen(content.format("cave.altar.risen", "name" -> form.name), Nil))
         res <- burnOut(user, scene, renderer)
       } yield res
@@ -314,8 +315,9 @@ case class MonsterCaveState(
               case None => showRoom(user, scene, renderer)
               case Some(old) =>
                 for {
+                  now <- nowMs
                   _ <- inventoryRepo.removeItem(scene.pendingTrophy, hero.id).mapError(asThrowable).ignore
-                  _ <- heroDao.updateSquad(user.userId, hero.squad.replaceAt(p, form, hero.lvl))
+                  _ <- heroDao.updateSquad(user.userId, hero.squad.replaceAt(p, form, hero.lvl, now))
                   _ <- renderer.show(user, Screen(content.format("cave.altar.swapped",
                          "old" -> old.name, "name" -> form.name), Nil))
                   out <- burnOut(user, scene.copy(pending = None, pendingTrophy = 0L), renderer)
