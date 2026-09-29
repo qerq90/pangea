@@ -3,7 +3,7 @@ package pangea.service.state.states.events.cave
 import io.circe.syntax.EncoderOps
 import pangea.domain.Rng
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
+import pangea.generator.item.{FlaskGenerator, MaterialGenerator, TreasureMapGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.monster.MiniBoss
 import pangea.model.battle.SoloPveBattle
@@ -13,7 +13,8 @@ import pangea.generator.item.GemGenerator
 import pangea.model.item.{GemKind, ItemType, TrophyKind}
 import pangea.model.squad.{AllyKind, AllyRates, Squad, UndeadForm}
 import pangea.model.hero.Hero
-import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MaterialKind, Rarity => ItemRarity}
+import pangea.generator.loot.TreasureHuntGenerator
+import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MapZone, MaterialKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -260,6 +261,88 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       } yield assertTrue(scene.exists(_.poisoned) && inv.snapshot.isEmpty) &&
               assertTrue(battle.exists(_.effects.monsterPoison.isDefined)) &&
               assertTrue(battle.exists(_.group.others.forall(_.effects.monsterPoison.isDefined)))
+    },
+
+    // ── Карта клада ───────────────────────────────────────────────────────────
+
+    test("карта клада на пороге: тратится, и в пещере появляется комната с кладом") {
+      val map = TreasureMapGenerator.full(MapZone.Kinet).copy(id = 8L)
+      for {
+        t <- cave(items = List(map))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, smallCave(inside = false))
+        _     <- state.action(testUser, tap("CaveSupply"), r)
+        _     <- state.action(testUser, tap("CaveUse_8"), r)
+        said  <- texts(r)
+        scene <- sceneOf(dao)
+        rooms  = scene.get.rooms
+        dug    = rooms.last
+        cells  = rooms.map(rm => (rm.x, rm.y))
+      } yield assertTrue(said.contains("вела прямиком к этой пещере")) &&
+              assertTrue(inv.snapshot.isEmpty && scene.exists(_.treasure.contains(MapZone.Kinet))) &&
+              assertTrue(rooms.size == 4 && dug.kind == RoomKind.Treasure && dug.monsters == 0 && !dug.done) &&
+              // комната пристроена к пещере, а не поверх неё: место своё, а ход есть
+              assertTrue(cells.distinct.size == cells.size) &&
+              assertTrue(rooms.init.exists(rm => math.abs(rm.x - dug.x) + math.abs(rm.y - dug.y) == 1))
+    },
+
+    test("вторая карта не тратится: клад в пещере уже отмечен") {
+      val first  = TreasureMapGenerator.full(MapZone.Kinet).copy(id = 8L)
+      val second = TreasureMapGenerator.full(MapZone.TreeShip).copy(id = 9L)
+      for {
+        t <- cave(items = List(first, second))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, smallCave(inside = false))
+        _     <- state.action(testUser, tap("CaveSupply"), r)
+        _     <- state.action(testUser, tap("CaveUse_8"), r)
+        _     <- state.action(testUser, tap("CaveUse_9"), r)
+        said  <- texts(r)
+        scene <- sceneOf(dao)
+      } yield assertTrue(said.contains("второй карте здесь делать нечего")) &&
+              assertTrue(inv.snapshot.map(_.id) == List(9L)) &&
+              // зона осталась от первой карты, и комната с кладом по-прежнему одна
+              assertTrue(scene.exists(_.treasure.contains(MapZone.Kinet))) &&
+              assertTrue(scene.exists(_.rooms.count(_.kind == RoomKind.Treasure) == 1))
+    },
+
+    test("половинку карты пещера не берёт: на ней не видно, где копать") {
+      val half = TreasureMapGenerator.create(10L, half = true).copy(id = 7L)
+      for {
+        t <- cave(items = List(half))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, smallCave(inside = false))
+        _     <- state.action(testUser, tap("CaveSupply"), r)
+        _     <- state.action(testUser, tap("CaveUse_7"), r)
+        said  <- texts(r)
+        scene <- sceneOf(dao)
+      } yield assertTrue(said.contains("не видно, где копать")) &&
+              assertTrue(inv.snapshot.map(_.id) == List(7L)) &&
+              assertTrue(scene.exists(s => s.treasure.isEmpty && s.rooms.size == 3))
+    },
+
+    test("комната с кладом отдаёт ровно то же, что поход за кладом из города") {
+      val treasure = CaveRoom(1, 1, 0, RoomKind.Treasure)
+      val withDig  = smallCave().copy(rooms = smallCave().rooms :+ treasure, at = 3,
+                       treasure = Some(MapZone.Kinet))
+      val seed     = 4242L
+      val (reward, _) = TreasureHuntGenerator.roll(MapZone.Kinet, Rng(seed), knowsRareHerbs = false)
+      for {
+        t <- cave()
+        (state, dao, _, _, r) = t
+        _     <- put(dao, withDig)
+        _     <- TestRandom.feedLongs(seed)
+        out   <- state.action(testUser, tap("CaveSearch"), r)
+        loot  <- lootOf(dao)
+        said  <- texts(r)
+        back   = loot.get.eventData.flatMap(_.as[CaveScene].toOption).get
+      } yield assertTrue(out == StateType.Loot && said.contains("клад «Кинэт»")) &&
+              assertTrue(loot.exists(_.items.map(_.name) ==
+                (reward.items ++ reward.gems ++ reward.materials).map(_.name))) &&
+              assertTrue(loot.exists(_.silvers == List(reward.silver).filter(_ > 0L))) &&
+              assertTrue(loot.exists(_.doubloons == reward.doubloons)) &&
+              // из клада герой возвращается в ту же пещеру, а яма остаётся разрытой
+              assertTrue(loot.exists(_.returnState.contains(StateType.MonsterCave))) &&
+              assertTrue(back.rooms(3).done && back.at == 3)
     },
 
     test("бесполезная вещь тратится впустую, сюжетную пещера не берёт") {

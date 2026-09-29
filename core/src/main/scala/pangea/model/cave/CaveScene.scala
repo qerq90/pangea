@@ -4,6 +4,7 @@ import enumeratum._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.domain.Rng
+import pangea.model.item.MapZone
 import pangea.model.monster.Rarity
 import pangea.model.squad.UndeadForm
 
@@ -18,6 +19,7 @@ object RoomKind extends Enum[RoomKind] {
   case object Stash extends RoomKind // чей-то схрон
   case object Rest  extends RoomKind // сухой угол, где можно перевести дух
   case object Altar extends RoomKind // алтарь тёмных сил: поднимает добычу обратно
+  case object Treasure extends RoomKind // клад по карте: она и привела сюда
 
   implicit val encoder: Encoder[RoomKind] = (k: RoomKind) => k.entryName.asJson
   implicit val decoder: Decoder[RoomKind] = (c: HCursor) => c.as[String].map(RoomKind.withName)
@@ -74,6 +76,8 @@ object CaveDir extends Enum[CaveDir] {
   * @param altarSpent алтарь отдал свою силу: поднимать больше некого
   * @param pending   кто ждёт места в отряде, пока герой решает, кем пожертвовать
   * @param pendingTrophy id трофея, за который этот поднятый встанет
+  * @param treasure  зона карты клада, если карту пустили в дело на пороге: по
+  *                  ней и катается добыча комнаты с кладом
   */
 final case class CaveScene(
   race:      String,
@@ -89,7 +93,8 @@ final case class CaveScene(
   rewarded:  Boolean = false,
   altarSpent: Boolean = false,
   pending:    Option[UndeadForm] = None,
-  pendingTrophy: Long = 0L
+  pendingTrophy: Long = 0L,
+  treasure:   Option[MapZone] = None
 ) {
 
   def room: CaveRoom = rooms.lift(at).getOrElse(rooms.head)
@@ -124,7 +129,8 @@ object CaveScene {
       "rewarded"  -> s.rewarded.asJson,
       "altarSpent" -> s.altarSpent.asJson,
       "pending"      -> s.pending.asJson,
-      "pendingTrophy" -> s.pendingTrophy.asJson)
+      "pendingTrophy" -> s.pendingTrophy.asJson,
+      "treasure"      -> s.treasure.asJson)
 
   implicit val decoder: Decoder[CaveScene] = (c: HCursor) =>
     for {
@@ -142,8 +148,9 @@ object CaveScene {
       spent     <- c.getOrElse[Boolean]("altarSpent")(false)
       pending   <- c.getOrElse[Option[UndeadForm]]("pending")(None)
       trophy    <- c.getOrElse[Long]("pendingTrophy")(0L)
+      treasure  <- c.getOrElse[Option[MapZone]]("treasure")(None)
     } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil,
-                      rewarded, spent, pending, trophy)
+                      rewarded, spent, pending, trophy, treasure)
 }
 
 /** Числа пещеры. Вынесены из компаньонов нарочно — их читают и генератор, и
@@ -303,6 +310,25 @@ object CaveGenerator {
           val (k, next) = roll(r, CaveRates.KindPool.size)
           (acc + (i -> CaveRates.KindPool(k)), next)
         }
+    }
+  }
+
+  /** Пристроить к пещере комнату с кладом: карта привела именно сюда, но где
+    * копать — герой ищет сам. Комната встаёт на свободную клетку рядом с одной
+    * из вырытых, поэтому ход в неё есть, а мобов в ней нет: клад стерегут те,
+    * кто и так бродит по пещере.
+    *
+    * Клетки берутся в порядке обхода комнат, так что комната садится «за»
+    * случайной из них, а не всегда у входа. */
+  def addTreasureRoom(scene: CaveScene, rng: Rng): (CaveScene, Rng) = {
+    val taken = scene.rooms.map(r => (r.x, r.y)).toSet
+    val free  = scene.rooms.flatMap(r => CaveDir.values.toList.map(d => (r.x + d.dx, r.y + d.dy)))
+                  .distinct.filterNot(taken.contains)
+    if (free.isEmpty) (scene, rng)
+    else {
+      val (i, next) = roll(rng, free.size)
+      val (x, y)    = free(i)
+      (scene.copy(rooms = scene.rooms :+ CaveRoom(x, y, 0, RoomKind.Treasure)), next)
     }
   }
 
