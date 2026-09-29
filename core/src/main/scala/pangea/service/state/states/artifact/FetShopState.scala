@@ -8,7 +8,7 @@ import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Лавка Фета в Торговом доме: сборные артефакты Азата. Каждый стоит
@@ -26,7 +26,8 @@ case class FetShopState(
       "FetGoods"    -> Target.Run { (u, ua, r) => withKind(ua)(showGoods(u, _, r)).as(StateType.FetShop) },
       "FetBuy"      -> Target.Run { (u, ua, r) => withKind(ua)(confirm(u, _, r)).as(StateType.FetShop) },
       "FetBuyYes"   -> Target.Run { (u, ua, r) => withKind(ua)(buy(u, _, r)).as(StateType.FetShop) },
-      "LeaveFetShop" -> Target.Goto(StateType.TradeHouse)
+      "LeaveFetShop" -> Target.Goto(StateType.TradeHouse),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => showShop(u, r).as(StateType.FetShop) }
   )
@@ -43,8 +44,10 @@ case class FetShopState(
     renderer.show(user, Screen(content.text("fet.counter"),
       ArtifactKind.values.toList.zipWithIndex.map { case (k, i) =>
         Choice("FetGoods", content.text(s"artifact.${k.key}.title"), data = Map("kind" -> k.entryName), row = Some(i))
-      } :+ Choice("LeaveFetShop", content.text("fet.leave"),
-             color = ChoiceColor.Negative, row = Some(ArtifactKind.values.size))))
+      } ++ List(
+        Choice("LeaveFetShop", content.text("fet.leave"),
+          color = ChoiceColor.Negative, row = Some(ArtifactKind.values.size)),
+        CityExit.button(content, Some(ArtifactKind.values.size)))))
 
   /** Карточка товара: рассказ Фета, цена и что сейчас с артефактом у героя. */
   private def showGoods(user: User, kind: ArtifactKind, renderer: Renderer): Task[Unit] =

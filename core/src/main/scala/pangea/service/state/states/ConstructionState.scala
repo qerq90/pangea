@@ -9,7 +9,7 @@ import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -51,7 +51,8 @@ case class ConstructionState(
         enter(user, renderer).as(StateType.Construction)
       },
       "Finish" -> Target.Run((user, _, renderer) => finish(user, renderer)),
-      "LeaveConstruction" -> Target.Goto(StateType.MarketSquare)
+      "LeaveConstruction" -> Target.Goto(StateType.MarketSquare),
+      CityExit.route
     ),
     fallback = Target.Run { (user, _, renderer) =>
       enter(user, renderer).as(StateType.Construction)
@@ -94,7 +95,8 @@ case class ConstructionState(
             "construction.buildWallLabel",
             "duration" -> formatHours(Job.BuildWall.hours)
           ),
-          content.choice("LeaveConstruction", "construction.back")
+          content.choice("LeaveConstruction", "construction.back"),
+          CityExit.button(content)
         )
       )
     )
@@ -114,7 +116,7 @@ case class ConstructionState(
       user,
       Screen(
         content.text("construction.work.text"),
-        content.screen("construction.work").choices
+        content.screen("construction.work").choices :+ CityExit.button(content)
       )
     )
 

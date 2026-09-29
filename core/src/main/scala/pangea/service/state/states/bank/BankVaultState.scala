@@ -14,7 +14,7 @@ import pangea.repository.bank.{BankRepoError, BankRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.service.state.ItemMenu
 import pangea.service.state.states.bank.BankVaultState._
-import pangea.service.state.{InventoryFeedback, State, UserAction}
+import pangea.service.state.{CityExit, InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /** «Моё хранилище» в Торговом доме: ячейки, выкупленные у Рахадима. Работает
@@ -41,7 +41,8 @@ case class BankVaultState(
       "VaultDepositAll"     -> Target.Run { (u, _, r) => depositAllSilver(u, r).as(StateType.BankVault) },
       "VaultWithdrawSilver" -> Target.Run { (u, _, r) => writeScene(u, VaultScene(vaultMode = Some(ModeWithdrawSilver))) *> showWithdrawSilver(u, r).as(StateType.BankVault) },
       "VaultWithdrawAll"    -> Target.Run { (u, _, r) => withdrawAllSilver(u, r).as(StateType.BankVault) },
-      "LeaveVault"          -> Target.Goto(StateType.TradeHouse)
+      "LeaveVault"          -> Target.Goto(StateType.TradeHouse),
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -72,7 +73,8 @@ case class BankVaultState(
                    Choice("VaultWithdrawItems",  content.text("bank.vault.menu.withdrawItems"),  row = Some(0)),
                    Choice("VaultDepositSilver",  content.text("bank.vault.menu.depositSilver"),  row = Some(1)),
                    Choice("VaultWithdrawSilver", content.text("bank.vault.menu.withdrawSilver"), row = Some(1)),
-                   Choice("LeaveVault",          content.text("bank.vault.menu.leave"), color = ChoiceColor.Negative, row = Some(2))
+                   Choice("LeaveVault",          content.text("bank.vault.menu.leave"), color = ChoiceColor.Negative, row = Some(2)),
+                   CityExit.button(content, Some(2))
                  )
                  renderer.show(user, Screen(text, choices))
                }

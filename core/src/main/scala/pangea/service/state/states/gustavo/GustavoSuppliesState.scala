@@ -4,7 +4,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.Task
 
 /**
@@ -25,13 +25,15 @@ case class GustavoSuppliesState(
     routes = Map(
       "Flask" -> Target.Goto(StateType.GustavoFlask),
       "Belt"  -> Target.Goto(StateType.GustavoBelt),
-      "Back"  -> Target.Goto(StateType.Gustavo)
+      "Back"  -> Target.Goto(StateType.Gustavo),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => render(u, r).as(StateType.GustavoSupplies) }
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.Gustavo, StateType.GustavoSupplies, StateType.GustavoFlask, StateType.GustavoBelt)
+    Set(StateType.Gustavo, StateType.GustavoSupplies, StateType.GustavoFlask, StateType.GustavoBelt,
+        StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = render(user, renderer)
 
@@ -44,7 +46,8 @@ case class GustavoSuppliesState(
       choices = List(
         content.choice("Flask", "gustavo.supplies.flaskLabel", "cost" -> flaskRefillCost(hero).toString),
         content.choice("Belt",  "gustavo.supplies.beltLabel",  "cost" -> beltRefillCost(hero).toString),
-        content.choice("Back",  "gustavo.supplies.back")
+        content.choice("Back",  "gustavo.supplies.back"),
+        CityExit.button(content)
       )
       _ <- renderer.show(user, Screen(content.text("gustavo.supplies.intro"), choices))
     } yield ()

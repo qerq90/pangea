@@ -10,7 +10,7 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{HerbLore, MarisaQuest, State, UserAction}
+import pangea.service.state.{CityExit, HerbLore, MarisaQuest, State, UserAction}
 import zio.Task
 
 /** «Расскажи о травах». Густаво учит нехотя: пока герой носит ему «странные
@@ -32,12 +32,13 @@ case class GustavoHerbsState(
     routes = Map(
       "BuyTreatise1" -> Target.Run { (u, _, r) => buy(u, r, QuestItemKind.FlowerTreatise1, HerbLore.Treatise1Price) },
       "BuyTreatise2" -> Target.Run { (u, _, r) => buy(u, r, QuestItemKind.FlowerTreatise2, HerbLore.Treatise2Price) },
-      "Back"         -> Target.Goto(StateType.Gustavo)
+      "Back"         -> Target.Goto(StateType.Gustavo),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => talk(u, r).as(StateType.GustavoHerbs) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Gustavo, StateType.GustavoHerbs)
+  override def targetStates: Set[StateType] = Set(StateType.Gustavo, StateType.GustavoHerbs, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = talk(user, renderer)
 
@@ -77,7 +78,7 @@ case class GustavoHerbsState(
           Screen(content.format("gustavo.herbs.firstLesson", "price" -> HerbLore.Treatise1Price.toString), List(
             content.choice("BuyTreatise1", "gustavo.herbs.buy1", "price" -> HerbLore.Treatise1Price.toString).copy(color = ChoiceColor.Positive),
             back))
-      _ <- renderer.show(user, screen)
+      _ <- renderer.show(user, CityExit.on(screen, content))
     } yield ()
 
   /** Купить трактат: серебро — Густаво, книга — в сумку (места не занимает). */

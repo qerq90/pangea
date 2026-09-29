@@ -10,7 +10,7 @@ import pangea.model.stats.StatBoost
 import pangea.model.user.User
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{NpcQuestLog, State, UserAction}
+import pangea.service.state.{CityExit, NpcQuestLog, State, UserAction}
 import zio.Task
 
 /** Экран зелий-бафов Густаво (бык/медоед/кошка/злобомозг). Каждое даёт +15% соответствующей
@@ -30,12 +30,13 @@ case class GustavoBoostState(
   private val branch = new Branch(
     routes = Map(
       "BoostBuy" -> Target.Run { (u, ua, r) => buy(u, ua, r) },
-      "Back"     -> Target.Goto(StateType.Gustavo)
+      "Back"     -> Target.Goto(StateType.Gustavo),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => render(u, r).as(StateType.GustavoBoost) }
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.Gustavo, StateType.GustavoBoost)
+  override def targetStates: Set[StateType] = Set(StateType.Gustavo, StateType.GustavoBoost, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = render(user, renderer)
 
@@ -48,8 +49,8 @@ case class GustavoBoostState(
       hero   <- getHero(user)
       data   <- loadData(user)
       treat  <- questTreat(user)
-      choices = BoostStat.all.map(bs => boostButton(bs, hero, data, now, treat)) :+
-                  content.choice("Back", "gustavo.boostBack")
+      choices = BoostStat.all.map(bs => boostButton(bs, hero, data, now, treat)) ++
+                  List(content.choice("Back", "gustavo.boostBack"), CityExit.button(content))
       _ <- renderer.show(user, Screen(content.text("gustavo.boost.intro"), choices))
     } yield ()
 

@@ -8,7 +8,7 @@ import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
+import pangea.service.state.{CityExit, HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -41,14 +41,16 @@ case class GustavoState(
       "HerbsSell" -> Target.Run { (u, _, r) => sellHerbs(u, r) },
       "HerbsTalk" -> Target.Goto(StateType.GustavoHerbs),
       "Supplies"  -> Target.Goto(StateType.GustavoSupplies),
-      "Back"     -> Target.Goto(StateType.MarketSquare)
+      "Back"     -> Target.Goto(StateType.MarketSquare),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) }
   )
 
   override def targetStates: Set[StateType] =
     Set(StateType.MarketSquare, StateType.Gustavo, StateType.GustavoHeal,
-        StateType.GustavoBoost, StateType.GustavoSupplies, StateType.GustavoHerbs)
+        StateType.GustavoBoost, StateType.GustavoSupplies, StateType.GustavoHerbs,
+        StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = renderMenu(user, renderer)
 
@@ -167,7 +169,8 @@ case class GustavoState(
     val herbsBtn    = content.choice("Herbs", "gustavo.herbsLabel")
     val herbsTalk   = content.choice("HerbsTalk", "gustavo.herbs.talkLabel")
     val suppliesBtn = content.choice("Supplies", "gustavo.suppliesLabel")
-    val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, suppliesBtn) ++ questBtn.toList :+ content.choice("Back", "gustavo.back")
+    val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, suppliesBtn) ++ questBtn.toList ++
+      List(content.choice("Back", "gustavo.back"), CityExit.button(content))
     Screen(content.text("gustavo.menu.text"), choices)
   }
 }

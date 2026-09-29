@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.guild.TrophyExchangeState._
-import pangea.service.state.{AzatData, ItemMenu, NpcQuestLog, State, UserAction}
+import pangea.service.state.{AzatData, CityExit, ItemMenu, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -32,7 +32,8 @@ case class TrophyExchangeState(
       "TrophyListMenu"      -> Target.Run { (u, _, r) => writeScene(u, TrophyScene(page = Some(0))) *> showList(u, r) },
       "TrophyListPrev"      -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "TrophyListNext"      -> Target.Run { (u, _, r) => navigate(u, r, +1) },
-      "LeaveTrophyExchange" -> Target.Goto(StateType.Guild)
+      "LeaveTrophyExchange" -> Target.Goto(StateType.Guild),
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -142,6 +143,7 @@ case class TrophyExchangeState(
     val row = ItemMenu.NavRow
     List(
       Some(Choice("LeaveTrophyExchange", "↩ Назад", color = ChoiceColor.Negative, row = Some(row))),
+      Some(CityExit.button(content, Some(row))),
       Option.when(page > 0)(Choice("TrophyListPrev", content.text("common.prev"), row = Some(row))),
       Option.when(page < totalPages - 1)(Choice("TrophyListNext", content.text("common.next"), row = Some(row)))
     ).flatten

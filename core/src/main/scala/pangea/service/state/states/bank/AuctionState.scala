@@ -19,7 +19,7 @@ import pangea.service.payout.Payouts
 import pangea.repository.item.ItemRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.bank.AuctionState._
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -63,7 +63,8 @@ case class AuctionState(
       "SellConfirm"   -> Target.Run { (u, _, r)  => listLot(u, r).as(StateType.Auction) },
       "MyLots"        -> Target.Run { (u, _, r)  => showMine(u, r).as(StateType.Auction) },
       "Reclaim"       -> Target.Run { (u, ua, r) => withLotId(ua)(reclaim(u, _, r)).as(StateType.Auction) },
-      "LeaveAuction"  -> Target.Goto(StateType.TradeHouse)
+      "LeaveAuction"  -> Target.Goto(StateType.TradeHouse),
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -84,7 +85,8 @@ case class AuctionState(
     vaultOf(user).flatMap { vault =>
       if (vault.open) action
       else renderer.show(user, Screen(content.text("bank.auction.needVault"),
-        List(Choice("LeaveAuction", content.text("bank.auction.leave"), color = ChoiceColor.Negative, row = Some(0)))))
+        List(Choice("LeaveAuction", content.text("bank.auction.leave"), color = ChoiceColor.Negative, row = Some(0)),
+             CityExit.button(content, Some(0)))))
     }
 
   private def vaultOf(user: User): Task[BankVault] =
@@ -102,7 +104,8 @@ case class AuctionState(
                    Choice("AuctionBrowse", content.text("bank.auction.browseLabel"), row = Some(0)),
                    Choice("AuctionSell",   content.text("bank.auction.sellLabel"),   row = Some(0)),
                    Choice("MyLots",        content.text("bank.auction.mineLabel"),   row = Some(1)),
-                   Choice("LeaveAuction",  content.text("bank.auction.leave"), color = ChoiceColor.Negative, row = Some(2))
+                   Choice("LeaveAuction",  content.text("bank.auction.leave"), color = ChoiceColor.Negative, row = Some(2)),
+                   CityExit.button(content, Some(2))
                  )))
     } yield ()
 

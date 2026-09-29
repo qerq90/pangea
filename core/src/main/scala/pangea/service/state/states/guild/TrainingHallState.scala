@@ -3,7 +3,7 @@ package pangea.service.state.states.guild
 import pangea.engine.{Branch, Renderer, SceneContent, Target}
 import pangea.model.state.StateType
 import pangea.model.user.User
-import pangea.service.state.{State, UserAction}
+import pangea.service.state.{CityExit, State, UserAction}
 import zio.Task
 
 /** Меню тренировочного зала: Мастер Горн, Наставник Казимир, возврат в гильдию. */
@@ -13,7 +13,8 @@ case class TrainingHallState(content: SceneContent) extends State {
     routes = Map(
       "MasterHorn"        -> Target.Goto(StateType.MasterHorn),
       "MentorKazimir"     -> Target.Goto(StateType.MentorKazimir),
-      "LeaveTrainingHall" -> Target.Goto(StateType.Guild)
+      "LeaveTrainingHall" -> Target.Goto(StateType.Guild),
+      CityExit.route
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.TrainingHall) }
   )
@@ -21,7 +22,7 @@ case class TrainingHallState(content: SceneContent) extends State {
   override def targetStates: Set[StateType] = branch.gotoTargets
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, content.screen("guild.trainingHall"))
+    renderer.show(user, CityExit.on(content.screen("guild.trainingHall"), content))
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)

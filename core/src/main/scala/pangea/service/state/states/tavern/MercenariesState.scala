@@ -8,7 +8,7 @@ import pangea.model.squad.{AllyKind, AllyRates, Squad}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{SquadDuty, State, UserAction}
+import pangea.service.state.{CityExit, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -30,7 +30,8 @@ case class MercenariesState(
       "MercList"      -> Target.Run { (u, _, r) => showList(u, r).as(StateType.Mercenaries) },
       "MercCard"      -> Target.Run { (u, ua, r) => withKind(ua, u, r)(k => showCard(u, k, r)).as(StateType.Mercenaries) },
       "MercHire"      -> Target.Run { (u, ua, r) => withKind(ua, u, r)(k => hire(u, k, r)).as(StateType.Mercenaries) },
-      "BackFromMercs" -> Target.Goto(StateType.Tavern)
+      "BackFromMercs" -> Target.Goto(StateType.Tavern),
+      CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => showList(u, r).as(StateType.Mercenaries) }
   )
@@ -59,7 +60,9 @@ case class MercenariesState(
       free  = available(squad, now)
       text  = if (free.isEmpty) content.text("mercenaries.empty") else content.text("mercenaries.title")
       buttons = free.map(k => Choice("MercCard", Choice.fit(k.name), data = Map("kind" -> k.entryName), row = Some(0)))
-      _    <- renderer.show(user, Screen(text, buttons :+ content.choice("BackFromMercs", "mercenaries.back").copy(row = Some(1))))
+      _    <- renderer.show(user, Screen(text, buttons ++ List(
+                content.choice("BackFromMercs", "mercenaries.back").copy(row = Some(1)),
+                CityExit.button(content, Some(1)))))
     } yield ()
 
   /** Карточка: история, реплика с ценой, «Нанять». */

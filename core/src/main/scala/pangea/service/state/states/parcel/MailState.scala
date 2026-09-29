@@ -9,7 +9,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.parcel.Parcels
-import pangea.service.state.{ItemMenu, State, UserAction}
+import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Почта Торгового дома: сюда попадает переданное, что не влезло в банковскую
@@ -25,7 +25,8 @@ case class MailState(
     routes = Map(
       "MailList"  -> Target.Run { (u, _, r) => showMail(u, r).as(StateType.Mail) },
       "MailAll"   -> Target.Run { (u, _, r) => takeAll(u, r).as(StateType.Mail) },
-      "LeaveMail" -> Target.Goto(StateType.TradeHouse)
+      "LeaveMail" -> Target.Goto(StateType.TradeHouse),
+      CityExit.route
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
@@ -54,7 +55,8 @@ case class MailState(
                page.map(line).mkString("\n")
              renderer.show(user, Screen(text, buttons ++ List(
                Choice("MailAll",   content.text("mail.takeAll"), row = Some(buttons.size)),
-               Choice("LeaveMail", content.text("mail.back"), color = ChoiceColor.Negative, row = Some(buttons.size + 1))
+               Choice("LeaveMail", content.text("mail.back"), color = ChoiceColor.Negative, row = Some(buttons.size + 1)),
+               CityExit.button(content, Some(buttons.size + 1))
              )))
            }
     } yield ()
@@ -111,7 +113,8 @@ case class MailState(
       }
 
   private def leaveRow: List[Choice] =
-    List(Choice("LeaveMail", content.text("mail.back"), color = ChoiceColor.Negative, row = Some(0)))
+    List(Choice("LeaveMail", content.text("mail.back"), color = ChoiceColor.Negative, row = Some(0)),
+         CityExit.button(content, Some(0)))
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)
