@@ -151,7 +151,10 @@ case class BattleState(
       sided   <- sideMobsPhase(promoted2, now)
       // Активный вне пары мог истечь ранами на своём ходу — тогда следующий.
       promoted3 = promoteAfterKill(sided)
-      ended   <- endRound(battle, promoted3)
+      // Охрана вся полегла — стрелкам некого прикрывать: они бросают башни и
+      // уходят, бой на этом кончается победой.
+      abandoned = towersAlone(promoted3)
+      ended   <- endRound(battle, abandoned)
       // Напротив героя пусто, а свободный моб появился — он шагает к герою.
       pulled  = pullFreeStep(ended)
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
@@ -159,6 +162,15 @@ case class BattleState(
       hinted  = plainSteelHint(hero, pulled)
       state  <- commit(user, hinted, now, renderer)
     } yield state
+
+  /** Башни стоят, пока есть кого прикрывать. Не осталось живой охраны — бой
+    * кончен: стрелки уходят, сами башни в добычу и опыт не идут. */
+  private def towersAlone(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue) res
+    else if (res.battle.livingGuards.nonEmpty) res
+    else if (!(res.battle.activeSlot :: res.battle.group.others).exists(s =>
+               s.alive && BattleState.isTowerSlot(s))) res
+    else res.copy(outcome = Outcome.Victory, log = res.log :+ content.text("battle.towersAbandoned"))
 
   /** Напоминание, что голое железо против этого врага почти бесполезно: без
     * такой строки игрок видит только маленькие числа и решает, что игра его
@@ -2792,10 +2804,18 @@ case class BattleState(
     // В дыму (дымная фляга) мобы вне пары не видят ни героя, ни друг друга:
     // ни удара сбоку, ни лечения соседу — только раны тикают и энергия копится.
     val smoke       = battle.effects.heroInSmoke
-    // Напротив стоит союзник — моб занят им и до героя не тянется.
-    val facing      = if (smoke) None else battle.group.allyAt(pos).filter(_.alive)
+    // Стрелок на башне достаёт любое место и бьёт того, кто к нему ближе.
+    // В дыму он не стреляет вовсе: цели не видно (см. дымную флягу).
+    val tower       = BattleState.isTower(tmp)
+    // Напротив стоит союзник — моб занят им и до героя не тянется; у башни
+    // «напротив» нет, поэтому ей ищем ближайшую цель по всему строю.
+    val facing      =
+      if (smoke) None
+      else if (tower) BattleState.towerTarget(battle, pos)
+      else battle.group.allyAt(pos).filter(_.alive)
     // Лежащего героя мобы не добивают — его смерть решится исходом боя.
-    val reachesHero = !smoke && facing.isEmpty && battle.group.inReach(pos) && !battle.group.heroDown
+    val reachesHero = !smoke && facing.isEmpty && !battle.group.heroDown &&
+                        (tower || battle.group.inReach(pos))
     for {
       // 1) удар сбоку — только если достаёт; союзника напротив — вместо героя
       struck <-
@@ -3054,7 +3074,13 @@ case class BattleState(
       // Недельное благословение Азата: +10% опыта/серебра, +10% редкости, +5% доп. дроп.
       blessed = azat.blessingActive(now)
       // Все павшие этого боя в порядке гибели; в бою 1 на 1 — один моб.
-      fallen = battle.group.slain :+ battle.slainActive
+      // Башни в счёт не идут: с них нечего взять и не за что дать опыт.
+      fallen0 = battle.group.slain :+ battle.slainActive
+      fallen  = {
+        val spoils = fallen0.filterNot(m => Race.withNameOption(m.race).exists(Race.immovable))
+        // Бой из одних башен всё же должен чем-то кончиться — тогда берём как есть.
+        if (spoils.nonEmpty) spoils else fallen0
+      }
       // Сюжетный бой: ни опыта, ни добычи по таблицам — только то, что положил
       // сюжет. Налёт на деревню мурлоков — исключение: награда как за обычный
       // бой, только этаж для неё — уровень героя (мурлоки его уровня).
@@ -3703,6 +3729,23 @@ object BattleState {
   /** Сколько союзников помещается в ряд клавиатуры: их бывает до десяти, а
     * рядов у ВК всего десять. */
   val AlliesPerRow: Int = 2
+
+  /** Сооружение ли это — башня со стрелком и всё, что ей подобно. */
+  def isTower(battle: SoloPveBattle): Boolean =
+    Race.withNameOption(battle.monsterRace).exists(Race.immovable)
+
+  def isTowerSlot(slot: pangea.model.battle.MonsterSlot): Boolean =
+    Race.withNameOption(slot.race).exists(Race.immovable)
+
+  /** Кого достанет стрелок с башни: он бьёт с любого места, поэтому целью
+    * берёт того, кто к нему ближе. Герой ближе или на равном расстоянии — бьёт
+    * героя (тогда None, и удар идёт обычным путём); ближе союзник — достаётся
+    * союзнику. Лежачего героя в расчёт не берём: его не добивают. */
+  def towerTarget(battle: SoloPveBattle, pos: Int): Option[pangea.model.battle.BattleAlly] = {
+    val heroDist = if (battle.group.heroDown) Int.MaxValue else math.abs(pos - battle.group.heroPos)
+    battle.group.allies.filter(a => a.alive && math.abs(pos - a.position) < heroDist)
+      .minByOption(a => math.abs(pos - a.position))
+  }
 
   /** Куда герой может шагнуть: ровно одно место влево или вправо, и только в
     * пределах строя — за его край, туда, где никого нет и не будет, ходить

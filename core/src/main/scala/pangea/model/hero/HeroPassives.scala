@@ -83,6 +83,11 @@ final case class HeroPassives(kinds: Set[PassiveKind], strength: Map[PassiveKind
   def hasImpenetrable: Boolean = has(PassiveKind.Impenetrable)
   def hasToughness: Boolean    = has(PassiveKind.Toughness)
   def hasSpiky: Boolean        = has(PassiveKind.Spiky)
+
+  /** «Ужасающий» и «Скрытность» — откуда бы они ни пришли, с вещи или с руны:
+    * караван смотрит только на то, есть ли они у героя. */
+  def hasTerrifying: Boolean   = has(PassiveKind.Terrifying)
+  def hasStealthy: Boolean     = has(PassiveKind.Stealthy)
   def hasQuickHands: Boolean   = has(PassiveKind.QuickHands)
 
   /** Непробиваемый: шанс как есть, срез урона растёт с пониманием (не выше 100 %). */

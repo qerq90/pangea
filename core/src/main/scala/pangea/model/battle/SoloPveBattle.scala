@@ -126,18 +126,22 @@ case class SoloPveBattle(
       (math.abs(d), if (d > 0) 0 else 1)
     }
 
+  /** Сооружения с места не сходят: ни к герою, ни в перемешивании. */
+  private def movable(slot: MonsterSlot): Boolean = !Race.immovable(Race.withName(slot.race))
+
   /** Активный моб пал, а в группе есть ещё: записать его в павшие. К герою
     * шагает ближайший свободный — тот, напротив которого нет союзника (при
     * равном расстоянии — правее); его прежнее место пустеет. Свободных нет —
     * никто не шагает: в полях остаётся ближайший занятый, на своём месте, и
-    * напротив героя пусто. Герой с места не сходит — у отряда позиции свои.
-    * Если мобов больше нет — None, это победа. Отложенный Таран сгорает. */
+    * напротив героя пусто. Сооружение не шагает никогда. Герой с места не
+    * сходит — у отряда позиции свои. Если мобов больше нет — None, это
+    * победа. Отложенный Таран сгорает. */
   def promoteNext: Option[SoloPveBattle] =
     if (group.others.isEmpty && group.queue.isEmpty) None
     else if (group.others.isEmpty) admitQueued._1.promoteNext   // строй пуст, но за ним ждут — входят и шагают
     else {
       val all  = group.places.indices.toList
-      val free = all.filter(i => group.freeAt(group.places(i)))
+      val free = all.filter(i => group.freeAt(group.places(i)) && movable(group.others(i)))
       val idx  = if (free.nonEmpty) nearestOf(free) else nearestOf(all)
       val pos  = if (free.nonEmpty) group.heroPos else group.places(idx)
       Some(withActive(group.others(idx)).copy(group = group.copy(
@@ -153,9 +157,11 @@ case class SoloPveBattle(
     * (активный возвращается на своё место). Пара цела или шагать некому — None. */
   def pullFree: Option[SoloPveBattle] =
     if (group.paired) None
-    else if (group.freeAt(group.activePos)) Some(copy(group = group.copy(activePos = group.heroPos)))
+    else if (group.freeAt(group.activePos) && !Race.immovable(Race.withName(monsterRace)))
+      Some(copy(group = group.copy(activePos = group.heroPos)))
     else {
-      val free = group.places.indices.toList.filter(i => group.freeAt(group.places(i)))
+      val free = group.places.indices.toList
+        .filter(i => group.freeAt(group.places(i)) && movable(group.others(i)))
       if (free.isEmpty) None
       else {
         val idx = nearestOf(free)
@@ -208,7 +214,8 @@ case class SoloPveBattle(
         val far  = math.abs(dist) > GroupState.Reach
         val free = next >= 1 && next != b.group.heroPos && !b.group.hasMonster(next)
         val busy = b.group.allyAt(pos).exists(_.alive)
-        if (!far || !free || busy) (b, moved)
+        // Сооружение стоит там, где стоит: подтягивать его к герою нечем.
+        if (!far || !free || busy || !movable(b.group.others(idx))) (b, moved)
         else (b.copy(group = b.group.copy(places = b.group.places.updated(idx, next))), moved :+ (b.group.others(idx) -> next))
       }
     }
@@ -224,12 +231,20 @@ case class SoloPveBattle(
     * остаются. `order` — новый порядок индексов по списку «активный :: others». */
   def reorderMonsters(order: List[Int]): SoloPveBattle = {
     val all = activeSlot :: group.others
+    // Сооружения в перемешивании не участвуют: их места закреплены, и обмен с
+    // ними сдвинул бы то, что сдвинуть нельзя.
     if (order.sorted != all.indices.toList) this
+    else if (all.zipWithIndex.exists { case (slot, i) => !movable(slot) && order(i) != i }) this
     else {
       val shuffled = order.map(all)
       withActive(shuffled.head).copy(group = group.copy(others = shuffled.tail))
     }
   }
+
+  /** Все живые мобы, кроме сооружений: ими бой и держится — когда таких не
+    * осталось, стрелкам некого прикрывать (см. `BattleState`). */
+  def livingGuards: List[MonsterSlot] =
+    (activeSlot :: group.others).filter(s => s.alive && !Race.immovable(Race.withName(s.race)))
 
   /** Все мобы по возрастанию мест (пустые места пропущены); активный — на своём месте. */
   def monstersInOrder: List[MonsterSlot] =
@@ -260,7 +275,10 @@ case class SoloPveBattle(
    *  накладывающие эффекты на моба, идут через этот метод, а не через `copy`,
    *  чтобы иммунитет нельзя было обойти, забыв про него в новом источнике. */
   def withEffects(e: BattleEffects): SoloPveBattle = {
-    val noDots  = if (Race.immuneToDots(Race.withName(monsterRace))) e.copy(monsterPoison = None, monsterBleed = None) else e
+    val race    = Race.withName(monsterRace)
+    val noDots  = if (Race.immuneToDots(race)) e.copy(monsterPoison = None, monsterBleed = None)
+                  else if (Race.immuneToBleed(race)) e.copy(monsterBleed = None)
+                  else e
     // Огненного элементаля вдобавок нельзя поджечь — он и так пламя.
     val noBurn  = if (boss.exists(_.immuneToBurn)) noDots.copy(monsterBurn = None) else noDots
     copy(effects = noBurn)

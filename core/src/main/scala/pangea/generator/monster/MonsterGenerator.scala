@@ -6,6 +6,15 @@ import pangea.model.monster.{Monster, MonsterRaceFactor, Race, Rarity}
 import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 
+/** Ставки башни со стрелком — за уровень. */
+object TowerRates {
+  val AtkPerLvl: Long      = 20L
+  val AccuracyPerLvl: Long = 30L
+  val DefencePerLvl: Long  = 20L
+  val ArmorPerLvl: Long    = 150L
+  val HpPerLvl: Long       = 45L
+}
+
 object MonsterGenerator {
 
   private val N = 1.1
@@ -34,6 +43,22 @@ object MonsterGenerator {
   // относительных весах, что и в общем пуле (17 : 4 : 1).
   private val markedRarityPool: List[Rarity] =
     rarityPool.filter(MarkedRarities.contains)
+
+  /** Башня со стрелком — сооружение с собственными ставками: стоит крепко
+    * (броня и HP), бьёт метко, но небыстро, и ни энергии, ни уклонения у неё
+    * нет. Редкость средняя нарочно: легендарные и мифические зовут сородичей,
+    * а звать башне некого. */
+  def tower(lvl: Int): Monster = {
+    val l = lvl.toLong.max(1L)
+    Monster(0L, l, Race.Construct, Rarity.Rare, FightStats(
+      atk      = TowerRates.AtkPerLvl * l,
+      hp       = TowerRates.HpPerLvl * l,
+      armor    = TowerRates.ArmorPerLvl * l,
+      defence  = TowerRates.DefencePerLvl * l,
+      evasion  = 0L,
+      accuracy = TowerRates.AccuracyPerLvl * l,
+      energy   = 0L))
+  }
 
   def generate(dungeonLevel: Int, rng: Rng): (Monster, Rng) = {
     val (race, rng1) = rng.pick(Race.mortals.toList)

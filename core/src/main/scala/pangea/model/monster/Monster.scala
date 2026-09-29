@@ -85,6 +85,10 @@ object Monster {
     (Race.Khajiit, Rarity.Uncommon)  -> "Тень пустыни",
     (Race.Khajiit, Rarity.Rare)      -> "Солдат серебряного когтя",
     (Race.Khajiit, Rarity.Mythical)  -> "Капитан серебряного когтя",
-    (Race.Khajiit, Rarity.Legendary) -> "Рейкьян Неуловимый"
+    (Race.Khajiit, Rarity.Legendary) -> "Рейкьян Неуловимый",
+
+    // ── Сооружение ─────────────────────────────────────────────────────────
+    // Башня одна на всю расу: редкость у неё служебная (см. MonsterGenerator.tower).
+    (Race.Construct, Rarity.Rare) -> "Башня со стрелком"
   )
 }
