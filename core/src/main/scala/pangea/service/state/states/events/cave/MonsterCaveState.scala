@@ -6,13 +6,13 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.MaterialGenerator
-import pangea.generator.loot.{LootGenerator, SchronGenerator}
+import pangea.generator.loot.{LootGenerator, SchronGenerator, TreasureHuntGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{Poison, SoloPveBattle}
 import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind}
-import pangea.model.hero.Hero
+import pangea.model.hero.{Hero, Knowledge}
 import pangea.generator.item.GemGenerator
-import pangea.model.item.{GemKind, Item, ItemDetails, MaterialKind}
+import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, MapZone, MaterialKind}
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.rune.{RuneStone, RuneStoneSize}
 import pangea.model.squad.UndeadForm
@@ -199,8 +199,11 @@ case class MonsterCaveState(
   private def spend(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer): Task[StateType] = {
     val boon    = CaveSupply.boonOf(item)
     val charged = CaveSupply.charged(item)
+    // Карта клада читается отдельно от прочего скарба: она не дурманит пещеру,
+    // а показывает, что клад спрятан именно в ней.
+    if (item.isTreasureMap) readMap(user, hero, scene, item, renderer)
     // Пустая фляга остаётся при герое: тратить нечего, и забирать её не за что.
-    if (charged.exists(_.charges <= 0))
+    else if (charged.exists(_.charges <= 0))
       renderer.show(user, Screen(content.format("cave.supply.emptyFlask", "name" -> item.displayTitle), Nil)) *>
         showSupplies(user, scene, renderer).as(StateType.MonsterCave)
     else {
@@ -226,6 +229,25 @@ case class MonsterCaveState(
       } yield StateType.MonsterCave
     }
   }
+
+  /** Карта клада, приложенная к пещере. Целая карта сходится с этой пещерой,
+    * тратится и открывает в ней комнату с кладом; вторая карта класть уже
+    * некуда — её герой оставляет себе. Половинку читать бессмысленно: на ней
+    * не видно, где копать, и портить её незачем. */
+  private def readMap(user: User, hero: Hero, scene: CaveScene, map: Item, renderer: Renderer): Task[StateType] =
+    (map.itemType, map.details) match {
+      case (ItemType.TreasureMap, ItemDetails.TreasureMap(zone)) if scene.treasure.isEmpty =>
+        for {
+          seed <- Random.nextLong
+          (dug, _) = CaveGenerator.addTreasureRoom(scene.copy(treasure = Some(zone)), Rng(seed))
+          _ <- inventoryRepo.removeItem(map.id, hero.id).mapError(asThrowable)
+          _ <- writeScene(user, dug)
+          _ <- renderer.show(user, Screen(content.text("cave.supply.map"), Nil))
+          _ <- showSupplies(user, dug, renderer)
+        } yield StateType.MonsterCave
+      case (ItemType.TreasureMap, _) => say(user, scene, "cave.supply.mapAlready", renderer)
+      case _                         => say(user, scene, "cave.supply.mapHalf", renderer)
+    }
 
   // ── Алтарь тёмных сил ──────────────────────────────────────────────────────
 
@@ -390,6 +412,7 @@ case class MonsterCaveState(
       case RoomKind.Herb  => content.text(if (room.done) "cave.room.herbTaken" else "cave.room.herb")
       case RoomKind.Chest => content.text(if (room.done) "cave.room.chestOpen" else "cave.room.chest")
       case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
+      case RoomKind.Treasure => content.text(if (room.done) "cave.room.treasureDug" else "cave.room.treasure")
       case RoomKind.Empty => emptyRoom(room)
     }
   }
@@ -405,6 +428,7 @@ case class MonsterCaveState(
     case RoomKind.Herb  => Some("cave.act.herb")
     case RoomKind.Chest => Some("cave.act.chest")
     case RoomKind.Stash => Some("cave.act.stash")
+    case RoomKind.Treasure => Some("cave.act.treasure")
     case RoomKind.Rest  => Some("cave.act.rest")
     case RoomKind.Altar => Some("cave.act.altar")
     case RoomKind.Empty => None
@@ -478,6 +502,7 @@ case class MonsterCaveState(
         case RoomKind.Herb  => pickHerb(user, scene, renderer)
         case RoomKind.Chest => openChest(user, scene, renderer)
         case RoomKind.Stash => openStash(user, scene, renderer)
+        case RoomKind.Treasure => digTreasure(user, scene, renderer)
         case _              => showRoom(user, scene, renderer)
       }
     }
@@ -537,6 +562,24 @@ case class MonsterCaveState(
                silvers   = if (reward.silver > 0L) List(reward.silver) else Nil,
                doubloons = reward.doubloons)
       _ <- renderer.show(user, Screen(content.text("cave.stash"), Nil))
+      _ <- handOver(user, scene, loot)
+    } yield StateType.Loot
+
+  /** Клад по карте: в пещере он тот же, что и в походе за город, — карта-то одна
+    * и та же. Редкие травы в нём находит только знающий цветы 2 ранга. */
+  private def digTreasure(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      seed <- Random.nextLong
+      lore <- HerbLore.readLore(heroDao, user.userId)
+      zone  = scene.treasure.getOrElse(MapZone.forLevel(hero.lvl))
+      (reward, _) = TreasureHuntGenerator.roll(zone, Rng(seed),
+                      knowsRareHerbs = lore.knows(Knowledge.FlowersRank2))
+      loot  = LootData(
+                items     = reward.items ++ reward.gems ++ reward.materials,
+                silvers   = if (reward.silver > 0L) List(reward.silver) else Nil,
+                doubloons = reward.doubloons)
+      _ <- renderer.show(user, Screen(content.format("cave.treasure", "name" -> zone.treasureName), Nil))
       _ <- handOver(user, scene, loot)
     } yield StateType.Loot
 
