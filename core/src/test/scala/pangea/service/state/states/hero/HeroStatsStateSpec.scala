@@ -4,7 +4,8 @@ import pangea.engine.SceneContent
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
-import pangea.test.{TestFixtures, TestHeroDao, TestRenderer}
+import pangea.model.artifact.ArtifactKind
+import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestRenderer}
 import zio.test._
 import zio.ZIO
 
@@ -110,6 +111,35 @@ object HeroStatsStateSpec extends ZIOSpecDefault {
         _        <- state.enter(testUser, renderer)
         screens  <- renderer.sentScreens
       } yield assertTrue(!screens.head.choices.map(_.id).contains("Upgrade"))
+    },
+
+    test("без ларца, сумки и шкафа первая кнопка — «Инвентарь», и ведёт она прямо в инвентарь") {
+      for {
+        renderer <- TestRenderer.make
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HeroStatsState(heroDao, content, Some(TestArtifactRepository.empty))
+        _        <- state.enter(testUser, renderer)
+        screens  <- renderer.sentScreens
+        first     = screens.head.choices.head
+        result   <- state.action(testUser, tap("OpenBag"), renderer)
+      } yield assertTrue(first.id == "OpenBag" && first.label == "Инвентарь") &&
+              assertTrue(!screens.head.choices.exists(_.label == "Рюкзак")) &&
+              assertTrue(result == StateType.Inventory)
+    },
+
+    test("купил хранилище — на его месте появляется «Рюкзак»") {
+      val casket = TestArtifactRepository.of(
+        casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1))
+      for {
+        renderer <- TestRenderer.make
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = HeroStatsState(heroDao, content, Some(casket))
+        _        <- state.enter(testUser, renderer)
+        screens  <- renderer.sentScreens
+        first     = screens.head.choices.head
+      } yield assertTrue(first.id == "OpenInventory" && first.label == "Рюкзак")
     },
 
     test("OpenInventory → переходит в Inventory") {
