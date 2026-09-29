@@ -227,7 +227,7 @@ object StatesMap {
           TradeHouse -> TradeHouseState(heroDao, bankRepo, parcels, content),
           Transfer   -> TransferState(heroDao, inventoryRepo, transfers, content),
           Mail       -> MailState(heroDao, inventoryRepo, parcels, content),
-          BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content),
+          BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content, artifacts),
           Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, bankRepo, payouts, players, content),
           FetShop    -> FetShopState(heroDao, artifactRepo, content),
           Backpack   -> BackpackState(heroDao, inventoryRepo, artifactRepo, content),

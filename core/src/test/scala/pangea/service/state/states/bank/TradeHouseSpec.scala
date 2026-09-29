@@ -149,7 +149,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
 
     suite("Хранилище")(
 
-      test("меню: пять кнопок, вместимость растёт с числом ячеек") {
+      test("меню: вещи, серебро, «Положить всё» с настройкой; вместимость растёт с числом ячеек") {
         for {
           t <- vaultState(inventory = Nil, cells = 2)
           (state, _, _, _, renderer) = t
@@ -157,7 +157,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
           screens <- renderer.sentScreens
         } yield assertTrue(screens.last.choices.map(_.id).toSet ==
                   Set("VaultDepositItems", "VaultWithdrawItems", "VaultDepositSilver", "VaultWithdrawSilver",
-                      "LeaveVault", "GoToCity")) &&
+                      "VaultStowAll", "VaultStowSettings", "LeaveVault", "GoToCity")) &&
                 assertTrue(screens.last.text.contains("200") && screens.last.text.contains("200000"))
       },
 

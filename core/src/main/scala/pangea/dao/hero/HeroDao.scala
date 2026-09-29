@@ -84,6 +84,11 @@ trait HeroDao {
   def writeKillLog(userId: UserId, data: Json): Task[Unit]
   def readKillLog(userId: UserId): Task[Option[Json]]
 
+  /** Настройка «Положить всё» в хранилище Торгового дома
+    * (см. [[pangea.model.bank.StowSettings]]). Durable, живёт в `heroes.vault_stow`. */
+  def writeVaultStow(userId: UserId, data: Json): Task[Unit]
+  def readVaultStow(userId: UserId): Task[Option[Json]]
+
   /** Сюжетные задания горожан ([[pangea.model.quest.NpcQuests]]). Durable,
     * живёт в `heroes.npc_quests`. */
   def writeNpcQuests(userId: UserId, data: Json): Task[Unit]
