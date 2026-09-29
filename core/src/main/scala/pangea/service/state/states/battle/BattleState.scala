@@ -265,12 +265,12 @@ case class BattleState(
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
-    // показываем, пока бой идёт и в нём больше одного моба; удары сбоку — и
-    // тогда, когда они добили героя, иначе смерть придёт без объяснения.
+    // показываем, только пока бой идёт, — после него он не нужен. А вот что
+    // случилось сбоку, говорим при любом исходе: иначе союзник, которого
+    // унесло свитком тем же ходом, каким кончился бой, пропадал бы молча.
     val standing  = if (res.outcome == Outcome.Continue && res.battle.group.hasFormation) groupLines(res.battle) else Vector.empty
     val groupMsg  = (res.sideLog ++ standing).mkString("\n")
-    val showGroup = ZIO.when(groupMsg.nonEmpty && (res.outcome == Outcome.Continue || res.outcome == Outcome.Death))(
-      renderer.show(user, Screen(groupMsg, Nil)))
+    val showGroup = ZIO.when(groupMsg.nonEmpty)(renderer.show(user, Screen(groupMsg, Nil)))
     res.outcome match {
       // Приговорённый дотерпел свои раунды и ушёл: добычи с него нет, но и
       // герой цел — событие просто кончилось.
@@ -289,6 +289,9 @@ case class BattleState(
         for {
           outcome <- (persistHero *> persistSquad *> clearDust *> applyVictory(user, res.hero, res.battle)).uninterruptible
           _       <- showLog
+          // Что случилось сбоку в этот же ход — до итогов победы: иначе
+          // союзник, которого унесло свитком, пропал бы молча.
+          _       <- showGroup
           _       <- showVictory(user, outcome, renderer)
         } yield StateType.Loot
       case Outcome.Death if res.battle.group.allies.exists(_.alive) && !res.battle.group.heroDown =>
@@ -307,7 +310,7 @@ case class BattleState(
         // Сюжетный бой идёт не в лабиринте — бежать из него в город.
         val to = if (res.battle.story.isDefined) StateType.GlobalMap else StateType.Dungeon
         (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
-          showLog *>
+          showLog *> showGroup *>
           renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(to)
     }
   }
@@ -353,11 +356,15 @@ case class BattleState(
   /** «Переместиться»: с кем из союзников поменяться местами. */
   private def moveRoute(user: User, renderer: Renderer): Task[StateType] =
     getBattle(user).flatMap { battle =>
-      // Союзников в строю бывает до десяти — по двое в ряд, иначе клавиатура
-      // ВК не примет столько рядов (см. VkRenderer.MaxRows).
-      val choices = battle.group.allies.filter(_.alive).sortBy(_.position).zipWithIndex.map { case (a, i) =>
-        pangea.engine.Choice("MoveTo", pangea.engine.Choice.fit(content.format("battle.group.moveTo", "n" -> a.position.toString, "name" -> a.name)),
-          data = Map("target" -> a.position.toString), row = Some(i / BattleState.AlliesPerRow))
+      // Шаг ровно один — влево или вправо, как у мобов. Соседнее место может
+      // быть пустым: тогда герой просто переходит на него.
+      val choices = BattleState.stepTargets(battle).zipWithIndex.map { case (pos, i) =>
+        val label = battle.group.allyAt(pos).filter(_.alive) match {
+          case Some(a) => content.format("battle.group.moveTo", "n" -> pos.toString, "name" -> a.name)
+          case None    => content.format("battle.group.moveToFree", "n" -> pos.toString)
+        }
+        pangea.engine.Choice("MoveTo", pangea.engine.Choice.fit(label),
+          data = Map("target" -> pos.toString), row = Some(i / BattleState.AlliesPerRow))
       }
       val cancel = pangea.engine.Choice("CancelTarget", content.text("battle.group.cancelTarget"),
         color = pangea.engine.ChoiceColor.Negative,
@@ -365,18 +372,24 @@ case class BattleState(
       renderer.show(user, Screen(content.text("battle.group.moveWhom"), choices :+ cancel)).as(StateType.Battle)
     }
 
-  /** Герой меняется местами с союзником на позиции `target`: тот встаёт на
-    * прежнее место героя. Стоял там моб — герой теперь с ним в паре, и тот
-    * отвечает; ход на этом кончается. */
+  /** Герой делает шаг на соседнее место. Стоял там союзник — они меняются
+    * местами: сам союзник с места не сходит никогда, его переставляет герой.
+    * Стоял напротив моб — герой теперь с ним в паре, и тот отвечает; ход на
+    * этом кончается. */
   private def moveTurn(target: Option[Int])(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
-    target.flatMap(p => battle.group.allyAt(p).filter(_.alive)) match {
+    target.filter(BattleState.stepTargets(battle).contains) match {
       case None => cont(hero, battle, content.text("battle.group.targetGone"))
-      case Some(ally) =>
+      case Some(pos) =>
         val from    = battle.group.heroPos
-        val swapped = battle.copy(group = battle.group.updateAlly(ally.position)(_.copy(position = from)))
-        val moved   = if (swapped.group.hasMonster(ally.position)) swapped.moveHeroTo(ally.position)
-                      else swapped.copy(group = swapped.group.copy(heroPos = ally.position))
-        val line    = content.format("battle.group.moved", "name" -> ally.name, "n" -> ally.position.toString)
+        val ally    = battle.group.allyAt(pos).filter(_.alive)
+        val swapped = ally.fold(battle)(a =>
+          battle.copy(group = battle.group.updateAlly(a.position)(_.copy(position = from))))
+        val moved   = if (swapped.group.hasMonster(pos)) swapped.moveHeroTo(pos)
+                      else swapped.copy(group = swapped.group.copy(heroPos = pos))
+        val line    = ally match {
+          case Some(a) => content.format("battle.group.moved", "name" -> a.name, "n" -> pos.toString)
+          case None    => content.format("battle.group.stepped", "n" -> pos.toString)
+        }
         closeTurn(TurnResult(hero, moved, Vector(line), Outcome.Continue), nowMs, Set.empty)
     }
 
@@ -3581,12 +3594,19 @@ case class BattleState(
     }
     // Бить некого (напротив пусто, соседей нет) — вместо атаки «Переместиться»
     // (поменяться местами с союзником), а без союзников — «Ждать».
-    val attackButton =
-      if (battle0.group.attackTargets.nonEmpty) pangea.engine.Choice("Attack", "Атака", row = Some(1))
-      else if (battle0.group.allies.exists(_.alive)) pangea.engine.Choice("Move", content.text("battle.group.moveLabel"), row = Some(1))
-      else pangea.engine.Choice("Wait", content.text("battle.group.waitLabel"), row = Some(1))
+    // Бить некого — можно шагнуть в сторону (если есть куда) или просто
+    // выждать: шаг ход тратит, а выжидание копит энергию, и подменять одно
+    // другим неправильно.
+    val actionButtons =
+      if (battle0.group.attackTargets.nonEmpty) List(pangea.engine.Choice("Attack", "Атака", row = Some(1)))
+      else
+        List(
+          Option.when(BattleState.stepTargets(battle0).nonEmpty)(
+            pangea.engine.Choice("Move", content.text("battle.group.moveLabel"), row = Some(1))),
+          Some(pangea.engine.Choice("Wait", content.text("battle.group.waitLabel"), row = Some(1)))
+        ).flatten
     val mainButtons =
-      (List(attackButton, flaskButton)) ++
+      (actionButtons :+ flaskButton) ++
         beltButton.toList ++
         mixButton.toList ++
         divineButton.toList ++
@@ -3683,6 +3703,14 @@ object BattleState {
   /** Сколько союзников помещается в ряд клавиатуры: их бывает до десяти, а
     * рядов у ВК всего десять. */
   val AlliesPerRow: Int = 2
+
+  /** Куда герой может шагнуть: ровно одно место влево или вправо, и только в
+    * пределах строя — за его край, туда, где никого нет и не будет, ходить
+    * незачем. Место может быть занято союзником (тогда поменяются) или пустым. */
+  def stepTargets(battle: SoloPveBattle): List[Int] = {
+    val here = battle.group.heroPos
+    List(here - 1, here + 1).filter(p => p >= 1 && p <= battle.group.rows)
+  }
 
   /** Исход хода — определяет переход и терминальные действия в [[BattleState.commit]]. */
   sealed trait Outcome

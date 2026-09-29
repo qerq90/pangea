@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{BattleAlly, SoloPveBattle}
+import pangea.model.battle.{BattleAlly, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
@@ -162,7 +162,31 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2 && after.group.allies.isEmpty)
     },
 
-    test("бить некого, союзники впереди — вместо «Атаки» кнопка «Переместиться»: герой меняется местами с союзником, ход кончается") {
+    test("союзника уносит свитком тем же ходом, каким кончается бой, — и об этом сказано") {
+      // Герой добивает моба в паре; второй, стоящий сбоку, успевает добить
+      // союзника и тут же издыхает от яда — бой кончается победой. Раньше
+      // строка про свиток пропадала: после победы сводку не показывали.
+      val doomed = ally(pos = 2, hp = Some(1L), armor = Some(0L))
+      val h      = hero(atk = 100000L, allies = List(doomed))
+      val group  = SoloPveBattle.fromGroup(List(monster(1L), monster(1000L, atk = 100000L)), h, List(0L, 0L))
+      val poisoned = group.copy(group = group.group.copy(
+        others = group.group.others.map(o => o.copy(effects = o.effects.copy(monsterPoison = Some(Poison(100)))))))
+      for {
+        t <- makeState(h, poisoned)
+        (state, dao, r) = t
+        _       <- TestRandom.feedInts(60, 99, 99, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L, 100L)
+        result  <- state.action(testUser, aimed("Attack", 1), r)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+        now     <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(screens.contains("воспользовался свитком")) &&
+              // и в отряде его после боя нет — ушёл в отлучку
+              assertTrue(!updated.squad.has(AllyKind.Human) && updated.squad.isAway(AllyKind.Human, now))
+    },
+
+    test("шаг ровно один: дальний союзник в списке не появляется, к соседнему герой встаёт меняясь") {
+      // Герой на 3, свои на 1 и 2, моб на месте 1 — дотянуться до него разом нельзя.
       val h = hero(heroPos = 3, allies = List(ally(pos = 1), ally(AllyKind.Gnome, pos = 2)))
       for {
         t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
@@ -171,19 +195,48 @@ object AllyBattleSpec extends ZIOSpecDefault {
         entry   <- r.sentScreens.map(_.last)
         _       <- state.action(testUser, tap("Move"), r)
         ask     <- r.sentScreens.map(_.last)
-        // герой встал на 1 — в пару с мобом, тот отвечает; Йорген на 3 бить некого; Брамбл на 2 достаёт моба как
-        // соседа + прок; подкрепление
+        // шаг через голову не проходит: место 1 от героя через одно
+        far     <- state.action(testUser, aimed("MoveTo", 1), r)
+        stayed  <- battleOf(dao)
+        // а на соседнее встаёт, меняясь местами с тем, кто там стоял
         _       <- TestRandom.feedInts(99, 60, 99, 99) *> TestRandom.feedLongs(100L, 100L)
-        result  <- state.action(testUser, aimed("MoveTo", 1), r)
+        result  <- state.action(testUser, aimed("MoveTo", 2), r)
         after   <- battleOf(dao)
-        updated <- dao.getHeroByUserId(userId).map(_.get)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(entry.choices.exists(_.label == "Переместиться") && !entry.choices.exists(_.label == "Атака")) &&
-              assertTrue(ask.text.contains("с кем?") && ask.choices.filter(_.id == "MoveTo").map(_.label) == List("1. Йорген Кремень", "2. Брамбл Медноус")) &&
-              assertTrue(result == StateType.Battle && screens.contains("Вы меняетесь местами: Йорген Кремень")) &&
-              assertTrue(after.group.heroPos == 1 && after.group.paired && after.group.allyAt(3).exists(_.kind == AllyKind.Human)) &&
-              assertTrue(screens.contains("⚔ Брамбл Медноус бьёт") && !screens.contains("⚔ Йорген Кремень бьёт")) &&
-              assertTrue(updated.fightStats.hp < 500000L)   // моб в паре ответил герою
+              // выжидание никуда не делось: шаг его не подменяет
+              assertTrue(entry.choices.exists(_.label == "Ждать")) &&
+              assertTrue(ask.choices.filter(_.id == "MoveTo").map(_.label) == List("2. Брамбл Медноус")) &&
+              assertTrue(far == StateType.Battle && stayed.group.heroPos == 3) &&
+              assertTrue(result == StateType.Battle && screens.contains("Вы меняетесь местами: Брамбл Медноус")) &&
+              // поменялись: герой на 2, Брамбл на 3, а Йорген как стоял на 1, так и стоит
+              assertTrue(after.group.heroPos == 2) &&
+              assertTrue(after.group.allyAt(3).exists(_.kind == AllyKind.Gnome)) &&
+              assertTrue(after.group.allyAt(1).exists(_.kind == AllyKind.Human))
+    },
+
+    test("шаг на пустое соседнее место: союзник для этого не нужен") {
+      // Герой на 3, моб на месте 1 — не достать, своих рядом нет: остаётся шагнуть.
+      // Позицию задаём бою напрямую: одиночного героя отряд ставит на первое место.
+      val h    = hero(heroPos = 3, allies = Nil)
+      val solo = SoloPveBattle.from(monster(100000L), h)
+      for {
+        t <- makeState(h, solo.copy(group = solo.group.copy(heroPos = 3)))
+        (state, dao, r) = t
+        _      <- state.enter(testUser, r)
+        entry  <- r.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("Move"), r)
+        ask    <- r.sentScreens.map(_.last)
+        _      <- TestRandom.feedInts(99, 99) *> TestRandom.feedLongs(100L, 100L)
+        result <- state.action(testUser, aimed("MoveTo", 2), r)
+        after  <- battleOf(dao)
+        says   <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(entry.choices.exists(_.label == "Переместиться")) &&
+              // за край строя ходить некуда: сосед всего один, и тот пустой
+              assertTrue(ask.choices.filter(_.id == "MoveTo").map(_.label) == List("2. — пусто —")) &&
+              assertTrue(result == StateType.Battle && says.contains("Вы переходите на позицию 2")) &&
+              // шаг сделан — и моб на месте 1 к концу раунда сам подтянулся к герою
+              assertTrue(after.group.heroPos == 2 && after.group.paired)
     },
 
     test("бить некого и союзников уже нет (ушли по свиткам) — «Ждать»: герой пропускает удар, раунд идёт") {
