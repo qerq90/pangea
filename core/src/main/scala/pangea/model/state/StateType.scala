@@ -14,18 +14,20 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   implicit val decoder: Decoder[StateType] = (c: HCursor) => c.as[String].map(StateType.withName)
 
   // Battle 37% · MonsterCave 1% · FlowerMeadow 2% · FoundItem 19% · Spring 18% · Girl 2% ·
-  // SilverVein 10% · TreasureMobs 5% · TreasureDig 5% · ElementalLair 1% (вес = число
-  // повторов в пуле, сумма = 100). Процент под логово элементаля забран у боя, под
-  // девушку — у ручья, под поляну цветов — по одному у боя и у находки, под пещеру с
-  // монстрами — снова у боя. Пещера и поляна стоят сразу за боем, чтобы билеты событий
-  // дальше по списку не сдвигались.
+  // SilverVein 9% · Caravan 1% · TreasureMobs 5% · TreasureDig 5% · ElementalLair 1%
+  // (вес = число повторов в пуле, сумма = 100). Процент под логово элементаля забран у
+  // боя, под девушку — у ручья, под поляну цветов — по одному у боя и у находки, под
+  // пещеру с монстрами — снова у боя, под караван — у серебряной жилы. Пещера и поляна
+  // стоят сразу за боем, караван — сразу за жилой, чтобы билеты событий дальше по
+  // списку не сдвигались.
   val BattleTickets: Int = 37
 
   val events: List[StateType] =
     List.fill(BattleTickets)(Battle) ++ List.fill(1)(MonsterCave) ++
       List.fill(2)(FlowerMeadow) ++ List.fill(19)(FoundItem) ++
       List.fill(18)(Spring) ++ List.fill(2)(Girl) ++
-      List.fill(10)(SilverVein) ++ List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
+      List.fill(9)(SilverVein) ++ List.fill(1)(Caravan) ++
+      List.fill(5)(TreasureMobs) ++ List.fill(5)(TreasureDig) ++
       List.fill(1)(ElementalLair)
 
   /** Пул событий с изменённым весом боя. `battleFactor` множит число «билетов»
@@ -101,6 +103,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object FlowerMeadow     extends StateType // поляна цветов: сбор трав по таймеру
   case object MonsterCave      extends StateType // пещера с монстрами: комнаты, кучки мобов, находки
   case object RaceRevenge      extends StateType // раса пришла за расплатой: именной и двое старших
+  case object Caravan          extends StateType // караван: охрана, башни со стрелками и поклажа
   case object Knowledge        extends StateType // знания героя (меню персонажа)
   case object GustavoHerbs     extends StateType // Густаво: рассказ о травах и трактаты
   case object Squad            extends StateType // отряд героя (меню персонажа)

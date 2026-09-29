@@ -49,6 +49,7 @@ import pangea.model.state.StateType.{
   FlowerMeadow,
   MonsterCave,
   RaceRevenge,
+  Caravan,
   Knowledge,
   Squad,
   Mercenaries,
@@ -92,6 +93,7 @@ import pangea.service.state.states.parcel.{MailState, TransferState}
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.dungeon.DungeonState
 import pangea.service.state.states.events.{ElementalLairState, ElementalSearchState, FlowerMeadowState, GirlState, RaceRevengeState, RottenJoeState, SilverVeinState}
+import pangea.service.state.states.events.caravan.CaravanState
 import pangea.service.state.states.events.cave.MonsterCaveState
 import pangea.service.state.states.temple.{CubeState, HallAzatState, TempleAzatState}
 import pangea.service.state.states.events.treasure.{
@@ -262,6 +264,7 @@ object StatesMap {
           FlowerMeadow      -> FlowerMeadowState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           MonsterCave       -> MonsterCaveState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           RaceRevenge       -> RaceRevengeState(heroDao, content),
+          Caravan           -> CaravanState(heroDao, inventoryRepo, itemRepo, content),
           MarisaSearch      -> MarisaSearchState(heroDao, inventoryRepo, itemRepo, content),
           MarisaHunt        -> MarisaHuntState(heroDao, inventoryRepo, scheduler, content, bank),
           MurlocElder       -> MurlocElderState(heroDao, inventoryRepo, itemRepo, content),
