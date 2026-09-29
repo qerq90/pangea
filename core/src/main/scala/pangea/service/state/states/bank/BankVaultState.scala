@@ -202,8 +202,8 @@ case class BankVaultState(
   private def showStowSettings(user: User, renderer: Renderer): Task[Unit] =
     VaultStow.read(heroDao, user.userId).flatMap(s => renderer.show(user, stowSettingsScreen(s)))
 
-  /** Экран настройки: тринадцать переключателей по двое в ряд — так они все
-    * помещаются в семь рядов, и ещё остаётся место под «Назад» (у ВК рядов
+  /** Экран настройки: переключатели по трое в ряд — так все четырнадцать
+    * укладываются в пять рядов, и остаётся место под «Назад» (у ВК рядов
     * всего десять, и лишний он не прощает — отклоняет весь экран). */
   private def stowSettingsScreen(s: StowSettings): Screen = {
     val groups = StowGroup.itemGroups ++ List(StowGroup.Silver) ++ StowGroup.storageGroups
@@ -433,8 +433,9 @@ object BankVaultState {
   val ModeDepositSilver  = "vaultDepositSilver"
   val ModeWithdrawSilver = "vaultWithdrawSilver"
 
-  /** По двое в ряд: подписи с «Вкл/Выкл» длинные, а рядов у ВК десять. */
-  val StowTogglesPerRow: Int = 2
+  /** По трое в ряд: столько переключателей в десять рядов иначе не уложить, а
+    * подписи под такую ширину короткие — название и значок. */
+  val StowTogglesPerRow: Int = 3
 
   case class VaultScene(
     vaultMode:    Option[String] = None,

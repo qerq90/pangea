@@ -26,6 +26,7 @@ object StowGroup extends Enum[StowGroup] {
   case object SmallRunes extends StowGroup("smallRunes", "bank.vault.stow.smallRunes")
   case object BigRunes   extends StowGroup("bigRunes",   "bank.vault.stow.bigRunes")
   case object Materials  extends StowGroup("materials",  "bank.vault.stow.materials")
+  case object Maps       extends StowGroup("maps",       "bank.vault.stow.maps")
   case object Silver     extends StowGroup("silver",     "bank.vault.stow.silver")
   case object Casket     extends StowGroup("casket",     "bank.vault.stow.casket")
   case object Wardrobe   extends StowGroup("wardrobe",   "bank.vault.stow.wardrobe")
@@ -34,7 +35,7 @@ object StowGroup extends Enum[StowGroup] {
   /** Переключатели вещей — в том порядке, в каком они стоят на экране. Серебро
     * и чужие хранилища идут следом отдельными строками. */
   val itemGroups: List[StowGroup] =
-    List(Herbs, Gems, Gear, Trophies, Brews, Dust, SmallRunes, BigRunes, Materials)
+    List(Herbs, Gems, Gear, Trophies, Brews, Dust, SmallRunes, BigRunes, Materials, Maps)
 
   val storageGroups: List[StowGroup] = List(Casket, Wardrobe, LivingBag)
 
@@ -53,6 +54,7 @@ final case class StowSettings(
   smallRunes: Boolean = true,
   bigRunes:   Boolean = true,
   materials:  Boolean = true,
+  maps:       Boolean = true,
   silver:     Boolean = false,
   casket:     Boolean = false,
   wardrobe:   Boolean = false,
@@ -69,6 +71,7 @@ final case class StowSettings(
     case StowGroup.SmallRunes => smallRunes
     case StowGroup.BigRunes   => bigRunes
     case StowGroup.Materials  => materials
+    case StowGroup.Maps       => maps
     case StowGroup.Silver     => silver
     case StowGroup.Casket     => casket
     case StowGroup.Wardrobe   => wardrobe
@@ -85,6 +88,7 @@ final case class StowSettings(
     case StowGroup.SmallRunes => copy(smallRunes = !smallRunes)
     case StowGroup.BigRunes   => copy(bigRunes = !bigRunes)
     case StowGroup.Materials  => copy(materials = !materials)
+    case StowGroup.Maps       => copy(maps = !maps)
     case StowGroup.Silver     => copy(silver = !silver)
     case StowGroup.Casket     => copy(casket = !casket)
     case StowGroup.Wardrobe   => copy(wardrobe = !wardrobe)
@@ -102,9 +106,12 @@ final case class StowSettings(
     else if (item.gem.isDefined) Some(StowGroup.Gems)
     else if (item.material.exists(_.isHerb)) Some(StowGroup.Herbs)
     else if (item.material.isDefined) Some(StowGroup.Materials)
+    // Карта и её половинка — под одним переключателем: половинка тоже ждёт
+    // своего часа, и хранить их врозь незачем.
+    else if (item.isTreasureMap) Some(StowGroup.Maps)
     else if (item.itemType == ItemType.Trophy) Some(StowGroup.Trophies)
     else if (ItemType.equippable.contains(item.itemType)) Some(StowGroup.Gear)
-    else None // карты клада и прочее кладут руками
+    else None // прочее кладут руками
 
   /** Идёт ли эта вещь в ячейку при нынешней настройке. */
   def takes(item: Item): Boolean = groupOf(item).exists(on)
@@ -128,6 +135,7 @@ object StowSettings {
       smallRunes = flag(StowGroup.SmallRunes),
       bigRunes   = flag(StowGroup.BigRunes),
       materials  = flag(StowGroup.Materials),
+      maps       = flag(StowGroup.Maps),
       silver     = flag(StowGroup.Silver),
       casket     = flag(StowGroup.Casket),
       wardrobe   = flag(StowGroup.Wardrobe),

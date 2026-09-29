@@ -3,11 +3,11 @@ package pangea.service.state.states.bank
 import io.circe.Json
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.generator.item.{GemGenerator, MaterialGenerator}
+import pangea.generator.item.{GemGenerator, MaterialGenerator, TreasureMapGenerator}
 import pangea.model.artifact.ArtifactKind
 import pangea.model.bank.{StowGroup, StowSettings}
 import pangea.model.hero.Hero
-import pangea.model.item.{BrewKind, GemKind, Item, ItemDetails, ItemType, MaterialKind, QuestItemKind, Rarity, TrophyKind}
+import pangea.model.item.{BrewKind, GemKind, Item, ItemDetails, ItemType, MapZone, MaterialKind, QuestItemKind, Rarity, TrophyKind}
 import pangea.model.rune.{RuneStone, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -38,6 +38,8 @@ object VaultStowSpec extends ZIOSpecDefault {
   private def smallRune(id: Long) = RuneStone.item(RuneStone.all.head, RuneStoneSize.Small).copy(id = id)
   private def bigRune(id: Long)   = RuneStone.item(RuneStone.all.head, RuneStoneSize.Big).copy(id = id)
   private def quest(id: Long)     = QuestItemKind.item(QuestItemKind.MarisaLetter).copy(id = id)
+  private def map(id: Long)       = TreasureMapGenerator.full(MapZone.Kinet).copy(id = id)
+  private def halfMap(id: Long)   = TreasureMapGenerator.create(10L, half = true).copy(id = id)
 
   private def gear(id: Long): Item =
     Item(id, "🔵 Шлем", 10L, Rarity.Blue, ItemType.Helmet,
@@ -85,7 +87,10 @@ object VaultStowSpec extends ZIOSpecDefault {
       assertTrue(s.groupOf(material(7)).contains(StowGroup.Materials)) &&
       assertTrue(s.groupOf(smallRune(8)).contains(StowGroup.SmallRunes)) &&
       assertTrue(s.groupOf(bigRune(9)).contains(StowGroup.BigRunes)) &&
-      assertTrue(s.groupOf(quest(10)).isEmpty)
+      // карта и половинка — под одним переключателем
+      assertTrue(s.groupOf(map(10)).contains(StowGroup.Maps)) &&
+      assertTrue(s.groupOf(halfMap(11)).contains(StowGroup.Maps)) &&
+      assertTrue(s.groupOf(quest(12)).isEmpty)
     },
 
     test("настройка переживает запись в jsonb, а пустая запись — это настройка по умолчанию") {
@@ -100,7 +105,7 @@ object VaultStowSpec extends ZIOSpecDefault {
       assertTrue(!StowSettings.default.silver && StowGroup.storageGroups.forall(g => !StowSettings.default.on(g)))
     },
 
-    test("экран настройки: тринадцать переключателей по двое в ряд, и клавиатура ВК это держит") {
+    test("экран настройки: все переключатели по трое в ряд, и клавиатура ВК это держит") {
       for {
         t <- vaultState()
         (state, _, _, _, r) = t
@@ -111,7 +116,8 @@ object VaultStowSpec extends ZIOSpecDefault {
       } yield assertTrue(screen.choices.count(_.id.startsWith("VaultStow_")) == StowGroup.values.size) &&
               assertTrue(screen.choices.size == StowGroup.values.size + 1) &&
               assertTrue(rows.size <= VkRenderer.MaxRows && byRow.max <= VkRenderer.MaxButtonsPerRow) &&
-              assertTrue(rows.size == 8 && screen.choices.last.id == "VaultMenu")
+              // четырнадцать переключателей по трое — пять рядов, шестой под «Назад»
+              assertTrue(byRow.max == 3 && rows.size == 6 && screen.choices.last.id == "VaultMenu")
     },
 
     test("переключатель гаснет и загорается, и это запоминается") {
@@ -124,7 +130,7 @@ object VaultStowSpec extends ZIOSpecDefault {
         _     <- state.action(testUser, tap("VaultStow_gear"), r)
         on    <- dao.readVaultStow(userId).map(_.flatMap(_.as[StowSettings].toOption).get)
       } yield assertTrue(!off.gear && on.gear) &&
-              assertTrue(shown.label.contains("Выкл") && shown.color == pangea.engine.ChoiceColor.Negative)
+              assertTrue(shown.label.contains("❌") && shown.color == pangea.engine.ChoiceColor.Negative)
     },
 
     test("кладёт отмеченное, а невключённое и сюжетное оставляет при герое") {
