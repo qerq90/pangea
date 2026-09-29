@@ -200,12 +200,13 @@ case class BankVaultState(
     }
 
   private def showStowSettings(user: User, renderer: Renderer): Task[Unit] =
-    VaultStow.read(heroDao, user.userId).flatMap(s => renderer.show(user, stowSettingsScreen(s)))
+    VaultStow.read(heroDao, user.userId)
+      .flatMap(s => renderer.show(user, stowSettingsScreen(s, content.text("bank.vault.stow.header"))))
 
   /** Экран настройки: переключатели по трое в ряд — так все четырнадцать
     * укладываются в пять рядов, и остаётся место под «Назад» (у ВК рядов
     * всего десять, и лишний он не прощает — отклоняет весь экран). */
-  private def stowSettingsScreen(s: StowSettings): Screen = {
+  private def stowSettingsScreen(s: StowSettings, text: String): Screen = {
     val groups = StowGroup.itemGroups ++ List(StowGroup.Silver) ++ StowGroup.storageGroups
     val buttons = groups.zipWithIndex.map { case (g, i) =>
       val on = s.on(g)
@@ -217,13 +218,21 @@ case class BankVaultState(
         row   = Some(i / StowTogglesPerRow))
     }
     val rows = (groups.size + StowTogglesPerRow - 1) / StowTogglesPerRow
-    Screen(content.text("bank.vault.stow.header"),
+    Screen(text,
       buttons :+ Choice("VaultMenu", content.text("bank.vault.stow.back"),
         color = ChoiceColor.Negative, row = Some(rows)))
   }
 
+  /** Щелчок по переключателю: длинное объяснение герой уже прочитал, когда
+    * сюда зашёл, — теперь хватит строчки о том, что именно поменялось. */
   private def toggleStow(user: User, group: StowGroup, renderer: Renderer): Task[Unit] =
-    VaultStow.toggle(heroDao, user.userId, group).flatMap(s => renderer.show(user, stowSettingsScreen(s)))
+    VaultStow.toggle(heroDao, user.userId, group).flatMap { s =>
+      val name = content.format(group.key, "state" -> "").trim
+      val line = content.format(
+        if (s.on(group)) "bank.vault.stow.toggledOn" else "bank.vault.stow.toggledOff",
+        "what" -> name)
+      renderer.show(user, stowSettingsScreen(s, line))
+    }
 
   private def backRow: List[Choice] =
     List(Choice("VaultMenu", content.text("bank.vault.back"), color = ChoiceColor.Negative, row = Some(0)))

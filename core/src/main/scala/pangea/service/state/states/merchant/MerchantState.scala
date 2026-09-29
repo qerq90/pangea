@@ -56,10 +56,14 @@ case class MerchantState(
       "SellJunk"        -> Target.Run { (u, _,  r) => sellJunk(u, r) },
       "JunkSettings"    -> Target.Run { (u, _,  r) => showJunkSettings(u, r) },
       "JunkRarity"      -> Target.Run { (u, ua, r) => toggleJunkRarity(u, ua, r) },
-      "JunkPassives"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(passives = !s.passives)) },
-      "JunkActives"     -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(actives = !s.actives)) },
-      "JunkTrophies"    -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(trophies = !s.trophies)) },
-      "JunkRunes"       -> Target.Run { (u, _,  r) => updateJunkSettings(u, r)(s => s.copy(runeSale = Some(!s.runes))) },
+      "JunkPassives"    -> Target.Run { (u, _,  r) =>
+        updateJunkSettings(u, r, "merchant.junk.passives", _.passives)(s => s.copy(passives = !s.passives)) },
+      "JunkActives"     -> Target.Run { (u, _,  r) =>
+        updateJunkSettings(u, r, "merchant.junk.actives", _.actives)(s => s.copy(actives = !s.actives)) },
+      "JunkTrophies"    -> Target.Run { (u, _,  r) =>
+        updateJunkSettings(u, r, "merchant.junk.trophies", _.trophies)(s => s.copy(trophies = !s.trophies)) },
+      "JunkRunes"       -> Target.Run { (u, _,  r) =>
+        updateJunkSettings(u, r, "merchant.junk.runes", _.runes)(s => s.copy(runeSale = Some(!s.runes))) },
       "BackFromJunk"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "SellListPrev"    -> Target.Run { (u, _,  r) => navigateSell(u, r, -1) },
       "SellListNext"    -> Target.Run { (u, _,  r) => navigateSell(u, r, +1) },
@@ -294,10 +298,10 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
-      _    <- renderer.show(user, junkSettingsScreen(data.junkSettings))
+      _    <- renderer.show(user, junkSettingsScreen(data.junkSettings, content.text("merchant.junk.header")))
     } yield StateType.Merchant
 
-  private def junkSettingsScreen(s: JunkSaleSettings): Screen = {
+  private def junkSettingsScreen(s: JunkSaleSettings, text: String): Screen = {
     def state(on: Boolean) = content.text(if (on) "merchant.junk.on" else "merchant.junk.off")
     def color(on: Boolean) = if (on) ChoiceColor.Positive else ChoiceColor.Negative
 
@@ -328,7 +332,7 @@ case class MerchantState(
         row = Some(rarityRows + i))
     }
     Screen(
-      content.text("merchant.junk.header"),
+      text,
       rarityButtons ++ flagButtons :+
         content.choice("BackFromJunk", "merchant.junk.back")
           .copy(row = Some(rarityRows + flags.size))
@@ -337,12 +341,17 @@ case class MerchantState(
 
   private def toggleJunkRarity(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     payloadStr(ua, "g").flatMap(id => JunkRarityGroups.find(_.id == id)) match {
-      case Some(group) => updateJunkSettings(user, renderer)(_.toggleGroup(group))
-      case None        => showJunkSettings(user, renderer)
+      case Some(group) =>
+        updateJunkSettings(user, renderer, group.emoji, _.groupOn(group))(_.toggleGroup(group))
+      case None => showJunkSettings(user, renderer)
     }
 
-  // Применяет правку настройки, сохраняет её в merchant_data и перерисовывает экран.
-  private def updateJunkSettings(user: User, renderer: Renderer)(
+  /** Применяет правку настройки, сохраняет её в merchant_data и перерисовывает
+    * экран. Длинное объяснение герой уже прочитал, когда сюда зашёл, — после
+    * щелчка хватит строчки о том, что именно поменялось. `what` — либо ключ
+    * подписи переключателя, либо готовый значок редкости. */
+  private def updateJunkSettings(user: User, renderer: Renderer, what: String,
+      read: JunkSaleSettings => Boolean)(
       f: JunkSaleSettings => JunkSaleSettings
   ): Task[StateType] =
     for {
@@ -350,8 +359,17 @@ case class MerchantState(
       data     <- loadOrInit(user, now)
       updated   = f(data.junkSettings)
       _        <- heroDao.writeMerchantData(user.userId, data.copy(junkSale = Some(updated)).asJson)
-      _        <- renderer.show(user, junkSettingsScreen(updated))
+      line      = content.format(
+                    if (read(updated)) "merchant.junk.toggledOn" else "merchant.junk.toggledOff",
+                    "what" -> nameOf(what))
+      _        <- renderer.show(user, junkSettingsScreen(updated, line))
     } yield StateType.Merchant
+
+  /** Имя переключателя для сводки: подпись без «Вкл/Выкл». У редкостей подписи
+    * нет — там сразу приходит значок. */
+  private def nameOf(what: String): String =
+    if (what.contains(".")) content.format(what, "state" -> "").replace(":", "").trim
+    else what
 
   private def sellNavRow(page: Int, totalPages: Int): List[Choice] = {
     val row = ItemMenu.NavRow

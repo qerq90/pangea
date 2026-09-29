@@ -232,6 +232,27 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(rows.keys.toList.sorted == (0 until rows.size).toList)
     },
 
+    test("после щелчка — строчка о том, что поменялось, а не всё объяснение заново") {
+      for {
+        t <- makeState(richHero)
+        (state, _, _, renderer) = t
+        _       <- state.action(testUser, tap("JunkSettings"), renderer)
+        opened  <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tapRarity("Green"), renderer)
+        on      <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tapRarity("Green"), renderer)
+        off     <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tap("JunkTrophies"), renderer)
+        flag    <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(opened.text.contains("Отметьте, снаряжение каких редкостей")) &&
+              assertTrue(on.text == "✅ Теперь продаётся как хлам: 🟢") &&
+              assertTrue(off.text == "❌ Теперь не продаётся как хлам: 🟢") &&
+              // трофеи по умолчанию выключены — щелчок их включает
+              assertTrue(flag.text == "✅ Теперь продаётся как хлам: Трофеи") &&
+              // кнопки никуда не делись — щёлкать дальше можно там же
+              assertTrue(on.choices.size == opened.choices.size)
+    },
+
     test("нажатие на переключатель редкости сохраняется в merchant_data и переключает обратно") {
       for {
         t <- makeState(richHero)

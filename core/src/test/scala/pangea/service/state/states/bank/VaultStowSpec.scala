@@ -120,6 +120,23 @@ object VaultStowSpec extends ZIOSpecDefault {
               assertTrue(byRow.max == 3 && rows.size == 6 && screen.choices.last.id == "VaultMenu")
     },
 
+    test("после щелчка — строчка о том, что поменялось, а не всё объяснение заново") {
+      for {
+        t <- vaultState()
+        (state, _, _, _, r) = t
+        _      <- state.action(testUser, tap("VaultStowSettings"), r)
+        opened <- r.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("VaultStow_gems"), r)
+        off    <- r.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("VaultStow_gems"), r)
+        on     <- r.sentScreens.map(_.last)
+      } yield assertTrue(opened.text.contains("Отметьте, что уходит в ячейку")) &&
+              assertTrue(off.text == "❌ Теперь не перекладывается: 💎 Камни") &&
+              assertTrue(on.text == "✅ Теперь перекладывается: 💎 Камни") &&
+              // кнопки остаются: щёлкать дальше можно там же
+              assertTrue(on.choices.size == opened.choices.size)
+    },
+
     test("переключатель гаснет и загорается, и это запоминается") {
       for {
         t <- vaultState()
