@@ -24,6 +24,7 @@ import pangea.model.monster.{Race, Rarity => MobRarity}
   * @param prices   почём он их отдаёт
   * @param page     страница списка вещей героя
   * @param wave     какая волна боя идёт, когда караван разделён дурманом
+  * @param spoils   охрана перебита, поклажа ещё не разобрана
   */
 final case class CaravanScene(
   race:     String,
@@ -36,7 +37,8 @@ final case class CaravanScene(
   goods:    List[Item]  = Nil,
   prices:   List[Long]  = Nil,
   page:     Int         = 0,
-  wave:     Int         = 0
+  wave:     Int         = 0,
+  spoils:   Boolean     = false
 ) {
 
   /** Сколько охраны выйдет драться: каждый испуг уводит свою долю. */
@@ -63,7 +65,7 @@ object CaravanScene {
       "race" -> s.race.asJson, "guards" -> s.guards.asJson, "towers" -> s.towers.asJson,
       "stage" -> s.stage.asJson, "weakened" -> s.weakened.asJson, "smoke" -> s.smoke.asJson,
       "scared" -> s.scared.asJson, "goods" -> s.goods.asJson, "prices" -> s.prices.asJson,
-      "page" -> s.page.asJson, "wave" -> s.wave.asJson)
+      "page" -> s.page.asJson, "wave" -> s.wave.asJson, "spoils" -> s.spoils.asJson)
 
   implicit val decoder: Decoder[CaravanScene] = (c: HCursor) =>
     for {
@@ -78,7 +80,8 @@ object CaravanScene {
       prices   <- c.getOrElse[List[Long]]("prices")(Nil)
       page     <- c.getOrElse[Int]("page")(0)
       wave     <- c.getOrElse[Int]("wave")(0)
-    } yield CaravanScene(race, guards, towers, stage, weakened, smoke, scared, goods, prices, page, wave)
+      spoils   <- c.getOrElse[Boolean]("spoils")(false)
+    } yield CaravanScene(race, guards, towers, stage, weakened, smoke, scared, goods, prices, page, wave, spoils)
 }
 
 /** Числа каравана. Вынесены отдельно: их читают и генератор, и сцена, и тесты. */
@@ -97,8 +100,10 @@ object CaravanRates {
   val MinTowers: Int = 1
   val MaxTowers: Int = 2
 
-  /** Башни стоят в самом хвосте строя и не двигаются. */
-  val TowerPlace: Int = 10
+  /** Башни стоят поодаль от свалки и не двигаются: первая на этом месте,
+    * вторая следом. Между ними и охраной остаются пустые места строя — до
+    * стрелков ещё надо добежать, а они бьют с любого расстояния. */
+  val TowerPlace: Int = 14
 
   /** На сколько процентов испуг уводит охрану и сколько её остаётся всегда. */
   val ScarePct: Long   = 25L

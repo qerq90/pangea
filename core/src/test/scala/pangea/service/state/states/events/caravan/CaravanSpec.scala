@@ -297,7 +297,7 @@ object CaravanSpec extends ZIOSpecDefault {
               assertTrue(doped.monsterStats.energy == base.energy * 80L / 100L)
     },
 
-    test("нападение: одна волна, башни в хвосте строя, поклажа ждёт на экране добычи") {
+    test("нападение: одна волна, башни поодаль, а за поклажей герой возвращается к обозу") {
       for {
         t <- caravan()
         (state, dao, _, r) = t
@@ -307,12 +307,16 @@ object CaravanSpec extends ZIOSpecDefault {
         loot   <- lootOf(dao)
         said   <- texts(r)
         places  = battle.get.group.places
+        back    = loot.get.eventData.flatMap(_.as[CaravanScene].toOption).get
       } yield assertTrue(out == StateType.Battle && said.contains("их 3")) &&
               assertTrue(battle.exists(b => b.group.others.size == 4 && b.group.activePos == 1)) &&
-              // охрана идёт подряд от героя, а башни — последними в списке, на
-              // десятом и девятом местах
-              assertTrue(places == List(2, 3, CaravanRates.TowerPlace, CaravanRates.TowerPlace - 1)) &&
-              assertTrue(loot.exists(l => l.items.size == 3 && l.returnState.isEmpty))
+              // охрана идёт подряд от героя, а башни стоят поодаль — на 14 и 15
+              assertTrue(places == List(2, 3, CaravanRates.TowerPlace, CaravanRates.TowerPlace + 1)) &&
+              assertTrue(CaravanRates.TowerPlace == 14) &&
+              // добычу с мобов соберёт экран добычи, а поклажу герой заберёт,
+              // вернувшись к обозу
+              assertTrue(loot.exists(l => l.items.isEmpty && l.returnState.contains(StateType.Caravan))) &&
+              assertTrue(back.spoils && back.goods.size == 3)
     },
 
     test("одурманенный караван: первая волна возвращает к каравану, вторая отдаёт поклажу") {
@@ -336,7 +340,26 @@ object CaravanSpec extends ZIOSpecDefault {
               assertTrue(said1.contains("Волна 1 из 2")) &&
               assertTrue(back.wave == 1 && back.stage == CaravanRates.StageMoment) &&
               assertTrue(wave1.exists(l => l.items.isEmpty && l.returnState.contains(StateType.Caravan))) &&
-              assertTrue(wave2.exists(l => l.items.size == 3 && l.returnState.isEmpty))
+              // после второй волны обоз стоит без охраны, поклажа ещё в повозках
+              assertTrue(wave2.exists(l => l.items.isEmpty && l.returnState.contains(StateType.Caravan))) &&
+              assertTrue(wave2.get.eventData.flatMap(_.as[CaravanScene].toOption).exists(_.spoils))
+    },
+
+    test("перебив охрану, герой разбирает повозки — и поклажа уходит на экран добычи") {
+      for {
+        t <- caravan()
+        (state, dao, _, r) = t
+        // бой позади: экран добычи вернул героя к обозу без охраны
+        _     <- put(dao, scene(stage = CaravanRates.StageMoment).copy(wave = 1, spoils = true))
+        _     <- state.enter(testUser, r)
+        offer <- r.sentScreens.map(_.last)
+        out   <- state.action(testUser, tap("CaravanSpoils"), r)
+        loot  <- lootOf(dao)
+        said  <- texts(r)
+      } yield assertTrue(offer.choices.map(_.id) == List("CaravanSpoils")) &&
+              assertTrue(offer.text.contains("обоз стоит без хозяев")) &&
+              assertTrue(out == StateType.Loot && said.contains("обираете повозки")) &&
+              assertTrue(loot.exists(l => l.items.size == 3 && l.returnState.isEmpty))
     },
 
     test("торговля идёт только с серебра на руках: банк каравану не указ") {
