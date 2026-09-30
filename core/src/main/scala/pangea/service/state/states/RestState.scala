@@ -21,7 +21,7 @@ case class RestState(heroDao: HeroDao, scheduler: Scheduler, content: SceneConte
   // содержимое — пробуждение решает таймер, не ключ маршрута).
   private val ReviveAction = """{"action":"Revive"}"""
 
-  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.GlobalMap)
+  override def targetStates: Set[StateType] = Set(StateType.Dungeon, StateType.GlobalMap, StateType.Arena)
 
   /** Ключи в scene_data от сюжетной смерти (см. DeathState). */
   private val WakeToKey    = "wakeTo"

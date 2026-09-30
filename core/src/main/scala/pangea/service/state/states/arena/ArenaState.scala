@@ -1,7 +1,7 @@
 package pangea.service.state.states.arena
 
 import io.circe.syntax.EncoderOps
-import io.circe.jawn
+import io.circe.{Json, jawn}
 import pangea.dao.arena.ArenaDao
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Players, Renderer, SceneContent, Screen, Target}
@@ -13,7 +13,7 @@ import pangea.model.user.{User, UserId}
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.battle.BattleState
 import pangea.service.state.states.arena.ArenaState._
-import pangea.service.state.{CharacterMenu, CityExit, State, UserAction}
+import pangea.service.state.{CharacterMenu, CityExit, InstantRest, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -42,6 +42,7 @@ case class ArenaState(
       "ArenaNearest" -> Target.Run { (u, _, r) => showWaiting(u, r) },
       "ArenaByCode"  -> Target.Run { (u, _, r) => enlist(u, r) },
       "ArenaCancel"  -> Target.Run { (u, _, r) => cancel(u, r) },
+      "ArenaRest"    -> Target.Run { (u, _, r) => rest(u, r) },
       "ArenaMenu"    -> Target.Run { (u, _, r) => enter(u, r).as(StateType.Arena) },
       // Соперник нашёлся, пока герой ждал: арена зовёт его на песок.
       "ArenaPoke"    -> Target.Run { (u, _, r) => start(u, r) },
@@ -53,13 +54,25 @@ case class ArenaState(
   )
 
   override def targetStates: Set[StateType] =
-    branch.gotoTargets + StateType.HeroStats + StateType.Battle + StateType.Arena
+    branch.gotoTargets + StateType.HeroStats + StateType.Battle + StateType.Arena + StateType.Rest
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     arenaDao.ofUser(user.userId).flatMap {
-      case Some(fight) if fight.waiting => showEnlisted(user, fight, renderer)
-      case _                            => showMenu(user, renderer)
+      case Some(fight) if fight.finished => finish(user, fight, renderer)
+      case Some(fight) if fight.waiting  => showEnlisted(user, fight, renderer)
+      case _                             => showMenu(user, renderer)
     }
+
+  /** Бой кончился, пока герой не смотрел: рассказываем чем и убираем строку. */
+  private def finish(user: User, fight: ArenaFight, renderer: Renderer): Task[Unit] =
+    for {
+      _ <- ZIO.when(fight.unseenFor(user.userId))(
+             renderer.show(user, Screen(fight.lastLog.mkString("\n"), Nil)))
+      _ <- renderer.show(user, Screen(
+             content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"), Nil))
+      _ <- arenaDao.delete(fight.id)
+      _ <- showMenu(user, renderer)
+    } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -68,14 +81,18 @@ case class ArenaState(
     renderer.show(user, Screen(content.text("arena.menu"), List(
       content.choice("ArenaNearest", "arena.nearest").copy(color = ChoiceColor.Positive, row = Some(0)),
       content.choice("ArenaByCode",  "arena.byCode").copy(row = Some(0)),
+      content.choice("ArenaRest", "arena.rest").copy(row = Some(1)),
       content.choice("OpenCharacter", "common.character").copy(row = Some(1)),
       content.choice("LeaveArena", "arena.leave").copy(color = ChoiceColor.Negative, row = Some(2)),
       CityExit.button(content, Some(2)))))
 
   // ── Ближайший бой: кто уже ждёт ───────────────────────────────────────────
 
+  /** «Ближайший бой»: герой сам встаёт в общую очередь и видит остальных,
+    * кто в ней стоит. Записи по коду сюда не попадают — их зовут кодом. */
   private def showWaiting(user: User, renderer: Renderer): Task[StateType] =
     for {
+      _   <- enqueue(user)
       all <- arenaDao.waiting(ArenaRates.ListSize + 1)
       free = all.filter(f => f.waiting && !f.has(user.userId)).take(ArenaRates.ListSize)
       _ <- if (free.isEmpty)
@@ -90,6 +107,36 @@ case class ArenaState(
                buttons :+ backButton(free.size)))
            }
     } yield StateType.Arena
+
+  /** Встать в общую очередь: записи нет — заводим открытую, запись по коду —
+    * открываем её же, код при этом остаётся в силе. */
+  private def enqueue(user: User): Task[Unit] =
+    arenaDao.ofUser(user.userId).flatMap {
+      case Some(f) if f.waiting && !f.open =>
+        nowMs.flatMap(now => arenaDao.update(f.copy(open = true), now))
+      case Some(_) => ZIO.unit
+      case None =>
+        for {
+          hero <- getHero(user)
+          now  <- nowMs
+          _    <- register(user, hero, now, open = true)
+        } yield ()
+    }
+
+  /** Отдых на арене — тот же костёр, что в лабиринте, только просыпается
+    * герой здесь же (см. `RestState`). Есть мгновенный отдых от благословения
+    * — тратится он, и никакого привала. */
+  private def rest(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      used <- InstantRest.use(heroDao, scheduler, content, user, now, renderer)
+      res  <- used match {
+                case Some(_) => enter(user, renderer).as(StateType.Arena)
+                case None    =>
+                  heroDao.writeSceneData(user.userId,
+                    Json.obj("wakeTo" -> (StateType.Arena: StateType).asJson)).as(StateType.Rest)
+              }
+    } yield res
 
   private def backButton(row: Int): Choice =
     content.choice("ArenaMenu", "arena.back").copy(color = ChoiceColor.Negative, row = Some(row))
@@ -112,16 +159,16 @@ case class ArenaState(
     }
 
   /** Завести запись со свободным кодом: занятый код — не беда, катаем другой. */
-  private def register(user: User, hero: Hero, nowMs: Long, tries: Int = 8): Task[ArenaFight] =
+  private def register(user: User, hero: Hero, nowMs: Long, open: Boolean = false, tries: Int = 8): Task[ArenaFight] =
     for {
       n    <- Random.nextIntBetween(0, 10000)
       code  = f"$n%04d"
       name <- nameOf(user)
       side  = ArenaSide(user.userId, hero.id, name, hero.lvl)
-      made <- arenaDao.create(ArenaFight(0L, code, ArenaStatus.Waiting, side, None), nowMs)
+      made <- arenaDao.create(ArenaFight(0L, code, ArenaStatus.Waiting, side, None, open = open), nowMs)
       out  <- made match {
                 case Some(fight)         => ZIO.succeed(fight)
-                case None if tries > 1   => register(user, hero, nowMs, tries - 1)
+                case None if tries > 1   => register(user, hero, nowMs, open, tries - 1)
                 case None                => ZIO.fail(new Throwable("Arena: no free code"))
               }
     } yield out
@@ -193,6 +240,8 @@ case class ArenaState(
   /** Зов арены ждущему: соперник нашёлся, пора на песок. */
   private def start(user: User, renderer: Renderer): Task[StateType] =
     arenaDao.ofUser(user.userId).flatMap {
+      // Бой кончился, пока герой был на арене, — зовут его за итогом.
+      case Some(fight) if fight.finished => finish(user, fight, renderer).as(StateType.Arena)
       case Some(fight) if !fight.waiting =>
         for {
           now  <- nowMs

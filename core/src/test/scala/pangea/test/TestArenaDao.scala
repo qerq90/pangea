@@ -27,7 +27,7 @@ class TestArenaDao(private var fights: List[ArenaFight] = Nil, private var nextI
   override def ofUser(userId: UserId): Task[Option[ArenaFight]] = ZIO.succeed(fights.find(_.has(userId)))
 
   override def waiting(limit: Int): Task[List[ArenaFight]] =
-    ZIO.succeed(fights.filter(_.waiting).take(limit))
+    ZIO.succeed(fights.filter(f => f.waiting && f.open).take(limit))
 
   override def update(fight: ArenaFight, now: Long): Task[Unit] =
     ZIO.succeed { fights = fights.map(f => if (f.id == fight.id) fight else f) }
