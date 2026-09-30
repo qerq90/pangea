@@ -297,8 +297,11 @@ object CaveGenerator {
     val (shift, r1)     = roll(rng, (roomCount - 1).max(1))
     val restIdx         = shift + 1
     val (altarRoll, r2) = roll(r1, 100)
-    val (altarShift, r3) = roll(r2, (roomCount - 1).max(1))
-    val altarIdx        = altarShift + 1
+    // Алтарь катается среди мест БЕЗ привала: место привала просто
+    // пропускается, а не отменяет алтарь. Иначе редкое совпадение съедало бы
+    // несколько процентов и без того нечастого алтаря.
+    val (altarShift, r3) = roll(r2, (roomCount - 2).max(1))
+    val altarIdx        = if (altarShift + 1 >= restIdx) altarShift + 2 else altarShift + 1
     val withAltar       = altarRoll < CaveRates.AltarChancePct && altarIdx != restIdx
     val start: Map[Int, RoomKind] =
       Map(0 -> RoomKind.Empty, restIdx -> RoomKind.Rest) ++
