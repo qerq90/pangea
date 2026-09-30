@@ -56,6 +56,7 @@ case class CaravanState(
       "CaravanSneak"  -> Target.Run { (u, _, r) => withScene(u)(s => sneak(u, s, r)) },
       "CaravanTrade"  -> Target.Run { (u, _, r) => withScene(u)(s => trade(u, s, r)) },
       "CaravanLeave"  -> Target.Run { (u, _, r) => leave(u, r) },
+      "CaravanSpoils" -> Target.Run { (u, _, r) => withScene(u)(s => takeSpoils(u, s, r)) },
       "OpenCharacter" -> Target.Run { (u, _, _) => CharacterMenu.open(heroDao, u.userId, StateType.Caravan) }
     ),
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
@@ -66,9 +67,24 @@ case class CaravanState(
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     readScene(user).flatMap {
-      case Some(scene) => show(user, scene, renderer).unit
-      case None        => discover(user, renderer)
+      // Охрана перебита — остаётся разобрать повозки.
+      case Some(scene) if scene.spoils => showSpoils(user, renderer)
+      case Some(scene)                 => show(user, scene, renderer).unit
+      case None                        => discover(user, renderer)
     }
+
+  /** Бой кончился, обоз стоит без охраны: поклажу забирают одной кнопкой. */
+  private def showSpoils(user: User, renderer: Renderer): Task[Unit] =
+    renderer.show(user, Screen(content.text("caravan.spoils.text"), List(
+      content.choice("CaravanSpoils", "caravan.spoils.take")
+        .copy(color = ChoiceColor.Positive, row = Some(0)))))
+
+  /** Поклажа уходит на экран добычи — тем же путём, каким её отдавали бы за
+    * тихую кражу. Сцена на этом кончается. */
+  private def takeSpoils(user: User, scene: CaravanScene, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text("caravan.spoils.taken"), Nil)) *>
+      heroDao.writeSceneData(user.userId, LootData(items = scene.goods, silvers = Nil).asJson)
+        .as(StateType.Loot)
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -361,9 +377,10 @@ case class CaravanState(
                       .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
       battle  = withTowers(SoloPveBattle.fromGroup(guards ++ towers, hero, energies), guards.size, towers.size)
       last    = scene.wave >= scene.waves
-      routing = if (last) LootData(items = scene.goods, silvers = Nil)
-                else LootData(Nil, Nil, returnState = Some(StateType.Caravan),
-                       eventData = Some(scene.copy(stage = CaravanRates.StageMoment).asJson))
+      // Добычу с мобов экран добычи соберёт сам, а поклажу каравана он не
+      // знает — за ней герой возвращается сюда же, к разбитому обозу.
+      routing = LootData(Nil, Nil, returnState = Some(StateType.Caravan),
+                  eventData = Some(scene.copy(stage = CaravanRates.StageMoment, spoils = last).asJson))
       _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format(
@@ -378,7 +395,7 @@ case class CaravanState(
       val places = battle.group.places.zipWithIndex.map { case (p, i) =>
         // Башни идут в списке последними: их места переносим в хвост строя.
         val towerIdx = i - (guards - 1)
-        if (towerIdx >= 0) CaravanRates.TowerPlace - towerIdx else p
+        if (towerIdx >= 0) CaravanRates.TowerPlace + towerIdx else p
       }
       battle.copy(group = battle.group.copy(places = places))
     }
