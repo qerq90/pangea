@@ -13,6 +13,7 @@ case class CityCenterState(content: SceneContent) extends State {
   private val branch = new Branch(
     routes = Map(
       "TempleAzat" -> Target.Goto(StateType.TempleAzat),
+      "Arena"      -> Target.Goto(StateType.Arena),
       "BackToCity" -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (user, _, renderer) => enter(user, renderer).as(StateType.CityCenter) }
@@ -24,6 +25,7 @@ case class CityCenterState(content: SceneContent) extends State {
     val byId = content.screen("cityCenter.enter").choices.map(c => c.id -> c).toMap
     val choices = List(
       byId("TempleAzat").copy(color = ChoiceColor.Positive, row = Some(0)),
+      byId("Arena").copy(row = Some(0)),
       byId("BackToCity").copy(color = ChoiceColor.Negative, row = Some(1))
     )
     renderer.show(user, Screen(content.text("cityCenter.enter.text"), choices))
