@@ -1,5 +1,6 @@
 package pangea.service.state.states
 
+import pangea.dao.arena.ArenaDao
 import pangea.dao.hero.HeroDao
 import pangea.engine.{GraphValidator, Journal, Players, SceneContent}
 import pangea.model.state.StateType
@@ -47,6 +48,7 @@ import pangea.model.state.StateType.{
   TreasureDig,
   Girl,
   FlowerMeadow,
+  Arena,
   MonsterCave,
   RaceRevenge,
   Caravan,
@@ -87,6 +89,7 @@ import pangea.service.payout.Payouts
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.model.artifact.ArtifactKind
+import pangea.service.state.states.arena.ArenaState
 import pangea.service.state.states.artifact.{ArtifactState, BackpackState, FetShopState}
 import pangea.service.state.states.bank.{AuctionState, BankVaultState, TradeHouseState}
 import pangea.service.state.states.parcel.{MailState, TransferState}
@@ -140,6 +143,7 @@ object StatesMap {
   val live: ZLayer[
     Players
       with HeroDao
+      with ArenaDao
       with InventoryRepository
       with BarrelRepository
       with BankRepository
@@ -173,6 +177,7 @@ object StatesMap {
         journal       <- ZIO.service[Journal]
         content       <- ZIO.service[SceneContent]
         scheduler     <- ZIO.service[Scheduler]
+        arenaDao      <- ZIO.service[ArenaDao]
         // Кошель героя: своё серебро, а следом — ячейка в Торговом доме.
         bank           = Some(bankRepo)
         // Ларец Азата и Живая сумка ловят добычу до того, как она попадёт в сумку.
@@ -196,6 +201,7 @@ object StatesMap {
             content
           ),
           Dungeon   -> DungeonState(heroDao, inventoryRepo, scheduler, content),
+          Arena     -> ArenaState(heroDao, arenaDao, content, scheduler, Some(players)),
           HeroStats -> HeroStatsState(heroDao, content, artifacts),
           FoundItem -> FoundItemState(
             heroDao,
@@ -205,7 +211,7 @@ object StatesMap {
             content,
             artifacts
           ),
-          Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content, scheduler),
+          Battle -> BattleState(heroDao, inventoryRepo, itemRepo, content, scheduler, Some(arenaDao)),
           Death  -> DeathState(heroDao, inventoryRepo, content, artifacts),
           Rest   -> RestState(heroDao, scheduler, content),
           Inventory -> InventoryState(

@@ -67,7 +67,10 @@ case class SoloPveBattle(
   escapesAfter:   Int     = 0,
   // Звать некого: ни подкрепления со стороны, ни сородичей на клич. Так дерутся
   // обитатели пещеры — она посчитана до последнего, и лишним взяться неоткуда.
-  noKin:          Boolean = false
+  noKin:          Boolean = false,
+  // Бой на арене: какая это строка боя и кто напротив. Пока оно есть, в ответ
+  // на ход никто не бьёт — соперник ответит своим ходом, а итог решает арена.
+  arena:          Option[ArenaRef] = None
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -415,8 +418,9 @@ object SoloPveBattle {
       divineUsed          <- c.getOrElse[Boolean]("divineUsedThisRound")(false)
       escapesAfter        <- c.getOrElse[Int]("escapesAfter")(0)
       noKin               <- c.getOrElse[Boolean]("noKin")(false)
+      arena               <- c.getOrElse[Option[ArenaRef]]("arena")(None)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName, divineUsed, escapesAfter, noKin)
+                         story, customName, divineUsed, escapesAfter, noKin, arena)
 }

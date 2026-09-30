@@ -55,6 +55,12 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object SquadFight extends TaskKind
   // Привал в пещере с монстрами (30 секунд) — один раз за пещеру.
   case object CaveRest extends TaskKind
+
+  /** Соперник сходил — зовём другого к экрану боя. */
+  case object ArenaPoke extends TaskKind
+
+  /** Минута на ход вышла — бьём за зевнувшего обычной атакой. */
+  case object ArenaTurn extends TaskKind
 }
 
 sealed trait TaskStatus extends EnumEntry

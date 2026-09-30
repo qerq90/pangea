@@ -19,12 +19,16 @@ import pangea.model.trauma.TraumaRoll
 import pangea.model.schedule.TaskKind
 import pangea.model.skill.{MonsterEnergy, MonsterSkill, Skill}
 import pangea.model.state.StateType
-import pangea.model.user.User
+import pangea.model.user.{User, UserId}
 import pangea.service.state.states.LootState
 import pangea.service.state.MurlocQuest
 import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.dao.arena.ArenaDao
+import pangea.model.arena.ArenaRates
+import pangea.service.state.states.arena.ArenaBattle
+import pangea.service.state.states.battle.BattleState.ArenaOwnActions
 import pangea.service.schedule.Scheduler
 import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction, KillLogData}
 import zio.{Random, Task, ZIO}
@@ -44,7 +48,10 @@ case class BattleState(
   itemRepo:      ItemRepository,
   content:       SceneContent,
   // Таймер раундов без героя (он обнулён, отряд дерётся дальше).
-  scheduler:     Scheduler = Scheduler.none
+  scheduler:     Scheduler = Scheduler.none,
+  // Арена: строка боя двух игроков. Без неё бой на арену не попадает — в
+  // лабиринте она не нужна.
+  arenaDao:      Option[ArenaDao] = None
 ) extends State {
 
   import BattleState.{AllyBlow, MobStrike, Outcome, TurnResult, VictoryOutcome}
@@ -67,7 +74,10 @@ case class BattleState(
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
-      "CancelTarget" -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle))
+      "CancelTarget" -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
+      // Арена зовёт к экрану: соперник сходил, бой кончился или минута вышла.
+      "ArenaPoke"    -> Target.Run((u, _, r) => arenaPoke(u, r)),
+      "ArenaTurn"    -> Target.Run((u, _, r) => arenaTimeout(u, r))
     ),
     fallback = Target.Run { (user, ua, renderer) =>
       // Кнопки способностей именуются Skill_<itemId> и роутятся динамически: id
@@ -99,7 +109,13 @@ case class BattleState(
         ZIO.fromEither(json.as[SoloPveBattle]).flatMap { battle =>
           // Герой обнулён — ходит только таймер отряда; кнопки лишь показывают, как дела.
           if (battle.group.heroDown && !BattleState.parseAction(ua).contains("SquadTick")) showDown(user, battle, renderer)
-          else branch.act(user, ua, renderer)
+          else
+            // На арене ходят по очереди: пока соперник думает, кнопки молчат.
+            // Зов арены и просроченный ход — не в счёт, они и двигают бой.
+            arenaWaits(user, battle, BattleState.parseAction(ua)).flatMap {
+              case true  => renderer.show(user, Screen(content.text("arena.notYourTurn"), Nil)).as(StateType.Battle)
+              case false => branch.act(user, ua, renderer)
+            }
         }
     }
 
@@ -257,6 +273,17 @@ case class BattleState(
       raw: TurnResult,
       nowMs: Long,
       renderer: Renderer
+  ): Task[StateType] =
+    raw.battle.arena match {
+      case Some(ref) => arenaCommit(user, ref, raw, nowMs, renderer)
+      case None      => dungeonCommit(user, raw, nowMs, renderer)
+    }
+
+  private def dungeonCommit(
+      user: User,
+      raw: TurnResult,
+      nowMs: Long,
+      renderer: Renderer
   ): Task[StateType] = {
     // «Упырь» (порог 12): победа — это пир, герой сразу восстанавливает часть HP
     // и брони. Считаем ДО persistHero, чтобы восстановленное сохранилось вместе с
@@ -326,6 +353,164 @@ case class BattleState(
           renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(to)
     }
   }
+
+  // ── Бой на арене ────────────────────────────────────────────────────────────
+
+  /** Не ход ли это соперника. Зов арены и просроченный ход проходят всегда:
+    * первый показывает свежий экран, второй бьёт за того, кто задумался. */
+  private def arenaWaits(user: User, battle: SoloPveBattle, action: Option[String]): Task[Boolean] =
+    (battle.arena, arenaDao) match {
+      case (Some(ref), Some(dao)) if !ArenaOwnActions.contains(action.getOrElse("")) =>
+        dao.byId(ref.fightId).map(_.exists(f => !f.isTurn(user.userId)))
+      case _ => ZIO.succeed(false)
+    }
+
+  /** Итог хода на арене. Добычи, опыта и смерти здесь нет: победа — это
+    * сообщение обоим, поражение — единица HP и пустая броня. Ход, который
+    * ничего не изменил (неготовое умение, пустая фляга), сопернику не уходит. */
+  private def arenaCommit(
+      user: User,
+      ref: pangea.model.battle.ArenaRef,
+      raw: TurnResult,
+      nowMs: Long,
+      renderer: Renderer
+  ): Task[StateType] = {
+    val res         = raw
+    val persistHero = heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+    val msg         = res.log.mkString("\n")
+    val showLog     = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
+    res.outcome match {
+      // Ход не состоялся — арена об этом не знает, просто перерисовываем экран.
+      case Outcome.Continue if !res.endsRound =>
+        persistHero.uninterruptible *> showLog *> showArenaScreen(user, res.hero, res.battle, nowMs, renderer)
+          .as(StateType.Battle)
+
+      case Outcome.Continue =>
+        for {
+          _ <- (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible
+          _ <- showLog
+          _ <- passTurn(user, ref, res, nowMs, renderer)
+        } yield StateType.Battle
+
+      // Соперник обнулён — он проиграл, а герой уходит с песка своим ходом.
+      case Outcome.Victory =>
+        persistHero.uninterruptible *> showLog *>
+          endArena(user, ref, winner = true, nowMs, renderer)
+
+      // Обнулили героя или он сбежал — поражение. Смерти арена не знает.
+      case Outcome.Death | Outcome.Fled =>
+        val beaten = if (res.outcome == Outcome.Death) ArenaBattle.beaten(res.hero) else res.hero
+        heroDao.updateEquipmentAndFightStats(user.userId, beaten.equipment, beaten.fightStats).uninterruptible *>
+          showLog *> endArena(user, ref, winner = false, nowMs, renderer)
+    }
+  }
+
+  /** Ход уходит сопернику: своё складываем в строку боя, ему шлём зов к
+    * экрану, себе снимаем минуту ожидания. */
+  private def passTurn(user: User, ref: pangea.model.battle.ArenaRef, res: TurnResult,
+                       nowMs: Long, renderer: Renderer): Task[Unit] =
+    arenaDao match {
+      case None => ZIO.unit
+      case Some(dao) =>
+        dao.byId(ref.fightId).flatMap {
+          case None => ZIO.unit // строки нет — бой уже кончился, ход слать некому
+          case Some(fight) =>
+            val foeUser = UserId(ref.foeUser)
+            val mine    = fight.sideOf(user.userId).map(ArenaBattle.harvest(_, res.battle))
+            val updated = mine.fold(fight)(fight.withSide).passTurn(foeUser, nowMs)
+            for {
+              // HP и броню соперника пишем ему самому: правда о бойце — в герое.
+              foeHero <- heroDao.getHeroByUserId(foeUser)
+              _       <- ZIO.foreachDiscard(foeHero) { h =>
+                           val hurt = ArenaBattle.foeAfter(h, res.battle)
+                           heroDao.updateFightStats(foeUser, hurt.fightStats)
+                         }
+              _ <- dao.update(updated, nowMs)
+              _ <- scheduler.cancel(user.userId, TaskKind.ArenaTurn)
+              _ <- wake(foeUser, nowMs)
+              _ <- scheduler.schedule(foeUser, nowMs + ArenaRates.TurnMs, TaskKind.ArenaTurn,
+                     StateType.Battle, BattleState.ArenaTurnAction)
+              _ <- renderer.show(user, Screen(content.format("arena.passed",
+                     "name" -> res.battle.monsterName), Nil))
+            } yield ()
+        }
+    }
+
+  /** Бой кончился: строка уходит, соперника зовём узнать итог. */
+  private def endArena(user: User, ref: pangea.model.battle.ArenaRef, winner: Boolean,
+                       nowMs: Long, renderer: Renderer): Task[StateType] =
+    for {
+      // Победа: соперника с песка тоже надо поднять — единица HP и ни клочка
+      // брони. Сам он об этом узнает, когда арена позовёт его к экрану.
+      _ <- ZIO.when(winner) {
+             val foe = UserId(ref.foeUser)
+             heroDao.getHeroByUserId(foe).flatMap(h =>
+               ZIO.foreachDiscard(h)(x => heroDao.updateFightStats(foe, ArenaBattle.beaten(x).fightStats)))
+           }
+      _ <- heroDao.clearActiveBattle(user.userId)
+      _ <- scheduler.cancel(user.userId, TaskKind.ArenaTurn)
+      _ <- ZIO.foreachDiscard(arenaDao)(_.delete(ref.fightId))
+      _ <- wake(UserId(ref.foeUser), nowMs)
+      _ <- renderer.show(user, Screen(content.text(if (winner) "arena.won" else "arena.lost"), Nil))
+    } yield StateType.Arena
+
+  /** Позвать игрока к экрану: он сам себя не обновит — ходит-то соперник. */
+  private def wake(who: UserId, nowMs: Long): Task[Unit] =
+    scheduler.schedule(who, nowMs, TaskKind.ArenaPoke, StateType.Battle, BattleState.ArenaPokeAction).unit
+
+  /** Зов арены: соперник сходил, или бой кончился, пока герой ждал. */
+  private def arenaPoke(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero   <- getHero(user)
+      battle <- heroDao.readActiveBattle(user.userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+      res <- battle.flatMap(b => b.arena.map(b -> _)) match {
+        case None => ZIO.succeed(StateType.Battle)
+        case Some((_, ref)) =>
+          arenaDao match {
+            case None => ZIO.succeed(StateType.Battle)
+            case Some(dao) =>
+              dao.byId(ref.fightId).flatMap {
+                // Строки нет — бой кончился чужим ходом: герой об этом узнаёт здесь.
+                case None =>
+                  heroDao.clearActiveBattle(user.userId) *>
+                    renderer.show(user, Screen(content.text("arena.over"), Nil)).as(StateType.Arena)
+                case Some(fight) =>
+                  refreshArena(user, hero, fight, now, renderer)
+              }
+          }
+      }
+    } yield res
+
+  /** Перерисовать бой по свежей строке арены: свой ход — кнопки, чужой —
+    * строка ожидания. */
+  private def refreshArena(user: User, hero: Hero, fight: pangea.model.arena.ArenaFight,
+                           nowMs: Long, renderer: Renderer): Task[StateType] =
+    (fight.sideOf(user.userId), fight.foeOf(user.userId)) match {
+      case (Some(me), Some(foe)) =>
+        for {
+          foeHero <- heroDao.getHeroByUserId(foe.userId).map(_.getOrElse(hero))
+          fresh    = ArenaBattle.assemble(fight, me, foe, hero, foeHero, nowMs)
+          _       <- heroDao.writeActiveBattle(user.userId, fresh.asJson)
+          _       <- if (fight.isTurn(user.userId)) showArenaScreen(user, hero, fresh, nowMs, renderer)
+                     else renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name), Nil))
+        } yield StateType.Battle
+      case _ => ZIO.succeed(StateType.Battle).unit.as(StateType.Battle)
+    }
+
+  private def showArenaScreen(user: User, hero: Hero, battle: SoloPveBattle,
+                              nowMs: Long, renderer: Renderer): Task[Unit] =
+    mixCount(hero).flatMap(mixes =>
+      renderer.show(user, buildBattleScreen(hero, battle, hero.effectiveMaxHp(nowMs), nowMs, mixes)))
+
+  /** Минута вышла: бьём за зевнувшего обычной атакой — и ход уходит дальше. */
+  private def arenaTimeout(user: User, renderer: Renderer): Task[StateType] =
+    heroDao.readActiveBattle(user.userId).map(_.flatMap(_.as[SoloPveBattle].toOption)).flatMap {
+      case Some(b) if b.arena.isDefined =>
+        renderer.show(user, Screen(content.text("arena.timeout"), Nil)) *>
+          attackRoute(user, None, renderer)
+      case _ => ZIO.succeed(StateType.Battle)
+    }
 
   /** Continue без изменения состояния — только сообщение (неготовый скилл, пустая
     * фляга и т.п.): ход не тратится, экран перерисовывается. */
@@ -486,7 +671,10 @@ case class BattleState(
   /** Ответ на ход героя: моб в паре бьёт и кастует ([[monsterPhase]]); пары
     * нет — только геройская сторона конца раунда ([[quietPhase]]). */
   private def respond(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String], skip: Set[Long]): Task[TurnResult] =
-    if (battle.group.paired) monsterPhase(hero, battle, nowMs, log, skip)
+    // На арене напротив живой игрок: он не отвечает тут же, а бьёт своим
+    // ходом. Ход героя кончается тиками — и уходит сопернику.
+    if (battle.arena.isDefined) quietPhase(hero, battle, nowMs, log, skip)
+    else if (battle.group.paired) monsterPhase(hero, battle, nowMs, log, skip)
     else quietPhase(hero, battle, nowMs, log, skip)
 
   /** Конец раунда без моба в паре: тик бафов и кулдаунов, раны и реген героя,
@@ -2507,8 +2695,10 @@ case class BattleState(
         if (surrounded)
           ZIO.succeed(TurnResult(hero, battle,
             Vector(content.format("battle.group.surround", "race" -> monster.race.genitivePlural)), Outcome.Continue))
-        // Напротив никого — бить в спину некому.
-        else if (battle.unpaired) ZIO.succeed(TurnResult(hero, battle, Vector.empty, Outcome.Fled))
+        // Напротив никого — бить в спину некому. На арене тоже: соперник —
+        // живой игрок, и вдогонку он не бьёт, его ход ещё не наступил.
+        else if (battle.unpaired || battle.arena.isDefined)
+          ZIO.succeed(TurnResult(hero, battle, Vector.empty, Outcome.Fled))
         else if (hitRoll > playerDodgeChance(hero, battle, nowMs, fleeing = true)) {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
@@ -3891,6 +4081,13 @@ object BattleState {
   /** На сколько тиков Боевой клич запирает умения мобов вокруг: гаснет один
     * каст — ближайший (двойка по той же причине, что и у ComboSkillBlockTurns). */
   val WarCrySkillBlockTurns: Int = 2
+
+  /** Чем арена зовёт игрока к экрану и чем добивает просроченный ход. */
+  val ArenaPokeAction: String = """{"action":"ArenaPoke"}"""
+  val ArenaTurnAction: String = """{"action":"ArenaTurn"}"""
+
+  /** Что арена двигает сама, не спрашивая, чей сейчас ход. */
+  val ArenaOwnActions: Set[String] = Set("ArenaPoke", "ArenaTurn")
 
   /** Шанс уклонения защищающегося юнита от удара атакующего, в процентах, зажат
     * в [5, 95]: 100 * (agi + evasion) / (agi + evasion + defence * 1 +

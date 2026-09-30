@@ -45,6 +45,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object MarketSquare     extends StateType
   case object CityCenter       extends StateType // Центр города (Храм Азата)
   case object TempleAzat       extends StateType // Храм Азата (Жрец / Зал / Уйти)
+  case object Arena            extends StateType // арена: запись на бой с другим игроком
   case object HallAzat         extends StateType // Зал Азата (кубы, заряды)
   case object Cube             extends StateType // крафт в кубе Азата
   case object UnassumingBarrel extends StateType
@@ -126,6 +127,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   val cityStates: Set[StateType] = Set(
     GlobalMap, HarborQuarter, MarketSquare, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
     TradeHouse, BankVault, Auction, FetShop, Mail,
+    Arena,
     Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoFlask, GustavoBelt,
     Tavern, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
     MasterHorn, MentorKazimir)
