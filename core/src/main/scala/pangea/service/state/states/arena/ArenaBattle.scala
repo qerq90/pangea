@@ -48,17 +48,27 @@ object ArenaBattle {
     val carried =
       if (!me.ready) fresh
       else fresh.copy(skillSlots = me.slots, heroBattleState = me.buffs, effects = me.effects)
-    carried.copy(
+    // Сбитому с мысли умения не даются: слоты стоят на перезарядке, пока он не
+    // придёт в себя. Тратить умение в пустоту было бы обиднее и непонятнее.
+    val gathered =
+      if (me.blocked <= 0) carried
+      else carried.copy(skillSlots = carried.skillSlots.map(s => s.copy(cooldown = s.cooldown.max(me.blocked))))
+    gathered.copy(
       monsterCurrentHp    = foeHero.fightStats.hp.max(0L),
       monsterCurrentArmor = foeHero.fightStats.armor.max(0L),
       customName          = Some(foe.name),
       arena               = Some(ArenaRef(fight.id, foe.userId.value)))
   }
 
-  /** Что из боя переживает ход: эффекты, кулдауны и бафы своей стороны. */
+  /** Что из боя переживает ход: эффекты, кулдауны и бафы своей стороны.
+    * Свой блок к этому ходу уже отработал — снимаем. */
   def harvest(side: ArenaSide, battle: SoloPveBattle): ArenaSide =
     side.copy(effects = battle.effects, slots = battle.skillSlots,
-      buffs = battle.heroBattleState, ready = true)
+      buffs = battle.heroBattleState, ready = true, blocked = (side.blocked - 1).max(0))
+
+  /** Сколько ходов соперник не сможет колдовать после этого хода: Боевой клич
+    * и комбо вешают запрет на «моба», а на арене этот моб — живой игрок. */
+  def blockFor(battle: SoloPveBattle): Int = battle.effects.monsterSkillBlockedTurns.max(0)
 
   /** Что стало с соперником: его HP и броня после чужого хода. */
   def foeAfter(foeHero: Hero, battle: SoloPveBattle): Hero =

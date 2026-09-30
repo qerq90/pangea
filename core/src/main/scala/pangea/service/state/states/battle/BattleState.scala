@@ -62,17 +62,17 @@ case class BattleState(
   private val branch = new Branch(
     routes = Map(
       "Attack"      -> Target.Run((u, ua, r) => attackRoute(u, BattleState.parseTarget(ua), r)),
-      "Wait"        -> Target.Run((u, _, r) => resolve(u, r)(waitTurn)),
+      "Wait"        -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.wait"))(waitTurn)),
       "Move"        -> Target.Run((u, _, r) => moveRoute(u, r)),
-      "MoveTo"      -> Target.Run((u, ua, r) => resolve(u, r)(moveTurn(BattleState.parseTarget(ua)))),
+      "MoveTo"      -> Target.Run((u, ua, r) => resolve(u, r, content.text("arena.turn.move"))(moveTurn(BattleState.parseTarget(ua)))),
       "SquadTick"   -> Target.Run((u, _, r) => squadTick(u, r)),
-      "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r)(flaskTurn)),
-      "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r)(beltTurn)),
-      "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r)(divineTurn)),
-      "UseRose"      -> Target.Run((u, _, r) => resolve(u, r)(roseTurn)),
-      "ThrowMix"     -> Target.Run((u, _, r) => resolve(u, r)(mixTurn)),
+      "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.flask"))(flaskTurn)),
+      "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.belt"))(beltTurn)),
+      "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.divine"))(divineTurn)),
+      "UseRose"      -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.rose"))(roseTurn)),
+      "ThrowMix"     -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.mix"))(mixTurn)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
-      "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r)(fleeTurn)),
+      "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.flee"))(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
       "CancelTarget" -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
       // Арена зовёт к экрану: соперник сходил, бой кончился или минута вышла.
@@ -137,15 +137,16 @@ case class BattleState(
 
   /** Прочитать снимок (герой + бой + время) один раз, посчитать ход чистой
     * функцией `turn`, затем один раз закоммитить результат. */
-  private def resolve(user: User, renderer: Renderer)(turn: Turn): Task[StateType] =
+  private def resolve(user: User, renderer: Renderer, note: String)(turn: Turn): Task[StateType] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
       battle <- getBattle(user)
-      state  <- resolveLoaded(user, renderer, hero, battle, now)(turn)
+      state  <- resolveLoaded(user, renderer, hero, battle, now, note)(turn)
     } yield state
 
-  private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long)(turn: Turn): Task[StateType] =
+  private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long,
+                            note: String)(turn: Turn): Task[StateType] =
     for {
       result <- turn(hero, battle, now)
       // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
@@ -176,7 +177,7 @@ case class BattleState(
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
       hinted  = plainSteelHint(hero, pulled)
-      state  <- commit(user, hinted, now, renderer)
+      state  <- commit(user, hinted, now, renderer, hero, note)
     } yield state
 
   /** Башни стоят, пока есть кого прикрывать. Не осталось живой охраны — бой
@@ -272,10 +273,12 @@ case class BattleState(
       user: User,
       raw: TurnResult,
       nowMs: Long,
-      renderer: Renderer
+      renderer: Renderer,
+      before: Hero,
+      note: String
   ): Task[StateType] =
     raw.battle.arena match {
-      case Some(ref) => arenaCommit(user, ref, raw, nowMs, renderer)
+      case Some(ref) => arenaCommit(user, ref, raw, nowMs, renderer, before, note)
       case None      => dungeonCommit(user, raw, nowMs, renderer)
     }
 
@@ -373,7 +376,9 @@ case class BattleState(
       ref: pangea.model.battle.ArenaRef,
       raw: TurnResult,
       nowMs: Long,
-      renderer: Renderer
+      renderer: Renderer,
+      before: Hero,
+      note: String
   ): Task[StateType] = {
     val res         = raw
     val persistHero = heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
@@ -389,26 +394,26 @@ case class BattleState(
         for {
           _ <- (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible
           _ <- showLog
-          _ <- passTurn(user, ref, res, nowMs, renderer)
+          _ <- passTurn(user, ref, res, before, note, nowMs, renderer)
         } yield StateType.Battle
 
       // Соперник обнулён — он проиграл, а герой уходит с песка своим ходом.
       case Outcome.Victory =>
         persistHero.uninterruptible *> showLog *>
-          endArena(user, ref, winner = true, (res.log ++ res.sideLog).toList, nowMs, renderer)
+          endArena(user, ref, winner = true, arenaSummary(note, before, res, None), nowMs, renderer)
 
       // Обнулили героя или он сбежал — поражение. Смерти арена не знает.
       case Outcome.Death | Outcome.Fled =>
         val beaten = if (res.outcome == Outcome.Death) ArenaBattle.beaten(res.hero) else res.hero
         heroDao.updateEquipmentAndFightStats(user.userId, beaten.equipment, beaten.fightStats).uninterruptible *>
-          showLog *> endArena(user, ref, winner = false, (res.log ++ res.sideLog).toList, nowMs, renderer)
+          showLog *> endArena(user, ref, winner = false, arenaSummary(note, before, res, None), nowMs, renderer)
     }
   }
 
   /** Ход уходит сопернику: своё складываем в строку боя, ему шлём зов к
     * экрану, себе снимаем минуту ожидания. */
   private def passTurn(user: User, ref: pangea.model.battle.ArenaRef, res: TurnResult,
-                       nowMs: Long, renderer: Renderer): Task[Unit] =
+                       before: Hero, note: String, nowMs: Long, renderer: Renderer): Task[Unit] =
     arenaDao match {
       case None => ZIO.unit
       case Some(dao) =>
@@ -416,12 +421,7 @@ case class BattleState(
           case None => ZIO.unit // строки нет — бой уже кончился, ход слать некому
           case Some(fight) =>
             val foeUser = UserId(ref.foeUser)
-            val mine    = fight.sideOf(user.userId).map(ArenaBattle.harvest(_, res.battle))
-            // Свой ход соперник видит целиком: бой на арене идёт по очереди, и
-            // без чужих строк половина боя проходила бы мимо него.
-            val told    = mine.fold(fight)(fight.withSide)
-                            .withLog((res.log ++ res.sideLog).toList)
-            val updated = told.seenBy(user.userId).passTurn(foeUser, nowMs)
+            val mine = fight.sideOf(user.userId).map(ArenaBattle.harvest(_, res.battle))
             for {
               // HP и броню соперника пишем ему самому: правда о бойце — в герое.
               foeHero <- heroDao.getHeroByUserId(foeUser)
@@ -429,6 +429,14 @@ case class BattleState(
                            val hurt = ArenaBattle.foeAfter(h, res.battle)
                            heroDao.updateFightStats(foeUser, hurt.fightStats)
                          }
+              // Соперник читает не чужие «вы ударили», а сводку: что применили
+              // и чем это для него обернулось.
+              lines = arenaSummary(note, before, res, foeHero)
+              // Сбитого с мысли запоминаем на нём самом: в своём зеркале он
+              // этого запрета не видит.
+              foeSide = fight.sideOf(foeUser).map(_.copy(blocked = ArenaBattle.blockFor(res.battle)))
+              told    = foeSide.foldLeft(mine.fold(fight)(fight.withSide))(_ withSide _).withLog(lines)
+              updated = told.seenBy(user.userId).passTurn(foeUser, nowMs)
               _ <- dao.update(updated, nowMs)
               _ <- scheduler.cancel(user.userId, TaskKind.ArenaTurn)
               _ <- wake(foeUser, nowMs)
@@ -495,12 +503,9 @@ case class BattleState(
                       .as(StateType.Arena)
                 case Some(fight) =>
                   // Что соперник успел сделать, пока герой ждал.
-                  tellFoeTurn(user, fight, dao, now, renderer) *> (
-                    if (fight.finished) heroDao.clearActiveBattle(user.userId) *> dao.delete(fight.id) *>
-                        renderer.show(user, Screen(
-                          content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"),
-                          Nil, hideKeyboard = true)).as(StateType.Arena)
-                    else refreshArena(user, hero, fight, now, renderer))
+                  if (fight.finished) finishArena(user, fight, dao, now, renderer)
+                  else tellFoeTurn(user, fight, dao, now, renderer) *>
+                         refreshArena(user, hero, fight, now, renderer)
               }
           }
       }
@@ -523,6 +528,45 @@ case class BattleState(
         } yield StateType.Battle
       case _ => ZIO.succeed(StateType.Battle).unit.as(StateType.Battle)
     }
+
+  /** Бой кончился: показываем итог тому, кто его ещё не читал, и уводим с
+    * песка. Строку стираем, когда её прочитали обе стороны, — иначе соперник
+    * остался бы с экраном боя и без объяснений. */
+  private def finishArena(user: User, fight: pangea.model.arena.ArenaFight, dao: ArenaDao,
+                          nowMs: Long, renderer: Renderer): Task[StateType] = {
+    val fresh = fight.seenBy(user.userId)
+    val tell  = ZIO.when(fight.unseenFor(user.userId))(
+      renderer.show(user, Screen(fight.lastLog.mkString("\n"), Nil)) *>
+        renderer.show(user, Screen(
+          content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"),
+          Nil, hideKeyboard = true)))
+    heroDao.clearActiveBattle(user.userId) *> tell *>
+      (if (fresh.readByAll) dao.delete(fight.id) else dao.update(fresh, nowMs))
+        .as(StateType.Arena)
+  }
+
+  /** Сводка хода для соперника: что применили и чем это для него кончилось.
+    * Полные тексты умений написаны от первого лица («ваш рёв раскатывается»)
+    * — в чужом логе они и длинны, и читаются как свои. Здесь только суть:
+    * название да числа. */
+  private def arenaSummary(note: String, before: Hero, res: TurnResult, foeBefore: Option[Hero]): List[String] = {
+    val what = if (note.isEmpty) content.text("arena.turn.acted") else note
+    val dealt = foeBefore.map { h =>
+      (h.fightStats.hp - res.battle.monsterCurrentHp).max(0L) +
+        (h.fightStats.armor - res.battle.monsterCurrentArmor).max(0L)
+    }.getOrElse(0L)
+    val hpBack    = (res.hero.fightStats.hp - before.fightStats.hp).max(0L)
+    val armorBack = (res.hero.fightStats.armor - before.fightStats.armor).max(0L)
+    val hpLost    = (before.fightStats.hp - res.hero.fightStats.hp).max(0L)
+    List(
+      Some(content.format("arena.turn.did", "what" -> what)),
+      Option.when(dealt > 0L)(content.format("arena.turn.dealt", "n" -> dealt.toString)),
+      Option.when(hpBack > 0L || armorBack > 0L)(content.format("arena.turn.healed",
+        "hp" -> hpBack.toString, "armor" -> armorBack.toString)),
+      // Своё же горение или яд соперник тоже видит — иначе чужое HP «само» падает.
+      Option.when(hpLost > 0L)(content.format("arena.turn.selfHurt", "n" -> hpLost.toString))
+    ).flatten
+  }
 
   /** Пересказать сопернику чужой ход — один раз: прочитанное помечаем. */
   private def tellFoeTurn(user: User, fight: pangea.model.arena.ArenaFight, dao: ArenaDao,
@@ -565,7 +609,7 @@ case class BattleState(
       state  <-
         if (target.isEmpty && battle.group.attackTargets.size > 1)
           renderer.show(user, attackTargetScreen(battle)).as(StateType.Battle)
-        else resolveLoaded(user, renderer, hero, battle, now)(attackTurn(target))
+        else resolveLoaded(user, renderer, hero, battle, now, content.text("arena.turn.attack"))(attackTurn(target))
     } yield state
 
   /** Базовая атака по месту `target` (без цели — по единственной досягаемой):
@@ -648,9 +692,9 @@ case class BattleState(
           state    <- res.outcome match {
             case Outcome.Victory =>
               val revived = res.hero.copy(fightStats = res.hero.fightStats.copy(hp = BattleState.DownReviveHp))
-              commit(user, res.copy(hero = revived, log = res.log :+ content.text("battle.squad.heroUp")), now, renderer)
+              commit(user, res.copy(hero = revived, log = res.log :+ content.text("battle.squad.heroUp")), now, renderer, hero, "")
             case _ if res.battle.group.allies.forall(!_.alive) =>
-              commit(user, res.copy(outcome = Outcome.Death, log = res.log :+ content.text("battle.squad.allGone")), now, renderer)
+              commit(user, res.copy(outcome = Outcome.Death, log = res.log :+ content.text("battle.squad.allGone")), now, renderer, hero, "")
             case _ =>
               val msg      = (res.log ++ res.sideLog).mkString("\n")
               val standing = groupLines(res.battle).mkString("\n")
@@ -2093,7 +2137,9 @@ case class BattleState(
       state  <-
         if (target.isEmpty && needsTarget(hero, battle, itemId))
           renderer.show(user, targetScreen(battle, itemId)).as(StateType.Battle)
-        else resolveLoaded(user, renderer, hero, battle, now)(
+        else resolveLoaded(user, renderer, hero, battle, now,
+          // Соперник увидит название умения, а не его рассказ от первого лица.
+          battle.slotByItem(itemId).map(_.skill.label).getOrElse(""))(
           skillTurn(itemId, target.orElse(battle.group.attackTargets.headOption).getOrElse(battle.group.heroPos)))
     } yield state
 
