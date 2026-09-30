@@ -536,12 +536,15 @@ object MonsterCaveSpec extends ZIOSpecDefault {
 
     // ── Алтарь тёмных сил ───────────────────────────────────────────────────
 
-    test("алтарь встречается не чаще чем в половине пещер и всегда один") {
+    test("алтарь ровно в половине пещер и всегда один; привал его больше не съедает") {
       val caves = (1L to 300L).toList.map(seed => CaveGenerator.generate(Race.Orc.entryName, Rng(seed))._1)
       val withAltar = caves.count(_.rooms.exists(_.kind == RoomKind.Altar))
       assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Altar) <= 1)) &&
-      // половина с поправкой на случайность выборки
-      assertTrue(withAltar > 90 && withAltar < 210) &&
+      // ровно половина с поправкой на случайность выборки: место привала
+      // алтарь больше не съедает — оно просто пропускается при выборе
+      assertTrue(withAltar > 120 && withAltar < 180) &&
+      assertTrue(caves.forall(s => s.rooms.count(r => r.kind == RoomKind.Altar || r.kind == RoomKind.Rest) ==
+                   (if (s.rooms.exists(_.kind == RoomKind.Altar)) 2 else 1))) &&
       // привал алтарём не вытесняется: угол для отдыха в пещере всё равно один
       assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Rest) == 1))
     },
@@ -576,9 +579,12 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         _     <- state.action(testUser, tap("CaveUse_11"), r)
         said  <- texts(r)
         after  = inv.snapshot.find(_.id == 11L)
+        scene <- sceneOf(dao)
       } yield assertTrue(list.choices.map(_.id).contains("CaveUse_11")) &&
               assertTrue(after.exists(_.gem.exists(g => g.kind == GemKind.Skull && g.grade == 3))) &&
-              assertTrue(said.contains("выплёвывает"))
+              assertTrue(said.contains("выплёвывает")) &&
+              // череп стоит камню тех же сил, что и поднятый: алтарь гаснет
+              assertTrue(scene.exists(_.altarSpent) && said.contains("Сила алтаря израсходована"))
     },
 
     test("трофей поднимает союзника, и алтарь после этого гаснет") {

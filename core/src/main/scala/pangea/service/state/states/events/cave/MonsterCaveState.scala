@@ -273,8 +273,9 @@ case class MonsterCaveState(
       _   <- inventoryRepo.updateItem(hero.id, skull).mapError(asThrowable)
       _   <- renderer.show(user, Screen(content.format("cave.altar.skull",
                "gem" -> item.displayTitle, "skull" -> skull.displayTitle), Nil))
-      _   <- showSupplies(user, scene, renderer)
-    } yield StateType.MonsterCave
+      // Череп стоит камню тех же сил, что и поднятый с камня, — алтарь гаснет.
+      res <- burnOut(user, scene, renderer)
+    } yield res
   }
 
   /** Трофей встаёт с камня тем, кем был при жизни. Мест в отряде нет — сперва
