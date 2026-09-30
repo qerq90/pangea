@@ -97,6 +97,42 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(isValidFindOutcome(result))
     },
 
+    test("каждое событие пула выпадает: по своему билету — своё состояние") {
+      // У голого героя пул — ровно StateType.events, а индекс в нём подаём
+      // сами. Берём по первому билету каждого события: их одиннадцать.
+      val firstIdx = StateType.events.zipWithIndex.groupBy(_._1).map {
+        case (event, tickets) => event -> tickets.map(_._2).min
+      }
+      def outcome(idx: Int, extra: Int*) =
+        for {
+          quad <- makeState()
+          (state, _, renderer, _) = quad
+          _    <- TestRandom.feedInts(idx +: extra: _*)
+          res  <- state.action(testUser, tap("FindEvent"), renderer)
+        } yield res
+      val ordinary = firstIdx.toList.filterNot { case (event, _) =>
+        event == StateType.Battle || event == StateType.Spring
+      }
+      for {
+        // Девять событий уводят героя прямо в себя.
+        plain  <- ZIO.foreach(ordinary) { case (event, i) => outcome(i).map(event -> _) }
+        // Бой и ручей разыгрываются на месте: бой заводит сам бой, а ручей
+        // лечит и бросает на засаду (99 — засады нет, герой остался в лабиринте).
+        battle <- outcome(firstIdx(StateType.Battle))
+        spring <- outcome(firstIdx(StateType.Spring), 99)
+      } yield assertTrue(plain.size == 9 && plain.forall { case (event, got) => got == event }) &&
+              assertTrue(battle == StateType.Battle) &&
+              assertTrue(spring == StateType.Dungeon)
+    },
+
+    test("в пуле ровно одиннадцать событий на сто билетов — новое молча не добавить") {
+      assertTrue(StateType.events.distinct.toSet == Set[StateType](
+        StateType.Battle, StateType.MonsterCave, StateType.FlowerMeadow, StateType.FoundItem,
+        StateType.Spring, StateType.Girl, StateType.SilverVein, StateType.Caravan,
+        StateType.TreasureMobs, StateType.TreasureDig, StateType.ElementalLair)) &&
+      assertTrue(StateType.events.size == 100 && StateType.events.distinct.size == 11)
+    },
+
     test("приговор: навстречу выходит именное существо названного рода на четверти сил") {
       val race   = pangea.model.monster.Race.Orc
       val doomed = TestFixtures.hero(userId).copy(statBoosts = pangea.model.stats.StatBoosts.none.add(
