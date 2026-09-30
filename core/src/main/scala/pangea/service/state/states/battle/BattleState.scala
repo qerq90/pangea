@@ -2984,7 +2984,11 @@ case class BattleState(
           result   =
             if (hurt.alive) (tmp.copy(group = tmp.group.updateAlly(a.position)(_ => hurt)), Vector(line))
             else (tmp.copy(group = tmp.group.withoutAlly(a.position)),
-                  Vector(line, content.format("battle.ally.scroll", "name" -> a.name)))
+                  // Наёмника уносит свиток, а поднятого с алтаря выносить
+                  // нечем: он рассыпается там же, где стоял.
+                  Vector(line, content.format(
+                    if (a.undead.isDefined) "battle.ally.crumbled" else "battle.ally.scroll",
+                    "name" -> a.name)))
         } yield result
     } yield out
 

@@ -7,7 +7,7 @@ import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.skill.Skill
-import pangea.model.squad.{Ally, AllyKind, Squad}
+import pangea.model.squad.{Ally, AllyKind, Squad, UndeadForm}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -160,6 +160,27 @@ object AllyBattleSpec extends ZIOSpecDefault {
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(screens.contains("воспользовался свитком") && screens.contains("шагает к вам")) &&
               assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2 && after.group.allies.isEmpty)
+    },
+
+    test("поднятый с алтаря свитков не носит: обнулённый — рассыпается, и в отряд не вернётся") {
+      // Поднятый стоит напротив моба (место 1), герой — за ним: бьют его.
+      val risen = Ally(AllyKind.Undead, 1, 1L, 0L, 0L,
+        undead = Some(UndeadForm("Эльф капитан", 12L, AllyKind.Human.stats(3L))))
+      val h     = hero(heroPos = 2, allies = List(risen))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        (state, dao, r) = t
+        // удар героя; поднятый бьёт; моб его обнуляет; подкрепления нет
+        _       <- TestRandom.feedInts(60, 60, 99, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _       <- state.action(testUser, tap("Attack"), r)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        after   <- battleOf(dao)
+      } yield assertTrue(screens.contains("Эльф капитан") && screens.contains("осыпаются грудой")) &&
+              // про свиток ему сказать нечего: он не наёмник
+              assertTrue(!screens.contains("воспользовался свитком")) &&
+              // с песка он убран, а из отряда уйдёт насовсем по концу боя
+              assertTrue(after.group.allies.isEmpty) &&
+              assertTrue(after.group.alliesGone.exists(_.undead.isDefined))
     },
 
     test("союзника уносит свитком тем же ходом, каким кончается бой, — и об этом сказано") {
