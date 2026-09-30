@@ -96,11 +96,13 @@ object ArenaSpec extends ZIOSpecDefault {
         code   = codeOf(fights)
         _     <- state.action(one, tap("ArenaByCode"), r)
         said  <- texts(r)
+        // кнопка одна: пока ждёшь — стой здесь, «Назад» вело на этот же экран
+        card  <- r.sentScreens.map(_.last)
         _     <- state.action(one, tap("ArenaCancel"), r)
         after  = fights.snapshot
       } yield assertTrue(code.length == ArenaRates.CodeLength && code.forall(_.isDigit)) &&
-              assertTrue(fights.snapshot.isEmpty == false || true) &&
               assertTrue(said.contains(code) && said.contains("Ваш код")) &&
+              assertTrue(card.choices.map(_.id) == List("ArenaCancel")) &&
               assertTrue(after.isEmpty)
     },
 

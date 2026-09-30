@@ -173,10 +173,12 @@ case class ArenaState(
               }
     } yield out
 
+  /** Экран записи. Кнопка одна: пока герой ждёт, ему и надо стоять здесь —
+    * зов соперника приходит только тому, кто на арене. Уйти можно, сняв
+    * запись; «Назад» отсюда вело на этот же экран и только мешало. */
   private def showEnlisted(user: User, fight: ArenaFight, renderer: Renderer): Task[Unit] =
     renderer.show(user, Screen(content.format("arena.enlisted", "code" -> fight.code), List(
-      content.choice("ArenaCancel", "arena.cancel").copy(color = ChoiceColor.Negative, row = Some(0)),
-      content.choice("ArenaMenu", "arena.back").copy(row = Some(0)))))
+      content.choice("ArenaCancel", "arena.cancel").copy(color = ChoiceColor.Negative, row = Some(0)))))
 
   private def cancel(user: User, renderer: Renderer): Task[StateType] =
     arenaDao.ofUser(user.userId).flatMap {
