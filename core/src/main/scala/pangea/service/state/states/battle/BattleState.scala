@@ -395,13 +395,13 @@ case class BattleState(
       // Соперник обнулён — он проиграл, а герой уходит с песка своим ходом.
       case Outcome.Victory =>
         persistHero.uninterruptible *> showLog *>
-          endArena(user, ref, winner = true, nowMs, renderer)
+          endArena(user, ref, winner = true, (res.log ++ res.sideLog).toList, nowMs, renderer)
 
       // Обнулили героя или он сбежал — поражение. Смерти арена не знает.
       case Outcome.Death | Outcome.Fled =>
         val beaten = if (res.outcome == Outcome.Death) ArenaBattle.beaten(res.hero) else res.hero
         heroDao.updateEquipmentAndFightStats(user.userId, beaten.equipment, beaten.fightStats).uninterruptible *>
-          showLog *> endArena(user, ref, winner = false, nowMs, renderer)
+          showLog *> endArena(user, ref, winner = false, (res.log ++ res.sideLog).toList, nowMs, renderer)
     }
   }
 
@@ -417,7 +417,11 @@ case class BattleState(
           case Some(fight) =>
             val foeUser = UserId(ref.foeUser)
             val mine    = fight.sideOf(user.userId).map(ArenaBattle.harvest(_, res.battle))
-            val updated = mine.fold(fight)(fight.withSide).passTurn(foeUser, nowMs)
+            // Свой ход соперник видит целиком: бой на арене идёт по очереди, и
+            // без чужих строк половина боя проходила бы мимо него.
+            val told    = mine.fold(fight)(fight.withSide)
+                            .withLog((res.log ++ res.sideLog).toList)
+            val updated = told.seenBy(user.userId).passTurn(foeUser, nowMs)
             for {
               // HP и броню соперника пишем ему самому: правда о бойце — в герое.
               foeHero <- heroDao.getHeroByUserId(foeUser)
@@ -438,7 +442,7 @@ case class BattleState(
 
   /** Бой кончился: строка уходит, соперника зовём узнать итог. */
   private def endArena(user: User, ref: pangea.model.battle.ArenaRef, winner: Boolean,
-                       nowMs: Long, renderer: Renderer): Task[StateType] =
+                       lastLines: List[String], nowMs: Long, renderer: Renderer): Task[StateType] =
     for {
       // Победа: соперника с песка тоже надо поднять — единица HP и ни клочка
       // брони. Сам он об этом узнает, когда арена позовёт его к экрану.
@@ -449,7 +453,20 @@ case class BattleState(
            }
       _ <- heroDao.clearActiveBattle(user.userId)
       _ <- scheduler.cancel(user.userId, TaskKind.ArenaTurn)
-      _ <- ZIO.foreachDiscard(arenaDao)(_.delete(ref.fightId))
+      // Строку не рвём: соперник ещё не знает, чем кончилось, — прочитает и
+      // сотрёт её сам (см. ArenaState).
+      _ <- ZIO.foreachDiscard(arenaDao) { dao =>
+             dao.byId(ref.fightId).flatMap {
+               case None => ZIO.unit
+               case Some(fight) =>
+                 val me  = user.userId
+                 val end = fight.withLog(lastLines).seenBy(me).copy(
+                   status = pangea.model.arena.ArenaStatus.Finished,
+                   turn   = None,
+                   winner = Some(if (winner) me else UserId(ref.foeUser)))
+                 dao.update(end, nowMs)
+             }
+           }
       _ <- wake(UserId(ref.foeUser), nowMs)
       _ <- renderer.show(user, Screen(content.text(if (winner) "arena.won" else "arena.lost"), Nil))
     } yield StateType.Arena
@@ -471,12 +488,19 @@ case class BattleState(
             case None => ZIO.succeed(StateType.Battle)
             case Some(dao) =>
               dao.byId(ref.fightId).flatMap {
-                // Строки нет — бой кончился чужим ходом: герой об этом узнаёт здесь.
+                // Строки нет — бой кончился и прочитан: уводим героя с песка.
                 case None =>
                   heroDao.clearActiveBattle(user.userId) *>
-                    renderer.show(user, Screen(content.text("arena.over"), Nil)).as(StateType.Arena)
+                    renderer.show(user, Screen(content.text("arena.over"), Nil, hideKeyboard = true))
+                      .as(StateType.Arena)
                 case Some(fight) =>
-                  refreshArena(user, hero, fight, now, renderer)
+                  // Что соперник успел сделать, пока герой ждал.
+                  tellFoeTurn(user, fight, dao, now, renderer) *> (
+                    if (fight.finished) heroDao.clearActiveBattle(user.userId) *> dao.delete(fight.id) *>
+                        renderer.show(user, Screen(
+                          content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"),
+                          Nil, hideKeyboard = true)).as(StateType.Arena)
+                    else refreshArena(user, hero, fight, now, renderer))
               }
           }
       }
@@ -492,10 +516,22 @@ case class BattleState(
           foeHero <- heroDao.getHeroByUserId(foe.userId).map(_.getOrElse(hero))
           fresh    = ArenaBattle.assemble(fight, me, foe, hero, foeHero, nowMs)
           _       <- heroDao.writeActiveBattle(user.userId, fresh.asJson)
+          // Чужой ход — кнопки прячем: жать их всё равно нельзя, а соблазн есть.
           _       <- if (fight.isTurn(user.userId)) showArenaScreen(user, hero, fresh, nowMs, renderer)
-                     else renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name), Nil))
+                     else renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name),
+                            Nil, hideKeyboard = true))
         } yield StateType.Battle
       case _ => ZIO.succeed(StateType.Battle).unit.as(StateType.Battle)
+    }
+
+  /** Пересказать сопернику чужой ход — один раз: прочитанное помечаем. */
+  private def tellFoeTurn(user: User, fight: pangea.model.arena.ArenaFight, dao: ArenaDao,
+                          nowMs: Long, renderer: Renderer): Task[Unit] =
+    if (!fight.unseenFor(user.userId)) ZIO.unit
+    else {
+      val who   = fight.foeOf(user.userId).map(_.name).getOrElse("")
+      val lines = content.format("arena.foeTurn", "name" -> who) + "\n" + fight.lastLog.mkString("\n")
+      renderer.show(user, Screen(lines, Nil)) *> dao.update(fight.seenBy(user.userId), nowMs)
     }
 
   private def showArenaScreen(user: User, hero: Hero, battle: SoloPveBattle,

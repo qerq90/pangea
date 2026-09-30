@@ -19,7 +19,8 @@ trait ArenaDao {
   /** Бой, в котором этот игрок сейчас участвует, — ждущий или идущий. */
   def ofUser(userId: UserId): Task[Option[ArenaFight]]
 
-  /** Кто ждёт соперника, раньше записавшиеся первыми. */
+  /** Кто ждёт соперника в общей очереди, раньше записавшиеся первыми.
+    * Записи по коду сюда не попадают: их зовут кодом, а не из списка. */
   def waiting(limit: Int): Task[List[ArenaFight]]
 
   def update(fight: ArenaFight, now: Long): Task[Unit]

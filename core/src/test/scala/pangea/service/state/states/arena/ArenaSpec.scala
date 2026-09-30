@@ -96,27 +96,85 @@ object ArenaSpec extends ZIOSpecDefault {
         code   = codeOf(fights)
         _     <- state.action(one, tap("ArenaByCode"), r)
         said  <- texts(r)
+        // кнопка одна: пока ждёшь — стой здесь, «Назад» вело на этот же экран
+        card  <- r.sentScreens.map(_.last)
         _     <- state.action(one, tap("ArenaCancel"), r)
         after  = fights.snapshot
       } yield assertTrue(code.length == ArenaRates.CodeLength && code.forall(_.isDigit)) &&
-              assertTrue(fights.snapshot.isEmpty == false || true) &&
               assertTrue(said.contains(code) && said.contains("Ваш код")) &&
+              assertTrue(card.choices.map(_.id) == List("ArenaCancel")) &&
               assertTrue(after.isEmpty)
     },
 
-    test("список ждущих показывает чужих, а свою запись — нет") {
+    test("«Ближайший бой» сам ставит в очередь; записи по коду в очереди не видны") {
       for {
         t <- arena(oneId -> fighter(oneId, 1L, 10, 10), twoId -> fighter(twoId, 2L, 5, 5))
         (state, _, _, fights, _, r) = t
-        _     <- state.action(two, tap("ArenaByCode"), r)   // второй записался
-        _     <- state.action(one, tap("ArenaNearest"), r)  // первый смотрит список
+        _     <- state.action(two, tap("ArenaByCode"), r)   // второй записался по коду
+        _     <- state.action(one, tap("ArenaNearest"), r)  // первый встал в очередь
+        alone <- r.sentScreens.map(_.last)
+        mine   = fights.snapshot.find(_.has(oneId)).get
+        hidden = fights.snapshot.find(_.has(twoId)).get
+        _     <- state.action(two, tap("ArenaNearest"), r)  // и второй передумал ждать втихую
         list  <- r.sentScreens.map(_.last)
-        _     <- state.action(two, tap("ArenaNearest"), r)  // и сам записавшийся тоже
-        own   <- r.sentScreens.map(_.last)
-      } yield assertTrue(list.choices.count(_.id.startsWith(ArenaState.JoinPrefix)) == 1) &&
-              assertTrue(list.choices.head.label.contains("10 ур.") || list.choices.head.label.nonEmpty) &&
-              assertTrue(fights.snapshot.size == 1) &&
-              assertTrue(own.text.contains("никто не ждёт"))
+        opened = fights.snapshot.find(_.has(twoId)).get
+      } yield // записи по коду в очереди нет — первый стоит один
+              assertTrue(alone.choices.count(_.id.startsWith(ArenaState.JoinPrefix)) == 0) &&
+              assertTrue(alone.text.contains("Вы в очереди")) &&
+              assertTrue(mine.open && !hidden.open && fights.snapshot.size == 2) &&
+              // «Ближайший бой» открыл запись второго, и код у неё остался прежним
+              assertTrue(opened.open && opened.code == hidden.code) &&
+              assertTrue(list.choices.count(_.id.startsWith(ArenaState.JoinPrefix)) == 1) &&
+              assertTrue(list.choices.head.label.contains("10 ур."))
+    },
+
+    test("ход соперника пересказывают целиком — и только один раз") {
+      val quick = fighter(oneId, 1L, agi = 20, int = 20)
+      val slow  = fighter(twoId, 2L, agi = 5, int = 5)
+      for {
+        t <- arena(oneId -> quick, twoId -> slow)
+        (state, battle, _, fights, _, r) = t
+        _     <- state.action(one, tap("ArenaByCode"), r)
+        code   = codeOf(fights)
+        _     <- state.action(two, typed(code), r)
+        _     <- state.action(one, tap("ArenaPoke"), r)
+        _     <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+        _     <- battle.action(one, tap("Attack"), r)       // первый бьёт
+        _     <- r.reset
+        _     <- battle.action(two, tap("ArenaPoke"), r)    // второго зовут к экрану
+        told  <- texts(r)
+        _     <- r.reset
+        _     <- battle.action(two, tap("ArenaPoke"), r)    // второй зов — пересказа уже нет
+        again <- texts(r)
+      } yield assertTrue(told.contains("Ход соперника") && told.contains("урон")) &&
+              assertTrue(!again.contains("Ход соперника"))
+    },
+
+    test("в чужой ход кнопки убраны с экрана, а не просто не работают") {
+      val quick = fighter(oneId, 1L, agi = 20, int = 20)
+      val slow  = fighter(twoId, 2L, agi = 5, int = 5)
+      for {
+        t <- arena(oneId -> quick, twoId -> slow)
+        (state, battle, _, fights, _, r) = t
+        _      <- state.action(one, tap("ArenaByCode"), r)
+        code    = codeOf(fights)
+        _      <- state.action(two, typed(code), r)
+        _      <- r.reset
+        _      <- battle.action(two, tap("ArenaPoke"), r)
+        screen <- r.sentScreens.map(_.last)
+      } yield assertTrue(screen.choices.isEmpty && screen.hideKeyboard) &&
+              assertTrue(screen.text.contains("Ход за соперником"))
+    },
+
+    test("отдых на арене — тот же костёр, только просыпается герой здесь же") {
+      for {
+        t <- arena(oneId -> fighter(oneId, 1L, 10, 10))
+        (state, _, dao, _, sched, r) = t
+        out   <- state.action(one, tap("ArenaRest"), r)
+        scene <- dao.readSceneData(oneId)
+        wake   = scene.flatMap(_.hcursor.get[StateType]("wakeTo").toOption)
+        _     <- sched.scheduled
+      } yield assertTrue(out == StateType.Rest && wake.contains(StateType.Arena))
     },
 
     test("чужой код сводит двоих: бой заводится обоим, ход у того, кто быстрее") {
@@ -211,8 +269,11 @@ object ArenaSpec extends ZIOSpecDefault {
         winner <- heroOf(dao, oneId)
         mine   <- battleOf(dao, oneId)
         tasks  <- sched.scheduled
+        // строка ждёт, пока проигравший прочитает итог
+        _      <- battle.action(two, tap("ArenaPoke"), r)
+        told   <- texts(r)
       } yield assertTrue(out == StateType.Arena && fights.snapshot.isEmpty) &&
-              assertTrue(said.contains("Соперник повержен")) &&
+              assertTrue(said.contains("Соперник повержен") && told.contains("Вы проиграли")) &&
               // ни опыта, ни добычи: победа сама по себе
               assertTrue(winner.exp == 0L && mine.isEmpty) &&
               assertTrue(loser.fightStats.hp == 1L && loser.fightStats.armor == 0L) &&
@@ -233,7 +294,11 @@ object ArenaSpec extends ZIOSpecDefault {
         out  <- battle.action(one, tap("ConfirmFlee"), r)
         said <- texts(r)
         me   <- heroOf(dao, oneId)
-      } yield assertTrue(out == StateType.Arena && fights.snapshot.isEmpty) &&
+        // сбежавший прочитал итог сам, сопернику он ещё предстоит
+        end     = fights.snapshot.headOption
+        _      <- battle.action(two, tap("ArenaPoke"), r)
+      } yield assertTrue(out == StateType.Arena && end.exists(_.finished)) &&
+              assertTrue(fights.snapshot.isEmpty) &&
               assertTrue(said.contains("Вы проиграли")) &&
               // сбежал целым: единица HP — только для обнулённых
               assertTrue(me.fightStats.hp == 1000L)

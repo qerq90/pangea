@@ -50,7 +50,7 @@ class ArenaDaoLive(xa: Transactor[Task]) extends ArenaDao {
 
   override def waiting(limit: Int): Task[List[ArenaFight]] =
     sql"""select id, code, data from arena_fights
-          where status = ${waitingStatus.entryName}
+          where status = ${waitingStatus.entryName} and (data ->> 'open') = 'true'
           order by updated_at limit $limit"""
       .query[(Long, String, Json)].to[List].transact(xa)
       .map(_.flatMap { case (i, c, d) => parse(i, c, d) })
