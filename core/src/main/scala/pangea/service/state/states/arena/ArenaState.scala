@@ -63,15 +63,19 @@ case class ArenaState(
       case _                             => showMenu(user, renderer)
     }
 
-  /** Бой кончился, пока герой не смотрел: рассказываем чем и убираем строку. */
+  /** Бой кончился, пока герой не смотрел: рассказываем чем. Кто итог уже
+    * читал (обычно тот, чей ход всё и решил), второй раз его не увидит, а
+    * строка уходит, когда её прочитали обе стороны. */
   private def finish(user: User, fight: ArenaFight, renderer: Renderer): Task[Unit] =
     for {
-      _ <- ZIO.when(fight.unseenFor(user.userId))(
-             renderer.show(user, Screen(fight.lastLog.mkString("\n"), Nil)))
-      _ <- renderer.show(user, Screen(
-             content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"), Nil))
-      _ <- arenaDao.delete(fight.id)
-      _ <- showMenu(user, renderer)
+      now   <- nowMs
+      fresh  = fight.seenBy(user.userId)
+      _     <- ZIO.when(fight.unseenFor(user.userId))(
+                 renderer.show(user, Screen(fight.lastLog.mkString("\n"), Nil)) *>
+                   renderer.show(user, Screen(
+                     content.text(if (fight.winner.contains(user.userId)) "arena.won" else "arena.lost"), Nil)))
+      _     <- if (fresh.readByAll) arenaDao.delete(fight.id) else arenaDao.update(fresh, now)
+      _     <- showMenu(user, renderer)
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =

@@ -1,5 +1,6 @@
 package pangea.service.state.states.arena
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.arena.{ArenaFight, ArenaRates, ArenaSide, ArenaStatus}
 import pangea.model.battle.SoloPveBattle
@@ -38,6 +39,13 @@ object ArenaSpec extends ZIOSpecDefault {
       fightStats = FightStats(atk = atk, hp = hp, armor = 0, defence = 0,
                               evasion = 0, accuracy = 9999, energy = 100))
   }
+
+  /** Нагрудник с Боевым кличем: он и сбивает сопернику концентрацию. */
+  private def battleCry(id: Long): pangea.model.item.Item =
+    pangea.model.item.Item(id, "Горжет", 10L, pangea.model.item.Rarity.Blue,
+      pangea.model.item.ItemType.ChestPlate,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = pangea.model.item.ItemDetails.Armor(pangea.model.skill.Skill.BattleCry))
 
   private def arena(heroes: (UserId, Hero)*) =
     for {
@@ -146,8 +154,37 @@ object ArenaSpec extends ZIOSpecDefault {
         _     <- r.reset
         _     <- battle.action(two, tap("ArenaPoke"), r)    // второй зов — пересказа уже нет
         again <- texts(r)
-      } yield assertTrue(told.contains("Ход соперника") && told.contains("урон")) &&
+      } yield assertTrue(told.contains("Ход соперника")) &&
+              // сводкой, а не чужим рассказом от первого лица
+              assertTrue(told.contains("• удар") && told.contains("вам нанесено")) &&
               assertTrue(!again.contains("Ход соперника"))
+    },
+
+    test("сбитому с мысли умения не даются: они уходят на перезарядку, а не в пустоту") {
+      val crier = fighter(oneId, 1L, agi = 20, int = 20).copy(
+        equipment = TestFixtures.emptyEquipment.copy(chestPlate = battleCry(101L)))
+      val foe   = fighter(twoId, 2L, agi = 5, int = 5)
+      for {
+        t <- arena(oneId -> crier, twoId -> foe)
+        (state, battle, dao, fights, _, r) = t
+        _      <- state.action(one, tap("ArenaByCode"), r)
+        code    = codeOf(fights)
+        _      <- state.action(two, typed(code), r)
+        _      <- state.action(one, tap("ArenaPoke"), r)
+        // Боевой клич раскачивается два хода — в тесте отдаём его готовым.
+        ready  <- battleOf(dao, oneId).map(_.get)
+        _      <- dao.writeActiveBattle(oneId,
+                    ready.copy(skillSlots = ready.skillSlots.map(_.copy(cooldown = 0))).asJson)
+        _      <- TestRandom.feedInts(60, 60) *> TestRandom.feedLongs(100L, 100L)
+        _      <- battle.action(one, tap("Skill_101"), r)     // клич сбивает соперника
+        fight   = fights.snapshot.head
+        blocked = fight.sideOf(twoId).get.blocked
+        _      <- r.reset
+        _      <- battle.action(two, tap("ArenaPoke"), r)     // соперник заходит ходить
+        mine   <- battleOf(dao, twoId)
+      } yield assertTrue(blocked > 0) &&
+              // его умения пришли на перезарядку — применить их нечем
+              assertTrue(mine.exists(_.skillSlots.forall(_.cooldown > 0)))
     },
 
     test("в чужой ход кнопки убраны с экрана, а не просто не работают") {

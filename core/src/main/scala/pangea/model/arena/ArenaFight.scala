@@ -48,7 +48,11 @@ final case class ArenaSide(
   buffs:   HeroBattleState      = HeroBattleState.empty,
   ready:   Boolean              = false,
   // Номер хода, чей лог сторона уже прочитала: по нему видно, что показать.
-  seen:    Int                  = 0
+  seen:    Int                  = 0,
+  // Сколько своих ходов сторона не сможет применить умение: её сбили с мысли
+  // (Боевой клич). Считается на том, кого сбили, — в его зеркале боя этого
+  // эффекта не видно, он висит в чужом.
+  blocked: Int                  = 0
 )
 
 object ArenaSide {
@@ -62,7 +66,8 @@ object ArenaSide {
       "slots"   -> s.slots.asJson,
       "buffs"   -> s.buffs.asJson,
       "ready"   -> s.ready.asJson,
-      "seen"    -> s.seen.asJson)
+      "seen"    -> s.seen.asJson,
+      "blocked" -> s.blocked.asJson)
 
   implicit val decoder: Decoder[ArenaSide] = (c: HCursor) =>
     for {
@@ -75,7 +80,8 @@ object ArenaSide {
       buffs   <- c.getOrElse[HeroBattleState]("buffs")(HeroBattleState.empty)
       ready   <- c.getOrElse[Boolean]("ready")(false)
       seen    <- c.getOrElse[Int]("seen")(0)
-    } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen)
+      blocked <- c.getOrElse[Int]("blocked")(0)
+    } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen, blocked)
 }
 
 /** Бой на арене: двое, чей сейчас ход и до какой минуты он думает.
@@ -120,6 +126,9 @@ final case class ArenaFight(
   /** Показывать ли этот лог стороне: свой ход она и так видела. */
   def unseenFor(userId: UserId): Boolean =
     lastLog.nonEmpty && sideOf(userId).exists(_.seen < turnNo)
+
+  /** Итог прочитали обе стороны — строку можно убирать. */
+  def readByAll: Boolean = sides.forall(_.seen >= turnNo)
 
   /** Отметить, что сторона прочитала последний лог. */
   def seenBy(userId: UserId): ArenaFight =
