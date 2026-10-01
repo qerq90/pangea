@@ -492,7 +492,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(scene.exists(_.at == 2))
     },
 
-    test("за последнего убитого — вдвое больше опыта, и только один раз") {
+    test("за последнего убитого — сто шестьдесят процентов взятого, и только один раз") {
       for {
         t <- cave()
         (state, dao, _, _, r) = t
@@ -504,10 +504,11 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         _      <- state.enter(testUser, r)
         twice  <- dao.getHeroByUserId(userId).map(_.get)
         screen <- r.sentScreens.map(_.last)
-      } yield assertTrue(said.contains("+40 опыта") && after.exp == 40L) &&
+      } yield assertTrue(said.contains("+32 опыта") && after.exp == 32L) &&
+              assertTrue(CaveRates.ClearExpPct == 160L) &&
               assertTrue(said.contains("Кажется, теперь всё чисто.")) &&
               assertTrue(scene.exists(_.rewarded)) &&
-              assertTrue(twice.exp == 40L) &&
+              assertTrue(twice.exp == 32L) &&
               // зачистка не выталкивает из пещеры: герой в той же комнате и ходит дальше
               assertTrue(screen.choices.map(_.id).contains("CaveForward")) &&
               assertTrue(scene.exists(_.inside))
