@@ -20,20 +20,19 @@ class VkRenderer(api: Api) extends Renderer {
         // строку (старое поведение — сохранено для совместимости).
         val hasRows = screen.choices.exists(_.row.isDefined)
         val kbInit  = Keyboard.empty.withInline(screen.inline)
-        val kb =
-          if (!hasRows) screen.choices.foldLeft(kbInit) { (acc, choice) =>
-            acc.addRow().addButton(toButton(choice))
-          }
-          else {
-            val grouped = screen.choices.zipWithIndex
+        val rows =
+          if (!hasRows) screen.choices.map(List(_))
+          else
+            screen.choices.zipWithIndex
               .groupBy { case (c, _) => c.row.getOrElse(Int.MaxValue) }
               .toList
               .sortBy(_._1)
               .map { case (_, items) => items.sortBy(_._2).map(_._1) }
-            VkRenderer.fit(grouped).foldLeft(kbInit) { (acc, rowChoices) =>
-              rowChoices.foldLeft(acc.addRow()) { (k, choice) => k.addButton(toButton(choice)) }
-            }
-          }
+        // Страховка общая для обеих раскладок: столбик из одиннадцати кнопок ВК
+        // отклоняет так же, как и одиннадцать рядов.
+        val kb = VkRenderer.fit(rows).foldLeft(kbInit) { (acc, rowChoices) =>
+          rowChoices.foldLeft(acc.addRow()) { (k, choice) => k.addButton(toButton(choice)) }
+        }
         Some(kb)
       }
     api.sendMessage(user, screen.text, List.empty, kbOpt)
