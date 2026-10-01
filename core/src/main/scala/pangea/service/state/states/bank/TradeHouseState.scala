@@ -10,7 +10,7 @@ import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
-import pangea.model.quest.{DailyNpc, DailyRates}
+import pangea.model.quest.DailyNpc
 import pangea.service.state.{CityExit, DailyDialog, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -96,7 +96,7 @@ case class TradeHouseState(
       hero <- getHero(user)
       paid <- daily.hand(user, hero, now)
       _    <- ZIO.foreachDiscard(paid) { case (task, exp) =>
-                val pay = DailyRates.doubloons(task.kind)
+                val pay = task.kind.doubloons
                 heroDao.updateDoubloons(user.userId, hero.doubloons + pay) *>
                   renderer.show(user, Screen(content.format("daily.rakhadim.reward",
                     "doubloons" -> pay.toString, "exp" -> exp.toString), Nil))

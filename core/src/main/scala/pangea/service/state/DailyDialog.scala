@@ -108,7 +108,7 @@ final case class DailyDialog(
     today(hero, nowMs).flatMap { task =>
       if (!task.ready) ZIO.succeed(None)
       else {
-        val exp = DailyRates.exp(hero.lvl)
+        val exp = DailyRates.exp(hero.lvl, task.kind)
         val up  = hero.gainExp(exp)
         DailyQuestLog.complete(heroDao, user.userId, npc, task) *>
           heroDao.updateExpAndLevel(user.userId, up.exp, up.lvl, up.upgradePoints)

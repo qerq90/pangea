@@ -110,11 +110,16 @@ case class GustavoState(
       hero <- getHero(user)
       paid <- daily.hand(user, hero, now)
       _    <- ZIO.foreachDiscard(paid) { case (task, exp) =>
-                val brew = BrewKind.item(DailyRates.brew(task.kind, DailyRates.dayOf(now) + hero.id.value))
+                val brew = BrewKind.item(
+                  DailyRates.brew(task.kind.rareReward, DailyRates.dayOf(now) + hero.id.value))
                 val give = itemRepo.fold(ZIO.unit: Task[Unit])(repo =>
                   repo.persist(hero.id, brew).flatMap(it =>
                     inventoryRepo.addItem(hero.id, it).ignore))
-                give *> renderer.show(user, Screen(content.format("daily.gustavo.reward",
+                // За редкую траву и склянка редкая, и опыт вдвое — об этом он
+                // говорит отдельно, чтобы разница не прошла мимо.
+                val key = if (task.kind.rareReward) "daily.gustavo.rewardRare"
+                          else "daily.gustavo.reward"
+                give *> renderer.show(user, Screen(content.format(key,
                   "brew" -> brew.displayTitle, "exp" -> exp.toString), Nil))
               }
       _    <- renderMenu(user, renderer)
