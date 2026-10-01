@@ -165,7 +165,7 @@ object DailyKind extends Enum[DailyKind] {
     * полсотни для сотого уровня — не наказ, а недоразумение. */
   case object HornReputation extends DailyKind("reputation", DailyNpc.Horn, 50L, snap = true) {
     override def goalFor(heroLvl: Long): Long =
-      DailyRates.HornSacks * TrophyKind.reputationFor(TrophyKind.Sack.coef, heroLvl)
+      DailyRates.sacks(DailyRates.HornGoalSacks, heroLvl)
   }
 
   /** Заказать у него улучшение: молот не должен стынуть. */
@@ -357,12 +357,17 @@ object DailyRates {
     pool((((seed % pool.size.toLong).toInt + pool.size) % pool.size).toInt)
   }
 
-  /** Репутация от Горна — столько же, сколько опыта за тот же наказ.
-    * Статичная сороковка с растущей ценой прокачки в гильдии не сходилась. */
-  def reputation(heroLvl: Long): Long = exp(heroLvl)
+  /** У Горна всё мерено мешками с пожитками по уровню героя: десять он
+    * просит, шесть отдаёт. Ставка та же, по которой Гильдия платит за трофей. */
+  val HornGoalSacks: Long   = 10L
+  val HornRewardSacks: Long = 6L
 
-  /** Сколькими мешками с пожитками Горн меряет свой наказ по репутации. */
-  val HornSacks: Long = 10L
+  /** Сколько репутации в стольких мешках по этому уровню. */
+  def sacks(count: Long, heroLvl: Long): Long =
+    count * TrophyKind.reputationFor(TrophyKind.Sack.coef, heroLvl)
+
+  /** Репутация от Горна за сданный наказ. */
+  def reputation(heroLvl: Long): Long = sacks(HornRewardSacks, heroLvl)
 
   /** Выше этой редкости Ришелье на городскую стражу ничего не берёт. */
   val GuardRarity: pangea.model.item.Rarity = pangea.model.item.Rarity.Green
