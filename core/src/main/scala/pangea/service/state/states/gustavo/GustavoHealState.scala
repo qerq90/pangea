@@ -98,6 +98,7 @@ case class GustavoHealState(
       newUntil  = if (newNames.isEmpty) None else hero.traumaUntil
       _        <- purse.charge(user.userId, hero, price)
       _        <- heroDao.updateTrauma(user.userId, newUntil, newNames)
+      // «Мне нужна практика» — вылеченная травма идёт в заказ дня.
       _        <- heroDao.writeGustavoData(user.userId,
                     data.copy(healCooldownUntil = Some(now + GustavoData.HealCooldownMs)).asJson)
       _        <- renderer.show(user, Screen(content.format("gustavo.healed", "trauma" -> healed.name), Nil))

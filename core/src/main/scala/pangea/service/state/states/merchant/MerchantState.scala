@@ -17,7 +17,8 @@ import pangea.repository.item.ItemRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.merchant.MerchantState._
-import pangea.service.state.{CharacterMenu, CityExit, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
+import pangea.model.quest.{DailyKind, DailyNpc, DailyRates}
+import pangea.service.state.{CharacterMenu, CityExit, DailyDialog, DailyQuestLog, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -42,6 +43,9 @@ case class MerchantState(
   /** «Товар с того света»: три серых вещи через «Продать хлам» — Ришелье
     * доплачивает до цены белых и обновляет партию вне очереди. */
   private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Richelieu, "Rich")
+
+  /** Уговор с Ришелье: на каждый день своя просьба о прилавке. */
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Richelieu, "Richelieu", Some(inventoryRepo))
 
   private val branch = new Branch(
     routes = Map(
@@ -72,6 +76,12 @@ case class MerchantState(
       "BackFromSell"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "OpenCharacter"   -> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
       "Back"            -> Target.Goto(StateType.MarketSquare),
+      daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
+      daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.handAction  -> Target.Run { (u, _, r) => handDaily(u, r) },
+      "RichelieuDailyBack" -> Target.Run { (u, _, r) =>
+        nowMs.flatMap(now => loadOrInit(u, now).flatMap(d => getHero(u).flatMap(h =>
+          showMenu(u, r, d, h)))).as(StateType.Merchant) },
       CityExit.route,
       CityExit.route
     ),
@@ -131,6 +141,8 @@ case class MerchantState(
                           val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
                           purse.charge(user.userId, hero, mi.price) *>
                             heroDao.writeMerchantData(user.userId, newData.asJson) *>
+                            // «У прилавка должен кто-то стоять» — покупка в счёт уговора.
+                            DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.BuyFromMerchant, 1L) *>
                             InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
                               renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil))) *>
                             showMenu(user, renderer)
@@ -219,6 +231,8 @@ case class MerchantState(
           val line = if (gold > 0) "merchant.soldDoubloons" else "merchant.sold"
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
             pay *>
+            // Проданная вещь идёт в уговор с Ришелье.
+            DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.SellItems, 1L) *>
             renderer.show(user, Screen(
               content.format(line, "name" -> item.name, "price" -> price.toString), Nil))
         case None => ZIO.unit
@@ -241,6 +255,8 @@ case class MerchantState(
            else
              inventoryRepo.removeItems(junk.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
                heroDao.updateSilver(user.userId, hero.silver + total) *>
+               // Ришелье считает и хлам: телега его тоже наполняет.
+               DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.SellJunk, junk.size.toLong) *>
                renderer.show(user, Screen(content.format("merchant.sellJunkDone",
                  "count" -> junk.size.toString, "silver" -> total.toString), Nil)) *>
                questAfterJunk(user, hero.copy(silver = hero.silver + total), data, junk, renderer) *>
@@ -291,6 +307,40 @@ case class MerchantState(
     * не камень, не материал и не карта. */
   private def isGrayGear(item: Item): Boolean =
     item.rarity == Rarity.Gray && ItemType.equippable.contains(item.itemType)
+
+  // ── Уговор с Ришелье ────────────────────────────────────────────────────────
+
+  private def showDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      task <- daily.today(hero, now)
+      _    <- daily.show(user, task, now, renderer)
+    } yield StateType.Merchant
+
+  private def takeDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.Merchant
+
+  /** Торговец платит серебром — чем же ещё. */
+  private def handDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      paid <- daily.hand(user, hero, now)
+      _    <- ZIO.foreachDiscard(paid) { case (_, exp) =>
+                val silver = DailyRates.silver(hero.lvl)
+                heroDao.updateSilver(user.userId, hero.silver + silver) *>
+                  renderer.show(user, Screen(content.format("daily.richelieu.reward",
+                    "silver" -> silver.toString, "exp" -> exp.toString), Nil))
+              }
+      data <- loadOrInit(user, now)
+      h2   <- getHero(user)
+      _    <- showMenu(user, renderer, data, h2)
+    } yield StateType.Merchant
 
   // ── Настройка автопродажи ───────────────────────────────────────────────────
 
@@ -402,9 +452,16 @@ case class MerchantState(
     } yield ()
 
   private def showMenu(user: User, renderer: Renderer, data: MerchantData, hero: Hero): Task[Unit] =
-    quest.load(user).flatMap(q => renderer.show(user, menuScreen(data, hero, quest.button(q))))
+    for {
+      q    <- quest.load(user)
+      now  <- nowMs
+      // Уговор на сегодня: кнопка рядом с сюжетным заданием.
+      work <- daily.today(hero, now)
+      _    <- renderer.show(user, menuScreen(data, hero, quest.button(q), daily.button(work)))
+    } yield ()
 
-  private def menuScreen(data: MerchantData, hero: Hero, questBtn: Option[Choice]): Screen = {
+  private def menuScreen(data: MerchantData, hero: Hero, questBtn: Option[Choice],
+                         dailyBtn: Option[Choice]): Screen = {
     val lines = data.items.zipWithIndex.map { case (mi, i) =>
       if (mi.bought) content.format("merchant.boughtLine", "n" -> (i + 1).toString, "name" -> mi.item.name)
       else saleLine(mi, i, hero)
@@ -416,7 +473,7 @@ case class MerchantState(
       case (mi, i) if !mi.bought =>
         content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
     }
-    val choices = buyButtons ++ questBtn.toList ++ List(
+    val choices = buyButtons ++ questBtn.toList ++ dailyBtn.toList ++ List(
       content.choice("Refresh",       "merchant.refreshLabel"),
       content.choice("Sell",          "merchant.sellLabel"),
       content.choice("SellJunk",      "merchant.sellJunkLabel"),

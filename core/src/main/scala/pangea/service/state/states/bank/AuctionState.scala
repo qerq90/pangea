@@ -19,7 +19,8 @@ import pangea.service.payout.Payouts
 import pangea.repository.item.ItemRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.bank.AuctionState._
-import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
+import pangea.model.quest.{DailyKind, DailyNpc}
+import pangea.service.state.{CityExit, DailyQuestLog, ItemMenu, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -401,6 +402,8 @@ case class AuctionState(
                               ZIO.logError(s"auction sell failed: $e")
                 },
                 lot => players.announce(AuctionLot.announcement(lot)).ignore *>
+                         // Рахадиму нужно, чтобы торги шли, — лот идёт ему в книгу.
+                         DailyQuestLog.add(heroDao, user.userId, DailyNpc.Rakhadim, DailyKind.BankLot, 1L) *>
                          resetScene(user) *>
                          renderer.show(user, Screen(content.format("bank.auction.listed",
                            "id" -> lot.id.toString, "name" -> it.displayTitle, "price" -> lot.priceLine,

@@ -73,7 +73,8 @@ object GustavoStateSpec extends ZIOSpecDefault {
           ids      = screens.last.choices.map(_.id)
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Positive)) &&
-                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest", "Back", "GoToCity"))
+                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest",
+                  "GustavoDaily", "Back", "GoToCity"))
       },
 
       test("«В город» уводит прямо на площадь — и от прилавка, и с предложения зелья") {

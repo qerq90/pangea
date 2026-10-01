@@ -168,6 +168,12 @@ object Queries {
   def readKillLog(userId: UserId): Fragment =
     sql"select kill_log from $tableName where user_id = $userId"
 
+  def writeDailyQuests(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set daily_quests = $data where user_id = $userId"
+
+  def readDailyQuests(userId: UserId): Fragment =
+    sql"select daily_quests from $tableName where user_id = $userId"
+
   def writeVaultStow(userId: UserId, data: Json): Fragment =
     sql"update $tableName set vault_stow = $data where user_id = $userId"
 

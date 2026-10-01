@@ -12,7 +12,8 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{CityExit, NpcQuestDialog, State, UserAction}
+import pangea.model.quest.{DailyKind, DailyNpc, DailyRates}
+import pangea.service.state.{CityExit, DailyDialog, DailyQuestLog, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -38,6 +39,9 @@ case class MasterHornState(
     * Завязка смотрит на оружие героя. */
   private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Horn, "Horn")
 
+  /** Наказ Горна: на каждый день своя проверка стали. */
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Horn, "Horn")
+
   private val branch = new Branch(
     routes = Map(
       quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
@@ -53,6 +57,10 @@ case class MasterHornState(
       "ConfirmImprove"       -> Target.Run { (u, _, r) => confirmImprove(u, r) },
       "CancelImprove"        -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) },
       "LeaveMasterHorn"      -> Target.Goto(StateType.TrainingHall),
+      daily.openAction       -> Target.Run { (u, _, r) => showDaily(u, r) },
+      daily.takeAction       -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.handAction       -> Target.Run { (u, _, r) => handDaily(u, r) },
+      "HornDailyBack"        -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) },
       CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.MasterHorn) }
@@ -67,8 +75,45 @@ case class MasterHornState(
       quest.load(user).flatMap { quests =>
         val base = content.screen("guild.masterHorn.menu")
         val (front, back) = base.choices.partition(_.id != "LeaveMasterHorn")
-        renderer.show(user, CityExit.on(base.copy(choices = front ++ quest.button(quests).toList ++ back), content))
+        for {
+          now  <- nowMs
+          hero <- getHero(user)
+          work <- daily.today(hero, now)
+          _    <- renderer.show(user, CityExit.on(base.copy(
+                    choices = front ++ quest.button(quests).toList ++ daily.button(work).toList ++ back), content))
+        } yield ()
       }
+
+  // ── Наказ на день ──────────────────────────────────────────────────────────
+
+  private def showDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      task <- daily.today(hero, now)
+      _    <- daily.show(user, task, now, renderer)
+    } yield StateType.MasterHorn
+
+  private def takeDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.MasterHorn
+
+  /** Кузнец платит тем, что у него есть, — именем в гильдии. */
+  private def handDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      paid <- daily.hand(user, hero, now)
+      _    <- ZIO.foreachDiscard(paid) { case (_, exp) =>
+                heroDao.updateGuildReputation(user.userId, hero.guildReputation + DailyRates.reputation) *>
+                  renderer.show(user, Screen(content.format("daily.horn.reward",
+                    "rep" -> DailyRates.reputation.toString, "exp" -> exp.toString), Nil))
+              }
+      _    <- enter(user, renderer)
+    } yield StateType.MasterHorn
 
   // ── Задание Горна ──────────────────────────────────────────────────────────
 
@@ -149,6 +194,8 @@ case class MasterHornState(
                 askImprove(user, renderer, stat)
             else
               applyBoost(user, hero, stat, price, renderer) *>
+                // «Молот не должен стынуть» — заказ идёт в наказ на день.
+                DailyQuestLog.add(heroDao, user.userId, DailyNpc.Horn, DailyKind.HornUpgrade, 1L) *>
                 askImprove(user, renderer, stat)
           }
       }
@@ -197,6 +244,9 @@ case class MasterHornState(
       _ <- ZIO.when(stat == Stat.Inventory)(inventoryRepo.increaseCapacity(hero.id, stat.step).orElse(ZIO.unit))
       _ <- heroDao.updateMasterHornBoosts(user.userId, bumped(hero.masterHornBoosts, stat))
     } yield ()
+
+  private def nowMs: Task[Long] =
+    ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)
