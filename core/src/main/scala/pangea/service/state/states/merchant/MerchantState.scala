@@ -469,20 +469,29 @@ case class MerchantState(
     val text =
       if (data.items.nonEmpty && data.items.forall(_.bought)) content.text("merchant.soldOut")
       else content.text("merchant.richelieu.header") + "\n\n" + lines.mkString("\n\n")
+    // Раскладка рядами, а не столбиком: сверху товар, под ним торговля, ниже
+    // хлам, дела Ришелье и выход. Столбиком кнопки не помещались — с уговором
+    // дня их стало двенадцать, а клавиатура ВК принимает десять рядов и целиком
+    // отклоняет сообщение, если их больше.
     val buyButtons = data.items.zipWithIndex.collect {
       case (mi, i) if !mi.bought =>
-        content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString).copy(data = Map("idx" -> i.toString))
+        content.choice("Buy", "merchant.buyLabel", "n" -> (i + 1).toString)
+          .copy(data = Map("idx" -> i.toString), row = Some(0))
     }
-    val choices = buyButtons ++ questBtn.toList ++ dailyBtn.toList ++ List(
-      content.choice("Refresh",       "merchant.refreshLabel"),
-      content.choice("Sell",          "merchant.sellLabel"),
-      content.choice("SellJunk",      "merchant.sellJunkLabel"),
-      content.choice("JunkSettings",  "merchant.junk.settingsLabel"),
-      content.choice("OpenCharacter", "common.character"),
-      content.choice("Back",          "merchant.backLabel"),
-      CityExit.button(content)
-    )
-    Screen(text, choices)
+    val trade = List(
+      content.choice("Refresh", "merchant.refreshLabel").copy(row = Some(1)),
+      content.choice("Sell",    "merchant.sellLabel").copy(row = Some(1)))
+    val junk = List(
+      content.choice("SellJunk",     "merchant.sellJunkLabel").copy(row = Some(2)),
+      content.choice("JunkSettings", "merchant.junk.settingsLabel").copy(row = Some(2)))
+    // Задание и уговор — в одном ряду: сегодня их два, завтра может не быть ни
+    // одного, и остальные кнопки от этого не разъезжаются.
+    val work = (questBtn.toList ++ dailyBtn.toList).map(_.copy(row = Some(3)))
+    val rest = List(
+      content.choice("OpenCharacter", "common.character").copy(row = Some(4)),
+      content.choice("Back",          "merchant.backLabel").copy(row = Some(5)),
+      CityExit.button(content, Some(5)))
+    Screen(text, buyButtons ++ trade ++ junk ++ work ++ rest)
   }
 
   /** Строка продаваемого предмета + сравнение с надетым в том же слоте — тот же

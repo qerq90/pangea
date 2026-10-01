@@ -68,6 +68,26 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(ids.contains("Refresh") && ids.contains("Sell") && ids.contains("Back"))
     },
 
+    test("меню разложено рядами и влезает в клавиатуру ВК — с уговором дня и заданием") {
+      for {
+        t <- makeState(richHero)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        screens <- renderer.sentScreens
+        btns     = screens.last.choices
+        rows     = btns.groupBy(_.row.getOrElse(Int.MaxValue))
+        // столбиком эти же кнопки дали бы двенадцать рядов — ВК такое отклоняет
+      } yield assertTrue(btns.size > pangea.service.sender.vk.VkRenderer.MaxRows) &&
+              assertTrue(rows.size <= pangea.service.sender.vk.VkRenderer.MaxRows) &&
+              assertTrue(rows.values.forall(_.size <= pangea.service.sender.vk.VkRenderer.MaxButtonsPerRow)) &&
+              // ряды идут подряд, без дыр
+              assertTrue(rows.keys.toList.sorted == (0 until rows.size).toList) &&
+              // товар сверху одним рядом, выход — последним
+              assertTrue(rows(0).map(_.id) == List("Buy", "Buy", "Buy")) &&
+              assertTrue(btns.filter(_.id == "RichelieuDaily").flatMap(_.row) == List(3)) &&
+              assertTrue(rows(rows.size - 1).map(_.id) == List("Back", "GoToCity"))
+    },
+
     test("предметы зафиксированы: повторный enter не меняет сток") {
       for {
         t <- makeState(richHero)

@@ -1,6 +1,12 @@
 package pangea.service.sender.vk
 
-import pangea.engine.Choice
+import pangea.engine.{Choice, Screen}
+import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.model.vk.Attachment
+import pangea.model.vk.keyboard.Keyboard
+import pangea.model.vk.model.UserResponse
+import pangea.service.sender.Api
+import zio.{Ref, Task, ZIO}
 import zio.test._
 
 /** Клавиатура ВК: не больше десяти рядов и пяти кнопок в ряду. Сообщение,
@@ -10,6 +16,16 @@ object VkRendererSpec extends ZIOSpecDefault {
 
   private def rows(n: Int): List[List[Choice]] =
     (0 until n).toList.map(i => List(Choice(s"B$i", s"Кнопка $i", row = Some(i))))
+
+  private val testUser = User(UserId(1L), VkId("vk"), TelegramId("tg"))
+
+  /** Апи-заглушка: запоминает клавиатуру, которую рендерер собрал к отправке. */
+  private class CapturingApi(sent: Ref[Option[Keyboard]]) extends Api {
+    def getName(user: User): Task[UserResponse] = ZIO.fail(new Throwable("not needed"))
+    def sendMessage(user: User, message: String, attachments: List[Attachment],
+                    keyboard: Option[Keyboard]): Task[Unit] = sent.set(keyboard)
+    def sendToChat(message: String): Task[Unit] = ZIO.unit
+  }
 
   override def spec = suite("VkRenderer")(
 
@@ -27,6 +43,20 @@ object VkRendererSpec extends ZIOSpecDefault {
       assertTrue(fitted.flatten.map(_.id) == many.flatten.map(_.id)) &&
       // порядок кнопок сохраняется и на большой раскладке
       assertTrue(VkRenderer.fit(rows(40)).flatten.map(_.id) == rows(40).flatten.map(_.id))
+    },
+
+    test("столбик без рядов тоже ужимается: одиннадцать кнопок — уже отказ ВК") {
+      // Сцена без `row` кладёт каждую кнопку в свой ряд — именно так
+      // падало меню Ришелье, когда к нему прибавился уговор дня.
+      val many = (0 until 12).toList.map(i => Choice(s"B$i", s"Кнопка $i"))
+      for {
+        sent <- Ref.make(Option.empty[Keyboard])
+        _    <- new VkRenderer(new CapturingApi(sent)).show(testUser, Screen("текст", many))
+        kb   <- sent.get
+      } yield assertTrue(kb.exists(_.buttons.size <= VkRenderer.MaxRows)) &&
+              assertTrue(kb.exists(_.buttons.forall(_.size <= VkRenderer.MaxButtonsPerRow))) &&
+              // ни одной кнопки не потерялось
+              assertTrue(kb.exists(_.buttons.map(_.size).sum == many.size))
     }
   )
 }
