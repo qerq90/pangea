@@ -3,12 +3,13 @@ package pangea.service.state.states.gustavo
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails}
-import pangea.model.quest.NpcQuest
+import pangea.model.item.{BrewKind, Item, ItemDetails}
+import pangea.model.quest.{DailyNpc, DailyRates, NpcQuest}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
-import pangea.service.state.{CityExit, HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
+import pangea.repository.item.ItemRepository
+import pangea.service.state.{CityExit, DailyDialog, HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -23,8 +24,13 @@ import zio.{Task, ZIO}
 case class GustavoState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  // Заказ дня Густаво платит склянкой — её нужно завести герою в сумку.
+  itemRepo:      Option[ItemRepository] = None
 ) extends State with GustavoScene {
+
+  /** Заказ Густаво: на каждый день свой. */
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Gustavo, "Gustavo", Some(inventoryRepo))
 
   /** «Подопытный»: выпить зелье, победить троих, пока оно действует, и
     * отчитаться — Густаво наполняет флягу и рассказывает, из чего варит. */
@@ -39,6 +45,10 @@ case class GustavoState(
       "Boost"    -> Target.Goto(StateType.GustavoBoost),
       "Herbs"     -> Target.Run { (u, _, r) => showHerbs(u, r) },
       "HerbsSell" -> Target.Run { (u, _, r) => sellHerbs(u, r) },
+      daily.openAction -> Target.Run { (u, _, r) => showDaily(u, r) },
+      daily.takeAction -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.handAction -> Target.Run { (u, _, r) => handDaily(u, r) },
+      "GustavoDailyBack" -> Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) },
       "HerbsTalk" -> Target.Goto(StateType.GustavoHerbs),
       "Supplies"  -> Target.Goto(StateType.GustavoSupplies),
       "Back"     -> Target.Goto(StateType.MarketSquare),
@@ -62,8 +72,45 @@ case class GustavoState(
       now    <- nowMs
       data   <- loadData(user)
       quests <- quest.load(user)
-      _      <- renderer.show(user, menuScreen(data, now, quest.button(quests)))
+      hero   <- getHero(user)
+      work   <- daily.today(hero, now)
+      _      <- renderer.show(user, menuScreen(data, now, quest.button(quests), daily.button(work)))
     } yield ()
+
+  // ── Заказ Густаво ─────────────────────────────────────────────────────────
+
+  private def showDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      task <- daily.today(hero, now)
+      _    <- daily.show(user, task, now, renderer)
+    } yield StateType.Gustavo
+
+  private def takeDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.Gustavo
+
+  /** Травник платит склянкой из своих запасов — что сварил, тем и делится. За
+    * редкую траву и склянка редкая: такие он варит по одной. */
+  private def handDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      paid <- daily.hand(user, hero, now)
+      _    <- ZIO.foreachDiscard(paid) { case (task, exp) =>
+                val brew = BrewKind.item(DailyRates.brew(task.kind, DailyRates.dayOf(now) + hero.id.value))
+                val give = itemRepo.fold(ZIO.unit: Task[Unit])(repo =>
+                  repo.persist(hero.id, brew).flatMap(it =>
+                    inventoryRepo.addItem(hero.id, it).ignore))
+                give *> renderer.show(user, Screen(content.format("daily.gustavo.reward",
+                  "brew" -> brew.displayTitle, "exp" -> exp.toString), Nil))
+              }
+      _    <- renderMenu(user, renderer)
+    } yield StateType.Gustavo
 
   // ── Травы ───────────────────────────────────────────────────────────────
 
@@ -158,7 +205,8 @@ case class GustavoState(
       _    <- renderMenu(user, renderer)
     } yield ()
 
-  private def menuScreen(data: GustavoData, now: Long, questBtn: Option[Choice]): Screen = {
+  private def menuScreen(data: GustavoData, now: Long, questBtn: Option[Choice],
+                         dailyBtn: Option[Choice]): Screen = {
     val healBtn = data.healCooldownUntil.filter(_ > now).map(_ - now) match {
       case Some(left) =>
         content.choice("Heal", "gustavo.cooldownLabel", "mins" -> minsOf(left)).copy(color = ChoiceColor.Negative)
@@ -170,6 +218,7 @@ case class GustavoState(
     val herbsTalk   = content.choice("HerbsTalk", "gustavo.herbs.talkLabel")
     val suppliesBtn = content.choice("Supplies", "gustavo.suppliesLabel")
     val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, suppliesBtn) ++ questBtn.toList ++
+      dailyBtn.toList ++
       List(content.choice("Back", "gustavo.back"), CityExit.button(content))
     Screen(content.text("gustavo.menu.text"), choices)
   }

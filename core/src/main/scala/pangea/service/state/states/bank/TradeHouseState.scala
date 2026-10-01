@@ -7,9 +7,11 @@ import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.bank.BankRepository
+import pangea.repository.inventory.InventoryRepository
 import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
-import pangea.service.state.{CityExit, State, UserAction}
+import pangea.model.quest.{DailyNpc, DailyRates}
+import pangea.service.state.{CityExit, DailyDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Торговый дом на Торговой площади: банкир Рахадим продаёт ячейки хранилища, меняет
@@ -17,14 +19,18 @@ import zio.{Task, ZIO}
  *  вещи и серебро, первая стоит [[BankVault.FirstCellPrice]], каждая следующая —
  *  на [[BankVault.CellPriceStep]] дороже предыдущей. */
 case class TradeHouseState(
-  heroDao:  HeroDao,
-  bankRepo: BankRepository,
-  parcels:  Parcels,
-  content:  SceneContent
+  heroDao:       HeroDao,
+  bankRepo:      BankRepository,
+  parcels:       Parcels,
+  inventoryRepo: InventoryRepository,
+  content:       SceneContent
 ) extends State {
 
   /** Ячейку тоже можно оплатить из уже выкупленных: сперва своё, потом банк. */
   private val purse = Purse(heroDao, Some(bankRepo))
+
+  /** Счётная книга Рахадима: сегодняшнее поручение банкира. */
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Rakhadim, "Rakhadim", Some(inventoryRepo))
 
   private val branch = new Branch(
     routes = Map(
@@ -38,6 +44,10 @@ case class TradeHouseState(
       "FetShop"         -> Target.Goto(StateType.FetShop),
       "Mail"            -> Target.Goto(StateType.Mail),
       "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare),
+      daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
+      daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.handAction  -> Target.Run { (u, _, r) => handDaily(u, r) },
+      "RakhadimDailyBack" -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) },
       CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
@@ -53,16 +63,52 @@ case class TradeHouseState(
 
   // --- Меню Рахадима ---
 
+  // ── Счётная книга ─────────────────────────────────────────────────────────
+
+  private def showDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      task <- daily.today(hero, now)
+      _    <- daily.show(user, task, now, renderer)
+    } yield StateType.TradeHouse
+
+  private def takeDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.TradeHouse
+
+  /** Банкир платит тем, чем и живёт, — дублонами. Ставка от уровня не зависит:
+    * за лот одна, за принесённое другая. */
+  private def handDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      paid <- daily.hand(user, hero, now)
+      _    <- ZIO.foreachDiscard(paid) { case (task, exp) =>
+                val pay = DailyRates.doubloons(task.kind)
+                heroDao.updateDoubloons(user.userId, hero.doubloons + pay) *>
+                  renderer.show(user, Screen(content.format("daily.rakhadim.reward",
+                    "doubloons" -> pay.toString, "exp" -> exp.toString), Nil))
+              }
+      _    <- showMenu(user, renderer)
+    } yield StateType.TradeHouse
+
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
       vault <- bankRepo.get(hero.id).mapError(asThrowable)
       // Почта видна, только если на ней что-то лежит.
       mail  <- parcels.waitingCount(hero.id).orElse(ZIO.succeed(0L))
-      _     <- renderer.show(user, menuScreen(vault, mail))
+      now   <- nowMs
+      // Счётная книга: у банкира на каждый день своя просьба.
+      task  <- daily.today(hero, now)
+      _     <- renderer.show(user, menuScreen(vault, mail, daily.button(task)))
     } yield ()
 
-  private def menuScreen(vault: BankVault, mail: Long = 0L): Screen = {
+  private def menuScreen(vault: BankVault, mail: Long = 0L, work: Option[Choice] = None): Screen = {
     // Ряд на две кнопки: покупка ячейки и вход в хранилище (если есть что открывать).
     val buy = Choice("BuyCell",
       Choice.fit(content.format("bank.tradeHouse.buyCell", "price" -> vault.nextCellPrice.toString)),
@@ -80,7 +126,8 @@ case class TradeHouseState(
     ) ++ auction ++
       Option.when(mail > 0L)(Choice("Mail",
         content.format("bank.tradeHouse.mailLabel", "count" -> mail.toString),
-        color = ChoiceColor.Positive, row = Some(3))) :+
+        color = ChoiceColor.Positive, row = Some(3))) ++
+      work.map(_.copy(row = Some(3))) :+
       Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(4)) :+
       CityExit.button(content, Some(4))
     val text = content.format("bank.tradeHouse.menu",
@@ -139,6 +186,9 @@ case class TradeHouseState(
     } yield ()
 
   // --- Вспомогательное ---
+
+  private def nowMs: Task[Long] =
+    ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
 
   private def getHero(user: User): Task[Hero] =
     heroDao.getHeroByUserId(user.userId)

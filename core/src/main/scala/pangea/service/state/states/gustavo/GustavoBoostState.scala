@@ -116,6 +116,7 @@ case class GustavoBoostState(
     purse.charge(user.userId, hero, price) *>
       heroDao.updateStatBoosts(user.userId, newBoosts) *>
       heroDao.writeGustavoData(user.userId, data.copy(freeBoostsUsed = newFree).asJson) *>
+      // «Мне нужен подопытный» — выпитое идёт в заказ дня.
       renderer.show(user, Screen(content.format(msgKey, "potion" -> bs.potion, "stat" -> bs.label), Nil))
   }
 
