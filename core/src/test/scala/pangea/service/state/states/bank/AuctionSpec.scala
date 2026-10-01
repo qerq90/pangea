@@ -106,10 +106,29 @@ object AuctionSpec extends ZIOSpecDefault {
         first  <- f.renderer.sentScreens
         _      <- f.state.action(testUser, tap("AuctionNext"), f.renderer)
         second <- f.renderer.sentScreens
-      } yield assertTrue(first.last.choices.count(_.id == "BuyLot") == ItemMenu.DefaultPageSize) &&
+      } yield assertTrue(first.last.choices.count(_.id == "ShowLot") == ItemMenu.DefaultPageSize) &&
               assertTrue(first.last.choices.forall(_.label.length <= Choice.MaxLabelLength)) &&
               assertTrue(first.last.choices.flatMap(_.row).max < 10) &&
-              assertTrue(second.last.choices.count(_.id == "BuyLot") == 4)
+              assertTrue(second.last.choices.count(_.id == "ShowLot") == 4)
+    },
+
+    test("лот с витрины открывает карточку с описанием, а не сразу покупку") {
+      for {
+        f       <- auction(lots = List(lotOf(7L)), silver = 1000L)
+        _       <- f.state.action(testUser, tap("AuctionBrowse"), f.renderer)
+        _       <- f.state.action(testUser, tap("ShowLot", "id" -> "7"), f.renderer)
+        card    <- f.renderer.sentScreens
+        // и только с карточки — к покупке
+        _       <- f.state.action(testUser, tap("BuyLot", "id" -> "7"), f.renderer)
+        confirm <- f.renderer.sentScreens
+      } yield assertTrue(card.last.text.contains("№7") && card.last.text.contains("Топор 7")) &&
+              // описание вещи стоит до цены, а не после срока торгов
+              assertTrue(card.last.text.contains("⚔ +7") && card.last.text.contains("🎯 +2")) &&
+              assertTrue(card.last.text.indexOf("⚔ +7") < card.last.text.indexOf("Цена:")) &&
+              assertTrue(card.last.choices.map(_.id) == List("BuyLot", "Auction")) &&
+              // ничего не куплено: карточка только показывает
+              assertTrue(f.lots.snapshot.size == 1) &&
+              assertTrue(confirm.last.choices.map(_.id) == List("BuyLotYes", "Auction"))
     },
 
     test("номер лота текстом открывает карточку со всеми характеристиками") {
@@ -308,6 +327,43 @@ object AuctionSpec extends ZIOSpecDefault {
         } yield assertTrue(showcase.last.text.contains("Прилавки пусты")) &&
                 assertTrue(mine.last.text.contains("не продан")) &&
                 assertTrue(f.lots.snapshot.isEmpty && f.inv.snapshot.size == 1)
+      },
+
+      test("номер проданного лота освобождается: следующая вещь занимает его") {
+        for {
+          f    <- auction(inventory = List(gear(42L, "Шлем")), lots = List(lotOf(1L), lotOf(2L)), silver = 1000L)
+          // первый лот купили — номер 1 освободился
+          _    <- f.state.action(testUser, tap("BuyLotYes", "id" -> "1"), f.renderer)
+          _    <- f.state.action(testUser, tap("AucSell_42"), f.renderer)
+          _    <- f.state.action(testUser, tap("SellCurrency", "cur" -> "Silver"), f.renderer)
+          _    <- f.state.action(testUser, text("500"), f.renderer)
+          _    <- f.state.action(testUser, tap("SellConfirm"), f.renderer)
+          lots  = f.lots.snapshot
+        } yield assertTrue(lots.map(_.id).toSet == Set(1L, 2L)) &&
+                assertTrue(lots.find(_.id == 1L).exists(_.item.name == "Шлем")) &&
+                assertTrue(f.players.announced.exists(_.contains("Выставлен лот номер 1")))
+      },
+
+      test("номер снятого лота тоже освобождается, а витрина держит свежие сверху") {
+        // часы теста стоят на нуле, поэтому «вчерашние» лоты выставлены в минус
+        val old1 = lotOf(1L).copy(listedAt = -200L)
+        val old2 = lotOf(2L, owner = heroId).copy(listedAt = -100L)
+        for {
+          f     <- auction(inventory = List(gear(42L, "Шлем")), lots = List(old1, old2), silver = 1000L)
+          // свой лот №2 сняли — освободился именно он
+          _     <- f.state.action(testUser, tap("Reclaim", "id" -> "2"), f.renderer)
+          _     <- f.state.action(testUser, tap("AucSell_42"), f.renderer)
+          _     <- f.state.action(testUser, tap("SellCurrency", "cur" -> "Silver"), f.renderer)
+          _     <- f.state.action(testUser, text("500"), f.renderer)
+          _     <- f.state.action(testUser, tap("SellConfirm"), f.renderer)
+          _     <- f.state.action(testUser, tap("AuctionBrowse"), f.renderer)
+          shelf <- f.renderer.sentScreens
+          lots   = f.lots.snapshot
+        } yield assertTrue(lots.map(_.id).toSet == Set(1L, 2L)) &&
+                assertTrue(lots.find(_.id == 2L).exists(_.item.name == "Шлем")) &&
+                // новый лот взял номер поменьше, но стоит первым: порядок по
+                // времени выставления, а не по номеру
+                assertTrue(shelf.last.choices.map(_.label).head.contains("Шлем"))
       },
 
       test("чужой лот не снять") {

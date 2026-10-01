@@ -912,7 +912,7 @@ bank:
     empty: "Прилавки пусты — никто ничего не выставил."
     browseHeader: "Лоты в продаже. Страница {page}/{total}\nВыберите лот или напишите его номер."
     lotButton: "№{id} {name} — {price}"
-    card: "Лот №{id}\n{title}\nЦена: {price}\nДо конца торгов: {hours} ч."
+    card: "Лот №{id}\n{title}{stats}\nЦена: {price}\nДо конца торгов: {hours} ч."
     noSuchLot: "Лота №{id} у Рахадима нет."
     stateUnsold:   "Срок вышел: лот не продан и ждёт хозяина."
     stateOwn:      "Это ваш лот."

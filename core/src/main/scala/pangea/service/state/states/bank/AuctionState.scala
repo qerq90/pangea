@@ -55,6 +55,7 @@ case class AuctionState(
       "AuctionBrowse" -> Target.Run { (u, _, r)  => writeScene(u, AuctionScene(page = Some(0))) *> showBrowse(u, r).as(StateType.Auction) },
       "AuctionPrev"   -> Target.Run { (u, _, r)  => turnPage(u, r, -1).as(StateType.Auction) },
       "AuctionNext"   -> Target.Run { (u, _, r)  => turnPage(u, r, +1).as(StateType.Auction) },
+      "ShowLot"       -> Target.Run { (u, ua, r) => withLotId(ua)(showLot(u, _, r)).as(StateType.Auction) },
       "BuyLot"        -> Target.Run { (u, ua, r) => withLotId(ua)(confirmBuy(u, _, r)).as(StateType.Auction) },
       "BuyLotYes"     -> Target.Run { (u, ua, r) => withLotId(ua)(buy(u, _, r)).as(StateType.Auction) },
       "AuctionSell"   -> Target.Run { (u, _, r)  => writeScene(u, AuctionScene(sellPage = Some(0))) *> showSellList(u, r).as(StateType.Auction) },
@@ -121,7 +122,7 @@ case class AuctionState(
       _ <- if (lots.isEmpty) renderer.show(user, Screen(content.text("bank.auction.empty"), backRow))
            else {
              // Не больше восьми лотов на страницу: девятый ряд занимает навигация.
-             val buttons = lots.map(lot => Choice("BuyLot",
+             val buttons = lots.map(lot => Choice("ShowLot",
                ItemMenu.truncate(content.format("bank.auction.lotButton",
                  "id" -> lot.id.toString, "name" -> lot.item.displayTitle, "price" -> lot.priceLine)),
                data = Map("id" -> lot.id.toString)))
@@ -157,8 +158,10 @@ case class AuctionState(
           val card  = content.format("bank.auction.card",
             "id"    -> lot.id.toString,
             "title" -> lot.item.displayTitle,
+            // Описание вещи идёт сразу под именем: цену смотрят, уже зная, за что.
+            "stats" -> (if (stats.isEmpty) "" else "\n" + stats.mkString("\n")),
             "price" -> lot.priceLine,
-            "hours" -> lot.hoursLeft(now).toString) + (if (stats.isEmpty) "" else "\n" + stats.mkString("\n"))
+            "hours" -> lot.hoursLeft(now).toString)
           val own = lot.sellerId == hero.id
           val buttons =
             if (own && lot.unsold(now)) List(Choice("Reclaim", content.text("bank.auction.reclaimLabel"), data = Map("id" -> lot.id.toString), row = Some(0)))

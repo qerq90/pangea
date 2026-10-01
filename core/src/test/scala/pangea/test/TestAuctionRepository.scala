@@ -11,10 +11,15 @@ import zio.{IO, ZIO}
   * лоты не хранятся. */
 class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends AuctionRepository {
 
-  private var nextId: Long = lots.map(_.id).maxOption.getOrElse(0L) + 1L
+  /** Наименьший свободный номер — как в проде: проданный лот освобождает свой. */
+  private def freeId: Long = Iterator.from(1).map(_.toLong).find(n => !lots.exists(_.id == n)).get
+
+  /** Свежие сверху. По номеру сортировать нельзя: они переиспользуются. */
+  private def newestFirst(xs: List[AuctionLot]): List[AuctionLot] =
+    xs.sortBy(l => (-l.listedAt, -l.id))
 
   def page(now: Long, page: Int, pageSize: Int): IO[AuctionRepoError, (List[AuctionLot], Int, Int)] = {
-    val onSaleLots = lots.filter(_.onSale(now)).sortBy(-_.id)
+    val onSaleLots = newestFirst(lots.filter(_.onSale(now)))
     val pages      = ((onSaleLots.size + pageSize - 1) / pageSize).max(1)
     val p          = page.max(0).min(pages - 1)
     ZIO.succeed((onSaleLots.slice(p * pageSize, p * pageSize + pageSize), pages, p))
@@ -26,7 +31,7 @@ class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends Au
     ZIO.fromOption(lots.find(_.id == id)).orElseFail(AuctionRepoError.LotNotFound)
 
   def mine(sellerId: HeroId, limit: Long): IO[AuctionRepoError, List[AuctionLot]] =
-    ZIO.succeed(lots.filter(_.sellerId == sellerId).sortBy(-_.id).take(limit.toInt))
+    ZIO.succeed(newestFirst(lots.filter(_.sellerId == sellerId)).take(limit.toInt))
 
   def mineCount(sellerId: HeroId): IO[AuctionRepoError, Long] =
     ZIO.succeed(lots.count(_.sellerId == sellerId).toLong)
@@ -37,8 +42,7 @@ class TestAuctionRepository(private var lots: List[AuctionLot] = Nil) extends Au
     else if (price > AuctionLot.MaxPrice) ZIO.fail(AuctionRepoError.PriceTooHigh)
     else if (lots.count(_.sellerId == sellerId) >= AuctionLot.MaxLots) ZIO.fail(AuctionRepoError.TooManyLots)
     else ZIO.succeed {
-      val lot = AuctionLot.fresh(sellerId, item, price, currency, now).copy(id = nextId)
-      nextId += 1L
+      val lot = AuctionLot.fresh(sellerId, item, price, currency, now).copy(id = freeId)
       lots = lots :+ lot
       lot
     }
