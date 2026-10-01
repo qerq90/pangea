@@ -54,6 +54,16 @@ sealed abstract class DailyKind(
     * редким гостем. Метод, а не параметр с умолчанием: умолчания конструктора
     * живут в компаньоне, а варианту enum туда лучше не заглядывать. */
   def weight: Int = 1
+
+  /** Во сколько раз опыт за поручение больше обычного. Редкому заказу —
+    * редкая плата: такую траву и найти труднее. */
+  def expFactor: Int = 1
+
+  /** Сколько дублонов платит за это Рахадим; у прочих горожан плата своя. */
+  def doubloons: Long = 0L
+
+  /** Платят ли за него из редких запасов (склянка Густаво). */
+  def rareReward: Boolean = false
 }
 
 /** Поручение «принеси»: горожанин называет вещь, герой достаёт её из сумки и
@@ -80,10 +90,13 @@ object DailyKind extends Enum[DailyKind] {
 
   // ── Рахадим: торги должны идти, редкое — лежать на виду ───────────────────
   /** Выставить лот на аукцион: пустой зал банкиру дороже пустой ячейки. */
-  case object BankLot extends DailyKind("lot", DailyNpc.Rakhadim, 1L)
+  case object BankLot extends DailyKind("lot", DailyNpc.Rakhadim, 1L) {
+    override def doubloons: Long = DailyRates.LotDoubloons
+  }
 
   /** Принести реликвию названной расы: такие вещи Рахадим держит отдельно. */
   case object BankRelic extends DailyKind("relic", DailyNpc.Rakhadim, 1L) with DailyBring {
+    override def doubloons: Long = DailyRates.BringDoubloons
     override def picks: List[String] = Race.mortals.map(_.entryName).toList
     override def pickName(pick: String): String =
       Race.withNameOption(pick).map(_.genitivePlural).getOrElse(pick)
@@ -97,6 +110,7 @@ object DailyKind extends Enum[DailyKind] {
     * приходят и без героя. Череп сюда не идёт — это не камень, а то, что от
     * черепа осталось. */
   case object BankGem extends DailyKind("gem", DailyNpc.Rakhadim, 1L) with DailyBring {
+    override def doubloons: Long = DailyRates.BringDoubloons
     override def picks: List[String] =
       GemKind.values.filterNot(_ == GemKind.Skull).map(_.entryName).toList
     override def pickName(pick: String): String =
@@ -167,7 +181,9 @@ object DailyKind extends Enum[DailyKind] {
   /** Редкая трава второго ранга, одна. Заказ нечастый — примерно раз в десять
     * дней, — и платит он за него по-другому. */
   case object HerbRare extends DailyKind("rare", DailyNpc.Gustavo, 1L) with DailyBring {
-    override def weight: Int = DailyRates.GustavoRareWeight
+    override def weight: Int        = DailyRates.GustavoRareWeight
+    override def expFactor: Int     = DailyRates.RareExpFactor
+    override def rareReward: Boolean = true
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
       item.material.exists(_.herbRank >= 2)
@@ -285,19 +301,26 @@ object DailyRates {
   /** Сколько миллисекунд до полуночи по Москве. */
   def untilNextDay(nowMs: Long): Long = (dayOf(nowMs) + 1) * DayMs - MoscowOffsetMs - nowMs
 
-  /** Опыт за поручение: по уровню героя, чтобы и на поздних этажах не зря. */
-  def exp(heroLvl: Long): Long = 50L + heroLvl * 25L
+  /** Опыт за поручение — доля уровня, а не отдельная линейка: двадцатая часть
+    * порога, то есть пять процентов уровня. Так заказ стоит одинаково что на
+    * третьем уровне, что на сотом, и не перекашивает лестницу ни там, ни там. */
+  def exp(heroLvl: Long): Long = (pangea.model.hero.Hero.neededExpForLevel(heroLvl) / 20L).max(5L)
 
-  /** Серебро Ришелье — по уровню героя. */
-  def silver(heroLvl: Long): Long = 200L * (heroLvl + 5L)
+  /** То же с поправкой на само поручение: за редкое платят вдвое. */
+  def exp(heroLvl: Long, kind: DailyKind): Long = exp(heroLvl) * kind.expFactor.toLong
+
+  /** Серебро Ришелье — по уровню героя, и мерено его же прилавком: заказ стоит
+    * примерно шесть зелёных вещей своего уровня (зелёная уходит ему за
+    * `(ур + 5) × 1.2 × 4`). Не доход, а плата за работу. */
+  def silver(heroLvl: Long): Long = 30L * (heroLvl + 5L)
 
   /** Дублоны Рахадима. С уровнем не растут: банкир платит за вещь, а не за
     * заслуги, — за лот поменьше, за принесённое побольше. */
-  val lotDoubloons: Long   = 2L
-  val bringDoubloons: Long = 5L
+  val LotDoubloons: Long   = 2L
+  val BringDoubloons: Long = 5L
 
-  def doubloons(kind: DailyKind): Long =
-    if (kind == DailyKind.BankLot) lotDoubloons else bringDoubloons
+  /** Во сколько раз редкий заказ Густаво щедрее прочих на опыт. */
+  val RareExpFactor: Int = 2
 
   /** Как часто Густаво просит редкую траву: девять, девять и два — примерно
     * один такой заказ на десять дней. */
@@ -310,8 +333,8 @@ object DailyRates {
   val rareBrews: IndexedSeq[BrewKind] =
     BrewKind.values.filter(k => k.base.isEmpty && k.recipe.exists(_.herbRank >= 2))
 
-  def brew(kind: DailyKind, seed: Long): BrewKind = {
-    val pool = if (kind == DailyKind.HerbRare) rareBrews else plainBrews
+  def brew(rare: Boolean, seed: Long): BrewKind = {
+    val pool = if (rare) rareBrews else plainBrews
     pool((((seed % pool.size.toLong).toInt + pool.size) % pool.size).toInt)
   }
 

@@ -297,12 +297,26 @@ object DailyQuestSpec extends ZIOSpecDefault {
     },
 
     test("платят по делу: за лот меньше, за принесённое больше, и уровень тут ни при чём") {
-      assertTrue(DailyRates.doubloons(DailyKind.BankLot) == 2L) &&
-      assertTrue(DailyRates.doubloons(DailyKind.BankRelic) == 5L) &&
-      assertTrue(DailyRates.doubloons(DailyKind.BankGem) == 5L) &&
-      // редкая трава оплачивается редкой склянкой, прочие заказы — простой
-      assertTrue((0L until 20L).forall(s => DailyRates.plainBrews.contains(DailyRates.brew(DailyKind.HerbsAny, s)))) &&
-      assertTrue((0L until 20L).forall(s => DailyRates.rareBrews.contains(DailyRates.brew(DailyKind.HerbRare, s)))) &&
+      // заказ Ришелье мерен его же прилавком: шесть зелёных вещей своего уровня
+      assertTrue((1L to Hero.MaxLevel).forall { l =>
+        val green = ((l + 5L) * 1.2 * Rarity.Green.factorR).toLong
+        DailyRates.silver(l) / green == 6L
+      }) &&
+      // опыт — двадцатая часть порога, то есть пять процентов уровня на любом уровне
+      assertTrue((2L to Hero.MaxLevel).forall { l =>
+        DailyRates.exp(l) == Hero.neededExpForLevel(l) / 20L
+      }) &&
+      // на первом уровне двадцатая часть совсем мала — держит пол
+      assertTrue(DailyRates.exp(1L) == 5L && Hero.neededExpForLevel(1L) / 20L < 5L) &&
+      assertTrue(DailyKind.BankLot.doubloons == 2L) &&
+      assertTrue(DailyKind.BankRelic.doubloons == 5L) &&
+      assertTrue(DailyKind.BankGem.doubloons == 5L) &&
+      // редкая трава оплачивается редкой склянкой и двойным опытом
+      assertTrue(DailyKind.HerbRare.rareReward && !DailyKind.HerbsAny.rareReward) &&
+      assertTrue(DailyKind.HerbRare.expFactor == 2 && DailyKind.HerbsAny.expFactor == 1) &&
+      assertTrue(DailyRates.exp(10L, DailyKind.HerbRare) == 2L * DailyRates.exp(10L)) &&
+      assertTrue((0L until 20L).forall(s => DailyRates.plainBrews.contains(DailyRates.brew(rare = false, s)))) &&
+      assertTrue((0L until 20L).forall(s => DailyRates.rareBrews.contains(DailyRates.brew(rare = true, s)))) &&
       assertTrue(DailyRates.rareBrews.forall(b => b.recipe.exists(_.herbRank >= 2))) &&
       assertTrue(DailyRates.plainBrews.forall(b => b.recipe.forall(_.herbRank <= 1)))
     },
