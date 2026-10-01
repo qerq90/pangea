@@ -60,7 +60,7 @@ object StateHandlerSpec extends ZIOSpecDefault {
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
       transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
-                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, heroRepo, api)
+                       pangea.service.admin.AdminPanel.disabled, content, lock), heroDao, heroRepo, api)
 
   /** Обвязка для отложенной выручки: герой, диспетчер и склад невыданных денег. */
   private def makePayoutHandler(startState: StateType) =
@@ -80,7 +80,7 @@ object StateHandlerSpec extends ZIOSpecDefault {
         StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content))
       lock      <- PlayerLock.make
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
-                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, api, payoutDao)
+                       pangea.service.admin.AdminPanel.disabled, content, lock), heroDao, api, payoutDao)
 
   override def spec = suite("StateHandler /home")(
 
@@ -258,5 +258,5 @@ object StateHandlerSpec extends ZIOSpecDefault {
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
       transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
-                       pangea.service.admin.AdminPanel.disabled, lock), heroDao, api)
+                       pangea.service.admin.AdminPanel.disabled, content, lock), heroDao, api)
 }

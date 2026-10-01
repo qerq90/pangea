@@ -67,13 +67,23 @@ final class ServerLive(
       } yield resp
   }
 
-  /** Что умеет общая беседа: пока только «Передать» в ответ (или пересылкой)
-    * на сообщение того, кому передают. Всё прочее там нас не касается. */
+  /** Что умеет общая беседа: «Передать» в ответ (или пересылкой) на
+    * сообщение того, кому передают, и две команды о себе — «Мой профиль» и
+    * «Моё снаряжение», ответ на которые уходит в саму беседу. Всё прочее там нас
+    * не касается. */
   private def handleChat(msg: VkEvent.Message): Task[Unit] =
-    (msg.fromId, msg.quotedAuthor, ChatCommand.transferQuery(msg.text)) match {
-      case (Some(from), Some(to), Some(query)) if from > 0L && to > 0L =>
-        stateHandler.transferFromChat(VkId(from.toString), VkId(to.toString), query, msg.id)
-      case _ => ZIO.unit
+    msg.fromId.filter(_ > 0L) match {
+      case None => ZIO.unit
+      case Some(from) =>
+        ChatCommand.selfCommand(msg.text) match {
+          case Some(command) => stateHandler.selfToChat(VkId(from.toString), command, msg.id)
+          case None =>
+            (msg.quotedAuthor, ChatCommand.transferQuery(msg.text)) match {
+              case (Some(to), Some(query)) if to > 0L =>
+                stateHandler.transferFromChat(VkId(from.toString), VkId(to.toString), query, msg.id)
+              case _ => ZIO.unit
+            }
+        }
     }
 
   private val httpApp: HttpApp[Task] = (routes <+> LogsRoutes.routes).orNotFound

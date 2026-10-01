@@ -270,7 +270,7 @@ case class Hero(
   def getNeededExp: Long = Hero.neededExpForLevel(lvl)
   def getLvlExp: Long    = exp
 
-  /** Начисление опыта с прокачкой уровней по лестнице Фибоначчи. Возвращает героя
+  /** Начисление опыта с прокачкой уровней по [[Hero.neededExpForLevel]]. Возвращает героя
    *  с обновлёнными `exp`/`lvl`/`upgradePoints` (4 очка характеристик за уровень,
    *  кап на `Hero.MaxLevel`). Единственное место расчёта прокачки. */
   def gainExp(amount: Long): Hero = {

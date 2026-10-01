@@ -9,7 +9,8 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
 import io.circe.syntax.EncoderOps
 import pangea.service.admin.AdminPanel
-import pangea.service.chat.ChatCommand
+import pangea.engine.SceneContent
+import pangea.service.chat.{ChatCommand, ChatProfile}
 import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.state.states.parcel.TransferState
@@ -30,6 +31,7 @@ class StateHandler(
   transfers: Transfers,
   states: Map[StateType, State],
   admin: AdminPanel,
+  content: SceneContent,
   lock: PlayerLock
 ) {
 
@@ -90,6 +92,40 @@ class StateHandler(
         }
     }
   }
+
+  /** «Мой профиль» и «Моё снаряжение» из общей беседы: ответ уходит туда же,
+    * в беседу — о себе рассказывают при всех. Писал не игрок или игрок без героя —
+    * молчим: беседа не место для сообщений об ошибках. */
+  def selfToChat(senderVk: VkId, command: ChatCommand.Self, eventId: Long): Task[Unit] =
+    userRepo.getUserByVkId(senderVk).flatMap {
+      case None => ZIO.unit
+      case Some(sender) =>
+        lock.withLock(sender.userId) {
+          // Номера событий беседы считаем отрицательными — как и у «Передать»,
+          // иначе повтор-защита путала бы их с номерами из лички.
+          userRepo.checkAndRecordEvent(sender.userId, -eventId).flatMap { fresh =>
+            ZIO.when(fresh)(tellAboutSelf(sender, command)).unit
+          }
+        }
+    }
+
+  private def tellAboutSelf(sender: User, command: ChatCommand.Self): Task[Unit] =
+    heroRepo.getHero(sender.userId).flatMap {
+      case None => ZIO.unit
+      case Some(hero) =>
+        for {
+          now  <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+          name <- api.getName(sender).map(r => s"${r.response.head.firstName} ${r.response.head.lastName}")
+                    .orElse(ZIO.succeed(StateHandler.TransferSomeone))
+          text <- command match {
+                    case ChatCommand.Self.Gear => ZIO.succeed(ChatProfile.gear(name, hero))
+                    case ChatCommand.Self.Profile =>
+                      AzatData.load(heroDao, sender.userId, now).map(azat =>
+                        ChatProfile.profile(name, hero, now, azat.blessingActive(now), azat.instantRests, content))
+                  }
+          _    <- api.sendToChat(text)
+        } yield ()
+    }
 
   private def startTransfer(sender: User, targetVk: VkId, query: String, renderer: Renderer): Task[Unit] =
     for {
@@ -361,7 +397,7 @@ object StateHandler {
 
   val live: ZLayer[
     Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels
-      with Transfers with AdminPanel,
+      with Transfers with AdminPanel with SceneContent,
     Nothing,
     StateHandler
   ] =
@@ -376,8 +412,9 @@ object StateHandler {
         transfers <- ZIO.service[Transfers]
         statesMap <- ZIO.service[StatesMap]
         admin     <- ZIO.service[AdminPanel]
+        content   <- ZIO.service[SceneContent]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
       } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, statesMap.states,
-                               admin, lock)
+                               admin, content, lock)
     )
 }
