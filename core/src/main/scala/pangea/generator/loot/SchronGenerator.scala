@@ -69,13 +69,16 @@ object SchronGenerator {
     * @param killLevel   уровень для масштабирования предметов/серебра
     * @param doubloonMin минимум дублонов вместе с серебром
     * @param doubloonMax максимум дублонов вместе с серебром
+    * @param doubloonPct шанс (в %), что золото вообще окажется рядом с серебром;
+    *                    сто — как было всегда, и лишнего броска тогда не делается
     */
   def roll(
       race: Race,
       killLevel: Long,
       doubloonMin: Int,
       doubloonMax: Int,
-      rng: Rng
+      rng: Rng,
+      doubloonPct: Int = 100
   ): (Reward, Rng) = {
     @tailrec
     def loop(
@@ -105,7 +108,7 @@ object SchronGenerator {
                     loop(tail, used + cat, trophy(kind, race, killLevel) :: items, silver, doubloons, r3)
                   case Category.Silver =>
                     val (s, r3) = rollSilver(killLevel, r2)
-                    val (d, r4) = r3.between(doubloonMin.toLong, doubloonMax.toLong + 1L)
+                    val (d, r4) = rollDoubloons(doubloonPct, doubloonMin, doubloonMax, r3)
                     loop(tail, used + cat, items, silver + s, doubloons + d, r4)
                   case Category.MapHalf =>
                     // половинка карты по уровню схрона; RNG не тратит
@@ -138,6 +141,15 @@ object SchronGenerator {
       }
     (walk(active, 0L), next)
   }
+
+  // Золото рядом с серебром. При ста процентах броска на «будет ли» нет вовсе:
+  // так прикопанный схрон и сундук с цепочкой катятся ровно так же, как и раньше.
+  private def rollDoubloons(pct: Int, min: Int, max: Int, rng: Rng): (Long, Rng) =
+    if (pct >= 100) rng.between(min.toLong, max.toLong + 1L)
+    else {
+      val (hit, r1) = rng.between(0L, 100L)
+      if (hit < pct.toLong) r1.between(min.toLong, max.toLong + 1L) else (0L, r1)
+    }
 
   // Серебро: базис lvl×8 с разбросом ±20%, минимум 1.
   private def rollSilver(killLevel: Long, rng: Rng): (Long, Rng) = {

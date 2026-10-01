@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit
   * где есть ход, красные в стену. В комнате сперва дерутся, а находка (трава,
   * сундук, чей-то схрон, сухой угол для привала) ждёт до конца боя. Мобы стоят
   * кучками по 3–5, легендарных среди них не бывает, минибоссы сюда не заходят.
-  * За последнего убитого пещера отдаёт вдвое больше опыта, чем герой взял со
+  * За последнего убитого пещера докладывает большую долю опыта, взятого со
   * всех её обитателей.
   *
   * Уход и смерть пещеру закрывают: недобитое и необысканное остаётся в ней. */
@@ -559,7 +559,8 @@ case class MonsterCaveState(
       hero <- getHero(user)
       seed <- Random.nextLong
       (reward, _) = SchronGenerator.roll(Race.withName(scene.race), hero.dungeonLevel.toLong,
-                      CaveRates.StashDoubloonMin, CaveRates.StashDoubloonMax, Rng(seed))
+                      CaveRates.StashDoubloonMin, CaveRates.StashDoubloonMax, Rng(seed),
+                      CaveRates.StashDoubloonChancePct)
       loot = LootData(
                items     = reward.items,
                silvers   = if (reward.silver > 0L) List(reward.silver) else Nil,
@@ -634,13 +635,13 @@ case class MonsterCaveState(
 
   // ── Зачистка и уход ────────────────────────────────────────────────────────
 
-  /** Последний обитатель пал — пещера отдаёт вдвое больше опыта, чем герой взял
+  /** Последний обитатель пал — пещера докладывает долю от опыта, что герой взял
     * со всех её мобов. Награда одна на пещеру. Из пещеры это героя не выводит:
     * необысканные углы остаются на месте, и уходит он сам, когда захочет. */
   private def reward(user: User, scene: CaveScene, renderer: Renderer): Task[CaveScene] =
     if (!scene.cleared || scene.rewarded || scene.expEarned <= 0L) ZIO.succeed(scene)
     else {
-      val bonus = scene.expEarned * CaveRates.ClearExpFactor
+      val bonus = (scene.expEarned * CaveRates.ClearExpPct / 100L).max(1L)
       for {
         hero   <- getHero(user)
         leveled = hero.gainExp(bonus)
