@@ -78,6 +78,7 @@ case class MerchantState(
       "Back"            -> Target.Goto(StateType.MarketSquare),
       daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.giveAction  -> Target.Run { (u, _, r) => giveDaily(u, r) },
       daily.handAction  -> Target.Run { (u, _, r) => handDaily(u, r) },
       "RichelieuDailyBack" -> Target.Run { (u, _, r) =>
         nowMs.flatMap(now => loadOrInit(u, now).flatMap(d => getHero(u).flatMap(h =>
@@ -325,6 +326,13 @@ case class MerchantState(
       _    <- daily.take(user, hero, now, renderer)
     } yield StateType.Merchant
 
+  private def giveDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.give(user, hero, now, renderer)
+    } yield StateType.Merchant
+
   /** Торговец платит серебром — чем же ещё. */
   private def handDaily(user: User, renderer: Renderer): Task[StateType] =
     for {
@@ -497,12 +505,8 @@ case class MerchantState(
   /** Строка продаваемого предмета + сравнение с надетым в том же слоте — тот же
    *  формат и разделитель, что при находке/дропе ([[Item.ComparisonSeparator]]).
    *  Если слот пуст — сравнивать не с чем, показываем только предмет. */
-  private def saleLine(mi: MerchantItem, i: Int, hero: Hero): String = {
-    val base     = s"${i + 1}) ${itemDesc(mi.item)}\n🪙 Цена: ${mi.price}"
-    val equipped = hero.equipment.equippedFor(mi.item.itemType).filter(_.itemType != ItemType.NoItem)
-    if (equipped.isEmpty) base
-    else base + "\n" + Item.ComparisonSeparator + "\n" + equipped.map(_.equippedComparison("Надето")).mkString("\n")
-  }
+  private def saleLine(mi: MerchantItem, i: Int, hero: Hero): String =
+    ItemMenu.saleLine(i + 1, mi.item, mi.price, hero)
 
   private def itemDesc(item: Item): String = {
     val lines = item.statsLines

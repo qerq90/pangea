@@ -7,7 +7,7 @@ import pangea.model.item._
 import pangea.model.monster.Race
 import pangea.model.quest._
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -170,49 +170,105 @@ object DailyQuestSpec extends ZIOSpecDefault {
               assertTrue(DailyKind.HornKills.snap && DailyKind.HornKills.goal == 20L)
     },
 
-    test("«принеси» считается по сумке и чужого не принимает") {
+    test("сумка сама не пустеет: пока не нажал «Отдать», вещи при герое") {
+      val day  = DailyRates.dayOf(noon)
+      val task = DailyTask(DailyKind.HerbNamed, day, pick = Some(MaterialKind.Nettle.entryName), taken = true)
+      val bag  = List(herb(1L, MaterialKind.Nettle), herb(2L, MaterialKind.Nettle),
+                      herb(3L, MaterialKind.Nettle), herb(4L, MaterialKind.Sage))
+      for {
+        d      <- dao()
+        h      <- d.getHeroByUserId(userId).map(_.get)
+        c      <- ZIO.attempt(SceneContent.load())
+        r      <- TestRenderer.make
+        inv     = TestInventoryRepository.withItems(bag)
+        _      <- seed(d, DailyNpc.Gustavo, task)
+        dlg     = DailyDialog(d, c, DailyNpc.Gustavo, "Gustavo", Some(inv))
+        idle   <- dlg.today(h, noon)
+        _      <- dlg.show(testUser, idle, noon, r)
+        seen   <- r.sentScreens.map(_.last)
+        before  = inv.snapshot.map(_.id)
+        _      <- dlg.give(testUser, h, noon, r)
+        given  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        after  <- dlg.today(h, noon)
+      } yield // заглянуть к Густаво — не значит отдать: ни прогресса, ни пропажи в сумке
+              assertTrue(idle.count == 0L && !idle.ready && before == List(1L, 2L, 3L, 4L)) &&
+              assertTrue(seen.choices.map(_.id) == List("GustavoDailyGive", "GustavoDailyBack")) &&
+              // после кнопки ушли ровно две крапивы: третья и шалфей остались при герое
+              assertTrue(after.count == 2L && after.ready) &&
+              assertTrue(inv.snapshot.map(_.id) == List(3L, 4L)) &&
+              assertTrue(given.contains("Густаво забирает"))
+    },
+
+    test("отдавать можно по частям, и лишнего горожанин не берёт") {
+      val day = DailyRates.dayOf(noon)
+      for {
+        d     <- dao()
+        h     <- d.getHeroByUserId(userId).map(_.get)
+        c     <- ZIO.attempt(SceneContent.load())
+        r     <- TestRenderer.make
+        // заказ на шесть трав, а в сумке пока четыре
+        inv    = TestInventoryRepository.withItems((1L to 4L).toList.map(herb(_, MaterialKind.Sage)))
+        _     <- seed(d, DailyNpc.Gustavo, DailyTask(DailyKind.HerbsAny, day, taken = true))
+        dlg    = DailyDialog(d, c, DailyNpc.Gustavo, "Gustavo", Some(inv))
+        _     <- dlg.give(testUser, h, noon, r)
+        half  <- dlg.today(h, noon)
+        // донёс ещё три — возьмут только недостающие две
+        _     <- ZIO.foreachDiscard(5L to 7L)(i => inv.addItem(h.id, herb(i, MaterialKind.Chamomile)).ignore)
+        _     <- dlg.give(testUser, h, noon, r)
+        full  <- dlg.today(h, noon)
+      } yield assertTrue(half.count == 4L && !half.ready && inv.snapshot.isEmpty == false) &&
+              assertTrue(full.count == DailyKind.HerbsAny.goal && full.ready) &&
+              // седьмая трава осталась при герое: больше, чем просили, не берут
+              assertTrue(inv.snapshot.size == 1)
+    },
+
+    test("чужого не берут: ни реликвию другой расы, ни целый камень") {
       val day  = DailyRates.dayOf(noon)
       val task = DailyTask(DailyKind.BankRelic, day, pick = Some(Race.Elf.entryName), taken = true)
       for {
         d      <- dao()
-        h       = hero()
+        h      <- d.getHeroByUserId(userId).map(_.get)
         c      <- ZIO.attempt(SceneContent.load())
+        r      <- TestRenderer.make
         // в сумке чужая реликвия и голова: ни то, ни другое не годится
-        wrong   = TestInventoryRepository.withItems(List(relic(1L, Race.Orc),
+        inv     = TestInventoryRepository.withItems(List(relic(1L, Race.Orc),
                     thing(2L, "Голова (Эльф)", ItemType.Trophy,
                       ItemDetails.Trophy(Race.Elf.entryName, TrophyKind.Head))))
         _      <- seed(d, DailyNpc.Rakhadim, task)
-        empty  <- DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(wrong)).today(h, noon)
-        right   = TestInventoryRepository.withItems(List(relic(1L, Race.Orc), relic(3L, Race.Elf)))
-        full   <- DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(right)).today(h, noon)
-      } yield assertTrue(empty.count == 0L && !empty.ready) &&
-              assertTrue(full.count == 1L && full.ready) &&
+        dlg     = DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(inv))
+        _      <- dlg.give(testUser, h, noon, r)
+        refused <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        empty  <- dlg.today(h, noon)
+        _      <- inv.addItem(h.id, relic(3L, Race.Elf)).ignore
+        _      <- dlg.give(testUser, h, noon, r)
+        done   <- dlg.today(h, noon)
+      } yield assertTrue(empty.count == 0L && !empty.ready && refused.contains("Пусто")) &&
+              assertTrue(inv.snapshot.map(_.id) == List(1L, 2L)) &&
+              assertTrue(done.count == 1L && done.ready) &&
               // камень берут только надколотый и только названной породы
               assertTrue(DailyKind.BankGem.accepts(stone(5L, GemKind.Ruby, 1), Some(GemKind.Ruby.entryName))) &&
               assertTrue(!DailyKind.BankGem.accepts(stone(6L, GemKind.Ruby, 3), Some(GemKind.Ruby.entryName))) &&
               assertTrue(!DailyKind.BankGem.accepts(stone(7L, GemKind.Topaz, 1), Some(GemKind.Ruby.entryName)))
     },
 
-    test("сданное «принеси» остаётся у горожанина: лишнего не берут, опыт идёт") {
+    test("сдача закрывает поручение: опыт идёт, завтрашнее не копится") {
       val day  = DailyRates.dayOf(noon)
-      val task = DailyTask(DailyKind.HerbNamed, day, pick = Some(MaterialKind.Nettle.entryName), taken = true)
-      val bag  = List(herb(1L, MaterialKind.Nettle), herb(2L, MaterialKind.Nettle),
-                      herb(3L, MaterialKind.Nettle), herb(4L, MaterialKind.Sage))
+      val task = DailyTask(DailyKind.HerbNamed, day, count = DailyKind.HerbNamed.goal,
+                   pick = Some(MaterialKind.Nettle.entryName), taken = true)
       for {
         d     <- dao()
         h     <- d.getHeroByUserId(userId).map(_.get)
         c     <- ZIO.attempt(SceneContent.load())
-        inv    = TestInventoryRepository.withItems(bag)
+        inv    = TestInventoryRepository.withItems(List(herb(1L, MaterialKind.Nettle)))
         _     <- seed(d, DailyNpc.Gustavo, task)
         dlg    = DailyDialog(d, c, DailyNpc.Gustavo, "Gustavo", Some(inv))
         paid  <- dlg.hand(testUser, h, noon)
-        left   = inv.snapshot.map(_.id).toSet
         after <- d.getHeroByUserId(userId).map(_.get)
         log   <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Gustavo).get)
       } yield assertTrue(paid.exists(_._2 == DailyRates.exp(h.lvl)) && log.done) &&
-              // ушло ровно две крапивы, третья и шалфей остались
-              assertTrue(left == Set(3L, 4L) && after.exp >= DailyRates.exp(h.lvl)) &&
-              assertTrue(DailyKind.HerbNamed.goal == 2L)
+              assertTrue(after.exp >= DailyRates.exp(h.lvl)) &&
+              // награда берёт только то, что уже сдано: сумку сдача не трогает
+              assertTrue(inv.snapshot.map(_.id) == List(1L))
     },
 
     test("страже уходит худшее: хороший клинок у героя не заберут") {
@@ -225,11 +281,19 @@ object DailyQuestSpec extends ZIOSpecDefault {
         thing(5L, "Шлем", ItemType.Helmet, ItemDetails.Plain))
       val gone = task.toGive(bag).map(_.id)
       assertTrue(gone == List(2L, 3L, 4L)) &&
-      // доспех для стражи — только нагрудник: шлем не берут ни туда, ни сюда
+      // оранжевый меч Ришелье вовсе не возьмёт: потолок — зелёный
+      assertTrue(DailyRates.GuardRarity == Rarity.Green) &&
+      assertTrue(!DailyKind.GuardWeapons.accepts(sword, None)) &&
+      assertTrue(!DailyKind.GuardWeapons.accepts(
+        thing(7L, "Сабля", ItemType.Weapon, ItemDetails.Plain).copy(rarity = Rarity.Blue), None)) &&
+      assertTrue(DailyKind.GuardWeapons.accepts(bag(3), None)) &&
+      // доспех для стражи — только нагрудник, и тоже не дороже зелёного
       assertTrue(!DailyKind.GuardWeapons.accepts(bag.last, None)) &&
       assertTrue(!DailyKind.GuardArmor.accepts(bag.last, None)) &&
       assertTrue(DailyKind.GuardArmor.accepts(
-        thing(6L, "Кираса", ItemType.ChestPlate, ItemDetails.Plain), None))
+        thing(6L, "Кираса", ItemType.ChestPlate, ItemDetails.Plain).copy(rarity = Rarity.Green), None)) &&
+      assertTrue(!DailyKind.GuardArmor.accepts(
+        thing(8L, "Кираса", ItemType.ChestPlate, ItemDetails.Plain).copy(rarity = Rarity.Purple), None))
     },
 
     test("платят по делу: за лот меньше, за принесённое больше, и уровень тут ни при чём") {
@@ -279,6 +343,32 @@ object DailyQuestSpec extends ZIOSpecDefault {
               assertTrue(said.contains("сверх уговора"))
     },
 
+    test("круг с «принеси» у Ришелье: взял, отдал кнопкой, получил") {
+      import pangea.model.state.StateType
+      import pangea.service.state.states.merchant.MerchantState
+      import pangea.test._
+      def tap(k: String) = UserAction("", Some(s"""{"action":"$k"}"""))
+      val bag = (1L to 3L).toList.map(i =>
+        thing(i, s"Нож $i", ItemType.Weapon, ItemDetails.Plain))
+      for {
+        d     <- dao(hero().copy(silver = 0L))
+        r     <- TestRenderer.make
+        c     <- ZIO.attempt(SceneContent.load())
+        inv    = TestInventoryRepository.withItems(bag)
+        st     = MerchantState(d, inv, TestItemRepository.make, c)
+        h     <- d.getHeroByUserId(userId).map(_.get)
+        _     <- seed(d, DailyNpc.Richelieu, DailyTask(DailyKind.GuardWeapons, DailyRates.dayOf(0L)))
+        _     <- st.action(testUser, tap("RichelieuDailyTake"), r)
+        _     <- st.action(testUser, tap("RichelieuDailyGive"), r)
+        given <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Richelieu).get)
+        out   <- st.action(testUser, tap("RichelieuDailyHand"), r)
+        after <- d.getHeroByUserId(userId).map(_.get)
+        log   <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Richelieu).get)
+      } yield assertTrue(given.count == 3L && given.ready && inv.snapshot.isEmpty) &&
+              assertTrue(out == StateType.Merchant && log.done) &&
+              assertTrue(after.silver == DailyRates.silver(h.lvl) && after.exp >= DailyRates.exp(h.lvl))
+    },
+
     test("у всех поручений есть тексты, а у «принеси» с уточнением — и само уточнение") {
       for {
         c <- ZIO.attempt(SceneContent.load())
@@ -289,6 +379,12 @@ object DailyQuestSpec extends ZIOSpecDefault {
       assertTrue(DailyNpc.values.forall { n =>
         List("offerLabel", "activeLabel", "readyLabel", "take", "hand", "untilNext", "doneToday", "reward")
           .forall(f => c.text(s"daily.${n.key}.$f").nonEmpty)
+      }) &&
+      // у кого есть «принеси» — есть и слова про сдачу товара
+      assertTrue(DailyNpc.values.filter(n => DailyKind.of(n).exists {
+        case _: DailyBring => true; case _ => false
+      }).forall { n =>
+        List("give", "given", "nothingToGive").forall(f => c.text(s"daily.${n.key}.$f").nonEmpty)
       }) &&
       // где горожанин называет вещь поимённо, там имя и подставляется
       assertTrue(DailyKind.values.filter { case b: DailyBring => b.picks.nonEmpty; case _ => false }

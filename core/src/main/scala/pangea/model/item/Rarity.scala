@@ -29,6 +29,13 @@ object Rarity extends Enum[Rarity] with DoobieEnum[Rarity] {
 
   val values = findValues
 
+  /** Порядок редкостей — от серой к оранжевой: ровно тот, в котором заведены
+   *  варианты. По нему и сравнивают, что дороже. */
+  def order(rarity: Rarity): Int = values.indexOf(rarity)
+
+  /** Не выше указанной редкости (включительно). */
+  def atMost(rarity: Rarity, cap: Rarity): Boolean = order(rarity) <= order(cap)
+
   case object Gray extends Rarity {
     override val emoji: String            = "⚫"
     override val factorR: Double          = 2

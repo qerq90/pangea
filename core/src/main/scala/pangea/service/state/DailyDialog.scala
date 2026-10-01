@@ -15,11 +15,12 @@ import zio.{Task, ZIO}
   * идёт, «сдать» — когда сделано, и ничего, когда сдано. Что именно просят и
   * чем платят, знает сама сцена: сюда она передаёт только награду.
   *
-  * Поручения «принеси» ничего не копят: сколько сделано — столько подходящего
-  * лежит в сумке, а при сдаче оно оттуда и уходит. Ради этого диалогу и нужен
-  * инвентарь; у кого таких поручений нет (Горн), тому он ни к чему.
+  * Поручения «принеси» сдаются своей кнопкой и по частям: сколько подходящего
+  * нашлось в сумке, столько и уходит горожанину, остальное — в другой заход.
+  * Сама собой сумка не пустеет: пока герой не нажал «отдать», вещи при нём.
   *
-  * Кнопки именуются `<prefix>Daily`, `<prefix>DailyTake`, `<prefix>DailyHand`.
+  * Кнопки именуются `<prefix>Daily`, `<prefix>DailyTake`, `<prefix>DailyGive`,
+  * `<prefix>DailyHand`.
   */
 final case class DailyDialog(
   heroDao:   HeroDao,
@@ -31,6 +32,7 @@ final case class DailyDialog(
 
   val openAction: String = s"${prefix}Daily"
   val takeAction: String = s"${prefix}DailyTake"
+  val giveAction: String = s"${prefix}DailyGive"
   val handAction: String = s"${prefix}DailyHand"
 
   private def npcKey(field: String): String = s"daily.${npc.key}.$field"
@@ -39,7 +41,7 @@ final case class DailyDialog(
     s"daily.${npc.key}.tasks.${task.kind.key}.$field"
 
   def today(hero: Hero, nowMs: Long): Task[DailyTask] =
-    DailyQuestLog.todays(heroDao, hero, npc, nowMs).flatMap(counted(hero, _))
+    DailyQuestLog.todays(heroDao, hero, npc, nowMs)
 
   /** Кнопка поручения для меню горожанина; сдано — кнопки нет до завтра. */
   def button(task: DailyTask): Option[Choice] =
@@ -55,14 +57,16 @@ final case class DailyDialog(
       else if (task.ready) line(task, "ready")
       else if (task.taken) line(task, "active")
       else line(task, "offer")
-    val left    = content.format(npcKey("untilNext"), "left" -> hoursLeft(nowMs))
-    val buttons =
-      if (task.done) Nil
-      else if (task.ready) List(content.choice(handAction, npcKey("hand")).copy(color = ChoiceColor.Positive))
-      else if (task.taken) Nil
-      else List(content.choice(takeAction, npcKey("take")).copy(color = ChoiceColor.Positive))
-    renderer.show(user, Screen(s"$body\n\n$left", buttons ++ List(back)))
+    val left = content.format(npcKey("untilNext"), "left" -> hoursLeft(nowMs))
+    renderer.show(user, Screen(s"$body\n\n$left", buttons(task) ++ List(back)))
   }
+
+  private def buttons(task: DailyTask): List[Choice] =
+    if (task.done) Nil
+    else if (task.ready) List(content.choice(handAction, npcKey("hand")).copy(color = ChoiceColor.Positive))
+    // «Принеси» сдаётся вручную: герой сам решает, когда расстаться с вещами.
+    else if (task.taken) task.bring.map(_ => content.choice(giveAction, npcKey("give"))).toList
+    else List(content.choice(takeAction, npcKey("take")).copy(color = ChoiceColor.Positive))
 
   /** Строка поручения. `{what}` — то, что просят назвать поимённо: чья
     * реликвия, какой камень, какая трава. */
@@ -76,41 +80,45 @@ final case class DailyDialog(
     content.choice(s"${prefix}DailyBack", npcKey("back")).copy(color = ChoiceColor.Negative)
 
   def take(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[Unit] =
-    DailyQuestLog.take(heroDao, hero, npc, nowMs)
-      .flatMap(counted(hero, _))
-      .flatMap(show(user, _, nowMs, renderer))
+    DailyQuestLog.take(heroDao, hero, npc, nowMs).flatMap(show(user, _, nowMs, renderer))
 
-  /** Сдать сделанное: принесённое уходит горожанину, опыт кладём здесь,
-    * остальное — на совести сцены. Возвращает опыт и само поручение, чтобы
-    * сцена сказала своё слово. */
+  /** Отдать то, что просят: сколько нашлось в сумке, столько и уходит, но не
+    * больше, чем не хватает. Пусто — так и говорим, вещи при герое. */
+  def give(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[Unit] =
+    today(hero, nowMs).flatMap { task =>
+      if (!task.taken || task.done || task.bring.isEmpty) show(user, task, nowMs, renderer)
+      else
+        bag(hero).flatMap { items =>
+          val goods = task.toGive(items)
+          if (goods.isEmpty)
+            renderer.show(user, Screen(content.text(npcKey("nothingToGive")), Nil)) *>
+              show(user, task, nowMs, renderer)
+          else
+            surrender(hero, goods) *>
+              DailyQuestLog.add(heroDao, user.userId, npc, task.kind, goods.size.toLong) *>
+              renderer.show(user, Screen(content.format(npcKey("given"),
+                "names" -> goods.map(_.displayTitle).mkString(", ")), Nil)) *>
+              today(hero, nowMs).flatMap(show(user, _, nowMs, renderer))
+        }
+    }
+
+  /** Сдать сделанное: опыт кладём здесь, остальное — на совести сцены.
+    * Возвращает опыт и само поручение, чтобы сцена сказала своё слово. */
   def hand(user: User, hero: Hero, nowMs: Long): Task[Option[(DailyTask, Long)]] =
     today(hero, nowMs).flatMap { task =>
       if (!task.ready) ZIO.succeed(None)
       else {
         val exp = DailyRates.exp(hero.lvl)
         val up  = hero.gainExp(exp)
-        surrender(hero, task) *>
-          DailyQuestLog.complete(heroDao, user.userId, npc, task) *>
+        DailyQuestLog.complete(heroDao, user.userId, npc, task) *>
           heroDao.updateExpAndLevel(user.userId, up.exp, up.lvl, up.upgradePoints)
             .as(Some(task -> exp))
       }
     }
 
-  /** Сколько подходящего в сумке — прогресс «принеси» нигде не хранится. */
-  private def counted(hero: Hero, task: DailyTask): Task[DailyTask] =
-    if (task.done || task.bring.isEmpty) ZIO.succeed(task)
-    else bag(hero).map(task.inBag)
-
-  /** Принесённое остаётся у горожанина — ровно столько, сколько просили. */
-  private def surrender(hero: Hero, task: DailyTask): Task[Unit] =
-    if (task.bring.isEmpty) ZIO.unit
-    else
-      bag(hero).flatMap { items =>
-        val goods = task.toGive(items).map(_.id).toSet
-        if (goods.isEmpty) ZIO.unit
-        else ZIO.foreachDiscard(inventory)(repo =>
-          repo.removeItems(goods, hero.id).mapError(e => new Throwable(e.toString)))
-      }
+  private def surrender(hero: Hero, goods: List[Item]): Task[Unit] =
+    ZIO.foreachDiscard(inventory)(repo =>
+      repo.removeItems(goods.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)))
 
   private def bag(hero: Hero): Task[List[Item]] =
     inventory.fold[Task[List[Item]]](ZIO.succeed(Nil))(repo =>

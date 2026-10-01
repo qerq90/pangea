@@ -1,7 +1,8 @@
 package pangea.service.state
 
 import pangea.engine.Choice
-import pangea.model.item.Item
+import pangea.model.hero.Hero
+import pangea.model.item.{Item, ItemType}
 
 /**
  * Утилиты для экранов «список предметов кнопками» (бочка, инвентарь, снаряжение,
@@ -25,6 +26,19 @@ object ItemMenu {
 
   def truncate(s: String): String =
     if (s.length <= MaxButtonLen) s else s.take(MaxButtonLen - 1) + "…"
+
+  /** Строка товара в списке на продажу: номер, предмет с характеристиками, цена
+   *  и сравнение с тем, что надето в тот же слот, — тот же формат и
+   *  разделитель, что при находке ([[Item.ComparisonSeparator]]). Прилавок
+   *  Ришелье и обоз каравана читаются одинаково. Слот пуст — сравнивать не с чем. */
+  def saleLine(n: Int, item: Item, price: Long, hero: Hero): String = {
+    val stats    = item.statsLines
+    val head     = s"$n) ${item.displayTitle}" + (if (stats.isEmpty) "" else "\n" + stats.mkString("\n"))
+    val base     = s"$head\n🪙 Цена: $price"
+    val equipped = hero.equipment.equippedFor(item.itemType).filter(_.itemType != ItemType.NoItem)
+    if (equipped.isEmpty) base
+    else base + "\n" + Item.ComparisonSeparator + "\n" + equipped.map(_.equippedComparison("Надето")).mkString("\n")
+  }
 
   /** Лейбл по умолчанию — заголовок предмета `<кружок> [Ур.N] <имя>`
    *  (см. `Item.displayTitle`; у карт клада и камней — только имя),

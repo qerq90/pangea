@@ -283,8 +283,9 @@ case class CaravanState(
   private def trade(user: User, scene: CaravanScene, renderer: Renderer): Task[StateType] =
     for {
       hero   <- getHero(user)
+      // Обоз читается как прилавок Ришелье — с тем же сравнением с надетым.
       lines   = scene.goods.zip(scene.prices).zipWithIndex.map { case ((item, price), i) =>
-                  s"${i + 1}) ${item.displayTitle}\n${item.statsLines.mkString("\n")}\n🪙 Цена: $price"
+                  ItemMenu.saleLine(i + 1, item, price, hero)
                 }
       buttons = scene.goods.zipWithIndex.map { case (_, i) =>
                   Choice(s"$BuyPrefix$i", content.format("caravan.buyLabel", "n" -> (i + 1).toString), row = Some(i))
