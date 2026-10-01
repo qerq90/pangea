@@ -72,7 +72,7 @@ final case class DailyDialog(
     * реликвия, какой камень, какая трава. */
   private def line(task: DailyTask, field: String): String =
     content.format(taskKey(task, field),
-      "goal" -> task.kind.goal.toString,
+      "goal" -> task.need.toString,
       "have" -> task.progress.toString,
       "what" -> task.what)
 

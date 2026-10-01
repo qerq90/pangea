@@ -55,6 +55,14 @@ sealed abstract class DailyKind(
     * живут в компаньоне, а варианту enum туда лучше не заглядывать. */
   def weight: Int = 1
 
+  /** Сколько просят у этого героя. По умолчанию — [[goal]] для всех одинаково;
+    * считается один раз, когда поручение выдано, и дальше живёт в самой записи:
+    * выросший за день уровень не должен двигать уже начатое дело. */
+  def goalFor(heroLvl: Long): Long = {
+    val _ = heroLvl
+    goal
+  }
+
   /** Во сколько раз опыт за поручение больше обычного. Редкому заказу —
     * редкая плата: такую траву и найти труднее. */
   def expFactor: Int = 1
@@ -152,8 +160,13 @@ object DailyKind extends Enum[DailyKind] {
   /** Убить мобов — Горн считает это проверкой стали. */
   case object HornKills extends DailyKind("kills", DailyNpc.Horn, 20L, snap = true)
 
-  /** Набрать репутации в гильдии за день. */
-  case object HornReputation extends DailyKind("reputation", DailyNpc.Horn, 50L, snap = true)
+  /** Набрать репутации в гильдии за день — столько, сколько дали бы десять
+    * мешков с пожитками по уровню героя. Число растёт вместе с героем: статичные
+    * полсотни для сотого уровня — не наказ, а недоразумение. */
+  case object HornReputation extends DailyKind("reputation", DailyNpc.Horn, 50L, snap = true) {
+    override def goalFor(heroLvl: Long): Long =
+      DailyRates.HornSacks * TrophyKind.reputationFor(TrophyKind.Sack.coef, heroLvl)
+  }
 
   /** Заказать у него улучшение: молот не должен стынуть. */
   case object HornUpgrade extends DailyKind("upgrade", DailyNpc.Horn, 1L)
@@ -212,12 +225,17 @@ final case class DailyTask(
   count: Long           = 0L,
   from:  Long           = 0L,
   pick:  Option[String] = None,
+  goal:  Long           = 0L,
   taken: Boolean        = false,
   done:  Boolean        = false
 ) {
-  def progress: Long = count.min(kind.goal)
+  /** Сколько просят именно по этой записи. Ноль — цель не записали (старая
+    * строка в jsonb), тогда берём общую для поручения. */
+  def need: Long = if (goal > 0L) goal else kind.goal
 
-  def ready: Boolean = !done && count >= kind.goal
+  def progress: Long = count.min(need)
+
+  def ready: Boolean = !done && count >= need
 
   def plus(n: Long): DailyTask = if (done) this else copy(count = count + n)
 
@@ -238,7 +256,7 @@ final case class DailyTask(
   }
 
   /** Сколько ещё просят сверх уже сданного. */
-  def left: Long = (kind.goal - count).max(0L)
+  def left: Long = (need - count).max(0L)
 
   /** Что из сумки уйдёт горожанину за одну сдачу: сколько не хватает, не
     * больше. Отдаём худшее из подходящего — просят «любое», и лишаться из-за
@@ -253,7 +271,7 @@ final case class DailyTask(
 object DailyTask {
   implicit val encoder: Encoder[DailyTask] = (t: DailyTask) =>
     Json.obj("kind" -> t.kind.asJson, "day" -> t.day.asJson, "count" -> t.count.asJson,
-      "from" -> t.from.asJson, "pick" -> t.pick.asJson,
+      "from" -> t.from.asJson, "pick" -> t.pick.asJson, "goal" -> t.goal.asJson,
       "taken" -> t.taken.asJson, "done" -> t.done.asJson)
 
   implicit val decoder: Decoder[DailyTask] = (c: HCursor) =>
@@ -263,9 +281,10 @@ object DailyTask {
       count <- c.getOrElse[Long]("count")(0L)
       from  <- c.getOrElse[Long]("from")(0L)
       pick  <- c.getOrElse[Option[String]]("pick")(None)
+      goal  <- c.getOrElse[Long]("goal")(0L)
       taken <- c.getOrElse[Boolean]("taken")(false)
       done  <- c.getOrElse[Boolean]("done")(false)
-    } yield DailyTask(kind, day, count, from, pick, taken, done)
+    } yield DailyTask(kind, day, count, from, pick, goal, taken, done)
 }
 
 /** Все сегодняшние поручения героя: по одному на горожанина. Живёт в
@@ -340,6 +359,9 @@ object DailyRates {
 
   /** Репутация от Горна. */
   val reputation: Long = 40L
+
+  /** Сколькими мешками с пожитками Горн меряет свой наказ по репутации. */
+  val HornSacks: Long = 10L
 
   /** Выше этой редкости Ришелье на городскую стражу ничего не берёт. */
   val GuardRarity: pangea.model.item.Rarity = pangea.model.item.Rarity.Green

@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{AzatState, Hero}
-import pangea.model.item.{Item, ItemDetails, ItemType}
+import pangea.model.item.{Item, ItemDetails, ItemType, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -186,6 +186,6 @@ object TrophyExchangeState {
       case t: ItemDetails.Trophy => t.coefValue
       case _                     => 0.0
     }
-    math.ceil(5.0 + item.lvl.toDouble * coef).toLong
+    TrophyKind.reputationFor(coef, item.lvl)
   }
 }
