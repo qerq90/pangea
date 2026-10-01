@@ -239,9 +239,11 @@ final case class DailyTask(
 
   def plus(n: Long): DailyTask = if (done) this else copy(count = count + n)
 
-  /** Счётчиковое задание: прогресс — разница с тем, что было при взятии. */
+  /** Счётчиковое задание: прогресс — разница с тем, что было при взятии, но
+    * счёт только растёт. Репутацию тратят там же, в гильдии, и без этого
+    * прокачка у Горна съедала бы его же наказ. */
   def withCounter(now: Long): DailyTask =
-    if (!kind.snap || done) this else copy(count = (now - from).max(0L))
+    if (!kind.snap || done) this else copy(count = count.max((now - from).max(0L)))
 
   /** Поручение «принеси», если это оно. */
   def bring: Option[DailyBring] = kind match {

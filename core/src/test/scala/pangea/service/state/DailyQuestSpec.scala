@@ -321,6 +321,31 @@ object DailyQuestSpec extends ZIOSpecDefault {
       assertTrue(DailyRates.plainBrews.forall(b => b.recipe.forall(_.herbRank <= 1)))
     },
 
+    test("набранная репутация не пропадает, если её успеть потратить") {
+      val lvl   = 10L
+      val need  = DailyKind.HornReputation.goalFor(lvl)
+      val start = hero(rep = 100L)
+      for {
+        d      <- TestHeroDao.withHero(userId, start)
+        _      <- seed(d, DailyNpc.Horn,
+                    DailyTask(DailyKind.HornReputation, DailyRates.dayOf(noon), goal = need))
+        taken  <- DailyQuestLog.take(d, start, DailyNpc.Horn, noon)
+        // набрал наказ целиком — хоть трофеями, хоть за «девушку» в лабиринте
+        earned  = start.copy(guildReputation = 100L + need)
+        _      <- d.insertHero(earned)
+        full   <- DailyQuestLog.todays(d, earned, DailyNpc.Horn, noon)
+        // и тут же спустил всё на прокачку у того же Горна
+        spent   = earned.copy(guildReputation = 0L)
+        _      <- d.insertHero(spent)
+        after  <- DailyQuestLog.todays(d, spent, DailyNpc.Horn, noon)
+        saved  <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Horn).get)
+      } yield assertTrue(taken.from == 100L && taken.count == 0L) &&
+              assertTrue(full.count == need && full.ready) &&
+              // счёт только растёт: потраченное не отнимает заработанного
+              assertTrue(after.count == need && after.ready) &&
+              assertTrue(saved.count == need)
+    },
+
     test("наказ Горна мерен мешками, и цель не плывёт за уровнем") {
       import pangea.service.state.states.guild.TrophyExchangeState
       val lvl  = 10L

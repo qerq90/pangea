@@ -35,7 +35,12 @@ object DailyQuestLog {
     val day = DailyRates.dayOf(nowMs)
     load(heroDao, hero.userId).flatMap { all =>
       all.today(npc, day) match {
-        case Some(task) => ZIO.succeed(refreshed(task, hero))
+        // Достигнутое сразу ложится в запись: иначе высшая отметка жила бы
+        // до первой траты репутации и пропадала вместе с ней.
+        case Some(task) =>
+          val seen = refreshed(task, hero)
+          if (seen == task) ZIO.succeed(task)
+          else save(heroDao, hero.userId, all.updated(npc, seen)).as(seen)
         case None =>
           val pool = DailyKind.of(npc)
           val kind = weighted(pool, pickFor(day * 1000003L + hero.id.value, pool.map(_.weight).sum))
