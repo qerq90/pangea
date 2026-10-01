@@ -115,20 +115,22 @@ object DailyKind extends Enum[DailyKind] {
   /** Купить у него хоть что-нибудь: прилавок должен пустеть. */
   case object BuyFromMerchant extends DailyKind("buy", DailyNpc.Richelieu, 1L)
 
-  /** Оружие для стражи: любое, лишь бы било. Качество не при чём — хорошее на
-    * них переводить Ришелье и сам не даст. */
+  /** Оружие для стражи — простое: серое, белое или зелёное. Дороже Ришелье не
+    * возьмёт, на караул хорошую сталь он переводить не станет. */
   case object GuardWeapons extends DailyKind("weapons", DailyNpc.Richelieu, 3L) with DailyBring {
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
-      item.itemType == ItemType.Weapon || item.itemType == ItemType.AdditionalWeapon
+      (item.itemType == ItemType.Weapon || item.itemType == ItemType.AdditionalWeapon) &&
+        Rarity.atMost(item.rarity, DailyRates.GuardRarity)
     }
   }
 
-  /** Нагрудники туда же: стражу прикрывают по груди, остальное её дело. */
+  /** Нагрудники туда же и с тем же потолком: стражу прикрывают по груди,
+    * остальное её дело. */
   case object GuardArmor extends DailyKind("armor", DailyNpc.Richelieu, 3L) with DailyBring {
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
-      item.itemType == ItemType.ChestPlate
+      item.itemType == ItemType.ChestPlate && Rarity.atMost(item.rarity, DailyRates.GuardRarity)
     }
   }
 
@@ -219,17 +221,17 @@ final case class DailyTask(
     case _                  => ""
   }
 
-  /** Прогресс «принеси» — это просто то, что лежит в сумке. */
-  def inBag(items: List[Item]): DailyTask =
-    bring.fold(this)(b => copy(count = items.count(b.accepts(_, pick)).toLong))
+  /** Сколько ещё просят сверх уже сданного. */
+  def left: Long = (kind.goal - count).max(0L)
 
-  /** Что именно уйдёт горожанину при сдаче. Отдаём худшее из подходящего:
-    * просят «любое», и лишаться из-за этого лучшего клинка герою незачем. */
+  /** Что из сумки уйдёт горожанину за одну сдачу: сколько не хватает, не
+    * больше. Отдаём худшее из подходящего — просят «любое», и лишаться из-за
+    * этого лучшего клинка герою незачем. */
   def toGive(items: List[Item]): List[Item] =
     bring.fold(List.empty[Item])(b =>
       items.filter(b.accepts(_, pick))
-        .sortBy(i => (Rarity.values.indexOf(i.rarity), i.lvl, i.gem.map(_.grade).getOrElse(0)))
-        .take(kind.goal.toInt))
+        .sortBy(i => (Rarity.order(i.rarity), i.lvl, i.gem.map(_.grade).getOrElse(0)))
+        .take(left.toInt))
 }
 
 object DailyTask {
@@ -315,4 +317,7 @@ object DailyRates {
 
   /** Репутация от Горна. */
   val reputation: Long = 40L
+
+  /** Выше этой редкости Ришелье на городскую стражу ничего не берёт. */
+  val GuardRarity: pangea.model.item.Rarity = pangea.model.item.Rarity.Green
 }

@@ -47,6 +47,7 @@ case class GustavoState(
       "HerbsSell" -> Target.Run { (u, _, r) => sellHerbs(u, r) },
       daily.openAction -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.giveAction -> Target.Run { (u, _, r) => giveDaily(u, r) },
       daily.handAction -> Target.Run { (u, _, r) => handDaily(u, r) },
       "GustavoDailyBack" -> Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) },
       "HerbsTalk" -> Target.Goto(StateType.GustavoHerbs),
@@ -92,6 +93,13 @@ case class GustavoState(
       now  <- nowMs
       hero <- getHero(user)
       _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.Gustavo
+
+  private def giveDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.give(user, hero, now, renderer)
     } yield StateType.Gustavo
 
   /** Травник платит склянкой из своих запасов — что сварил, тем и делится. За

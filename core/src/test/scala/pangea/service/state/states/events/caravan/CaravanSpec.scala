@@ -362,6 +362,26 @@ object CaravanSpec extends ZIOSpecDefault {
               assertTrue(loot.exists(l => l.items.size == 3 && l.returnState.isEmpty))
     },
 
+    test("прилавок каравана сравнивает товар с надетым — как у Ришелье") {
+      for {
+        // товар каравана — шлемы, и шлем у героя уже надет: есть с чем сравнить
+        t <- caravan(hero(silver = 1000L, passives = List(PassiveKind.Stealthy -> ItemType.Helmet)))
+        (state, dao, _, r) = t
+        _      <- put(dao, scene(prices = List(100L, 200L, 300L)))
+        _      <- state.action(testUser, tap("CaravanTrade"), r)
+        shelf  <- r.sentScreens.map(_.last)
+        // а без шлема сравнивать не с чем — и лишнего в тексте нет
+        b <- caravan(hero(silver = 1000L))
+        (bare, bareDao, _, bareR) = b
+        _      <- put(bareDao, scene(prices = List(100L, 200L, 300L)))
+        _      <- bare.action(testUser, tap("CaravanTrade"), bareR)
+        plain  <- bareR.sentScreens.map(_.last)
+      } yield assertTrue(shelf.text.contains(Item.ComparisonSeparator) && shelf.text.contains("Надето")) &&
+              // характеристики самого товара при этом никуда не делись
+              assertTrue(shelf.text.contains("Цена: 100") && shelf.text.contains("⚔ +1")) &&
+              assertTrue(!plain.text.contains(Item.ComparisonSeparator) && !plain.text.contains("Надето"))
+    },
+
     test("торговля идёт только с серебра на руках: банк каравану не указ") {
       for {
         t <- caravan(hero(silver = 150L))

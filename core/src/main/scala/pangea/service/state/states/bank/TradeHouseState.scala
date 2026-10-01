@@ -46,6 +46,7 @@ case class TradeHouseState(
       "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare),
       daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
+      daily.giveAction  -> Target.Run { (u, _, r) => giveDaily(u, r) },
       daily.handAction  -> Target.Run { (u, _, r) => handDaily(u, r) },
       "RakhadimDailyBack" -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) },
       CityExit.route
@@ -78,6 +79,13 @@ case class TradeHouseState(
       now  <- nowMs
       hero <- getHero(user)
       _    <- daily.take(user, hero, now, renderer)
+    } yield StateType.TradeHouse
+
+  private def giveDaily(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      _    <- daily.give(user, hero, now, renderer)
     } yield StateType.TradeHouse
 
   /** Банкир платит тем, чем и живёт, — дублонами. Ставка от уровня не зависит:
