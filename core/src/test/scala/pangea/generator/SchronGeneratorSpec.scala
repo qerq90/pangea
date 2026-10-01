@@ -56,18 +56,18 @@ object SchronGeneratorSpec extends ZIOSpecDefault {
       assertTrue(all.forall(r => r.silver <= 0L || (r.doubloons >= 2L && r.doubloons <= 3L)))
     },
 
-    test("шанс на золото: сто процентов по умолчанию, девяносто в пещере") {
+    test("шанс на золото: сто процентов по умолчанию, четверть в пещере") {
       val plain = rewards(Race.Gnome, 10L, 2, 3)
       val cave  = (1L to 500L).map(seed =>
         SchronGenerator.roll(Race.Gnome, 10L, 2, 3, Rng(seed), CaveRates.StashDoubloonChancePct)._1)
       val withSilver = cave.filter(_.silver > 0L)
       val empty      = withSilver.count(_.doubloons == 0L)
-      assertTrue(CaveRates.StashDoubloonChancePct == 90) &&
+      assertTrue(CaveRates.StashDoubloonChancePct == 25) &&
       // без параметра всё как было: серебро есть — значит, есть и золото
       assertTrue(plain.forall(r => (r.doubloons > 0L) == (r.silver > 0L))) &&
-      // в пещере примерно каждый десятый схрон с серебром остаётся без золота
+      // в пещере золото лежит лишь в четверти схронов с серебром
       assertTrue(withSilver.size > 50) &&
-      assertTrue(empty * 100 >= withSilver.size * 4 && empty * 100 <= withSilver.size * 18) &&
+      assertTrue(empty * 100 >= withSilver.size * 62 && empty * 100 <= withSilver.size * 88) &&
       // сам диапазон не тронут: если золото выпало — его два или три
       assertTrue(cave.forall(r => r.doubloons == 0L || (r.doubloons >= 2L && r.doubloons <= 3L))) &&
       // и без серебра золота не бывает ни там, ни там
