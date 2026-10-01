@@ -20,6 +20,12 @@ object TrophyKind extends Enum[TrophyKind] {
 
   val values = findValues
 
+  /** Репутация за трофей: `5 + Ур. × coef`, вверх до целого. Одна формула
+   *  на двоих: по ней Гильдия платит за сданный трофей, по ней же Горн меряет
+   *  свой дневной наказ. */
+  def reputationFor(coef: Double, lvl: Long): Long =
+    math.ceil(5.0 + lvl.toDouble * coef).toLong
+
   case object Relic extends TrophyKind {
     override val displayName: String = "Реликвия"
     override val coef: Double        = 4.0

@@ -321,6 +321,62 @@ object DailyQuestSpec extends ZIOSpecDefault {
       assertTrue(DailyRates.plainBrews.forall(b => b.recipe.forall(_.herbRank <= 1)))
     },
 
+    test("набранная репутация не пропадает, если её успеть потратить") {
+      val lvl   = 10L
+      val need  = DailyKind.HornReputation.goalFor(lvl)
+      val start = hero(rep = 100L)
+      for {
+        d      <- TestHeroDao.withHero(userId, start)
+        _      <- seed(d, DailyNpc.Horn,
+                    DailyTask(DailyKind.HornReputation, DailyRates.dayOf(noon), goal = need))
+        taken  <- DailyQuestLog.take(d, start, DailyNpc.Horn, noon)
+        // набрал наказ целиком — хоть трофеями, хоть за «девушку» в лабиринте
+        earned  = start.copy(guildReputation = 100L + need)
+        _      <- d.insertHero(earned)
+        full   <- DailyQuestLog.todays(d, earned, DailyNpc.Horn, noon)
+        // и тут же спустил всё на прокачку у того же Горна
+        spent   = earned.copy(guildReputation = 0L)
+        _      <- d.insertHero(spent)
+        after  <- DailyQuestLog.todays(d, spent, DailyNpc.Horn, noon)
+        saved  <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Horn).get)
+      } yield assertTrue(taken.from == 100L && taken.count == 0L) &&
+              assertTrue(full.count == need && full.ready) &&
+              // счёт только растёт: потраченное не отнимает заработанного
+              assertTrue(after.count == need && after.ready) &&
+              assertTrue(saved.count == need)
+    },
+
+    test("наказ Горна мерен мешками, и цель не плывёт за уровнем") {
+      import pangea.service.state.states.guild.TrophyExchangeState
+      val lvl  = 10L
+      val sack = thing(1L, "Мешок с пожитками", ItemType.Trophy,
+                   ItemDetails.Trophy(Race.Orc.entryName, TrophyKind.Sack)).copy(lvl = lvl)
+      for {
+        d      <- dao(hero().copy(lvl = lvl))
+        h      <- d.getHeroByUserId(userId).map(_.get)
+        issued <- DailyQuestLog.todays(d, h, DailyNpc.Horn, noon)
+        // герой вырос в тот же день — уже выданный наказ от этого не тяжелеет
+        grown   = h.copy(lvl = 100L)
+        _      <- d.insertHero(grown)
+        again  <- DailyQuestLog.todays(d, grown, DailyNpc.Horn, noon)
+      } yield // ровно десять мешков по той же ставке, по какой их принимает Гильдия
+              assertTrue(DailyKind.HornReputation.goalFor(lvl) ==
+                         10L * TrophyExchangeState.reputationFor(sack)) &&
+              assertTrue(DailyKind.HornReputation.goalFor(lvl) == 100L) &&
+              // с уровнем растёт, и на сотом это уже не полсотни
+              assertTrue(DailyKind.HornReputation.goalFor(100L) == 550L) &&
+              assertTrue((1L to 150L).forall(l =>
+                DailyKind.HornReputation.goalFor(l) > DailyKind.HornReputation.goal)) &&
+              // цель записывается при выдаче и дальше не меняется
+              assertTrue(issued.goal == issued.kind.goalFor(lvl) && issued.need == issued.goal) &&
+              assertTrue(again.goal == issued.goal) &&
+              // просит десять мешков, платит шесть — по той же ставке
+              assertTrue(DailyRates.reputation(lvl) == 6L * TrophyExchangeState.reputationFor(sack)) &&
+              assertTrue(DailyRates.reputation(lvl) == 60L) &&
+              assertTrue((1L to Hero.MaxLevel).forall(l =>
+                DailyRates.reputation(l) * 10L == DailyKind.HornReputation.goalFor(l) * 6L))
+    },
+
     test("запись переживает jsonb, а пустая читается как «поручений ещё не было»") {
       val task  = DailyTask(DailyKind.BankGem, 123L, count = 1L,
                     pick = Some(GemKind.Ruby.entryName), taken = true)
@@ -330,7 +386,10 @@ object DailyQuestSpec extends ZIOSpecDefault {
       assertTrue(back.contains(all)) &&
       assertTrue(fresh.contains(DailyQuests.empty)) &&
       assertTrue(all.today(DailyNpc.Rakhadim, 123L).nonEmpty) &&
-      assertTrue(all.today(DailyNpc.Rakhadim, 124L).isEmpty)
+      assertTrue(all.today(DailyNpc.Rakhadim, 124L).isEmpty) &&
+      // старая строка без цели берёт общую цель поручения
+      assertTrue(io.circe.Json.obj("kind" -> "HornKills".asJson, "day" -> 1L.asJson)
+        .as[DailyTask].exists(t => t.goal == 0L && t.need == DailyKind.HornKills.goal))
     },
 
     test("круг целиком: взял у Ришелье, сделал, сдал — серебро, опыт и «на сегодня всё»") {

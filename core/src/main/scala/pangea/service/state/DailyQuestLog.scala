@@ -35,11 +35,17 @@ object DailyQuestLog {
     val day = DailyRates.dayOf(nowMs)
     load(heroDao, hero.userId).flatMap { all =>
       all.today(npc, day) match {
-        case Some(task) => ZIO.succeed(refreshed(task, hero))
+        // Достигнутое сразу ложится в запись: иначе высшая отметка жила бы
+        // до первой траты репутации и пропадала вместе с ней.
+        case Some(task) =>
+          val seen = refreshed(task, hero)
+          if (seen == task) ZIO.succeed(task)
+          else save(heroDao, hero.userId, all.updated(npc, seen)).as(seen)
         case None =>
           val pool = DailyKind.of(npc)
           val kind = weighted(pool, pickFor(day * 1000003L + hero.id.value, pool.map(_.weight).sum))
-          val task = DailyTask(kind, day, from = counterOf(kind, hero), pick = pickOf(kind, day, hero))
+          val task = DailyTask(kind, day, from = counterOf(kind, hero), pick = pickOf(kind, day, hero),
+                               goal = kind.goalFor(hero.lvl))
           save(heroDao, hero.userId, all.updated(npc, task)).as(task)
       }
     }
@@ -73,7 +79,7 @@ object DailyQuestLog {
     * горожанина она своя. */
   def complete(heroDao: HeroDao, userId: UserId, npc: DailyNpc, task: DailyTask): Task[Unit] =
     load(heroDao, userId).flatMap(all =>
-      save(heroDao, userId, all.updated(npc, task.copy(done = true, count = task.kind.goal))))
+      save(heroDao, userId, all.updated(npc, task.copy(done = true, count = task.need))))
 
   private def update(heroDao: HeroDao, userId: UserId, npc: DailyNpc, task: DailyTask): Task[Unit] =
     load(heroDao, userId).flatMap(all => save(heroDao, userId, all.updated(npc, task)))
