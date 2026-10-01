@@ -357,8 +357,9 @@ object DailyRates {
     pool((((seed % pool.size.toLong).toInt + pool.size) % pool.size).toInt)
   }
 
-  /** Репутация от Горна. */
-  val reputation: Long = 40L
+  /** Репутация от Горна — столько же, сколько опыта за тот же наказ.
+    * Статичная сороковка с растущей ценой прокачки в гильдии не сходилась. */
+  def reputation(heroLvl: Long): Long = exp(heroLvl)
 
   /** Сколькими мешками с пожитками Горн меряет свой наказ по репутации. */
   val HornSacks: Long = 10L

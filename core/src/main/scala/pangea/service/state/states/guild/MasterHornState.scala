@@ -101,16 +101,18 @@ case class MasterHornState(
       _    <- daily.take(user, hero, now, renderer)
     } yield StateType.MasterHorn
 
-  /** Кузнец платит тем, что у него есть, — именем в гильдии. */
+  /** Кузнец платит тем, что у него есть, — именем в гильдии, и ровно
+    * столько же, сколько даёт опыта за тот же наказ. */
   private def handDaily(user: User, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
       paid <- daily.hand(user, hero, now)
       _    <- ZIO.foreachDiscard(paid) { case (_, exp) =>
-                heroDao.updateGuildReputation(user.userId, hero.guildReputation + DailyRates.reputation) *>
+                val rep = DailyRates.reputation(hero.lvl)
+                heroDao.updateGuildReputation(user.userId, hero.guildReputation + rep) *>
                   renderer.show(user, Screen(content.format("daily.horn.reward",
-                    "rep" -> DailyRates.reputation.toString, "exp" -> exp.toString), Nil))
+                    "rep" -> rep.toString, "exp" -> exp.toString), Nil))
               }
       _    <- enter(user, renderer)
     } yield StateType.MasterHorn

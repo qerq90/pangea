@@ -344,7 +344,10 @@ object DailyQuestSpec extends ZIOSpecDefault {
                 DailyKind.HornReputation.goalFor(l) > DailyKind.HornReputation.goal)) &&
               // цель записывается при выдаче и дальше не меняется
               assertTrue(issued.goal == issued.kind.goalFor(lvl) && issued.need == issued.goal) &&
-              assertTrue(again.goal == issued.goal)
+              assertTrue(again.goal == issued.goal) &&
+              // а платит Горн репутацией ровно столько же, сколько даёт опыта
+              assertTrue((1L to Hero.MaxLevel).forall(l =>
+                DailyRates.reputation(l) == DailyRates.exp(l)))
     },
 
     test("запись переживает jsonb, а пустая читается как «поручений ещё не было»") {
