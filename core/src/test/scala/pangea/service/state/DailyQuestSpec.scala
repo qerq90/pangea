@@ -34,8 +34,8 @@ object DailyQuestSpec extends ZIOSpecDefault {
     thing(id, s"Реликвия ($race)", ItemType.Trophy,
       ItemDetails.Trophy(race.entryName, TrophyKind.Relic))
 
-  private def stone(id: Long, kind: GemKind): Item =
-    thing(id, Gem.gradeName(kind, 3), ItemType.Gem, ItemDetails.Gem(Gem(kind, 3)))
+  private def stone(id: Long, kind: GemKind, grade: Int): Item =
+    thing(id, Gem.gradeName(kind, grade), ItemType.Gem, ItemDetails.Gem(Gem(kind, grade)))
 
   private def herb(id: Long, kind: MaterialKind): Item =
     thing(id, kind.displayName, ItemType.Material, ItemDetails.Material(kind))
@@ -97,6 +97,27 @@ object DailyQuestSpec extends ZIOSpecDefault {
       } yield assertTrue(again == today) &&
               assertTrue(today.forall(t => t.bring.forall(b =>
                 if (b.picks.isEmpty) t.pick.isEmpty else t.pick.exists(b.picks.contains))))
+    },
+
+    test("редкая трава — заказ нечастый: примерно раз в десять дней") {
+      val days = 300
+      for {
+        d     <- dao()
+        h      = hero()
+        kinds <- ZIO.foreach((0 until days).toList)(i =>
+                   DailyQuestLog.todays(d, h, DailyNpc.Gustavo, noon + i * DailyRates.DayMs).map(_.kind))
+        rare   = kinds.count(_ == DailyKind.HerbRare)
+      } yield
+        // объявленные доли: девять, девять и два из двадцати
+        assertTrue(DailyKind.of(DailyNpc.Gustavo).map(_.weight).sum == 20) &&
+        assertTrue(DailyKind.HerbRare.weight == 2) &&
+        // и на деле примерно так же: от трёх до двадцати процентов дней
+        assertTrue(rare * 100 >= days * 3 && rare * 100 <= days * 20) &&
+        // прочие поручения при этом не пропадают
+        assertTrue(kinds.toSet.size == 3) &&
+        // у остальных горожан веса ровные — поручения идут поровну
+        assertTrue(DailyKind.values.filter(_.weight != 1).map(_.npc).toSet ==
+                   Set[DailyNpc](DailyNpc.Gustavo))
     },
 
     test("прибавка идёт только взятому поручению и только своему") {
@@ -166,9 +187,10 @@ object DailyQuestSpec extends ZIOSpecDefault {
         full   <- DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(right)).today(h, noon)
       } yield assertTrue(empty.count == 0L && !empty.ready) &&
               assertTrue(full.count == 1L && full.ready) &&
-              // с камнем тот же разговор: важна порода, грейд — нет
-              assertTrue(DailyKind.BankGem.accepts(stone(5L, GemKind.Ruby), Some(GemKind.Ruby.entryName))) &&
-              assertTrue(!DailyKind.BankGem.accepts(stone(6L, GemKind.Topaz), Some(GemKind.Ruby.entryName)))
+              // камень берут только надколотый и только названной породы
+              assertTrue(DailyKind.BankGem.accepts(stone(5L, GemKind.Ruby, 1), Some(GemKind.Ruby.entryName))) &&
+              assertTrue(!DailyKind.BankGem.accepts(stone(6L, GemKind.Ruby, 3), Some(GemKind.Ruby.entryName))) &&
+              assertTrue(!DailyKind.BankGem.accepts(stone(7L, GemKind.Topaz, 1), Some(GemKind.Ruby.entryName)))
     },
 
     test("сданное «принеси» остаётся у горожанина: лишнего не берут, опыт идёт") {
@@ -203,9 +225,11 @@ object DailyQuestSpec extends ZIOSpecDefault {
         thing(5L, "Шлем", ItemType.Helmet, ItemDetails.Plain))
       val gone = task.toGive(bag).map(_.id)
       assertTrue(gone == List(2L, 3L, 4L)) &&
-      // доспехи — отдельное поручение, и шлем в оружейное не попадает
+      // доспех для стражи — только нагрудник: шлем не берут ни туда, ни сюда
       assertTrue(!DailyKind.GuardWeapons.accepts(bag.last, None)) &&
-      assertTrue(DailyKind.GuardArmor.accepts(bag.last, None))
+      assertTrue(!DailyKind.GuardArmor.accepts(bag.last, None)) &&
+      assertTrue(DailyKind.GuardArmor.accepts(
+        thing(6L, "Кираса", ItemType.ChestPlate, ItemDetails.Plain), None))
     },
 
     test("платят по делу: за лот меньше, за принесённое больше, и уровень тут ни при чём") {

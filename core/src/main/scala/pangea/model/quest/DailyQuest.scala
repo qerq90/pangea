@@ -3,7 +3,7 @@ package pangea.model.quest
 import enumeratum._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
-import pangea.model.item.{BrewKind, GemKind, Item, ItemDetails, ItemType, MaterialKind, Rarity, TrophyKind}
+import pangea.model.item.{BrewKind, Gem, GemKind, Item, ItemDetails, ItemType, MaterialKind, Rarity, TrophyKind}
 import pangea.model.monster.Race
 
 /** Горожанин, у которого есть ежедневное поручение. Ключ — имя секции в
@@ -47,7 +47,14 @@ sealed abstract class DailyKind(
   val npc:  DailyNpc,
   val goal: Long,
   val snap: Boolean = false
-) extends EnumEntry
+) extends EnumEntry {
+
+  /** Насколько часто поручение выпадает против прочих у того же горожанина.
+    * По умолчанию поровну; больше единицы ставится там, где заказ должен быть
+    * редким гостем. Метод, а не параметр с умолчанием: умолчания конструктора
+    * живут в компаньоне, а варианту enum туда лучше не заглядывать. */
+  def weight: Int = 1
+}
 
 /** Поручение «принеси»: горожанин называет вещь, герой достаёт её из сумки и
   * отдаёт. Прогресс нигде не хранится — он и есть содержимое сумки, а при
@@ -86,15 +93,16 @@ object DailyKind extends Enum[DailyKind] {
     }
   }
 
-  /** Принести названный самоцвет — грейд не важен, важна порода. Череп сюда не
-    * идёт: это не камень, а то, что от черепа осталось. */
+  /** Принести названный самоцвет, и непременно надколотый: целые к банкиру
+    * приходят и без героя. Череп сюда не идёт — это не камень, а то, что от
+    * черепа осталось. */
   case object BankGem extends DailyKind("gem", DailyNpc.Rakhadim, 1L) with DailyBring {
     override def picks: List[String] =
       GemKind.values.filterNot(_ == GemKind.Skull).map(_.entryName).toList
     override def pickName(pick: String): String =
-      GemKind.withNameOption(pick).map(_.baseName.toLowerCase).getOrElse(pick)
+      GemKind.withNameOption(pick).map(k => Gem.gradeName(k, Gem.MinGrade)).getOrElse(pick)
     def accepts(item: Item, pick: Option[String]): Boolean =
-      item.gem.exists(g => pick.forall(_ == g.kind.entryName))
+      item.gem.exists(g => g.grade == Gem.MinGrade && pick.forall(_ == g.kind.entryName))
   }
 
   // ── Ришелье: оборот на прилавке и заказ городской стражи ──────────────────
@@ -116,11 +124,11 @@ object DailyKind extends Enum[DailyKind] {
     }
   }
 
-  /** Доспехи туда же: страже всё равно, чем прикрываться. */
+  /** Нагрудники туда же: стражу прикрывают по груди, остальное её дело. */
   case object GuardArmor extends DailyKind("armor", DailyNpc.Richelieu, 3L) with DailyBring {
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
-      ItemType.defenceItems.contains(item.itemType)
+      item.itemType == ItemType.ChestPlate
     }
   }
 
@@ -137,6 +145,7 @@ object DailyKind extends Enum[DailyKind] {
   // ── Густаво: всё, что растёт ──────────────────────────────────────────────
   /** Травы, любые: котёл не разбирает. */
   case object HerbsAny extends DailyKind("herbs", DailyNpc.Gustavo, 6L) with DailyBring {
+    override def weight: Int = DailyRates.GustavoPlainWeight
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
       item.material.exists(_.isHerb)
@@ -145,6 +154,7 @@ object DailyKind extends Enum[DailyKind] {
 
   /** Названная трава первого ранга — ровно та, что нужна под рецепт. */
   case object HerbNamed extends DailyKind("herb", DailyNpc.Gustavo, 2L) with DailyBring {
+    override def weight: Int = DailyRates.GustavoPlainWeight
     override def picks: List[String] = MaterialKind.herbsOfRank(1).map(_.entryName).toList
     override def pickName(pick: String): String =
       MaterialKind.withNameOption(pick).map(_.displayName).getOrElse(pick)
@@ -152,8 +162,10 @@ object DailyKind extends Enum[DailyKind] {
       item.material.exists(m => m.herbRank == 1 && pick.forall(_ == m.entryName))
   }
 
-  /** Редкая трава второго ранга, одна. За такую и платит по-другому. */
+  /** Редкая трава второго ранга, одна. Заказ нечастый — примерно раз в десять
+    * дней, — и платит он за него по-другому. */
   case object HerbRare extends DailyKind("rare", DailyNpc.Gustavo, 1L) with DailyBring {
+    override def weight: Int = DailyRates.GustavoRareWeight
     def accepts(item: Item, pick: Option[String]): Boolean = {
       val _ = pick
       item.material.exists(_.herbRank >= 2)
@@ -284,6 +296,11 @@ object DailyRates {
 
   def doubloons(kind: DailyKind): Long =
     if (kind == DailyKind.BankLot) lotDoubloons else bringDoubloons
+
+  /** Как часто Густаво просит редкую траву: девять, девять и два — примерно
+    * один такой заказ на десять дней. */
+  val GustavoPlainWeight: Int = 9
+  val GustavoRareWeight: Int  = 2
 
   /** Чем платит Густаво. За простой заказ — склянка из простых трав, за редкую
     * траву — из тех, что варятся на редких: чем платить, он решает по дню. */

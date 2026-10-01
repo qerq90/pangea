@@ -38,7 +38,7 @@ object DailyQuestLog {
         case Some(task) => ZIO.succeed(refreshed(task, hero))
         case None =>
           val pool = DailyKind.of(npc)
-          val kind = pool(pickFor(day * 1000003L + hero.id.value, pool.size))
+          val kind = weighted(pool, pickFor(day * 1000003L + hero.id.value, pool.map(_.weight).sum))
           val task = DailyTask(kind, day, from = counterOf(kind, hero), pick = pickOf(kind, day, hero))
           save(heroDao, hero.userId, all.updated(npc, task)).as(task)
       }
@@ -99,7 +99,17 @@ object DailyQuestLog {
     case _ => None
   }
 
-  /** Какое поручение выпало сегодня. Не бросок, а счёт от дня и самого героя:
+  /** Какое поручение пришлось на выпавшее число. Поручения не равны: у кого
+    * вес больше, тот и занимает больше дней ([[DailyKind.weight]]). */
+  @annotation.tailrec
+  private def weighted(pool: List[DailyKind], roll: Int): DailyKind = pool match {
+    case kind :: Nil                      => kind
+    case kind :: _ if roll < kind.weight  => kind
+    case kind :: rest                     => weighted(rest, roll - kind.weight)
+    case Nil                              => DailyKind.BankLot // пул пуст не бывает
+  }
+
+  /** Какое число выпало сегодня. Не бросок, а счёт от дня и самого героя:
     * у каждого своё, назавтра другое, а бой и прочие сцены со своими бросками
     * при этом не сбиваются — заглянуть к горожанину можно когда угодно. */
   private def pickFor(seed: Long, bound: Int): Int = {
