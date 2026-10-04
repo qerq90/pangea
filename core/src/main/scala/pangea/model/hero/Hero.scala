@@ -239,12 +239,10 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
-  // ── «Родные» значения ───────────────────────────────────────────────────────
-  // То, с чем герой останется, когда зелья выветрятся, а травмы заживут: без
-  // расовых особенностей, без травм и без временных бафов. Всё постоянное —
-  // вложенные очки, достижения, снаряжение, камни, наборы, прокачка у Горна —
-  // в них входит: это и есть «своё». Показываются в скобках на «Персонаже».
-
+  /** «Родные» сила, тело, ловкость и ум — то, с чем герой останется, когда
+   *  зелья выветрятся, а травмы заживут: без расовых особенностей, травм и
+   *  временных бафов. Вложенные очки и прибавки достижений входят: это и есть
+   *  «своё». Показываются в скобках на «Персонаже» — только эти четыре числа. */
   def nativeBaseStats: BaseStats = BaseStats(
     agi = (baseStats.agi + Achievement.agiBonus(this)).max(1L),
     vit = baseStats.vit.max(1L),
@@ -252,35 +250,18 @@ case class Hero(
     int = (baseStats.int + Achievement.intBonus(this)).max(1L)
   )
 
-  def nativeFightStats: FightStats =
-    withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(TraumaPenalties()))))
-
-  def nativeMaxHp: Long = {
-    val subtotal = (baseStats.vit * 24L).max(1L) + equipment.allHp
-    (subtotal + gems.flatHp + sets.flatHp) * (100L + gems.maxHpBonusPct + sets.maxHpBonusPct) / 100L
-  }
-
-  def nativeMaxArmor: Long = maxArmor
-
-  def nativeMaxEnergy: Long = {
-    val b    = nativeBaseStats
-    val base = 5L * b.int + 2L * b.agi + equipment.allEnergy + masterHornBoosts.energy
-    (base * (100L + gems.energyBonusPct + sets.energyBonusPct) / 100L).max(1L)
-  }
-
   /** Карточка персонажа. `blessed` (активно ли благословение Азата) и
    *  `instantRests` (сколько быстрых отдыхов в запасе) живут в `azat_data`, а не
    *  в самом герое, поэтому приходят параметрами. Отдыхи показываем и без
    *  благословения: заряды остаются, даже когда оно кончилось.
    *
-   *  Каждое число — текущее, с учётом всего, что сейчас действует; в скобках за
-   *  ним — родное, до расы, травм и зелий. Скобки появляются только там, где
-   *  числа разошлись: у здорового героя без зелий они совпадают, и двоить их
-   *  незачем. */
+   *  У четырёх характеристик — силы, тела, ловкости и ума — число текущее, со
+   *  всем, что сейчас действует, а в скобках за ним родное: до расы, травм и
+   *  зелий. Скобки появляются только там, где числа разошлись. Остальные
+   *  строки — как и были, одним числом. */
   def getInfo(nowMs: Long, blessed: Boolean = false, instantRests: Int = 0): String = {
     val effB     = effectiveBaseStats(nowMs)
     val natB     = nativeBaseStats
-    val nat      = nativeFightStats
     val eff      = effectiveFightStats(nowMs)
     val maxHp    = effectiveMaxHp(nowMs)
     val maxArm   = effectiveMaxArmor(nowMs)
@@ -296,9 +277,9 @@ case class Hero(
        | 💪 СИЛ ${withNative(effB.str, natB.str)}  ТЕЛО ${withNative(effB.vit, natB.vit)}
        | 🏃 ЛОВ ${withNative(effB.agi, natB.agi)}  ИНТ ${withNative(effB.int, natB.int)}
        |
-       | ❤ ${fightStats.hp}/${withNative(maxHp, nativeMaxHp)}  🧥 Броня $curArm/${withNative(maxArm, nativeMaxArmor)}  ⚡ Энергия $curEn/${withNative(maxEn, nativeMaxEnergy)}
-       | ⚔ Атк ${withNative(eff.atk, nat.atk)}  🛡 Защ ${withNative(eff.defence, nat.defence)}
-       | 🎯 Точн ${withNative(eff.accuracy, nat.accuracy)}  👁 Укл ${withNative(eff.evasion, nat.evasion)}
+       | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm  ⚡ Энергия $curEn/$maxEn
+       | ⚔ Атк ${eff.atk}  🛡 Защ ${eff.defence}
+       | 🎯 Точн ${eff.accuracy}  👁 Укл ${eff.evasion}
        |
        | Свободных очков: $upgradePoints
        |""".stripMargin

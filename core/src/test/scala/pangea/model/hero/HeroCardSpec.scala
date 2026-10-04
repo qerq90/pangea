@@ -53,15 +53,17 @@ object HeroCardSpec extends ZIOSpecDefault {
       assertTrue(base.getInfo(0L).contains("СИЛ 10") && !base.getInfo(0L).contains("СИЛ 10 ("))
     },
 
-    test("родное считается и для потолков: HP, брони и энергии") {
-      val h = hero(Race.Orc)
-      // тело ×1.2 поднимает и потолок HP, а родной остаётся от вложенного тела
-      assertTrue(h.nativeMaxHp == 10L * 24L && h.effectiveMaxHp(0L) > h.nativeMaxHp) &&
-      assertTrue(h.getInfo(0L).contains(s"/${h.effectiveMaxHp(0L)} (${h.nativeMaxHp})")) &&
-      // броню раса не трогает — там скобок нет
-      assertTrue(h.nativeMaxArmor == h.effectiveMaxArmor(0L)) &&
-      // энергия считается от родных ума и ловкости
-      assertTrue(h.nativeMaxEnergy == 5L * 10L + 2L * 10L + h.equipment.allEnergy + h.masterHornBoosts.energy)
+    test("скобки только у четырёх характеристик: остальные строки одним числом") {
+      val h     = hero(Race.Orc)
+      val card  = h.getInfo(0L)
+      val lines = card.linesIterator.toList
+      // у орка раса сдвинула и потолок HP, и энергию — но там скобок быть не должно
+      assertTrue(h.effectiveMaxHp(0L) > 10L * 24L) &&
+      assertTrue(lines.exists(l => l.contains("СИЛ") && l.contains("("))) &&
+      assertTrue(lines.filter(l => l.contains("❤") || l.contains("Энергия") ||
+                                   l.contains("Атк") || l.contains("Точн")).forall(!_.contains("("))) &&
+      // всего четыре скобки — по одной на характеристику
+      assertTrue(card.count(_ == '(') == 4)
     },
 
     test("скобка появляется только при разнице") {
