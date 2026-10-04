@@ -112,7 +112,7 @@ object RatKingBattleSpec extends ZIOSpecDefault {
       assertTrue(s.energy == 100L * bossLvl && s.accuracy == 200L * bossLvl) &&
       assertTrue(s.defence == 100L * bossLvl && s.evasion == 50L * bossLvl) &&
       assertTrue(king.energyRegen(bossLvl) == 7L * bossLvl) &&
-      assertTrue(king.expReward(bossLvl) == 200L * bossLvl) &&
+      assertTrue(king.expReward(bossLvl) == 100L * bossLvl) &&
       assertTrue(king.monsterName == "Крысиный король" && king.race == Race.Animal) &&
       // три шага в круге, набора под него ещё нет, кровь — его ингредиент
       assertTrue(king.abilities == 3 && king.set.isEmpty) &&

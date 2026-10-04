@@ -488,7 +488,10 @@ object MiniBoss extends Enum[MiniBoss] {
     val DefencePerLvl: Long     = 100L
     val EvasionPerLvl: Long     = 50L
     val EnergyRegenPerLvl: Long = 7L
-    val ExpPerLvl: Long         = 200L
+
+    /** Платит он вдвое меньше элементалей: и растёт чаще, и встречается не
+      * случайно — за ним ходят по объявлению, когда захотят. */
+    val ExpPerLvl: Long = 100L
 
     /** Растёт втрое быстрее элементалей: раз в три уровня героя. */
     val LevelDivisor: Long = 3L
@@ -500,7 +503,7 @@ object MiniBoss extends Enum[MiniBoss] {
     /** Призыв крыс: сколько их лезет и во сколько это ему обходится. */
     val SummonMin: Int          = 2
     val SummonMax: Int          = 3
-    val SummonCostPerLvl: Long  = 30L
+    val SummonCostPerLvl: Long  = 15L
 
     /** Объединение: он поглощает своего же — чужие HP и броня идут ему и в
      *  текущее, и в потолок, а к атаке прибавляется столько за уровень босса. */
