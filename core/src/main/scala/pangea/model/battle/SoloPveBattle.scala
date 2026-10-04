@@ -223,6 +223,24 @@ case class SoloPveBattle(
       }
     }
 
+  /** Герой лежит — тому, кто стоял напротив него, больше нечего делать:
+    * лежачего мобы не добивают, а бить со своего места ему некого. Он отвязывается
+    * и встаёт напротив ближайшего живого союзника, у которого ещё никого нет:
+    * союзники до него дотягивались и раньше ([[GroupState.allyAt]] и `allyTarget`), а он их — нет.
+    *
+    * Возвращает бой и место, куда перешёл, если перешёл. Сооружение с места
+    * не сходит, и без свободного места напротив союзника всё остаётся как есть. */
+  def leaveDownedHero: (SoloPveBattle, Option[Int]) =
+    if (!group.heroDown || group.activePos != group.heroPos || monsterCurrentHp <= 0L || !movable(activeSlot))
+      (this, None)
+    else
+      group.allies
+        .filter(a => a.alive && !group.hasMonster(a.position))
+        .sortBy(a => (math.abs(a.position - group.heroPos), a.position))
+        .headOption
+        .fold((this, Option.empty[Int]))(a =>
+          (copy(group = group.copy(activePos = a.position)), Some(a.position)))
+
   /** Из очереди в строй — сколько влезет. Возвращает бой и вошедших. */
   def admitQueued: (SoloPveBattle, List[MonsterSlot]) =
     group.queue.foldLeft((copy(group = group.copy(queue = Nil)), List.empty[MonsterSlot])) { case ((b, in), s) =>

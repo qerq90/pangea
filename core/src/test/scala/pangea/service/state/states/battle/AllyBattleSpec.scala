@@ -343,6 +343,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
         b1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         sched    <- sch.scheduled
         scr1     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        lying    <- r.sentScreens.map(_.last)
         // кнопки лежащего героя ничего не делают — только экран
         _        <- state.action(testUser, aimed("Attack", 1), r)
         same     <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
@@ -362,6 +363,8 @@ object AllyBattleSpec extends ZIOSpecDefault {
         updated  <- dao.getHeroByUserId(userId).map(_.get)
         scr      <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(down == StateType.Battle && b1.group.heroDown) &&
+              // лежачему жать нечего: кнопок нет, и клавиатура убрана
+              assertTrue(lying.choices.isEmpty && lying.hideKeyboard) &&
               assertTrue(sched.exists(s => s.kind == TaskKind.SquadFight && s.expectedState == StateType.Battle && s.fireAt == 30000L)) &&
               assertTrue(scr1.contains("оседаете на землю") && scr1.contains("Отряд дерётся за вас")) &&
               assertTrue(same == b1) &&
@@ -369,6 +372,27 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(t2 == StateType.Battle && b3.monsterCurrentHp < 1000L && b3.group.heroDown) &&
               assertTrue(t3 == StateType.Loot && updated.fightStats.hp == 1L) &&
               assertTrue(scr.contains("отряд отбился, и вы приходите в себя"))
+    },
+
+    test("моб напротив лежачего уходит к союзнику, если есть куда") {
+      val h    = hero(allies = List(ally(pos = 2)))
+      val up   = group(h, 1000L)
+      val down = up.copy(group = up.group.copy(heroDown = true))
+      val (moved, to) = down.leaveDownedHero
+      // место союзника свободно — моб переходит туда и разрывает пару с героем
+      assertTrue(down.group.paired && to.contains(2)) &&
+      assertTrue(moved.group.activePos == 2 && !moved.group.paired) &&
+      // пока герой на ногах — никто никуда не идёт
+      assertTrue(up.leaveDownedHero._2.isEmpty) &&
+      // место союзника занято другим мобом — остаётся где стоял
+      assertTrue {
+        val two = group(h, 1000L, 10L)
+        two.copy(group = two.group.copy(heroDown = true)).leaveDownedHero._2.isEmpty
+      } &&
+      // союзник пал — идти не к кому
+      assertTrue(down.copy(group = down.group.updateAlly(2)(_.copy(hp = 0L))).leaveDownedHero._2.isEmpty) &&
+      // сооружение с места не сходит
+      assertTrue(down.copy(monsterRace = Race.Construct.entryName).leaveDownedHero._2.isEmpty)
     },
 
     test("герой лежит, а последний союзник уходит по свитку — смерть, отложенная до этого момента") {

@@ -339,11 +339,12 @@ case class BattleState(
       case Outcome.Death if res.battle.group.allies.exists(_.alive) && !res.battle.group.heroDown =>
         // Отряд ещё на ногах: герой падает, но не умирает — бой идёт без него,
         // раунд за раундом по таймеру, а смерть отложена до исхода.
-        val down = res.battle.copy(group = res.battle.group.copy(heroDown = true))
+        val fell = res.battle.copy(group = res.battle.group.copy(heroDown = true))
+        val (down, turned) = fell.leaveDownedHero
         (persistHero *> heroDao.writeActiveBattle(user.userId, down.asJson)).uninterruptible *>
           showLog *> showGroup *>
           scheduler.schedule(user.userId, nowMs + BattleState.SquadTickMs, TaskKind.SquadFight, StateType.Battle, BattleState.SquadTickAction) *>
-          renderer.show(user, Screen(content.text("battle.squad.heroDown"), Nil)) *>
+          renderer.show(user, Screen(content.text("battle.squad.heroDown") + turnsAwayLine(down, turned), Nil)) *>
           showDown(user, down, renderer)
       case Outcome.Death =>
         (persistHero *> persistSquad *> clearDust).uninterruptible *> showLog *> showGroup *>
@@ -683,7 +684,11 @@ case class BattleState(
       state  <-
         if (!battle.group.heroDown) showScreen(user, renderer).as(StateType.Battle)
         else for {
-          allied   <- allyPhase(TurnResult(hero, battle, Vector.empty, Outcome.Continue))
+          // Место напротив союзника могло освободиться и позже — смотрим каждый раунд.
+          moved    <- ZIO.succeed(battle.leaveDownedHero)
+          (walked, turnedTo) = moved
+          allied   <- allyPhase(TurnResult(hero, walked,
+                        Vector(turnsAwayLine(walked, turnedTo)).filter(_.nonEmpty), Outcome.Continue))
           promoted  = promoteAfterKill(allied)
           sided    <- sideMobsPhase(promoted, now)
           promoted2 = promoteAfterKill(sided)
@@ -707,11 +712,20 @@ case class BattleState(
         } yield state
     } yield state
 
-  /** Экран героя, лежащего без сил: строй и кнопка «Как дела». */
+  /** Экран героя, лежащего без сил: только строй. Кнопок нет и не нужно —
+    * жать лежачему нечего, бой идёт своей чередой по таймеру. Клавиатуру
+    * убираем явно: иначе так и висели бы кнопки боя, которые всё равно ничего
+    * не делают. */
   private def showDown(user: User, battle: SoloPveBattle, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(
       content.text("battle.squad.downScreen") + "\n\n" + groupLines(battle).mkString("\n"),
-      List(pangea.engine.Choice("Look", content.text("battle.squad.lookLabel"), row = Some(0))))).as(StateType.Battle)
+      Nil, hideKeyboard = true)).as(StateType.Battle)
+
+  /** Строка о том, что моб ушёл от лежащего к союзнику; пустая, если не ушёл. */
+  private def turnsAwayLine(battle: SoloPveBattle, to: Option[Int]): String =
+    to.flatMap(pos => battle.group.allyAt(pos)).fold("")(ally =>
+      "\n" + content.format("battle.squad.turnsAway",
+        "monster" -> battle.monsterName, "name" -> ally.name))
 
   /** Удар героя по мобу на месте `pos`, стоящему не напротив него: моб
     * разворачивается в поля, получает удар (без ответа) и сворачивается
