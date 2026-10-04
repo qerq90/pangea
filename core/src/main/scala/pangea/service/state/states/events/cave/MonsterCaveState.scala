@@ -9,7 +9,7 @@ import pangea.generator.item.MaterialGenerator
 import pangea.generator.loot.{LootGenerator, SchronGenerator, TreasureHuntGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{Poison, SoloPveBattle}
-import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind}
+import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveScene, RoomKind}
 import pangea.model.hero.{Hero, Knowledge}
 import pangea.generator.item.GemGenerator
 import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, MapZone, MaterialKind}
@@ -27,7 +27,7 @@ import pangea.service.artifact.ArtifactIntake
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.events.cave.MonsterCaveState._
-import pangea.model.quest.BoardKind
+import pangea.model.quest.{BoardKind, Difficulty}
 import pangea.service.state.{BoardProgress, CharacterMenu, HerbLore, InventoryFeedback, ItemMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 
@@ -69,6 +69,7 @@ case class MonsterCaveState(
       "CaveLeft"      -> Target.Run { (u, _, r) => awake(u, r)(go(u, CaveDir.Left, r)) },
       "CaveRight"     -> Target.Run { (u, _, r) => awake(u, r)(go(u, CaveDir.Right, r)) },
       "CaveSearch"    -> Target.Run { (u, _, r) => awake(u, r)(search(u, r)) },
+      "CaveDown"      -> Target.Run { (u, _, r) => awake(u, r)(descend(u, r)) },
       "CaveAltar"     -> Target.Run { (u, _, r) => awake(u, r)(withScene(u)(s => showSupplies(u, s, r).as(StateType.MonsterCave))) },
       "CaveSwap"      -> Target.Run { (u, ua, r) => swap(u, ua, r) },
       "CaveSwapNo"    -> Target.Run { (u, _, r) => withScene(u)(s => cancelSwap(u, s, r)) },
@@ -83,7 +84,8 @@ case class MonsterCaveState(
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.Dungeon, StateType.Battle, StateType.Loot, StateType.HeroStats, StateType.MonsterCave)
+    Set(StateType.Dungeon, StateType.Battle, StateType.Loot, StateType.HeroStats,
+        StateType.MonsterCave, StateType.GlobalMap)
 
   // ── Вход в событие и возвращение в него ────────────────────────────────────
 
@@ -121,12 +123,14 @@ case class MonsterCaveState(
              else reward(user, scene, renderer).flatMap(s => showRoom(user, s, renderer))
     } yield res
 
-  /** Порог пещеры: чья она — видно по следам, сколько их — нет. */
+  /** Порог пещеры: чья она — видно по следам, сколько их — нет. У канализации
+    * гадать не о чем: герой пришёл сюда по объявлению и знает, за кем. */
   private def showGate(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(
-      content.format("cave.gate.text", "race" -> Race.withName(scene.race).toString),
+      if (scene.sewer) content.format("sewer.gate.text", "lvl" -> Difficulty.render(scene.questLvl.toInt))
+      else content.format("cave.gate.text", "race" -> Race.withName(scene.race).toString),
       List(
-        content.choice("CaveEnter", "cave.gate.enter").copy(color = ChoiceColor.Positive, row = Some(0)),
+        content.choice("CaveEnter", key(scene, "gate.enter")).copy(color = ChoiceColor.Positive, row = Some(0)),
         content.choice("CaveSupply", "cave.gate.supply").copy(row = Some(1)),
         content.choice("OpenCharacter", "common.character").copy(row = Some(2)),
         content.choice("CaveOut", "cave.gate.leave").copy(color = ChoiceColor.Negative, row = Some(3))
@@ -136,7 +140,7 @@ case class MonsterCaveState(
     withScene(user) { scene =>
       val inside = scene.copy(inside = true, at = 0)
       writeScene(user, inside) *>
-        renderer.show(user, Screen(content.text("cave.entered"), Nil)) *>
+        renderer.show(user, Screen(txt(scene, "entered"), Nil)) *>
         showRoom(user, inside, renderer)
     }
 
@@ -219,11 +223,11 @@ case class MonsterCaveState(
       // Второй дурман поверх первого ничего не добавляет — честно предупреждаем.
       val already = (boon == CaveBoon.Dope && scene.weakened) || (boon == CaveBoon.Poison && scene.poisoned)
       val line = boon match {
-        case _ if already    => content.format("cave.supply.already", "name" -> item.displayTitle)
-        case CaveBoon.Dope   => content.format("cave.supply.dope", "name" -> item.displayTitle,
+        case _ if already    => content.format(key(scene, "supply.already"), "name" -> item.displayTitle)
+        case CaveBoon.Dope   => content.format(key(scene, "supply.dope"), "name" -> item.displayTitle,
                                   "pct" -> CaveRates.DopeCutPct.toString)
         case CaveBoon.Poison => content.format("cave.supply.poison", "name" -> item.displayTitle)
-        case CaveBoon.None   => content.format("cave.supply.wasted", "name" -> item.displayTitle)
+        case CaveBoon.None   => content.format(key(scene, "supply.wasted"), "name" -> item.displayTitle)
       }
       for {
         _ <- takeFrom(user, hero, item, charged)
@@ -246,11 +250,11 @@ case class MonsterCaveState(
           (dug, _) = CaveGenerator.addTreasureRoom(scene.copy(treasure = Some(zone)), Rng(seed))
           _ <- inventoryRepo.removeItem(map.id, hero.id).mapError(asThrowable)
           _ <- writeScene(user, dug)
-          _ <- renderer.show(user, Screen(content.text("cave.supply.map"), Nil))
+          _ <- renderer.show(user, Screen(txt(scene, "supply.map"), Nil))
           _ <- showSupplies(user, dug, renderer)
         } yield StateType.MonsterCave
-      case (ItemType.TreasureMap, _) => say(user, scene, "cave.supply.mapAlready", renderer)
-      case _                         => say(user, scene, "cave.supply.mapHalf", renderer)
+      case (ItemType.TreasureMap, _) => say(user, scene, "supply.mapAlready", renderer)
+      case _                         => say(user, scene, "supply.mapHalf", renderer)
     }
 
   // ── Алтарь тёмных сил ──────────────────────────────────────────────────────
@@ -259,13 +263,13 @@ case class MonsterCaveState(
     * переплавляет в черепа, трофеи поднимает обратно; всё прочее ему
     * безразлично — такую вещь герой уносит с собой. */
   private def offer(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer): Task[StateType] =
-    if (scene.altarSpent) say(user, scene, "cave.altar.spent", renderer)
+    if (scene.altarSpent) say(user, scene, "altar.spent", renderer)
     else item.gem match {
-      case Some(gem) if gem.kind == GemKind.Skull => say(user, scene, "cave.altar.skullAlready", renderer)
+      case Some(gem) if gem.kind == GemKind.Skull => say(user, scene, "altar.skullAlready", renderer)
       case Some(gem)                              => forgeSkull(user, hero, scene, item, gem.grade, renderer)
       case None => DarkAltar.formOf(item) match {
         case Some(form) => raise(user, hero, scene, item, form, renderer)
-        case None       => say(user, scene, "cave.altar.indifferent", renderer)
+        case None       => say(user, scene, "altar.indifferent", renderer)
       }
     }
 
@@ -323,7 +327,7 @@ case class MonsterCaveState(
                   now <- nowMs
                   _ <- inventoryRepo.removeItem(scene.pendingTrophy, hero.id).mapError(asThrowable).ignore
                   _ <- heroDao.updateSquad(user.userId, hero.squad.replaceAt(p, form, hero.lvl, now))
-                  _ <- renderer.show(user, Screen(content.format("cave.altar.swapped",
+                  _ <- renderer.show(user, Screen(content.format(key(scene, "altar.swapped"),
                          "old" -> old.name, "name" -> form.name), Nil))
                   out <- burnOut(user, scene.copy(pending = None, pendingTrophy = 0L), renderer)
                 } yield out
@@ -344,8 +348,8 @@ case class MonsterCaveState(
       showRoom(user, scene.copy(altarSpent = true), renderer)
 
   /** Короткая реплика камня и обратно к сумке. */
-  private def say(user: User, scene: CaveScene, key: String, renderer: Renderer): Task[StateType] =
-    renderer.show(user, Screen(content.text(key), Nil)) *>
+  private def say(user: User, scene: CaveScene, name: String, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(txt(scene, name), Nil)) *>
       showSupplies(user, scene, renderer).as(StateType.MonsterCave)
 
   /** Заряд — из фляги (хоть надетой, хоть из сумки), всё прочее — из сумки целиком. */
@@ -366,7 +370,7 @@ case class MonsterCaveState(
       if (!scene.inside) showGate(user, scene, renderer)
       else scene.neighbour(dir) match {
         case None =>
-          wall.flatMap(line => renderer.show(user, Screen(line, Nil))) *> showRoom(user, scene, renderer)
+          wall(scene).flatMap(line => renderer.show(user, Screen(line, Nil))) *> showRoom(user, scene, renderer)
         case Some(idx) =>
           val moved = scene.copy(at = idx)
           if (moved.room.monsters > 0) getHero(user).flatMap(fight(user, _, moved, idx, renderer))
@@ -377,8 +381,8 @@ case class MonsterCaveState(
     }
 
   /** Стена, в которую упёрся герой: пещера каждый раз показывает её по-своему. */
-  private def wall: Task[String] = {
-    val walls = content.list("cave.walls")
+  private def wall(scene: CaveScene): Task[String] = {
+    val walls = content.list(key(scene, "walls"))
     Random.nextIntBounded(walls.size).map(walls(_))
   }
 
@@ -420,14 +424,16 @@ case class MonsterCaveState(
       case RoomKind.Chest => content.text(if (room.done) "cave.room.chestOpen" else "cave.room.chest")
       case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
       case RoomKind.Treasure => content.text(if (room.done) "cave.room.treasureDug" else "cave.room.treasure")
-      case RoomKind.Empty => emptyRoom(room)
+      case RoomKind.Stairs   => content.text("sewer.room.stairs")
+      case RoomKind.Empty => emptyRoom(scene)
     }
   }
 
   /** Описание пустой комнаты. Вариант закреплён за местом, а не тянется наугад:
     * вернувшись, герой должен узнать комнату, в которой уже был. */
-  private def emptyRoom(room: CaveRoom): String = {
-    val lines = content.list("cave.rooms.empty")
+  private def emptyRoom(scene: CaveScene): String = {
+    val room  = scene.room
+    val lines = content.list(key(scene, "rooms.empty"))
     lines(math.floorMod(room.x * 31 + room.y * 17, lines.size))
   }
 
@@ -438,19 +444,34 @@ case class MonsterCaveState(
     case RoomKind.Treasure => Some("cave.act.treasure")
     case RoomKind.Rest  => Some("cave.act.rest")
     case RoomKind.Altar => Some("cave.act.altar")
+    case RoomKind.Stairs => Some("sewer.act.down")
     case RoomKind.Empty => None
   }
 
-  /** Кнопка находки: у привала и алтаря свои маршруты, прочее обыскивают. */
+  /** Кнопка находки: у привала, алтаря и хода вниз свои маршруты, прочее обыскивают. */
   private def actionId(kind: RoomKind): String = kind match {
-    case RoomKind.Rest  => "CaveRest"
-    case RoomKind.Altar => "CaveAltar"
-    case _              => "CaveSearch"
+    case RoomKind.Rest   => "CaveRest"
+    case RoomKind.Altar  => "CaveAltar"
+    case RoomKind.Stairs => "CaveDown"
+    case _               => "CaveSearch"
   }
 
   /** Герой стоит у алтаря — значит вещи из сумки идут не в пещеру, а на камень. */
   private def atAltar(scene: CaveScene): Boolean =
     scene.inside && scene.room.kind == RoomKind.Altar
+
+  /** Полный ключ текста: у канализации свои слова там, где они у неё есть
+    * (см. [[MonsterCaveState.SewerSays]]), в остальном она говорит языком
+    * пещеры — механика у них одна, и дублировать её тексты незачем. */
+  private def key(scene: CaveScene, name: String): String =
+    if (scene.sewer && SewerSays.contains(name)) s"sewer.$name" else s"cave.$name"
+
+  private def txt(scene: CaveScene, name: String): String = content.text(key(scene, name))
+
+  /** Чья добыча в сундуке и схроне: в пещере — хозяев пещеры, в канализации —
+    * людей, что прятали там своё. Крысы сундуков не набивают. */
+  private def lootRace(scene: CaveScene): Race =
+    if (scene.sewer) Race.Human else Race.withName(scene.race)
 
   // ── Бой в комнате ──────────────────────────────────────────────────────────
 
@@ -460,11 +481,16 @@ case class MonsterCaveState(
   private def fight(user: User, hero: Hero, scene: CaveScene, idx: Int, renderer: Renderer): Task[StateType] = {
     val race  = Race.withName(scene.race)
     val count = scene.rooms(idx).monsters
+    // В канализации уровень берётся от задания, а не от этажа лабиринта:
+    // объявление обещало крыс именно такой силы (см. SewerRates.MinLvl..MaxLvl).
+    val lvl   = if (scene.sewer) scene.questLvl.toInt.max(1) else hero.dungeonLevel
     for {
       seeds   <- ZIO.foreach(List.fill(count)(()))(_ => Random.nextLong)
       monsters = seeds.map { seed =>
-                   val (rarity, _) = CaveGenerator.rollRarity(Rng(seed))
-                   weaken(MonsterGenerator.generateOfRaceAndRarity(hero.dungeonLevel, race, rarity), scene.weakened)
+                   val (rarity, _) =
+                     if (scene.sewer) CaveGenerator.rollRatRarity(Rng(seed))
+                     else CaveGenerator.rollRarity(Rng(seed))
+                   weaken(MonsterGenerator.generateOfRaceAndRarity(lvl, race, rarity), scene.weakened)
                  }
       energies <- ZIO.foreach(monsters)(m =>
                     Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
@@ -475,9 +501,27 @@ case class MonsterCaveState(
       routing   = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
       _ <- heroDao.writeActiveBattle(user.userId, battle.copy(noKin = true).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
-      _ <- renderer.show(user, Screen(content.format("cave.ambush", "count" -> count.toString), Nil))
+      _ <- renderer.show(user, Screen(content.format(key(scene, "ambush"), "count" -> count.toString), Nil))
     } yield StateType.Battle
   }
+
+  /** Ход вниз: нижний ярус катается в этот самый момент — до спуска его ещё
+    * нет. Дурман и отрава идут вниз вместе с героем: сквозняк в трубах общий, а
+    * взятый наверху опыт копится дальше — платят за канализацию один раз. */
+  private def descend(user: User, renderer: Renderer): Task[StateType] =
+    withScene(user) { scene =>
+      if (!scene.sewer || scene.room.kind != RoomKind.Stairs || scene.room.monsters > 0)
+        showRoom(user, scene, renderer)
+      else
+        for {
+          seed      <- Random.nextLong
+          (deep, _)  = CaveGenerator.sewerDeep(scene.questLvl, Rng(seed))
+          below      = deep.copy(weakened = scene.weakened, poisoned = scene.poisoned,
+                         expEarned = scene.expEarned, restUsed = true)
+          _         <- renderer.show(user, Screen(content.text("sewer.descended"), Nil))
+          res       <- showRoom(user, below, renderer)
+        } yield res
+    }
 
   /** Одурманенный моб бьёт слабее и копит энергию медленнее. */
   private def weaken(m: Monster, on: Boolean): Monster =
@@ -510,6 +554,7 @@ case class MonsterCaveState(
         case RoomKind.Chest => openChest(user, scene, renderer)
         case RoomKind.Stash => openStash(user, scene, renderer)
         case RoomKind.Treasure => digTreasure(user, scene, renderer)
+        case RoomKind.Stairs => descend(user, renderer)
         case _              => showRoom(user, scene, renderer)
       }
     }
@@ -545,7 +590,7 @@ case class MonsterCaveState(
                 val (rune, _) = Rng(seed).pick(RuneStone.all)
                 LootData(items = List(RuneStone.item(rune, RuneStoneSize.Big)), silvers = Nil)
               } else {
-                val (drops, _) = LootGenerator.roll(Rarity.Mythical, Race.withName(scene.race),
+                val (drops, _) = LootGenerator.roll(Rarity.Mythical, lootRace(scene),
                                    hero.dungeonLevel.toLong, Rng(seed),
                                    gearChanceBonusPct = hero.gems.gearDropBonusPct)
                 LootData(
@@ -562,7 +607,7 @@ case class MonsterCaveState(
     for {
       hero <- getHero(user)
       seed <- Random.nextLong
-      (reward, _) = SchronGenerator.roll(Race.withName(scene.race), hero.dungeonLevel.toLong,
+      (reward, _) = SchronGenerator.roll(lootRace(scene), hero.dungeonLevel.toLong,
                       CaveRates.StashDoubloonMin, CaveRates.StashDoubloonMax, Rng(seed),
                       CaveRates.StashDoubloonChancePct)
       loot = LootData(
@@ -644,20 +689,26 @@ case class MonsterCaveState(
     * необысканные углы остаются на месте, и уходит он сам, когда захочет. */
   private def reward(user: User, scene: CaveScene, renderer: Renderer): Task[CaveScene] =
     if (!scene.cleared || scene.rewarded || scene.expEarned <= 0L) ZIO.succeed(scene)
+    // Верхний ярус канализации выбит, а большой крысы так и не видели: за
+    // половину дела не платят — надо искать ход вниз.
+    else if (!scene.lastFloor)
+      renderer.show(user, Screen(content.text("sewer.upperClear"), Nil)).as(scene)
     else {
       val bonus = (scene.expEarned * CaveRates.ClearExpPct / 100L).max(1L)
+      // Канализация в счёт пещер не идёт: за неё своё объявление.
+      val quest = if (scene.sewer) BoardKind.SewerRats else BoardKind.CaveClear
       for {
         hero   <- getHero(user)
         leveled = hero.gainExp(bonus)
         _      <- heroDao.updateExpAndLevel(user.userId, leveled.exp, leveled.lvl, leveled.upgradePoints)
-        _      <- renderer.show(user, Screen(content.format("cave.cleared", "exp" -> bonus.toString), Nil))
+        _      <- renderer.show(user, Screen(content.format(key(scene, "cleared"), "exp" -> bonus.toString), Nil))
         _      <- ZIO.when(leveled.lvl > hero.lvl)(
                     renderer.show(user, Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)))
         // Отдельной строкой, чтобы это не потерялось среди опыта и уровня.
-        _      <- renderer.show(user, Screen(content.text("cave.allClear"), Nil))
-        // Пещера выбита — объявление с доски можно закрывать.
-        closed <- BoardProgress.markDone(heroDao, user.userId, BoardKind.CaveClear)
-        _      <- ZIO.when(closed)(renderer.show(user, Screen(content.text("questBoard.doneCave"), Nil)))
+        _      <- renderer.show(user, Screen(content.text(key(scene, "allClear")), Nil))
+        closed <- BoardProgress.markDone(heroDao, user.userId, quest)
+        _      <- ZIO.when(closed)(renderer.show(user, Screen(
+                    content.text(if (scene.sewer) "questBoard.doneSewer" else "questBoard.doneCave"), Nil)))
         done    = scene.copy(rewarded = true)
         _      <- writeScene(user, done)
       } yield done
@@ -666,14 +717,20 @@ case class MonsterCaveState(
   private def askLeave(user: User, renderer: Renderer): Task[StateType] =
     withScene(user) { scene =>
       if (!scene.inside) leave(user, renderer)
-      else renderer.show(user, Screen(content.text("cave.confirmLeave.text"),
+      else renderer.show(user, Screen(txt(scene, "confirmLeave.text"),
         content.screen("cave.confirmLeave").choices)).as(StateType.MonsterCave)
     }
 
+  /** Уход. Из пещеры герой возвращается в лабиринт, из канализации — в город:
+    * он и пришёл-то сюда из гильдии, по объявлению. */
   private def leave(user: User, renderer: Renderer): Task[StateType] =
-    scheduler.cancel(user.userId, TaskKind.CaveRest) *>
-      heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.text("cave.left"), Nil)).as(StateType.Dungeon)
+    readScene(user).flatMap { scene =>
+      val sewer = scene.exists(_.sewer)
+      scheduler.cancel(user.userId, TaskKind.CaveRest) *>
+        heroDao.writeSceneData(user.userId, Json.Null) *>
+        renderer.show(user, Screen(content.text(if (sewer) "sewer.left" else "cave.left"), Nil))
+          .as(if (sewer) StateType.GlobalMap else StateType.Dungeon)
+    }
 
   // ── Вспомогательное ────────────────────────────────────────────────────────
 
@@ -735,6 +792,17 @@ case class MonsterCaveState(
 object MonsterCaveState {
   /** Префикс кнопки «пустить эту вещь в дело» перед входом. */
   val UsePrefix: String = "CaveUse_"
+
+  /** Ключи, на которые у канализации свои слова (`sewer.<имя>`); на всё
+    * остальное она отвечает словами пещеры (`cave.<имя>`). Список держим
+    * здесь, одним местом: по нему же тесты проверяют, что тексты на месте. */
+  val SewerSays: Set[String] = Set(
+    "gate.text", "gate.enter", "entered", "left", "confirmLeave.text",
+    "walls", "rooms.empty", "ambush", "cleared", "allClear",
+    "supply.dope", "supply.already", "supply.wasted",
+    "supply.map", "supply.mapAlready", "supply.mapHalf",
+    "altar.swapped"
+  )
 
   /** Сколько своих помещается в ряд на экране «кем жертвуем». */
   val SwapPerRow: Int = 2

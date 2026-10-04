@@ -28,6 +28,12 @@ sealed abstract class MaterialKind(val displayName: String) extends EnumEntry {
 
   /** Трава: собирается на поляне, сдаётся Густаво, Ришелье её не берёт. */
   def isHerb: Boolean = this == MaterialKind.StrangeFlower || herbRank > 0
+
+  /** Добыча, за которую не платят: Ришелье такое не берёт, и серебра за него
+   *  не выручить. Место в сумке оно занимает как всё прочее — носят его ради
+   *  будущего крафта, а не понадобилось, так выбрасывают. Руками в шкаф такое
+   *  положить можно: что держать при себе, решает хозяин. */
+  val worthless: Boolean = false
 }
 
 object MaterialKind extends Enum[MaterialKind] {
@@ -165,6 +171,42 @@ object MaterialKind extends Enum[MaterialKind] {
     * редких трав — продавать её Густаво жалко. */
   case object UnopenedRose extends Herb("Нераскрытая роза", 2, 30,
     "«Я срезал их девять и девять раз ошибся. Роза не вянет, не сохнет и не раскрывается: держи её в тепле, в темноте, в воде, в спирту — лепестки останутся сомкнутыми и твёрдыми, как жесть. Значит, дело не в тепле и не во влаге, дитя. Девятая до сих пор лежит у меня в столе. И до сих пор гудит», — из заметок Ашалдарона о цветах, которые не цветут.")
+
+  // ── Добыча из канализации ────────────────────────────────────────────────
+  // Крысиное добро: Ришелье от него отмахивается, серебра за него не выручить,
+  // а место в сумке оно занимает. Носят его ради будущих рецептов — а не
+  // нужно, так выбрасывают.
+
+  case object RatPelt extends MaterialKind("Шкурка крысы") {
+    override val description: String =
+      "Серая шкурка, снятая целиком. Пахнет мокрым камнем и ещё чем-то, о чём лучше не " +
+      "думать. За одну не дадут и медяка, но берут их, говорят, десятками."
+    override val worthless: Boolean = true
+  }
+
+  case object RatTail extends MaterialKind("Крысиный хвост") {
+    override val description: String =
+      "Голый хвост длиной в локоть. Жёсткий, как плеть, и к утру становится только жёстче. " +
+      "Выбросить рука не поднимается: где-то такие хвосты наверняка считают."
+    override val worthless: Boolean = true
+  }
+
+  case object PlagueWorms extends MaterialKind("Чумные черви") {
+    override val description: String =
+      "Белёсый клубок, вынутый из вспоротого брюха. Шевелится дольше, чем тот, в ком жил. " +
+      "Алхимики за такое хватаются первыми — и первыми же идут мыть руки."
+    override val worthless: Boolean = true
+  }
+
+  case object RatKingBlood extends MaterialKind("Кровь крысиного короля") {
+    override val description: String =
+      "Тёмная и густая: в склянке стоит колом и не оседает. Носят её в себе не все крысы, " +
+      "а только те, что подходили к нему близко. Что с ней делать, пока не знает никто."
+    override val worthless: Boolean = true
+  }
+
+  /** Всё, что выносят из канализации: не продаётся, в хранилища не кладётся. */
+  val sewerSpoils: IndexedSeq[MaterialKind] = values.filter(_.worthless)
 
   /** Травы данного ранга — из них выбирается находка на поляне. */
   def herbsOfRank(rank: Int): IndexedSeq[MaterialKind] = values.filter(_.herbRank == rank)

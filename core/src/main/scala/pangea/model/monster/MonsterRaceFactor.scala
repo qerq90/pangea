@@ -82,6 +82,17 @@ object MonsterRaceFactor {
       attackFactor = 1.6,
       accuracyFactor = 1.1,
       evasionFactor = 2.0
+    ),
+    // Зверь: мяса в нём мало, брони нет вовсе, зато попробуй попади. В обычной
+    // генерации эта раса не участвует (см. Race.bossRaces) — по ней считаются
+    // крысы канализации и всё, что ещё забежит в игру на четырёх лапах.
+    Race.Animal -> MonsterRaceFactor(
+      hpFactor = 0.6,
+      armorFactor = 0.3,
+      defenceFactor = 0.5,
+      attackFactor = 0.9,
+      accuracyFactor = 1.2,
+      evasionFactor = 1.6
     )
   )
 

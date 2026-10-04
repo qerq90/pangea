@@ -3,12 +3,14 @@ package pangea.service.state.states.guild
 import io.circe.syntax.EncoderOps
 import pangea.domain.Rng
 import pangea.engine.SceneContent
+import pangea.model.cave.SewerRates
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest._
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.service.state.states.road.RoadProgress
 import pangea.service.state.{BoardProgress, UserAction}
 import pangea.test._
 import zio.ZIO
@@ -39,9 +41,10 @@ object QuestBoardSpec extends ZIOSpecDefault {
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero(lvl))
       inv       = TestInventoryRepository.withItems(items)
+      sched    <- TestScheduler.make
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (QuestBoardState(heroDao, inv, content), heroDao, inv, renderer)
+    } yield (QuestBoardState(heroDao, inv, sched, content), heroDao, inv, renderer)
 
   private def saved(dao: TestHeroDao) =
     dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
@@ -66,17 +69,70 @@ object QuestBoardSpec extends ZIOSpecDefault {
       assertTrue(BoardTier.values.sliding(2).forall { case Seq(a, b) => b.from == a.to + 1L; case _ => true })
     },
 
-    test("свежая доска: восемь объявлений, караван и пещера по одному, расы трофеев не повторяются") {
+    test("свежая доска: восемь объявлений, тяжёлые по одному, расы трофеев не повторяются") {
       val slots  = QuestBoardState.roll(Rng(7L))
       val races  = slots.flatMap(_.race)
       assertTrue(slots.size == BoardRates.Slots) &&
       assertTrue(slots.count(_.kind == BoardKind.CaravanRout) == 1) &&
       assertTrue(slots.count(_.kind == BoardKind.CaveClear) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 6) &&
-      assertTrue(races.size == 6 && races.distinct.size == 6) &&
+      assertTrue(slots.count(_.kind == BoardKind.SewerRats) == 1) &&
+      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 5) &&
+      assertTrue(races.size == 5 && races.distinct.size == 5) &&
       // сложности: трофей — один знак, караван и пещера — пятнадцать
       assertTrue(BoardKind.Trophy.difficulty == 1 && BoardKind.CaravanRout.difficulty == 15) &&
       assertTrue(BoardKind.CaveClear.difficulty == 15)
+    },
+
+    test("канализация: уровень задания 1–25 и он же сложность объявления") {
+      val sewers = (1L to 300L).toList.map(s =>
+        QuestBoardState.roll(Rng(s)).find(_.kind == BoardKind.SewerRats).get)
+      val lvls   = sewers.map(_.lvl)
+      assertTrue(lvls.forall(l => l >= SewerRates.MinLvl && l <= SewerRates.MaxLvl)) &&
+      // уровень катается, а не стоит на месте, и всю шкалу задевает
+      assertTrue(lvls.distinct.size > 15) &&
+      // сложность объявления — его собственный уровень, а не ставка вида
+      assertTrue(sewers.forall(s => s.difficulty == s.lvl.toInt)) &&
+      // у прочих видов сложность по-прежнему общая
+      assertTrue(BoardSlot(BoardKind.CaveClear).difficulty == BoardKind.CaveClear.difficulty)
+    },
+
+    test("выездное уводит от доски в дорогу, а поллеру оставляет задачу") {
+      for {
+        t <- board()
+        (state, dao, _, r) = t
+        _     <- state.action(testUser, tap("BoardMine"), r)
+        fresh <- saved(dao)
+        idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
+        out   <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}$idx"), r)
+        data  <- saved(dao)
+        road  <- dao.readSceneData(userId).map(_.flatMap(_.as[RoadProgress].toOption).get)
+        said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        last  <- r.sentScreens.map(_.last)
+      } yield assertTrue(out == StateType.QuestRoad) &&
+              assertTrue(data.slots(idx).taken && road.kind == BoardKind.SewerRats) &&
+              assertTrue(road.lvl == data.slots(idx).lvl && road.lvl > 0L) &&
+              assertTrue(said.contains("выходите из гильдии")) &&
+              // на дороге кнопок нет: клавиатуру убираем
+              assertTrue(last.choices.isEmpty && last.hideKeyboard)
+    },
+
+    test("с выездного можно уйти и выдвинуться к нему снова") {
+      for {
+        t <- board()
+        (state, dao, _, r) = t
+        _     <- state.action(testUser, tap("BoardMine"), r)
+        fresh <- saved(dao)
+        idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
+        _     <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}$idx"), r)
+        // герой ушёл с задания, сцена пуста — и он снова у доски
+        _     <- dao.writeSceneData(userId, io.circe.Json.Null)
+        again <- state.action(testUser, tap("BoardMine"), r)
+        board <- r.sentScreens.map(_.last)
+        out   <- state.action(testUser, tap(s"${QuestBoardState.GoPrefix}$idx"), r)
+        road  <- dao.readSceneData(userId).map(_.flatMap(_.as[RoadProgress].toOption))
+      } yield assertTrue(again == StateType.QuestBoard) &&
+              assertTrue(board.choices.exists(_.id == s"${QuestBoardState.GoPrefix}$idx")) &&
+              assertTrue(out == StateType.QuestRoad && road.exists(_.kind == BoardKind.SewerRats))
     },
 
     test("стена досок: своя открыта, чужая отвечает своим отказом") {
@@ -205,8 +261,10 @@ object QuestBoardSpec extends ZIOSpecDefault {
         c <- ZIO.attempt(SceneContent.load())
       } yield assertTrue(BoardTier.values.forall(t => c.text(s"questBoard.locked.${t.key}").nonEmpty)) &&
               assertTrue(BoardKind.values.forall(k => c.text(s"questBoard.ask.${k.key}").nonEmpty)) &&
-              assertTrue(List("markCaravan", "markCave", "doneCaravan", "doneCave", "taken", "paid",
-                "paidTrophy", "noTrophy", "notYet").forall(f => c.text(s"questBoard.$f").nonEmpty))
+              assertTrue(List("markCaravan", "markCave", "doneCaravan", "doneCave", "doneSewer", "taken",
+                "paid", "paidTrophy", "noTrophy", "notYet", "stateAway", "goLabel", "depart")
+                .forall(f => c.text(s"questBoard.$f").nonEmpty)) &&
+              assertTrue(List("enter", "wait", "arrived", "lost").forall(f => c.text(s"questRoad.$f").nonEmpty))
     }
   )
 }

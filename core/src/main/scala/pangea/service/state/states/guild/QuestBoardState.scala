@@ -5,13 +5,17 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.model.cave.SewerRates
 import pangea.model.hero.Hero
 import pangea.model.monster.Race
 import pangea.model.quest._
+import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.service.schedule.Scheduler
 import pangea.service.state.states.guild.QuestBoardState._
+import pangea.service.state.states.road.{QuestRoadState, RoadProgress}
 import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 
@@ -34,6 +38,7 @@ import java.util.concurrent.TimeUnit
 case class QuestBoardState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
+  scheduler:     Scheduler,
   content:       SceneContent
 ) extends State {
 
@@ -48,7 +53,7 @@ case class QuestBoardState(
     fallback = Target.Run { (u, ua, r) => handleFallback(u, ua, r) }
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets
+  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.QuestRoad
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = showTiers(user, renderer).unit
 
@@ -119,6 +124,7 @@ case class QuestBoardState(
         "race" -> slot.race.flatMap(Race.withNameOption).map(_.genitivePlural).getOrElse(""))
       case BoardKind.CaravanRout => content.text("questBoard.ask.caravan")
       case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
+      case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
     }
     val state =
       if (!slot.taken)   content.text("questBoard.stateFree")
@@ -126,22 +132,25 @@ case class QuestBoardState(
       else slot.kind match {
         case BoardKind.Trophy if trophyFor(slot, inv).isDefined => content.text("questBoard.stateReady")
         case BoardKind.Trophy                                   => content.text("questBoard.stateNoTrophy")
+        case k if k.away                                        => content.text("questBoard.stateAway")
         case _                                                  => content.text("questBoard.stateHunting")
       }
     content.format("questBoard.line",
-      "n" -> (idx + 1).toString, "difficulty" -> Difficulty.render(slot.kind.difficulty),
+      "n" -> (idx + 1).toString, "difficulty" -> Difficulty.render(slot.difficulty),
       "what" -> what, "state" -> state)
   }
 
-  /** Кнопка объявления: взять, сдать или ничего, пока герой в пути. */
+  /** Кнопка объявления: взять, выдвинуться снова, сдать — или ничего, пока
+    * герой в пути. */
   private def button(slot: BoardSlot, idx: Int): Option[Choice] = {
     val row = Some(idx / 2)
-    if (!slot.taken)
-      Some(Choice(s"$TakePrefix$idx", ItemMenu.truncate(content.format("questBoard.takeLabel", "n" -> (idx + 1).toString)),
+    def btn(prefix: String, key: String): Option[Choice] =
+      Some(Choice(s"$prefix$idx", ItemMenu.truncate(content.format(key, "n" -> (idx + 1).toString)),
         color = ChoiceColor.Positive, row = row))
-    else if (slot.ready || slot.kind == BoardKind.Trophy)
-      Some(Choice(s"$HandPrefix$idx", ItemMenu.truncate(content.format("questBoard.handLabel", "n" -> (idx + 1).toString)),
-        color = ChoiceColor.Positive, row = row))
+    if (!slot.taken) btn(TakePrefix, "questBoard.takeLabel")
+    else if (slot.ready || slot.kind == BoardKind.Trophy) btn(HandPrefix, "questBoard.handLabel")
+    // С выездного можно уйти, не доделав, — тогда к нему возвращаются той же дорогой.
+    else if (slot.kind.away) btn(GoPrefix, "questBoard.goLabel")
     else None
   }
 
@@ -152,14 +161,39 @@ case class QuestBoardState(
       now  <- nowMs
       hero <- getHero(user)
       data <- load(user, hero, now)
-      _ <- data.slot(idx) match {
+      out <- data.slot(idx) match {
         case Some(s) if !s.taken =>
-          val next = data.updated(idx)(_.copy(taken = true))
-          save(user, next) *> renderer.show(user, Screen(content.text("questBoard.taken"), Nil))
-        case _ => ZIO.unit
+          save(user, data.updated(idx)(_.copy(taken = true))) *>
+            renderer.show(user, Screen(content.text("questBoard.taken"), Nil)) *>
+            // Выездное не ждёт в лабиринте: с ним уходят прямо от доски.
+            (if (s.kind.away) depart(user, s, renderer) else showBoard(user, renderer))
+        case _ => showBoard(user, renderer)
       }
-      out <- showBoard(user, renderer)
     } yield out
+
+  /** Снова в путь по уже взятому выездному: герой с него ушёл, не доделав, и
+    * возвращается той же дорогой. */
+  private def goAgain(user: User, idx: Int, renderer: Renderer): Task[StateType] =
+    for {
+      now  <- nowMs
+      hero <- getHero(user)
+      data <- load(user, hero, now)
+      out <- data.slot(idx).filter(s => s.taken && !s.done && s.kind.away) match {
+        case Some(slot) => depart(user, slot, renderer)
+        case None       => showBoard(user, renderer)
+      }
+    } yield out
+
+  /** Дорога к месту: герой уходит из гильдии и добирается туда сам
+    * (см. [[pangea.service.state.states.road.QuestRoadState]]). */
+  private def depart(user: User, slot: BoardSlot, renderer: Renderer): Task[StateType] =
+    for {
+      now <- nowMs
+      _   <- heroDao.writeSceneData(user.userId, RoadProgress(now, slot.kind, slot.lvl).asJson)
+      _   <- scheduler.schedule(user.userId, now + SewerRates.RoadMs,
+               TaskKind.QuestRoad, StateType.QuestRoad, QuestRoadState.DoneAction)
+      _   <- renderer.show(user, Screen(content.text("questBoard.depart"), Nil, hideKeyboard = true))
+    } yield StateType.QuestRoad
 
   /** Сдача: трофей уходит с рук, тяжёлое просто оплачивается. */
   private def hand(user: User, idx: Int, renderer: Renderer): Task[StateType] =
@@ -242,6 +276,8 @@ case class QuestBoardState(
         a.drop(TakePrefix.length).toIntOption.fold(showBoard(user, renderer))(take(user, _, renderer))
       case Some(a) if a.startsWith(HandPrefix) =>
         a.drop(HandPrefix.length).toIntOption.fold(showBoard(user, renderer))(hand(user, _, renderer))
+      case Some(a) if a.startsWith(GoPrefix) =>
+        a.drop(GoPrefix.length).toIntOption.fold(showBoard(user, renderer))(goAgain(user, _, renderer))
       case _ => showTiers(user, renderer)
     }
 
@@ -265,15 +301,21 @@ object QuestBoardState {
   val TakePrefix: String = "BoardTake_"
   val HandPrefix: String = "BoardHand_"
 
+  /** «Выдвинуться снова»: выездное задание уже взято, но герой с него ушёл. */
+  val GoPrefix: String = "BoardGo_"
+
   /** Ряд с выходом: восемь объявлений занимают четыре ряда по два. */
   val ExitRow: Int = BoardRates.Slots / 2
 
-  /** Свежая доска: по [[BoardRates.Layout]], трофейным — своя раса. Расы в
-    * пределах доски не повторяются, пока их хватает. */
+  /** Свежая доска: по [[BoardRates.Layout]], трофейным — своя раса, выездным —
+    * свой уровень. Расы в пределах доски не повторяются, пока их хватает. */
   def roll(rng: Rng): List[BoardSlot] = {
     val kinds = BoardRates.Layout.flatMap { case (k, n) => List.fill(n)(k) }
     kinds.foldLeft((List.empty[BoardSlot], List.empty[String], rng)) { case ((acc, used, r), kind) =>
-      if (!kind.needsRace) (acc :+ BoardSlot(kind), used, r)
+      if (kind.rolledLvl) {
+        val (lvl, r1) = r.between(SewerRates.MinLvl, SewerRates.MaxLvl + 1L)
+        (acc :+ BoardSlot(kind, lvl = lvl), used, r1)
+      } else if (!kind.needsRace) (acc :+ BoardSlot(kind), used, r)
       else {
         val pool        = Race.mortals.toList.map(_.entryName).filterNot(used.contains)
         val choices     = if (pool.isEmpty) Race.mortals.toList.map(_.entryName) else pool

@@ -37,6 +37,15 @@ object BoardTier extends Enum[BoardTier] {
 sealed abstract class BoardKind(val key: String, val difficulty: Int) extends EnumEntry {
   /** Называет ли задание расу: у трофейного она в самом тексте. */
   def needsRace: Boolean = false
+
+  /** Выездное: герой уходит на него прямо от доски и добирается по дороге
+    * ([[pangea.model.state.StateType.QuestRoad]]). Прочие он делает попутно, в
+    * лабиринте, когда они ему встретятся. */
+  def away: Boolean = false
+
+  /** Своя сложность у каждого объявления: у выездных она катается вместе с
+    * уровнем задания, у остальных одна на весь вид. */
+  def rolledLvl: Boolean = false
 }
 
 object BoardKind extends Enum[BoardKind] {
@@ -52,6 +61,14 @@ object BoardKind extends Enum[BoardKind] {
 
   /** «Найти пещеру и выбить всех до последнего» — раса пещеры не важна. */
   case object CaveClear extends BoardKind("cave", 15)
+
+  /** «Крысы в канализации» — выездное: герой уходит туда прямо от доски.
+    * Сложность у каждого объявления своя, по уровню задания, поэтому ставка
+    * вида здесь служебная (см. [[BoardSlot.difficulty]]). */
+  case object SewerRats extends BoardKind("sewer", 1) {
+    override def away: Boolean      = true
+    override def rolledLvl: Boolean = true
+  }
 
   def byKey(key: String): Option[BoardKind] = values.find(_.key == key)
 
@@ -69,16 +86,21 @@ final case class BoardSlot(
   kind:  BoardKind,
   race:  Option[String] = None,
   taken: Boolean        = false,
-  done:  Boolean        = false
+  done:  Boolean        = false,
+  lvl:   Long           = 0L
 ) {
   /** Взято и сделано, но ещё не оплачено. */
   def ready: Boolean = taken && done
+
+  /** Сложность этого объявления в знаках: у выездных она своя, по уровню
+    * задания, у остальных — одна на весь вид. */
+  def difficulty: Int = if (kind.rolledLvl && lvl > 0L) lvl.toInt else kind.difficulty
 }
 
 object BoardSlot {
   implicit val encoder: Encoder[BoardSlot] = (s: BoardSlot) => Json.obj(
     "kind" -> s.kind.asJson, "race" -> s.race.asJson,
-    "taken" -> s.taken.asJson, "done" -> s.done.asJson)
+    "taken" -> s.taken.asJson, "done" -> s.done.asJson, "lvl" -> s.lvl.asJson)
 
   implicit val decoder: Decoder[BoardSlot] = (c: HCursor) =>
     for {
@@ -86,7 +108,8 @@ object BoardSlot {
       race  <- c.getOrElse[Option[String]]("race")(None)
       taken <- c.getOrElse[Boolean]("taken")(false)
       done  <- c.getOrElse[Boolean]("done")(false)
-    } yield BoardSlot(kind, race, taken, done)
+      lvl   <- c.getOrElse[Long]("lvl")(0L)
+    } yield BoardSlot(kind, race, taken, done, lvl)
 }
 
 /** Доска героя на эту неделю: номер недели, раздел и восемь объявлений.
@@ -170,7 +193,8 @@ object BoardRates {
   /** Состав доски: столько-то объявлений каждого вида. Здесь и только здесь —
     * весь расклад, его ещё предстоит пересобрать вместе с новыми заданиями. */
   val Layout: List[(BoardKind, Int)] =
-    List(BoardKind.Trophy -> 6, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1)
+    List(BoardKind.Trophy -> 5, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
+         BoardKind.SewerRats -> 1)
 
   /** Номер недели по Москве, считая с понедельника: нулевой день эпохи —
     * четверг, поэтому к нему прибавляются три дня до ближайшего понедельника. */

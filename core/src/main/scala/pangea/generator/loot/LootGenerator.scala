@@ -190,6 +190,60 @@ object LootGenerator {
         )
     }
 
+  /** Что срезают со зверя и с каким весом (в %). Сумма меньше ста — остаток
+    * это «пусто»: с большинства крыс не берут ничего. `None` — малая руна: их
+    * в канализацию нанесло водой, и попадаются они изредка. */
+  val RatSpoils: List[(Option[MaterialKind], Int)] = List(
+    Some(MaterialKind.RatPelt)      -> 30,
+    Some(MaterialKind.RatTail)      -> 25,
+    Some(MaterialKind.PlagueWorms)  -> 6,
+    None                            -> 3,
+    Some(MaterialKind.RatKingBlood) -> 1
+  )
+
+  /** Сколько бросков добычи со зверя: с обычного один, с чумного два — второй
+    * пожиже. Легендарных и мифических зверей пока не водится, но если заведутся
+    * — считаются как чумные. */
+  private def ratChances(tier: MobRarity): List[Int] =
+    tier match {
+      case MobRarity.Common | MobRarity.Uncommon => List(50)
+      case _                                     => List(70, 25)
+    }
+
+  /** Добыча со зверя. Ни трофея, ни серебра, ни дублонов, ни камней, ни вещей:
+    * крыса не носит кошелька и не числится ни за одной гильдией — с неё берут
+    * только то, что можно срезать. Вид, уже выпавший в этом бою, из следующего
+    * броска выбывает: двух одинаковых шкурок с одной крысы не снять. */
+  private def ratLoot(tier: MobRarity, rng: Rng): (List[LootDrop], Rng) = {
+    @tailrec
+    def loop(slots: List[Int], used: Set[MaterialKind], acc: List[LootDrop], r: Rng): (List[LootDrop], Rng) =
+      slots match {
+        case Nil => (acc.reverse, r)
+        case chance :: rest =>
+          val (fired, r1) = r.between(0L, 100L)
+          if (fired >= chance) loop(rest, used, acc, r1)
+          else {
+            val active     = RatSpoils.filterNot { case (m, _) => m.exists(used.contains) }
+            val (roll, r2) = r1.between(0L, 100L)
+            @tailrec
+            def walk(rem: List[(Option[MaterialKind], Int)], acc2: Long): Option[Option[MaterialKind]] =
+              rem match {
+                case Nil             => None
+                case (m, w) :: tail  => if (roll < acc2 + w) Some(m) else walk(tail, acc2 + w)
+              }
+            walk(active, 0L) match {
+              case None               => loop(rest, used, acc, r2)
+              case Some(Some(kind))   =>
+                loop(rest, used + kind, LootDrop.Gear(MaterialGenerator.item(kind)) :: acc, r2)
+              case Some(None)         =>
+                val (rune, r3) = r2.pick(RuneStone.all)
+                loop(rest, used, LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Small)) :: acc, r3)
+            }
+          }
+      }
+    loop(ratChances(tier), Set.empty, Nil, rng)
+  }
+
   def roll(
       tier: MobRarity,
       race: Race,
@@ -197,7 +251,7 @@ object LootGenerator {
       rng: Rng,
       gearChanceBonusPct: Long = 0L,
       rarityBumpPct: Long = 0L
-  ): (List[LootDrop], Rng) = {
+  ): (List[LootDrop], Rng) = if (race == Race.Animal) ratLoot(tier, rng) else {
     // Бонус к шансу экипировки (топаз в снаряжении) добавляется к весу категории Gear.
     val weights = categoryWeights(tier).map {
       case (Category.Gear, w) => Category.Gear -> (w + gearChanceBonusPct.toInt)
@@ -387,8 +441,11 @@ object LootGenerator {
       killLevel: Long,
       rng: Rng
   ): (List[LootDrop], Rng) = {
+    // Со зверя трофеев не берут — ни обычных, ни «таксидермистом»: гильдия их
+    // не принимает, да и срезать с крысы, кроме шкурки, нечего.
     val (trophy, r1) =
-      if (trophyChancePct > 0L) rollChance(trophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
+      if (trophyChancePct > 0L && race != Race.Animal)
+        rollChance(trophyChancePct, rng)(makeDrop(Category.Trophy, tier, race, killLevel, _))
       else (None, rng)
     val (silver, r2) =
       if (silverChancePct > 0L) rollChance(silverChancePct, r1) { r =>
