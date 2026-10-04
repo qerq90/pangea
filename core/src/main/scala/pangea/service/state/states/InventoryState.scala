@@ -41,7 +41,10 @@ case class InventoryState(
       // Есть хранилища — назад в рюкзак, откуда сюда и зашли; нет — сразу в
       // «Персонаж»: рюкзак такому герою не показывают.
       "BackFromInventory" -> Target.Run { (u, _, _) => backTarget(u) },
-      "InventoryList"     -> Target.Run { (u, _, r) => writeScene(u, InventoryScene(page = Some(0))) *> showList(u, r).as(StateType.Inventory) },
+      // Возврат из карточки к списку: страницу держим ту же, с которой ушли, —
+      // иначе после каждого взгляда на вещь приходится листать заново. Сбрасываем
+      // только выбранную вещь: карточку мы закрыли.
+      "InventoryList"     -> Target.Run { (u, _, r) => backToList(u) *> showList(u, r).as(StateType.Inventory) },
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
@@ -867,6 +870,10 @@ case class InventoryState(
 
   private def itemDetail(item: Item, hero: Hero, silver: Long): String =
     s"🪙 $silver\n\n${itemText(item, hero.equipment, Some(hero))}"
+
+  /** Закрыть карточку, не трогая страницу списка. */
+  private def backToList(user: User): Task[Unit] =
+    readScene(user).flatMap(scene => writeScene(user, scene.copy(selectedId = None)))
 
   private def readScene(user: User): Task[InventoryScene] =
     UiScene.read(heroDao, user.userId, UiScene.Inventory, InventoryScene())

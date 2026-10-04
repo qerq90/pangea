@@ -80,6 +80,31 @@ object InventoryStateSpec extends ZIOSpecDefault {
   override def spec = suite("InventoryState")(
 
     // ── Складывание одинаковых вещей ─────────────────────────────────────────
+    test("«Назад» с карточки возвращает на ту же страницу, а не в начало") {
+      // Три страницы разных вещей: имена разные, иначе они сложатся в стопку.
+      val many = (1L to 20L).toList.map(i =>
+        Item(100L + i, s"Вещь $i", 1L, Rarity.Gray, ItemType.Weapon,
+          attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0))
+      for {
+        t <- makeState(baseHero, many)
+        (state, _, _, renderer) = t
+        _       <- state.enter(testUser, renderer)
+        _       <- state.action(testUser, tap("InventoryNext"), renderer)
+        _       <- state.action(testUser, tap("InventoryNext"), renderer)
+        third   <- renderer.sentScreens.map(_.last)
+        // открываем вещь с третьей страницы и просто уходим назад
+        onPage   = third.choices.map(_.id).filter(_.startsWith(InventoryState.ItemActionPrefix))
+        _       <- state.action(testUser, UserAction("", Some(s"""{"action":"${onPage.head}"}""")), renderer)
+        card    <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tap("InventoryList"), renderer)
+        back    <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(third.text.contains("(3/3)") && onPage.nonEmpty) &&
+              assertTrue(card.choices.map(_.id).contains("InventoryList")) &&
+              // та же третья страница с теми же кнопками, а не первая
+              assertTrue(back.text.contains("(3/3)")) &&
+              assertTrue(back.choices.map(_.id).filter(_.startsWith(InventoryState.ItemActionPrefix)) == onPage)
+    },
+
     test("сюжетный предмет в списке и на карточке — со звёздочкой перед именем, без редкости и уровня") {
       val letter = pangea.model.item.QuestItemKind.item(pangea.model.item.QuestItemKind.MarisaLetter).copy(id = 77L)
       for {
