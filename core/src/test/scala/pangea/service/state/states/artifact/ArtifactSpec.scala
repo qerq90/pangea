@@ -1,5 +1,6 @@
 package pangea.service.state.states.artifact
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
 import pangea.model.artifact.{ArtifactKind, HeroArtifacts}
@@ -167,6 +168,53 @@ object ArtifactSpec extends ZIOSpecDefault {
         } yield assertTrue(casket.items.data.size == 1) &&
                 assertTrue(casket.items.data.head.gem.exists(g => g.grade == 2 && g.kind == pangea.model.item.GemKind.Ruby)) &&
                 assertTrue(casket.charges == 4)
+      },
+
+      test("поход в Ларец не стирает событие: караван на выходе тот же") {
+        // Игрок стоит перед караваном и уходит в «Персонаж» → «Рюкзак» → Ларец:
+        // состав охраны и товар обязаны дождаться его в том же виде.
+        val (caravan, _) = pangea.model.caravan.CaravanGenerator.generate(pangea.domain.Rng(777L))
+        for {
+          heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+          renderer <- TestRenderer.make
+          content  <- ZIO.attempt(SceneContent.load())
+          invRepo   = TestInventoryRepository.withItems(List(gem(1L), gem(2L)))
+          state     = ArtifactState(ArtifactKind.Casket, heroDao, invRepo, TestItemRepository.make,
+                        TestArtifactRepository.empty, content)
+          _        <- heroDao.writeSceneData(userId, caravan.asJson)
+          _        <- state.enter(testUser, renderer)
+          _        <- state.action(testUser, tap("ArtifactPut"), renderer)
+          _        <- state.action(testUser, tap("ArtifactPutNext"), renderer)
+          // пока игрок в ларце, сцена хранилища лежит рядом, а не вместо
+          inside   <- heroDao.readSceneData(userId)
+          _        <- state.action(testUser, tap("ArtifactMenu"), renderer)
+          after    <- heroDao.readSceneData(userId)
+        } yield assertTrue(inside.flatMap(_.as[pangea.model.caravan.CaravanScene].toOption).contains(caravan)) &&
+                assertTrue(inside.exists(_.hcursor.downField("artifactScene").succeeded)) &&
+                // на выходе свой ключ убран, а караван остался целиком
+                assertTrue(after.flatMap(_.as[pangea.model.caravan.CaravanScene].toOption).contains(caravan)) &&
+                assertTrue(after.exists(!_.hcursor.downField("artifactScene").succeeded))
+      },
+
+      test("то же с пещерой: раса, комнаты и обитатели на месте") {
+        // Пещера живёт в той же колонке и так же катается заново, если её там
+        // не нашлось, — и «Персонаж» из неё открывается точно так же.
+        val (cave, _) = pangea.model.cave.CaveGenerator.generate(
+          pangea.model.monster.Race.Orc.entryName, pangea.domain.Rng(321L))
+        for {
+          heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+          renderer <- TestRenderer.make
+          content  <- ZIO.attempt(SceneContent.load())
+          invRepo   = TestInventoryRepository.withItems(List(herb(1L, MaterialKind.Nettle)))
+          state     = ArtifactState(ArtifactKind.LivingBag, heroDao, invRepo, TestItemRepository.make,
+                        TestArtifactRepository.empty, content)
+          _        <- heroDao.writeSceneData(userId, cave.asJson)
+          _        <- state.enter(testUser, renderer)
+          _        <- state.action(testUser, tap("ArtifactPut"), renderer)
+          _        <- state.action(testUser, tap("ArtifactMenu"), renderer)
+          after    <- heroDao.readSceneData(userId)
+        } yield assertTrue(after.flatMap(_.as[pangea.model.cave.CaveScene].toOption).contains(cave)) &&
+                assertTrue(after.exists(!_.hcursor.downField("artifactScene").succeeded))
       },
 
       test("нечего плавить и нет зарядов — говорим об этом, ничего не тратя") {
