@@ -16,6 +16,7 @@ case class GuildState(heroDao: HeroDao, content: SceneContent) extends State {
   private val branch = new Branch(
     routes = Map(
       "TrophyExchange" -> Target.Goto(StateType.TrophyExchange),
+      "QuestBoard"     -> Target.Goto(StateType.QuestBoard),
       "TrainingHall"   -> Target.Goto(StateType.TrainingHall),
       "OpenCharacter"  -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Guild) },
       "LeaveGuild"     -> Target.Goto(StateType.GlobalMap)

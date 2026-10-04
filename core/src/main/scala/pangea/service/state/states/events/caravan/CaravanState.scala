@@ -20,7 +20,8 @@ import pangea.repository.item.ItemRepository
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.events.cave.{CaveBoon, CaveSupply}
 import pangea.service.state.states.events.caravan.CaravanState._
-import pangea.service.state.{CharacterMenu, ItemMenu, State, UserAction}
+import pangea.model.quest.BoardKind
+import pangea.service.state.{BoardProgress, CharacterMenu, ItemMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 /** Караван (1% в лабиринте): десять-двадцать охранников, пара башен со
@@ -68,7 +69,11 @@ case class CaravanState(
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     readScene(user).flatMap {
       // Охрана перебита — остаётся разобрать повозки.
-      case Some(scene) if scene.spoils => showSpoils(user, renderer)
+      case Some(scene) if scene.spoils =>
+        // Охрана перебита — объявление с доски можно закрывать.
+        BoardProgress.markDone(heroDao, user.userId, BoardKind.CaravanRout).flatMap(marked =>
+          ZIO.when(marked)(renderer.show(user, Screen(content.text("questBoard.doneCaravan"), Nil)))) *>
+          showSpoils(user, renderer)
       case Some(scene)                 => show(user, scene, renderer).unit
       case None                        => discover(user, renderer)
     }
@@ -101,6 +106,9 @@ case class CaravanState(
       (goods, prices) = rollGoods(hero.lvl, r1)
       scene  = base.copy(goods = goods, prices = prices)
       _     <- writeScene(user, scene)
+      // Взято задание с доски — говорим сразу, что караван тот самый.
+      hunt  <- BoardProgress.hunting(heroDao, user.userId, BoardKind.CaravanRout)
+      _     <- ZIO.when(hunt)(renderer.show(user, Screen(content.text("questBoard.markCaravan"), Nil)))
       _     <- show(user, scene, renderer)
     } yield ()
 

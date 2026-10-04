@@ -5,8 +5,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, LoreData}
 import pangea.model.item.{BrewKind, BrewRates, Item, ItemDetails, ItemType}
-import pangea.model.monster.Race
-import pangea.model.quest.{NpcQuest, QuestData}
+import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -38,9 +37,6 @@ case class InnkeeperState(
 
   private val branch = new Branch(
     routes = Map(
-      "TurnInQuest" -> Target.Run { (user, _, renderer) =>
-        turnInQuest(user, renderer)
-      },
       quest.questAction   -> Target.Run { (user, _, renderer) => questTalk(user, renderer) },
       quest.acceptAction  -> Target.Run { (user, _, renderer) => quest.accept(user, renderer) *> showMenu(user, renderer).as(StateType.Innkeeper) },
       quest.declineAction -> Target.Run { (user, _, renderer) => showMenu(user, renderer).as(StateType.Innkeeper) },
@@ -113,7 +109,6 @@ case class InnkeeperState(
         Screen(
           content.text("innkeeper.text"),
           List(
-            Some(content.choice("TurnInQuest", "innkeeper.turnInLabel")),
             marisaBtn,
             quest.button(quests),
             kinetBtn,
@@ -258,89 +253,6 @@ case class InnkeeperState(
 
   private def readLore(user: User): Task[LoreData] =
     heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
-
-  // Сдать квест: забираем самый ценный подходящий трофей, начисляем опыт, закрываем задание.
-  private def turnInQuest(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      hero <- getHero(user)
-      data <- readQuests(user)
-      _ <- data.flatMap(_.active) match {
-        case None =>
-          renderer.show(
-            user,
-            Screen(content.text("innkeeper.noActive"), Nil)
-          ) *> showMenu(user, renderer)
-        case Some(raceName) =>
-          for {
-            inv <- inventoryRepo
-              .get(hero.id)
-              .mapError(e => new Throwable(e.toString))
-            matching = InnkeeperState.bestTrophyFor(inv.items.data, raceName)
-            _ <- matching match {
-              case None =>
-                renderer.show(
-                  user,
-                  Screen(
-                    content.format(
-                      "innkeeper.noItem",
-                      "race" -> Race.withName(raceName).toString
-                    ),
-                    Nil
-                  )
-                ) *>
-                  showMenu(user, renderer)
-              case Some(item) =>
-                val expGained = questExp(item)
-                val leveled   = hero.gainExp(expGained)
-                inventoryRepo
-                  .removeItem(item.id, hero.id)
-                  .mapError(e => new Throwable(e.toString)) *>
-                  heroDao.updateExpAndLevel(
-                    user.userId,
-                    leveled.exp,
-                    leveled.lvl,
-                    leveled.upgradePoints
-                  ) *>
-                  heroDao.updateDoubloons(user.userId, hero.doubloons + 1) *>
-                  heroDao.writeQuestData(
-                    user.userId,
-                    data.get.copy(active = None).asJson
-                  ) *>
-                  renderer.show(
-                    user,
-                    Screen(
-                      content.format(
-                        "innkeeper.completed",
-                        "item" -> item.name,
-                        "exp"  -> expGained.toString
-                      ),
-                      Nil
-                    )
-                  ) *>
-                  ZIO.when(leveled.lvl > hero.lvl)(
-                    renderer.show(
-                      user,
-                      Screen(
-                        content.format(
-                          "innkeeper.levelUp",
-                          "level" -> leveled.lvl.toString
-                        ),
-                        Nil
-                      )
-                    )
-                  ) *>
-                  showMenu(user, renderer)
-            }
-          } yield ()
-      }
-    } yield StateType.Innkeeper
-
-  // Опыт за трофей: 5 + Ур.трофея × коэффициент(вид), округление вверх.
-  private def questExp(trophy: Item): Long =
-    math.ceil(5.0 + trophy.lvl.toDouble * InnkeeperState.trophyCoef(trophy)).toLong
-
-  private def readQuests(user: User): Task[Option[QuestData]] =
-    heroDao.readQuestData(user.userId).map(_.flatMap(_.as[QuestData].toOption))
 
   private def getHero(user: User): Task[Hero] =
     heroDao

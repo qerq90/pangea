@@ -110,6 +110,7 @@ import pangea.service.state.states.guild.{
   GuildState,
   MasterHornState,
   MentorKazimirState,
+  QuestBoardState,
   TrainingHallState,
   TrophyExchangeState
 }
@@ -132,7 +133,6 @@ import pangea.service.state.states.tavern.{
   CardSellerState,
   InnkeeperState,
   MercenariesState,
-  QuestBoardState,
   TavernState
 }
 import zio.{ZIO, ZLayer}
@@ -259,7 +259,7 @@ object StatesMap {
             itemRepo,
             content
           ),
-          QuestBoard        -> QuestBoardState(heroDao, content),
+          QuestBoard        -> QuestBoardState(heroDao, inventoryRepo, content),
           Innkeeper         -> InnkeeperState(heroDao, inventoryRepo, content, bank),
           Mercenaries       -> MercenariesState(heroDao, inventoryRepo, content),
           SilverVein        -> SilverVeinState(heroDao, scheduler, content),

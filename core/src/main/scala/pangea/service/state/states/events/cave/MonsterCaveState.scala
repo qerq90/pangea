@@ -27,7 +27,8 @@ import pangea.service.artifact.ArtifactIntake
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.LootState.LootData
 import pangea.service.state.states.events.cave.MonsterCaveState._
-import pangea.service.state.{CharacterMenu, HerbLore, InventoryFeedback, ItemMenu, State, UserAction}
+import pangea.model.quest.BoardKind
+import pangea.service.state.{BoardProgress, CharacterMenu, HerbLore, InventoryFeedback, ItemMenu, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -103,6 +104,9 @@ case class MonsterCaveState(
       seed    <- Random.nextLong
       (scene, _) = CaveGenerator.generate(race.entryName, Rng(seed))
       _ <- writeScene(user, scene)
+      // Взято задание с доски — говорим сразу, что эта пещера годится.
+      hunt <- BoardProgress.hunting(heroDao, user.userId, BoardKind.CaveClear)
+      _ <- ZIO.when(hunt)(renderer.show(user, Screen(content.text("questBoard.markCave"), Nil)))
       _ <- showGate(user, scene, renderer)
     } yield ()
 
@@ -651,6 +655,9 @@ case class MonsterCaveState(
                     renderer.show(user, Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)))
         // Отдельной строкой, чтобы это не потерялось среди опыта и уровня.
         _      <- renderer.show(user, Screen(content.text("cave.allClear"), Nil))
+        // Пещера выбита — объявление с доски можно закрывать.
+        closed <- BoardProgress.markDone(heroDao, user.userId, BoardKind.CaveClear)
+        _      <- ZIO.when(closed)(renderer.show(user, Screen(content.text("questBoard.doneCave"), Nil)))
         done    = scene.copy(rewarded = true)
         _      <- writeScene(user, done)
       } yield done
