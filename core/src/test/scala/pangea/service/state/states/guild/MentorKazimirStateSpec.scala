@@ -58,7 +58,7 @@ object MentorKazimirStateSpec extends ZIOSpecDefault {
         menu <- r.sentScreens.map(_.last)
         _    <- state.action(testUser, tap("Brand"), r)
         brand <- r.sentScreens.map(_.last)
-      } yield assertTrue(menu.text.contains("Ха-ха-ха") && menu.choices.map(_.id) == List("Brand", "Deepen", "Runes", "LeaveMentorKazimir", "GoToCity")) &&
+      } yield assertTrue(menu.text.contains("Ха-ха-ха") && menu.choices.map(_.id) == List("Brand", "Deepen", "Runes", "KazQuest", "LeaveMentorKazimir", "GoToCity")) &&
               assertTrue(brand.text.contains("Боевые руны на теле: 0/2") && brand.text.contains("Пассивные руны на теле: 0/4") &&
                 brand.text.contains("500 репутации")) &&
               assertTrue(brand.choices.map(_.id) == List("BrandList", "BrandList", "Rebrand", "KazimirMenu"))

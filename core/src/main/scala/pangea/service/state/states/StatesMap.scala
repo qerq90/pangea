@@ -235,7 +235,7 @@ object StatesMap {
           Mail       -> MailState(heroDao, inventoryRepo, parcels, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content, artifacts),
           Auction    -> AuctionState(heroDao, inventoryRepo, itemRepo, auctionRepo, userRepo, bankRepo, payouts, players, content),
-          FetShop    -> FetShopState(heroDao, artifactRepo, content),
+          FetShop    -> FetShopState(heroDao, artifactRepo, inventoryRepo, content),
           Backpack   -> BackpackState(heroDao, inventoryRepo, artifactRepo, content),
           Casket     -> ArtifactState(ArtifactKind.Casket, heroDao, inventoryRepo, itemRepo, artifactRepo, content),
           LivingBag  -> ArtifactState(ArtifactKind.LivingBag, heroDao, inventoryRepo, itemRepo, artifactRepo, content),

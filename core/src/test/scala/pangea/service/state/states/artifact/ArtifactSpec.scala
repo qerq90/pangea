@@ -39,7 +39,7 @@ object ArtifactSpec extends ZIOSpecDefault {
       heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(doubloons = doubloons))
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (FetShopState(heroDao, repo, content), heroDao, repo, renderer)
+    } yield (FetShopState(heroDao, repo, TestInventoryRepository.accepting, content), heroDao, repo, renderer)
 
   private def chest(kind: ArtifactKind, repo: TestArtifactRepository, inventory: List[Item] = Nil) =
     for {

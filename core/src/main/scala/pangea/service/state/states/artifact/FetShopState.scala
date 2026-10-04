@@ -5,24 +5,34 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.artifact.{Artifact, ArtifactKind, HeroArtifacts}
 import pangea.model.hero.Hero
+import pangea.model.item.{Item, MaterialKind}
+import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
-import pangea.service.state.{CityExit, State, UserAction}
+import pangea.repository.inventory.InventoryRepository
+import pangea.service.state.{CityExit, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Лавка Фета в Торговом доме: сборные артефакты Азата. Каждый стоит
  *  [[HeroArtifacts.StepPriceDoubloons]] дублонов, и за ту же цену Фет трижды
  *  его улучшит — каждая ступень добавляет мест внутри. */
 case class FetShopState(
-  heroDao:   HeroDao,
-  artifacts: ArtifactRepository,
-  content:   SceneContent
+  heroDao:       HeroDao,
+  artifacts:     ArtifactRepository,
+  inventoryRepo: InventoryRepository,
+  content:       SceneContent
 ) extends State {
+
+  /** «Живая кожа»: кусок с Гнилого Джо — из такого Фет доращивает сумку. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Fet, "Fet")
 
   private val branch = new Branch(
     routes = Map(
       "FetShop"     -> Target.Run { (u, _, r)  => showShop(u, r).as(StateType.FetShop) },
+      quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showShop(u, r).as(StateType.FetShop) },
+      quest.declineAction -> Target.Run { (u, _, r) => showShop(u, r).as(StateType.FetShop) },
       "FetGoods"    -> Target.Run { (u, ua, r) => withKind(ua)(showGoods(u, _, r)).as(StateType.FetShop) },
       "FetBuy"      -> Target.Run { (u, ua, r) => withKind(ua)(confirm(u, _, r)).as(StateType.FetShop) },
       "FetBuyYes"   -> Target.Run { (u, ua, r) => withKind(ua)(buy(u, _, r)).as(StateType.FetShop) },
@@ -41,13 +51,48 @@ case class FetShopState(
     branch.act(user, ua, renderer)
 
   private def showShop(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(content.text("fet.counter"),
-      ArtifactKind.values.toList.zipWithIndex.map { case (k, i) =>
+    quest.load(user).flatMap { quests =>
+      val goods = ArtifactKind.values.toList.zipWithIndex.map { case (k, i) =>
         Choice("FetGoods", content.text(s"artifact.${k.key}.title"), data = Map("kind" -> k.entryName), row = Some(i))
-      } ++ List(
-        Choice("LeaveFetShop", content.text("fet.leave"),
-          color = ChoiceColor.Negative, row = Some(ArtifactKind.values.size)),
-        CityExit.button(content, Some(ArtifactKind.values.size)))))
+      }
+      val questRow = ArtifactKind.values.size
+      val leaveRow = questRow + quest.button(quests).size
+      renderer.show(user, Screen(content.text("fet.counter"),
+        goods ++ quest.button(quests).map(_.copy(row = Some(questRow))).toList ++ List(
+          Choice("LeaveFetShop", content.text("fet.leave"),
+            color = ChoiceColor.Negative, row = Some(leaveRow)),
+          CityExit.button(content, Some(leaveRow)))))
+    }
+
+  // ── «Живая кожа» ──────────────────────────────────────────────
+
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    quest.load(user).flatMap { quests =>
+      if (quests.isDone(NpcQuest.Fet)) showShop(user, renderer)
+      else if (!quests.isTaken(NpcQuest.Fet)) quest.offer(user, renderer, quest.text("intro"))
+      else turnIn(user, renderer)
+    }.as(StateType.FetShop)
+
+  /** Сдача: кожа уходит Фету, герой получает золото и опыт. */
+  private def turnIn(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- inv.items.data.find(FetShopState.ghoulSkin) match {
+        case None => renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> showShop(user, renderer)
+        case Some(skin) =>
+          for {
+            _    <- inventoryRepo.removeItem(skin.id, hero.id).mapError(e => new Throwable(e.toString))
+            _    <- heroDao.updateDoubloons(user.userId, hero.doubloons + FetShopState.QuestDoubloons)
+            done <- quest.complete(user, hero, identity)
+            (_, expLine) = done
+            _    <- renderer.show(user, Screen(quest.text("outro"), Nil))
+            _    <- renderer.show(user, Screen(quest.format("reward",
+                      "doubloons" -> FetShopState.QuestDoubloons.toString, "exp" -> expLine), Nil))
+            _    <- showShop(user, renderer)
+          } yield ()
+      }
+    } yield ()
 
   /** Карточка товара: рассказ Фета, цена и что сейчас с артефактом у героя. */
   private def showGoods(user: User, kind: ArtifactKind, renderer: Renderer): Task[Unit] =
@@ -127,4 +172,13 @@ case class FetShopState(
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
 
   private def asThrowable(e: Any): Throwable = new Throwable(e.toString)
+}
+
+object FetShopState {
+
+  /** Сколько золота Фет отсыпает за кусок живой кожи. */
+  val QuestDoubloons: Long = 25L
+
+  /** Кожа упыря — остаётся только от Гнилого Джо. */
+  def ghoulSkin(item: Item): Boolean = item.material.contains(MaterialKind.GhoulSkin)
 }
