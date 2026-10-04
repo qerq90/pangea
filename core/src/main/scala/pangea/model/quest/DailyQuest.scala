@@ -322,10 +322,11 @@ object DailyRates {
   /** Сколько миллисекунд до полуночи по Москве. */
   def untilNextDay(nowMs: Long): Long = (dayOf(nowMs) + 1) * DayMs - MoscowOffsetMs - nowMs
 
-  /** Опыт за поручение — доля уровня, а не отдельная линейка: двадцатая часть
-    * порога, то есть пять процентов уровня. Так заказ стоит одинаково что на
-    * третьем уровне, что на сотом, и не перекашивает лестницу ни там, ни там. */
-  def exp(heroLvl: Long): Long = (pangea.model.hero.Hero.neededExpForLevel(heroLvl) / 20L).max(5L)
+  /** Опыт за поручение — доля уровня, а не отдельная линейка: пятидесятая
+    * часть порога, то есть два процента уровня. Так заказ стоит одинаково что на
+    * третьем уровне, что на сотом, и не перекашивает лестницу ни там, ни там.
+    * На первых двух уровнях эта доля совсем мала — держит пол. */
+  def exp(heroLvl: Long): Long = (pangea.model.hero.Hero.neededExpForLevel(heroLvl) / 50L).max(5L)
 
   /** То же с поправкой на само поручение: за редкое платят вдвое. */
   def exp(heroLvl: Long, kind: DailyKind): Long = exp(heroLvl) * kind.expFactor.toLong
