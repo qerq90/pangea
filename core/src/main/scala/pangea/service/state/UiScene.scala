@@ -44,4 +44,8 @@ object UiScene {
   val Equipment: String = "equipmentScene"
   val Skills:    String = "skillsScene"
   val Socketing: String = "socketingScene"
+
+  /** Ларец, живая сумка и шкаф — один ключ на троих: в двух хранилищах
+    * сразу не постоишь. */
+  val Artifact:  String = "artifactScene"
 }

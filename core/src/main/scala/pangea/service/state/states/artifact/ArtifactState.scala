@@ -1,8 +1,7 @@
 package pangea.service.state.states.artifact
 
-import io.circe.{Decoder, Encoder, Json, jawn}
+import io.circe.{Decoder, Encoder, jawn}
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.domain.Rng
@@ -16,7 +15,7 @@ import pangea.repository.artifact.{ArtifactRepoError, ArtifactRepository}
 import pangea.repository.inventory.{InventoryRepoError, InventoryRepository}
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.artifact.ArtifactState._
-import pangea.service.state.{HerbLore, InventoryFeedback, ItemMenu, MarisaQuest, State, UserAction}
+import pangea.service.state.{HerbLore, InventoryFeedback, ItemMenu, MarisaQuest, State, UiScene, UserAction}
 import zio.{Random, Task, ZIO}
 
 /** Экран сборного артефакта: Ларца Азата или Живой сумки (вид задаётся при
@@ -256,14 +255,18 @@ case class ArtifactState(
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero for user ${user.userId}"))
 
+  // Страницы хранилища живут в своём ключе сцены. Раньше они занимали колонку
+  // целиком и стирали собой событие, в котором стоит игрок: сходить в Ларец из
+  // «Персонажа» перед караваном значило вернуться к другому каравану — та же беда,
+  // что когда-то была с логовом элементаля (см. [[UiScene]]).
   private def readScene(user: User): Task[ArtifactScene] =
-    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[ArtifactScene].toOption).getOrElse(ArtifactScene()))
+    UiScene.read(heroDao, user.userId, UiScene.Artifact, ArtifactScene())
 
   private def writeScene(user: User, scene: ArtifactScene): Task[Unit] =
-    heroDao.writeSceneData(user.userId, scene.asJson)
+    UiScene.write(heroDao, user.userId, UiScene.Artifact, scene)
 
   private def resetScene(user: User): Task[Unit] =
-    heroDao.writeSceneData(user.userId, Json.Null)
+    UiScene.clear(heroDao, user.userId, UiScene.Artifact)
 
   private def parseAction(payload: Option[String]): Option[String] =
     payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
