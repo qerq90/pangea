@@ -8,7 +8,7 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Players, Renderer, SceneConte
 import pangea.model.auction.{AuctionCurrency, AuctionLot}
 import pangea.model.bank.BankVault
 import pangea.model.hero.Hero
-import pangea.model.item.Item
+import pangea.model.item.{Item, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.auction.AuctionRepository
@@ -298,9 +298,14 @@ case class AuctionState(
            }
     } yield ()
 
-  /** Что можно выставить: не сюжетное и занимающее место (пыль и малые руны
-    * места не занимают, поэтому на торги не идут). */
-  private def sellable(item: Item): Boolean = !item.isQuestItem && !item.weightless
+  /** Что можно выставить: не сюжетное, не трофей и занимающее место (пыль и
+    * малые руны места не занимают, поэтому на торги не идут).
+    *
+    * Трофеи — личная добыча: их сдают в Гильдии за репутацию, а не продают
+    * друг другу, — ровно по той же причине, по которой их не передают из рук
+    * в руки (см. [[pangea.service.parcel.Transfers.sendable]]). */
+  private def sellable(item: Item): Boolean =
+    !item.isQuestItem && !item.weightless && item.itemType != ItemType.Trophy
 
   private def turnSellPage(user: User, renderer: Renderer, delta: Int): Task[Unit] =
     for {

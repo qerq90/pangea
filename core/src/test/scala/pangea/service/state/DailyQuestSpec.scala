@@ -302,12 +302,13 @@ object DailyQuestSpec extends ZIOSpecDefault {
         val green = ((l + 5L) * 1.2 * Rarity.Green.factorR).toLong
         DailyRates.silver(l) / green == 6L
       }) &&
-      // опыт — двадцатая часть порога, то есть пять процентов уровня на любом уровне
-      assertTrue((2L to Hero.MaxLevel).forall { l =>
-        DailyRates.exp(l) == Hero.neededExpForLevel(l) / 20L
+      // опыт — пятидесятая часть порога, то есть два процента уровня на любом уровне
+      assertTrue((3L to Hero.MaxLevel).forall { l =>
+        DailyRates.exp(l) == Hero.neededExpForLevel(l) / 50L
       }) &&
-      // на первом уровне двадцатая часть совсем мала — держит пол
-      assertTrue(DailyRates.exp(1L) == 5L && Hero.neededExpForLevel(1L) / 20L < 5L) &&
+      // на первых двух уровнях эта доля совсем мала — держит пол
+      assertTrue((1L to 2L).forall(l =>
+        DailyRates.exp(l) == 5L && Hero.neededExpForLevel(l) / 50L < 5L)) &&
       assertTrue(DailyKind.BankLot.doubloons == 2L) &&
       assertTrue(DailyKind.BankRelic.doubloons == 5L) &&
       assertTrue(DailyKind.BankGem.doubloons == 5L) &&

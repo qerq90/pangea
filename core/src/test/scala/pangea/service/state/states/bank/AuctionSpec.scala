@@ -168,6 +168,25 @@ object AuctionSpec extends ZIOSpecDefault {
                 assertTrue(f.players.announced.exists(m => m.contains("Выставлен лот номер 1") && m.contains("Шлем")))
       },
 
+      test("трофеи на торги не идут: их сдают в Гильдии") {
+        val trophy = Item(9L, "Мешок с пожитками (Орк)", lvl = 10L, Rarity.Gray, ItemType.Trophy,
+          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
+        for {
+          f      <- auction(inventory = List(trophy, gear(42L, "Шлем")), silver = 1000L)
+          _      <- f.state.action(testUser, tap("AuctionSell"), f.renderer)
+          list   <- f.renderer.sentScreens.map(_.last)
+          // и по прямому id тоже не выставить — возвращаемся к списку
+          _      <- f.state.action(testUser, tap("AucSell_9"), f.renderer)
+          again  <- f.renderer.sentScreens.map(_.last)
+          // а если кроме трофеев ничего нет — выставлять нечего
+          g      <- auction(inventory = List(trophy), silver = 1000L)
+          _      <- g.state.action(testUser, tap("AuctionSell"), g.renderer)
+          empty  <- g.renderer.sentScreens.map(_.last)
+        } yield assertTrue(list.choices.map(_.id) == List("AucSell_42", "Auction")) &&
+                assertTrue(again.text.contains("Что выставляем") && f.lots.snapshot.isEmpty) &&
+                assertTrue(empty.text.contains("Выставить нечего"))
+      },
+
       test("больше десяти лотов на торгах не держат") {
         val ten = (1L to AuctionLot.MaxLots.toLong).toList.map(lotOf(_, owner = heroId))
         for {
