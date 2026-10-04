@@ -239,12 +239,48 @@ case class Hero(
       s"${hours}ч ${minutes}мин"
     }
 
+  // ── «Родные» значения ───────────────────────────────────────────────────────
+  // То, с чем герой останется, когда зелья выветрятся, а травмы заживут: без
+  // расовых особенностей, без травм и без временных бафов. Всё постоянное —
+  // вложенные очки, достижения, снаряжение, камни, наборы, прокачка у Горна —
+  // в них входит: это и есть «своё». Показываются в скобках на «Персонаже».
+
+  def nativeBaseStats: BaseStats = BaseStats(
+    agi = (baseStats.agi + Achievement.agiBonus(this)).max(1L),
+    vit = baseStats.vit.max(1L),
+    str = (baseStats.str + Achievement.strBonus(this)).max(1L),
+    int = (baseStats.int + Achievement.intBonus(this)).max(1L)
+  )
+
+  def nativeFightStats: FightStats =
+    withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(TraumaPenalties()))))
+
+  def nativeMaxHp: Long = {
+    val subtotal = (baseStats.vit * 24L).max(1L) + equipment.allHp
+    (subtotal + gems.flatHp + sets.flatHp) * (100L + gems.maxHpBonusPct + sets.maxHpBonusPct) / 100L
+  }
+
+  def nativeMaxArmor: Long = maxArmor
+
+  def nativeMaxEnergy: Long = {
+    val b    = nativeBaseStats
+    val base = 5L * b.int + 2L * b.agi + equipment.allEnergy + masterHornBoosts.energy
+    (base * (100L + gems.energyBonusPct + sets.energyBonusPct) / 100L).max(1L)
+  }
+
   /** Карточка персонажа. `blessed` (активно ли благословение Азата) и
    *  `instantRests` (сколько быстрых отдыхов в запасе) живут в `azat_data`, а не
    *  в самом герое, поэтому приходят параметрами. Отдыхи показываем и без
-   *  благословения: заряды остаются, даже когда оно кончилось. */
+   *  благословения: заряды остаются, даже когда оно кончилось.
+   *
+   *  Каждое число — текущее, с учётом всего, что сейчас действует; в скобках за
+   *  ним — родное, до расы, травм и зелий. Скобки появляются только там, где
+   *  числа разошлись: у здорового героя без зелий они совпадают, и двоить их
+   *  незачем. */
   def getInfo(nowMs: Long, blessed: Boolean = false, instantRests: Int = 0): String = {
     val effB     = effectiveBaseStats(nowMs)
+    val natB     = nativeBaseStats
+    val nat      = nativeFightStats
     val eff      = effectiveFightStats(nowMs)
     val maxHp    = effectiveMaxHp(nowMs)
     val maxArm   = effectiveMaxArmor(nowMs)
@@ -253,15 +289,16 @@ case class Hero(
     val curEn    = fightStats.energy.min(maxEn)
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
     val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
+    import Hero.withNative
     s"""${race.toString}, Уровень $lvl  ☠ Убито: $kills
        | $getLvlExp/$getNeededExp опыта$blessingLine$restsLine
        |
-       | 💪 СИЛ ${effB.str}  ТЕЛО ${effB.vit}
-       | 🏃 ЛОВ ${effB.agi}  ИНТ ${effB.int}
+       | 💪 СИЛ ${withNative(effB.str, natB.str)}  ТЕЛО ${withNative(effB.vit, natB.vit)}
+       | 🏃 ЛОВ ${withNative(effB.agi, natB.agi)}  ИНТ ${withNative(effB.int, natB.int)}
        |
-       | ❤ ${fightStats.hp}/$maxHp  🧥 Броня $curArm/$maxArm  ⚡ Энергия $curEn/$maxEn
-       | ⚔ Атк ${eff.atk}  🛡 Защ ${eff.defence}
-       | 🎯 Точн ${eff.accuracy}  👁 Укл ${eff.evasion}
+       | ❤ ${fightStats.hp}/${withNative(maxHp, nativeMaxHp)}  🧥 Броня $curArm/${withNative(maxArm, nativeMaxArmor)}  ⚡ Энергия $curEn/${withNative(maxEn, nativeMaxEnergy)}
+       | ⚔ Атк ${withNative(eff.atk, nat.atk)}  🛡 Защ ${withNative(eff.defence, nat.defence)}
+       | 🎯 Точн ${withNative(eff.accuracy, nat.accuracy)}  👁 Укл ${withNative(eff.evasion, nat.evasion)}
        |
        | Свободных очков: $upgradePoints
        |""".stripMargin
@@ -289,6 +326,12 @@ case class Hero(
 object Hero {
   val MaxLevel: Long       = 150L
   val PointsPerLevel: Long = 4L
+
+  /** «Текущее (родное)» одной строкой. Скобка появляется только там, где числа
+   *  разошлись: у здорового героя без зелий они совпадают, и двоить их впустую
+   *  значило бы засыпать карточку одинаковыми числами. */
+  def withNative(current: Long, native: Long): String =
+    if (current == native) current.toString else s"$current ($native)"
 
   /** Порог опыта для уровня: `30 × ур × (ур + 2)` — 90, 240, 450, 720, 1050, …
    *
