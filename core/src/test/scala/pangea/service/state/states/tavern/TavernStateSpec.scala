@@ -34,15 +34,16 @@ object TavernStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("TavernState")(
 
-    test("enter → меню таверны с кнопками RentRoom, QuestBoard, Innkeeper") {
+    test("enter → меню таверны с кнопками RentRoom и Innkeeper") {
       for {
         triple              <- makeState(richHero)
         (state, _, renderer) = triple
         _                   <- state.enter(testUser, renderer)
         screens             <- renderer.sentScreens
       } yield assertTrue(screens.head.choices.map(_.id).contains("RentRoom")) &&
-              assertTrue(screens.head.choices.map(_.id).contains("QuestBoard")) &&
-              assertTrue(screens.head.choices.map(_.id).contains("Innkeeper"))
+              assertTrue(screens.head.choices.map(_.id).contains("Innkeeper")) &&
+              // доска заданий переехала в гильдию — в таверне её больше нет
+              assertTrue(!screens.head.choices.map(_.id).contains("QuestBoard"))
     },
 
     test("на пороге таверны отработавший наёмник уходит с репликой, отряд сохраняется без него") {
@@ -82,14 +83,6 @@ object TavernStateSpec extends ZIOSpecDefault {
         _                          <- state.enter(testUser, renderer)
         screens                    <- renderer.sentScreens
       } yield assertTrue(!screens.head.choices.map(_.id).contains("SuspiciousMan"))
-    },
-
-    test("QuestBoard → переходит в QuestBoard") {
-      for {
-        triple              <- makeState(richHero)
-        (state, _, renderer) = triple
-        result              <- state.action(testUser, tap("QuestBoard"), renderer)
-      } yield assertTrue(result == StateType.QuestBoard)
     },
 
     test("Innkeeper → переходит в Innkeeper") {

@@ -110,6 +110,9 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Squad            extends StateType // отряд героя (меню персонажа)
   case object Mercenaries      extends StateType // наёмники в таверне
 
+  // Дорога к месту выездного задания с доски гильдии (~10 минут, без кнопок).
+  case object QuestRoad extends StateType
+
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход
   case object TreasureHunt extends StateType // сам поход по таймеру (~10 минут) → добыча

@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
 import pangea.domain.Rng
 import pangea.model.item.MapZone
-import pangea.model.monster.Rarity
+import pangea.model.monster.{Race, Rarity}
 import pangea.model.squad.UndeadForm
 
 /** Что найдётся в комнате пещеры, когда её мобы полягут. */
@@ -20,6 +20,8 @@ object RoomKind extends Enum[RoomKind] {
   case object Rest  extends RoomKind // сухой угол, где можно перевести дух
   case object Altar extends RoomKind // алтарь тёмных сил: поднимает добычу обратно
   case object Treasure extends RoomKind // клад по карте: она и привела сюда
+  case object Stairs extends RoomKind // ход вниз: только в канализации, и только с первого яруса
+  case object Lair   extends RoomKind // логово Крысиного короля: нижний ярус канализации
 
   implicit val encoder: Encoder[RoomKind] = (k: RoomKind) => k.entryName.asJson
   implicit val decoder: Decoder[RoomKind] = (c: HCursor) => c.as[String].map(RoomKind.withName)
@@ -78,6 +80,11 @@ object CaveDir extends Enum[CaveDir] {
   * @param pendingTrophy id трофея, за который этот поднятый встанет
   * @param treasure  зона карты клада, если карту пустили в дело на пороге: по
   *                  ней и катается добыча комнаты с кладом
+  * @param sewer     это канализация по заданию с доски, а не пещера из лабиринта:
+  *                  крысы вместо смертных, свои слова и своя развязка
+  * @param questLvl  уровень задания: по нему, а не по этажу лабиринта, считаются
+  *                  статы крыс. У пещеры он нулевой
+  * @param floor     ярус канализации: первый просторный, второй короткий
   */
 final case class CaveScene(
   race:      String,
@@ -94,7 +101,10 @@ final case class CaveScene(
   altarSpent: Boolean = false,
   pending:    Option[UndeadForm] = None,
   pendingTrophy: Long = 0L,
-  treasure:   Option[MapZone] = None
+  treasure:   Option[MapZone] = None,
+  sewer:     Boolean = false,
+  questLvl:  Long    = 0L,
+  floor:     Int     = 1
 ) {
 
   def room: CaveRoom = rooms.lift(at).getOrElse(rooms.head)
@@ -111,6 +121,10 @@ final case class CaveScene(
 
   /** Живых мобов в пещере не осталось. */
   def cleared: Boolean = rooms.forall(_.monsters <= 0)
+
+  /** Последний ярус: у пещеры он единственный, у канализации — второй. Только
+    * на нём зачистка что-то значит. */
+  def lastFloor: Boolean = !sewer || floor >= SewerRates.Floors
 }
 
 object CaveScene {
@@ -130,7 +144,10 @@ object CaveScene {
       "altarSpent" -> s.altarSpent.asJson,
       "pending"      -> s.pending.asJson,
       "pendingTrophy" -> s.pendingTrophy.asJson,
-      "treasure"      -> s.treasure.asJson)
+      "treasure"      -> s.treasure.asJson,
+      "sewer"         -> s.sewer.asJson,
+      "questLvl"      -> s.questLvl.asJson,
+      "floor"         -> s.floor.asJson)
 
   implicit val decoder: Decoder[CaveScene] = (c: HCursor) =>
     for {
@@ -149,8 +166,11 @@ object CaveScene {
       pending   <- c.getOrElse[Option[UndeadForm]]("pending")(None)
       trophy    <- c.getOrElse[Long]("pendingTrophy")(0L)
       treasure  <- c.getOrElse[Option[MapZone]]("treasure")(None)
+      sewer     <- c.getOrElse[Boolean]("sewer")(false)
+      questLvl  <- c.getOrElse[Long]("questLvl")(0L)
+      floor     <- c.getOrElse[Int]("floor")(1)
     } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil,
-                      rewarded, spent, pending, trophy, treasure)
+                      rewarded, spent, pending, trophy, treasure, sewer, questLvl, floor)
 }
 
 /** Числа пещеры. Вынесены из компаньонов нарочно — их читают и генератор, и
@@ -206,6 +226,45 @@ object CaveRates {
   val ClearExpPct: Long = 160L
 }
 
+/** Числа канализации. Механика у неё пещерная — те же комнаты, та же ходьба, те
+  * же находки, — а вот обитатели, ярусы и алтарь свои. */
+object SewerRates {
+
+  /** Уровень задания катается в этих границах. Он же сложность объявления на
+    * доске и уровень всех крыс внутри: этаж лабиринта здесь ни при чём. */
+  val MinLvl: Long = 1L
+  val MaxLvl: Long = 25L
+
+  /** Ярусов два: верхний и нижний. */
+  val Floors: Int = 2
+
+  /** Наверху всё как в пещере, только алтарь стоит всегда, а среди комнат
+    * непременно найдётся ход вниз. */
+  val AltarChancePct: Int = 100
+
+  /** Нижний ярус короткий: пять-десять комнат и восемь-пятнадцать крыс. Угла
+    * для отдыха на нём нет, алтарь — как повезёт. */
+  val DeepMinRooms:       Int = 5
+  val DeepMaxRooms:       Int = 10
+  val DeepMinMonsters:    Int = 8
+  val DeepMaxMonsters:    Int = 15
+  val DeepAltarChancePct: Int = 50
+
+  /** Кто здесь водится: обычная крыса на семь случаев из десяти, чумная — на
+    * три. Редкости значат ровно то же, что у любого моба: второй и третий тир. */
+  val RarityPool: List[Rarity] =
+    List.fill(70)(Rarity.Uncommon) ++ List.fill(30)(Rarity.Rare)
+
+  /** Крысиный король один, но комната с ним считается занятой, пока он жив:
+    * по этому счётчику канализация и понимает, что выбита не вся. Крысы,
+    * которым выпало логово, уступают ему место — ярус недосчитается кучки. */
+  val KingCount: Int     = 1
+  val DeepMaxGroup: Int  = 5
+
+  /** Сколько герой добирается до канализации, взяв объявление с доски. */
+  val RoadMs: Long = 10L * 60L * 1000L
+}
+
 /** Чистая генерация пещеры: комнаты, ходы между ними, мобы по кучкам и находки.
   * Без ZIO и без скрытого Random — всё от [[Rng]], как и прочие генераторы. */
 object CaveGenerator {
@@ -221,20 +280,63 @@ object CaveGenerator {
   /** Пещера расы `race`: связный клубок комнат, мобы кучками по 3–5 и ровно
     * один угол, где можно перевести дух. Первая комната — вход: в ней пусто. */
   def generate(race: String, rng: Rng): (CaveScene, Rng) = {
-    val (extraRooms, r1) = roll(rng, CaveRates.MaxRooms - CaveRates.MinRooms + 1)
-    val (cells, r2)      = dig(CaveRates.MinRooms + extraRooms, r1)
-    val (total, r3)      = monsterCount(r2)
+    val (rooms, next) = build(CaveRates.MinRooms, CaveRates.MaxRooms, CaveRates.MinMonsters,
+      CaveRates.MaxMonsters, CaveRates.AltarChancePct, withRest = true, withStairs = false, rng)
+    (CaveScene(race, rooms), next)
+  }
+
+  /** Верхний ярус канализации: та же пещера теми же комнатами, только алтарь в
+    * ней стоит всегда, а среди ходов непременно есть один вниз. Уровень задания
+    * ложится в сцену — по нему, а не по этажу лабиринта, считаются крысы. */
+  def sewer(questLvl: Long, rng: Rng): (CaveScene, Rng) = {
+    val (rooms, next) = build(CaveRates.MinRooms, CaveRates.MaxRooms, CaveRates.MinMonsters,
+      CaveRates.MaxMonsters, SewerRates.AltarChancePct, withRest = true, withStairs = true, rng)
+    (CaveScene(Race.Animal.entryName, rooms, sewer = true, questLvl = questLvl, floor = 1), next)
+  }
+
+  /** Нижний ярус: короткий, без угла для отдыха и без хода дальше — дальше
+    * некуда. В самой дальней от входа клетке сидит Крысиный король: пока он жив,
+    * канализация не выбита. Герой оказывается на ярусе сразу внутри: наверх он
+    * уже спустился. */
+  def sewerDeep(questLvl: Long, rng: Rng): (CaveScene, Rng) = {
+    val (rooms, next) = build(SewerRates.DeepMinRooms, SewerRates.DeepMaxRooms,
+      SewerRates.DeepMinMonsters, SewerRates.DeepMaxMonsters, SewerRates.DeepAltarChancePct,
+      withRest = false, withStairs = false, rng)
+    (CaveScene(Race.Animal.entryName, withLair(rooms), inside = true, sewer = true,
+      questLvl = questLvl, floor = 2), next)
+  }
+
+  /** Посадить короля в самую дальнюю от входа клетку: идти к нему через весь
+    * ярус. Крыс из его комнаты не выгоняем — пусть сторожат вместе с ним, но
+    * считается она логовом: там ждёт он. */
+  private def withLair(rooms: List[CaveRoom]): List[CaveRoom] = {
+    val far = rooms.zipWithIndex.drop(1)
+      .maxByOption { case (r, _) => (math.abs(r.x) + math.abs(r.y), r.x, r.y) }
+    far.fold(rooms) { case (_, idx) =>
+      rooms.updated(idx, rooms(idx).copy(kind = RoomKind.Lair, monsters = SewerRates.KingCount))
+    }
+  }
+
+  /** Клубок комнат с мобами и находками — то общее, из чего сложены и пещера, и
+    * оба яруса канализации. */
+  private def build(
+      minRooms: Int, maxRooms: Int, minMobs: Int, maxMobs: Int,
+      altarPct: Int, withRest: Boolean, withStairs: Boolean, rng: Rng
+  ): (List[CaveRoom], Rng) = {
+    val (extraRooms, r1) = roll(rng, maxRooms - minRooms + 1)
+    val (cells, r2)      = dig(minRooms + extraRooms, r1)
+    val (total, r3)      = monsterCount(minMobs, maxMobs, r2)
     val (groups, r4)     = spread(total, cells.size, r3)
-    val (kinds, r5)      = kindsFor(cells.size, r4)
+    val (kinds, r5)      = kindsFor(cells.size, altarPct, withRest, withStairs, r4)
     val rooms = cells.zipWithIndex.map { case ((x, y), i) =>
       CaveRoom(x, y, groups.getOrElse(i, 0), kinds.getOrElse(i, RoomKind.Empty))
     }
-    (CaveScene(race, rooms), r5)
+    (rooms, r5)
   }
 
-  private def monsterCount(rng: Rng): (Int, Rng) = {
-    val (n, next) = roll(rng, CaveRates.MaxMonsters - CaveRates.MinMonsters + 1)
-    (n + CaveRates.MinMonsters, next)
+  private def monsterCount(min: Int, max: Int, rng: Rng): (Int, Rng) = {
+    val (n, next) = roll(rng, max - min + 1)
+    (n + min, next)
   }
 
   /** Прорыть `count` комнат случайным блужданием по сетке: каждая новая
@@ -297,8 +399,11 @@ object CaveGenerator {
   }
 
   /** Виды комнат: вход пустой, одна случайная — привал, ещё одна (в половине
-    * пещер) — алтарь тёмных сил, остальным свой бросок. */
-  private def kindsFor(roomCount: Int, rng: Rng): (Map[Int, RoomKind], Rng) = {
+    * пещер, а в канализации всегда) — алтарь тёмных сил, в канализации вдобавок
+    * ход вниз, остальным свой бросок. */
+  private def kindsFor(
+      roomCount: Int, altarPct: Int, withRest: Boolean, withStairs: Boolean, rng: Rng
+  ): (Map[Int, RoomKind], Rng) = {
     val (shift, r1)     = roll(rng, (roomCount - 1).max(1))
     val restIdx         = shift + 1
     val (altarRoll, r2) = roll(r1, 100)
@@ -307,11 +412,22 @@ object CaveGenerator {
     // несколько процентов и без того нечастого алтаря.
     val (altarShift, r3) = roll(r2, (roomCount - 2).max(1))
     val altarIdx        = if (altarShift + 1 >= restIdx) altarShift + 2 else altarShift + 1
-    val withAltar       = altarRoll < CaveRates.AltarChancePct && altarIdx != restIdx
-    val start: Map[Int, RoomKind] =
-      Map(0 -> RoomKind.Empty, restIdx -> RoomKind.Rest) ++
+    val withAltar       = altarRoll < altarPct && altarIdx != restIdx
+    val reserved: Map[Int, RoomKind] =
+      Map(0 -> RoomKind.Empty) ++
+        (if (withRest) Map(restIdx -> RoomKind.Rest) else Map.empty[Int, RoomKind]) ++
         (if (withAltar) Map(altarIdx -> RoomKind.Altar) else Map.empty[Int, RoomKind])
-    (1 until roomCount).foldLeft((start, r3)) {
+    // Ход вниз пропустить нельзя: если выпавшее место уже занято алтарём или
+    // привалом, он встаёт в ближайшую свободную комнату дальше по кругу.
+    val (start, r4) =
+      if (!withStairs) (reserved, r3)
+      else {
+        val (s, rr) = roll(r3, (roomCount - 1).max(1))
+        val free    = (0 until roomCount - 1).map(k => (s + k) % (roomCount - 1) + 1)
+                        .find(i => !reserved.contains(i))
+        (free.fold(reserved)(i => reserved + (i -> RoomKind.Stairs)), rr)
+      }
+    (1 until roomCount).foldLeft((start, r4)) {
       case ((acc, r), i) =>
         if (acc.contains(i)) (acc, r)
         else {
@@ -344,5 +460,11 @@ object CaveGenerator {
   def rollRarity(rng: Rng): (Rarity, Rng) = {
     val (i, next) = roll(rng, CaveRates.RarityPool.size)
     (CaveRates.RarityPool(i), next)
+  }
+
+  /** Кто выскочил в канализации: обычная крыса или чумная (см. [[SewerRates.RarityPool]]). */
+  def rollRatRarity(rng: Rng): (Rarity, Rng) = {
+    val (i, next) = roll(rng, SewerRates.RarityPool.size)
+    (SewerRates.RarityPool(i), next)
   }
 }

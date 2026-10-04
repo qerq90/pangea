@@ -340,7 +340,7 @@ object StoneElementalBattleSpec extends ZIOSpecDefault {
 
     test("дроп: его ингредиент — магический камень, а вещи из «Каменного стража»") {
       assertTrue(MiniBoss.StoneElemental.ingredient == pangea.model.item.MaterialKind.MagicStone) &&
-      assertTrue(MiniBoss.StoneElemental.set == pangea.model.item.ItemSet.StoneGuard)
+      assertTrue(MiniBoss.StoneElemental.set.contains(pangea.model.item.ItemSet.StoneGuard))
     }
   )
 

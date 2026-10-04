@@ -158,7 +158,7 @@ object CubeCraft {
 
     /** Ингредиент → набор, в который он переводит вещь. */
     private def setOf(i: Item): Option[ItemSet] =
-      i.material.flatMap(m => MiniBoss.values.find(_.ingredient == m).map(_.set))
+      i.material.flatMap(m => MiniBoss.values.find(_.ingredient == m).flatMap(_.set))
 
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
       for {
@@ -183,7 +183,7 @@ object CubeCraft {
     val size = 3
 
     private def materialOf(set: ItemSet): Option[MaterialKind] =
-      MiniBoss.values.find(_.set == set).map(_.ingredient)
+      MiniBoss.values.find(_.set.contains(set)).map(_.ingredient)
 
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val bySet = pool

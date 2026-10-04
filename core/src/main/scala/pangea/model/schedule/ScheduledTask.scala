@@ -55,6 +55,8 @@ object TaskKind extends Enum[TaskKind] with DoobieEnum[TaskKind] {
   case object SquadFight extends TaskKind
   // Привал в пещере с монстрами (30 секунд) — один раз за пещеру.
   case object CaveRest extends TaskKind
+  // Дорога к месту выездного задания с доски гильдии (10 минут) — приход на место.
+  case object QuestRoad extends TaskKind
 
   /** Соперник сходил — зовём другого к экрану боя. */
   case object ArenaPoke extends TaskKind

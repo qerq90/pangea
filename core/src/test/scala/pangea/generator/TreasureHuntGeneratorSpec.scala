@@ -63,7 +63,9 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
 
     test("ингредиенты минибоссов: ~35% кладов, ступень зоны плюс 0..1 штук, любой ингредиент любого босса") {
       import pangea.model.monster.MiniBoss
-      val pool = MiniBoss.values.map(_.ingredient).toSet
+      // Клад отдаёт ингредиенты наборов. Кровь Крысиного короля сюда не идёт:
+      // набора под неё нет, и берут её только с него самого.
+      val pool = TreasureHuntGenerator.bossIngredients.toSet
       val handfuls = rewards.map(_.materials.filter(m => m.material.exists(pool.contains)))
       val with_    = handfuls.count(_.nonEmpty)
       assertTrue(MapZone.Kinet.tier == 1 && MapZone.DeadmansGorge.tier == 3 && MapZone.AbandonedTemple.tier == 6) &&
@@ -71,7 +73,8 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
         assertTrue(handfuls.forall(h => h.isEmpty || h.size == zone.tier || h.size == 1 + zone.tier)) &&
         assertTrue(handfuls.exists(_.size == zone.tier) && handfuls.exists(_.size == 1 + zone.tier)) &&
         // все ингредиенты встречаются, шкура волка в том числе
-        assertTrue(handfuls.flatten.flatMap(_.material).toSet == pool)
+        assertTrue(handfuls.flatten.flatMap(_.material).toSet == pool) &&
+        assertTrue(!pool.contains(MiniBoss.RatKing.ingredient))
     },
 
     test("редкие травы — только знающему цветы 2 ранга, ~15%, тем же счётом") {

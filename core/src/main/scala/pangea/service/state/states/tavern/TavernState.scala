@@ -46,7 +46,6 @@ case class TavernState(
       "LeaveRoom"       -> Target.Run { (user, _, renderer) => leaveRoom(user, renderer) },
       "ConfirmLeaveRoom"-> Target.Run { (user, _, renderer) => confirmLeaveRoom(user, renderer) },
       "CancelLeaveRoom" -> Target.Run { (user, _, renderer) => showRoom(user, renderer).as(StateType.Tavern) },
-      "QuestBoard"      -> Target.Goto(StateType.QuestBoard),
       "Innkeeper"       -> Target.Goto(StateType.Innkeeper),
       "Mercenaries"     -> Target.Goto(StateType.Mercenaries),
       "OpenCharacter"   -> Target.Run { (user, _, _) => CharacterMenu.open(heroDao, user.userId, StateType.Tavern) },
@@ -81,7 +80,6 @@ case class TavernState(
           leaveRow = if (present) 4 else 3
           choices = suspicious.toList ++ List(
             byId("RentRoom").copy(row = Some(0)),
-            byId("QuestBoard").copy(color = ChoiceColor.Positive, row = Some(1)),
             byId("Innkeeper").copy(color = ChoiceColor.Positive, row = Some(1)),
             byId("Mercenaries").copy(row = Some(0)),
             byId("OpenCharacter").copy(row = Some(charRow)),

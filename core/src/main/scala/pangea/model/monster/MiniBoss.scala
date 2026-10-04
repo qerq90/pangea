@@ -80,8 +80,22 @@ sealed abstract class MiniBoss(
   /** Ингредиент, который остаётся после него. */
   def ingredient: MaterialKind
 
-  /** Набор, вещи которого он роняет и в который переводит куб через ингредиент. */
-  def set: ItemSet
+  /** Набор, вещи которого он роняет и в который переводит куб через ингредиент.
+   *  None — набора у него ещё нет: ингредиент копится под будущие рецепты, а
+   *  куб такую вещь не переделывает (см. [[pangea.generator.item.CubeCraft]]). */
+  def set: Option[ItemSet]
+
+  /** Дерётся не один: зовёт себе подмогу, и строй вокруг него живёт по общим
+   *  правилам группы (подтягивание, перемешивание). Прочие минибоссы выходят
+   *  один на один, и группового конца раунда у них нет. */
+  def fightsInGroup: Boolean = false
+
+  /** Его обычная атака, дошедшая до HP, травит героя. */
+  def poisonsOnHit: Boolean = false
+
+  /** Сколько процентов своего максимума HP он может потерять за раунд от удара
+   *  и умения героя вместе. 0 — предела нет, как у всех. */
+  def roundDamageCapPct: Long = 0L
 
   /** Имя в бою и в логе: «Огненный Элементаль», «Гнилой Джо». Редкость в него не
    *  входит — минибосс не «легендарный моб», он именной. */
@@ -188,7 +202,7 @@ object MiniBoss extends Enum[MiniBoss] {
     def heroHitSplit: Option[(Double, Double)] = None
 
     def ingredient: MaterialKind = MaterialKind.EverburningIron
-    def set: ItemSet             = ItemSet.WildFlame
+    def set: Option[ItemSet]     = Some(ItemSet.WildFlame)
 
     // ── «Скован холодом» ─────────────────────────────────────────────────────
     /** Сколько ходов держится оцепенение от прока Холода и на сколько % оно
@@ -284,7 +298,7 @@ object MiniBoss extends Enum[MiniBoss] {
     def heroHitSplit: Option[(Double, Double)] = Some((ArmorHitPct / 100.0, HpHitPct / 100.0))
 
     def ingredient: MaterialKind = MaterialKind.MagicStone
-    def set: ItemSet             = ItemSet.StoneGuard
+    def set: Option[ItemSet]     = Some(ItemSet.StoneGuard)
   }
 
   // ── Гнилой Джо ──────────────────────────────────────────────────────────────
@@ -363,7 +377,7 @@ object MiniBoss extends Enum[MiniBoss] {
     def monsterName: String = "Гнилой Джо"
 
     def ingredient: MaterialKind = MaterialKind.GhoulSkin
-    def set: ItemSet             = ItemSet.Ghoul
+    def set: Option[ItemSet]     = Some(ItemSet.Ghoul)
   }
 
   // ── Белый волк ──────────────────────────────────────────────────────────────
@@ -453,7 +467,87 @@ object MiniBoss extends Enum[MiniBoss] {
     def monsterName: String = "Белый Волк"
 
     def ingredient: MaterialKind = MaterialKind.WhiteWolfHide
-    def set: ItemSet             = ItemSet.Hunter
+    def set: Option[ItemSet]     = Some(ItemSet.Hunter)
+  }
+
+  // ── Крысиный король ─────────────────────────────────────────────────────────
+  /** Сидит в самой дальней клетке нижнего яруса канализации — та самая «большая
+   *  крыса», из-за которой объявление и повесили. Дерётся не один: на писк из
+   *  труб лезут новые крысы, а когда прижмёт, он их поглощает и растёт.
+   *
+   *  Ком из крыс и разваливается по одной: больше пятой части своего запаса за
+   *  раунд он не теряет, сколько бы герой ни вложил в удар и умение. Зато мяса
+   *  в нём на двоих, бьёт он слабо — и всякая рана от него гноится. */
+  case object RatKing extends MiniBoss("Крысиный", "Крысиного", Race.Animal) {
+
+    val HpPerLvl: Long          = 450L
+    val ArmorPerLvl: Long       = 400L
+    val AtkPerLvl: Long         = 50L
+    val EnergyPerLvl: Long      = 100L
+    val AccuracyPerLvl: Long    = 200L
+    val DefencePerLvl: Long     = 100L
+    val EvasionPerLvl: Long     = 50L
+    val EnergyRegenPerLvl: Long = 7L
+
+    /** Платит он вдвое меньше элементалей: и растёт чаще, и встречается не
+      * случайно — за ним ходят по объявлению, когда захотят. */
+    val ExpPerLvl: Long = 100L
+
+    /** Растёт втрое быстрее элементалей: раз в три уровня героя. */
+    val LevelDivisor: Long = 3L
+
+    /** Больше этой доли своего максимума HP он за раунд не теряет. */
+    val RoundDamageCapPct: Long = 20L
+
+    // ── Способности (применяются по кругу) ──────────────────────────────────
+    /** Призыв крыс: сколько их лезет и во сколько это ему обходится. */
+    val SummonMin: Int          = 2
+    val SummonMax: Int          = 3
+    val SummonCostPerLvl: Long  = 15L
+
+    /** Объединение: он поглощает своего же — чужие HP и броня идут ему и в
+     *  текущее, и в потолок, а к атаке прибавляется столько за уровень босса. */
+    val MergeCostPerLvl: Long = 15L
+    val MergeAtkPerLvl: Long  = 25L
+
+    def stats(bossLvl: Long): FightStats = FightStats(
+      atk      = AtkPerLvl * bossLvl,
+      hp       = HpPerLvl * bossLvl,
+      armor    = ArmorPerLvl * bossLvl,
+      defence  = DefencePerLvl * bossLvl,
+      evasion  = EvasionPerLvl * bossLvl,
+      accuracy = AccuracyPerLvl * bossLvl,
+      energy   = EnergyPerLvl * bossLvl
+    )
+
+    def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
+    def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    override def levelDivisor: Long = LevelDivisor
+
+    /** Стихии оружия ему безразличны. */
+    def damageTakenMult(e: Element): Double = 1.0
+    def plainDamageTakenMult: Double        = 1.0
+
+    /** Шерсть горит, как и всё живое. */
+    def immuneToBurn: Boolean = false
+
+    /** Призыв, пропуск, объединение. */
+    def abilities: Int = 3
+
+    override def fightsInGroup: Boolean    = true
+    override def poisonsOnHit: Boolean     = true
+    override def roundDamageCapPct: Long   = RoundDamageCapPct
+
+    /** Бьёт как все: сперва броня, остаток в HP. */
+    def heroHitSplit: Option[(Double, Double)] = None
+
+    def monsterName: String = "Крысиный король"
+
+    def ingredient: MaterialKind = MaterialKind.RatKingBlood
+
+    /** Набора под его кровь ещё нет — она копится под будущие рецепты. */
+    def set: Option[ItemSet] = None
   }
 
   /** Минибосс по имени варианта — для восстановления из сохранённого боя. */

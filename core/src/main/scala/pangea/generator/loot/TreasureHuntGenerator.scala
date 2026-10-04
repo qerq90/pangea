@@ -37,7 +37,8 @@ object TreasureHuntGenerator {
   val RareHerbChancePct: Long   = 15L
 
   /** Ингредиенты всех минибоссов — по одному от каждого, без повторов. */
-  def bossIngredients: List[MaterialKind] = MiniBoss.values.map(_.ingredient).distinct.toList
+  def bossIngredients: List[MaterialKind] =
+    MiniBoss.values.filter(_.set.isDefined).map(_.ingredient).distinct.toList
 
   // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =

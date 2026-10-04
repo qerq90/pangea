@@ -8,6 +8,7 @@ import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.cave.CaveGenerator
 import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
@@ -852,7 +853,10 @@ case class BattleState(
             // Защита моба режет удар ДО разбивки по броне/HP, иначе поехали бы
             // грани стихий (см. splitElementalDamage).
             guarded = (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L)
-            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, guarded, hero)
+            // Предел босса за раунд: Крысиный король отдаёт не больше пятой
+            // части запаса, сколько бы герой ни вложил в удар и умение.
+            capped = capBossDamage(battle, guarded)
+            (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, capped, hero)
             // В лог идёт то, что РЕАЛЬНО ушло в цель: сырое число сбивало с толку
             // там, где сопротивление режет удар в разы (каменного элементаля голая
             // сталь берёт на 20%, и «357 урона» превращались в 71 снятой брони).
@@ -860,7 +864,7 @@ case class BattleState(
               "battle.hit",
               "damage"  -> (armorDmg + hpDmg).toString,
               "monster" -> battle.monsterName
-            )
+            ) + capLine(guarded, capped).map("\n" + _).getOrElse("")
             newArmor = battle.monsterCurrentArmor - armorDmg
             newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
             // Баф «ядовитые атаки»: на любом попадании снимается. Моб травится, только
@@ -918,7 +922,7 @@ case class BattleState(
             healedHero = if (vamp + setSteal + flaskSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal + flaskSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
             effectsFed = if (!flaskBite) effectsBled else effectsBled.copy(heroVampiricHits = effectsBled.heroVampiricHits - 1)
-            hitBattle = battle
+            hitBattle = noteBossDamage(battle, armorDmg + hpDmg)
               .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
               .withEffects(effectsFed)
             // Проки стихий оружия (30% каждый) — только если моб жив после удара.
@@ -1098,8 +1102,94 @@ case class BattleState(
       case Some(MiniBoss.StoneElemental) => stoneTurnCast(hero, battle, nowMs)
       case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs)
       case Some(MiniBoss.WhiteWolf)      => wolfTurnCast(hero, battle, nowMs)
+      case Some(MiniBoss.RatKing)        => ratKingTurnCast(hero, battle)
       case _                             => fireTurnCast(hero, battle, nowMs)
     }
+
+  /** Круг Крысиного короля: призыв → пропуск → объединение. Ход он берёт раз в
+    * раунд, поэтому здесь же обнуляется счётчик урона, который герой успел по
+    * нему положить (см. [[capBossDamage]]). */
+  private def ratKingTurnCast(
+      hero: Hero,
+      battle: SoloPveBattle
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val king   = MiniBoss.RatKing
+    val lvl    = battle.monsterLvl
+    val energy = battle.monsterCurrentEnergy
+    val next   = nextTurn(battle, king).copy(bossTaken = 0L)
+
+    def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
+
+    battle.bossTurn match {
+      // 1) Призыв крыс: из труб лезут ещё две-три, уровнем в саму канализацию.
+      case 0 =>
+        val cost = king.SummonCostPerLvl * lvl
+        if (energy < cost || !battle.hasRoom) ZIO.succeed((next, hero, ""))
+        else
+          for {
+            rolled <- Random.nextIntBetween(king.SummonMin, king.SummonMax + 1)
+            // Больше, чем влезет в строй, он не зовёт: очередь за спинами
+            // копилась бы весь бой и вываливалась разом.
+            n      = rolled.min(GroupState.MaxMonsters - battle.group.aliveCount).max(1)
+            seeds <- ZIO.foreach(List.fill(n)(()))(_ => Random.nextLong)
+            pcts  <- ZIO.foreach(seeds)(_ =>
+                       Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L))
+            ratLvl = battle.minionLvl.max(1L).toInt
+            slots  = seeds.zip(pcts).map { case (seed, pct) =>
+                       val (rarity, _) = CaveGenerator.rollRatRarity(Rng(seed))
+                       val m = MonsterGenerator.generateOfRaceAndRarity(ratLvl, Race.Animal, rarity)
+                       MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats,
+                         m.fightStats.hp, m.fightStats.armor, m.marked,
+                         MonsterEnergy.startEnergy(m.lvl, m.rarity, pct), BattleEffects.empty)
+                     }
+            joined = slots.foldLeft(spend(cost, next))((b, s) => b.admit(s))
+          } yield (joined, hero, content.text("battle.ratKing.summon"))
+
+      // 2) Пропуск хода.
+      case 1 => ZIO.succeed((next, hero, ""))
+
+      // 3) Объединение: он поглощает своего — слабейшего из тех, кто рядом.
+      case _ =>
+        val cost = king.MergeCostPerLvl * lvl
+        val prey = battle.group.others.zipWithIndex.filter(_._1.alive).sortBy(_._1.currentHp).headOption
+        prey match {
+          case Some((slot, idx)) if energy >= cost =>
+            val grown = spend(cost, next).copy(
+              monsterStats = battle.monsterStats.copy(
+                hp    = battle.monsterStats.hp + slot.stats.hp,
+                armor = battle.monsterStats.armor + slot.stats.armor,
+                atk   = battle.monsterStats.atk + king.MergeAtkPerLvl * lvl),
+              monsterCurrentHp    = battle.monsterCurrentHp + slot.stats.hp,
+              monsterCurrentArmor = battle.monsterCurrentArmor + slot.stats.armor,
+              // Съеденная в павшие не идёт: её не убивали, и добычи за неё нет.
+              group = battle.group.devour(idx))
+            ZIO.succeed((grown, hero, content.text("battle.ratKing.merge")))
+          case _ => ZIO.succeed((next, hero, ""))
+        }
+    }
+  }
+
+  /** Сколько из этого удара дойдёт до минибосса с пределом: Крысиный король —
+    * ком из крыс и разваливается по одной, больше
+    * [[MiniBoss.roundDamageCapPct]] % своего максимума HP за раунд он не теряет.
+    * Предел общий на удар с руки и умение: счётчик обнуляется, когда босс берёт
+    * свой ход. Возвращает урезанный урон и бой с подросшим счётчиком. */
+  private def capBossDamage(battle: SoloPveBattle, damage: Long): Long =
+    battle.boss.map(_.roundDamageCapPct).filter(_ > 0L) match {
+      case None      => damage
+      case Some(pct) =>
+        val cap = (battle.monsterStats.hp * pct / 100L).max(1L)
+        damage.min((cap - battle.bossTaken).max(0L))
+    }
+
+  /** Записать в счёт раунда то, что по боссу с пределом реально прошло. */
+  private def noteBossDamage(battle: SoloPveBattle, dealt: Long): SoloPveBattle =
+    if (battle.boss.exists(_.roundDamageCapPct > 0L)) battle.copy(bossTaken = battle.bossTaken + dealt)
+    else battle
+
+  /** Строка о том, что предел сработал: ком потерял очередную крысу. */
+  private def capLine(before: Long, after: Long): Option[String] =
+    Option.when(after < before)(content.text("battle.ratKing.capped"))
 
   /** Круг огненного: всплеск → сфера → щит → пропуск. */
   private def fireTurnCast(
@@ -2464,8 +2554,10 @@ case class BattleState(
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
-    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, resisted, hero)
-    val skillLine         = line(armorDmg + hpDmg)
+    // Предел босса за раунд делится между ударом и умением — счёт общий.
+    val capped            = capBossDamage(battle, resisted)
+    val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, capped, hero)
+    val skillLine         = line(armorDmg + hpDmg) + capLine(resisted, capped).map("\n" + _).getOrElse("")
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
@@ -2481,7 +2573,7 @@ case class BattleState(
         bledEffects0.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)))
     // Удвоение тратится на первом же уроне — даже если он добил моба.
     val effects  = if (doubles) bledEffects.copy(doubleSpent = true) else bledEffects
-    val hit      = battle
+    val hit      = noteBossDamage(battle, armorDmg + hpDmg)
       .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
       .withEffects(effects)
     if (newHp <= 0) {
@@ -3224,7 +3316,8 @@ case class BattleState(
     * изменений), сюда не доходит. Порядок: подкрепление → перемешивание каждый
     * четвёртый раунд → отложенный Таран, чтобы перемешивание его не съело. */
   private def endRound(before: SoloPveBattle, res: TurnResult): Task[TurnResult] =
-    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle == before || res.battle.boss.isDefined) ZIO.succeed(res)
+    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle == before ||
+        res.battle.boss.exists(!_.fightsInGroup)) ZIO.succeed(res)
     else {
       val b0 = res.battle.copy(group = res.battle.group.copy(round = res.battle.group.round + 1))
       for {
@@ -3396,7 +3489,18 @@ case class BattleState(
           // Этаж встречи нужен клыку волка: трофей считается по нему.
           val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed),
             floorLvl = hero.dungeonLevel.toLong)
-          (List(battle.monsterName -> d), r)
+          // Те, кого босс позвал, а герой добил, роняют своё. Съеденных королём
+          // в павших нет — их не убивали (см. GroupState.devour).
+          val (minions, r2) = battle.group.slain.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], r)) {
+            case ((acc, rr), m) =>
+              val (dd, r3) = LootGenerator.roll(
+                Rarity.withName(m.rarity), Race.withName(m.race), killLevel, rr,
+                gearChanceBonusPct = hero.gems.gearDropBonusPct,
+                rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L)
+              (acc :+ (m.name -> dd), r3)
+          }
+          // Порядок тот же, что у `fallen`: сперва павшие в строю, босс последним.
+          (minions :+ (battle.monsterName -> d), r2)
         case None =>
           fallen.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], Rng(seed))) { case ((acc, rng), m) =>
             val (d, r) = LootGenerator.roll(
