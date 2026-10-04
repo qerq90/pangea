@@ -196,6 +196,27 @@ object ArtifactSpec extends ZIOSpecDefault {
                 assertTrue(after.exists(!_.hcursor.downField("artifactScene").succeeded))
       },
 
+      test("то же с пещерой: раса, комнаты и обитатели на месте") {
+        // Пещера живёт в той же колонке и так же катается заново, если её там
+        // не нашлось, — и «Персонаж» из неё открывается точно так же.
+        val (cave, _) = pangea.model.cave.CaveGenerator.generate(
+          pangea.model.monster.Race.Orc.entryName, pangea.domain.Rng(321L))
+        for {
+          heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId))
+          renderer <- TestRenderer.make
+          content  <- ZIO.attempt(SceneContent.load())
+          invRepo   = TestInventoryRepository.withItems(List(herb(1L, MaterialKind.Nettle)))
+          state     = ArtifactState(ArtifactKind.LivingBag, heroDao, invRepo, TestItemRepository.make,
+                        TestArtifactRepository.empty, content)
+          _        <- heroDao.writeSceneData(userId, cave.asJson)
+          _        <- state.enter(testUser, renderer)
+          _        <- state.action(testUser, tap("ArtifactPut"), renderer)
+          _        <- state.action(testUser, tap("ArtifactMenu"), renderer)
+          after    <- heroDao.readSceneData(userId)
+        } yield assertTrue(after.flatMap(_.as[pangea.model.cave.CaveScene].toOption).contains(cave)) &&
+                assertTrue(after.exists(!_.hcursor.downField("artifactScene").succeeded))
+      },
+
       test("нечего плавить и нет зарядов — говорим об этом, ничего не тратя") {
         val idle = TestArtifactRepository.of(casket =
           TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, charges = 3, items = List(gem(1L))))

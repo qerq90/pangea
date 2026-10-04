@@ -40,14 +40,20 @@ object DailyNpc extends Enum[DailyNpc] {
   *
   * @param key   имя в `scenes.yaml`: `daily.<npc>.tasks.<key>`
   * @param goal  сколько нужно
-  * @param snap  задание считает по счётчику героя, а не по прибавкам
   */
 sealed abstract class DailyKind(
   val key:  String,
   val npc:  DailyNpc,
-  val goal: Long,
-  val snap: Boolean = false
+  val goal: Long
 ) extends EnumEntry {
+
+  /** Задание считает по счётчику героя, а не по прибавкам.
+    *
+    * Метод, а не параметр с умолчанием, и это важно: умолчание конструктора
+    * живёт в компаньоне, и каждый вариант, который его опускал, залезал в `DailyKind$`
+    * прямо во время того, как тот себя собирал (`findValues`). На одном потоке это
+    * проходит, на двух — в `values` появляются null и всё падает в случайном месте. */
+  def snap: Boolean = false
 
   /** Насколько часто поручение выпадает против прочих у того же горожанина.
     * По умолчанию поровну; больше единицы ставится там, где заказ должен быть
@@ -158,12 +164,15 @@ object DailyKind extends Enum[DailyKind] {
 
   // ── Горн: железо должно работать ───────────────────────────────────────────
   /** Убить мобов — Горн считает это проверкой стали. */
-  case object HornKills extends DailyKind("kills", DailyNpc.Horn, 20L, snap = true)
+  case object HornKills extends DailyKind("kills", DailyNpc.Horn, 20L) {
+    override def snap: Boolean = true
+  }
 
   /** Набрать репутации в гильдии за день — столько, сколько дали бы десять
     * мешков с пожитками по уровню героя. Число растёт вместе с героем: статичные
     * полсотни для сотого уровня — не наказ, а недоразумение. */
-  case object HornReputation extends DailyKind("reputation", DailyNpc.Horn, 50L, snap = true) {
+  case object HornReputation extends DailyKind("reputation", DailyNpc.Horn, 50L) {
+    override def snap: Boolean = true
     override def goalFor(heroLvl: Long): Long =
       DailyRates.sacks(DailyRates.HornGoalSacks, heroLvl)
   }
