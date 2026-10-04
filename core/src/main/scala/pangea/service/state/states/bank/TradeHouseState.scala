@@ -10,8 +10,9 @@ import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
-import pangea.model.quest.DailyNpc
-import pangea.service.state.{CityExit, DailyDialog, State, UserAction}
+import pangea.model.item.{Item, MaterialKind}
+import pangea.model.quest.{DailyNpc, NpcQuest}
+import pangea.service.state.{CityExit, DailyDialog, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Торговый дом на Торговой площади: банкир Рахадим продаёт ячейки хранилища, меняет
@@ -29,6 +30,9 @@ case class TradeHouseState(
   /** Ячейку тоже можно оплатить из уже выкупленных: сперва своё, потом банк. */
   private val purse = Purse(heroDao, Some(bankRepo))
 
+  /** «Залог доверия»: кусок с элементаля — и задаток на ячейку. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Rakhadim, "Rakh")
+
   /** Счётная книга Рахадима: сегодняшнее поручение банкира. */
   private val daily = DailyDialog(heroDao, content, DailyNpc.Rakhadim, "Rakhadim", Some(inventoryRepo))
 
@@ -44,6 +48,9 @@ case class TradeHouseState(
       "FetShop"         -> Target.Goto(StateType.FetShop),
       "Mail"            -> Target.Goto(StateType.Mail),
       "LeaveTradeHouse" -> Target.Goto(StateType.MarketSquare),
+      quest.questAction   -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showMenu(u, r).as(StateType.TradeHouse) },
+      quest.declineAction -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) },
       daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
       daily.giveAction  -> Target.Run { (u, _, r) => giveDaily(u, r) },
@@ -104,6 +111,36 @@ case class TradeHouseState(
       _    <- showMenu(user, renderer)
     } yield StateType.TradeHouse
 
+  // ── «Залог доверия» ─────────────────────────────────────────
+
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    quest.load(user).flatMap { quests =>
+      if (quests.isDone(NpcQuest.Rakhadim)) showMenu(user, renderer)
+      else if (!quests.isTaken(NpcQuest.Rakhadim)) quest.offer(user, renderer, quest.text("intro"))
+      else turnIn(user, renderer)
+    }.as(StateType.TradeHouse)
+
+  /** Сдача: кусок ложится на сукно, герой получает задаток и опыт. */
+  private def turnIn(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(asThrowable)
+      _ <- inv.items.data.find(TradeHouseState.elementalPiece) match {
+        case None => renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> showMenu(user, renderer)
+        case Some(piece) =>
+          for {
+            _    <- inventoryRepo.removeItem(piece.id, hero.id).mapError(asThrowable)
+            _    <- heroDao.updateSilver(user.userId, hero.silver + TradeHouseState.QuestSilver)
+            done <- quest.complete(user, hero, identity)
+            (_, expLine) = done
+            _    <- renderer.show(user, Screen(quest.text("outro"), Nil))
+            _    <- renderer.show(user, Screen(quest.format("reward",
+                      "silver" -> TradeHouseState.QuestSilver.toString, "exp" -> expLine), Nil))
+            _    <- showMenu(user, renderer)
+          } yield ()
+      }
+    } yield ()
+
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
@@ -113,10 +150,12 @@ case class TradeHouseState(
       now   <- nowMs
       // Счётная книга: у банкира на каждый день своя просьба.
       task  <- daily.today(hero, now)
-      _     <- renderer.show(user, menuScreen(vault, mail, daily.button(task)))
+      quests <- quest.load(user)
+      _     <- renderer.show(user, menuScreen(vault, mail, daily.button(task), quest.button(quests)))
     } yield ()
 
-  private def menuScreen(vault: BankVault, mail: Long = 0L, work: Option[Choice] = None): Screen = {
+  private def menuScreen(vault: BankVault, mail: Long = 0L, work: Option[Choice] = None,
+                         story: Option[Choice] = None): Screen = {
     // Ряд на две кнопки: покупка ячейки и вход в хранилище (если есть что открывать).
     val buy = Choice("BuyCell",
       Choice.fit(content.format("bank.tradeHouse.buyCell", "price" -> vault.nextCellPrice.toString)),
@@ -135,7 +174,8 @@ case class TradeHouseState(
       Option.when(mail > 0L)(Choice("Mail",
         content.format("bank.tradeHouse.mailLabel", "count" -> mail.toString),
         color = ChoiceColor.Positive, row = Some(3))) ++
-      work.map(_.copy(row = Some(3))) :+
+      work.map(_.copy(row = Some(3))) ++
+      story.map(_.copy(row = Some(3))) :+
       Choice("LeaveTradeHouse", content.text("bank.tradeHouse.leave"), color = ChoiceColor.Negative, row = Some(4)) :+
       CityExit.button(content, Some(4))
     val text = content.format("bank.tradeHouse.menu",
@@ -207,4 +247,15 @@ case class TradeHouseState(
     getHero(user).flatMap(h => bankRepo.get(h.id).mapError(asThrowable))
 
   private def asThrowable(e: Any): Throwable = new Throwable(e.toString)
+}
+
+object TradeHouseState {
+
+  /** Задаток Рахадима — половина первой ячейки. */
+  val QuestSilver: Long = BankVault.FirstCellPrice / 2L
+
+  /** Что остаётся от элементалей: железо, которое не остывает, и камень,
+    * тянущий к себе другие. Банкир примет любой из двух. */
+  def elementalPiece(item: Item): Boolean =
+    item.material.exists(m => m == MaterialKind.EverburningIron || m == MaterialKind.MagicStone)
 }

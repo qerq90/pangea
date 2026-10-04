@@ -4,13 +4,14 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
 import pangea.model.item.Item
+import pangea.model.quest.NpcQuest
 import pangea.model.rune.{Rune, RuneData, RuneStoneSize}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.InventoryState
 import pangea.service.state.states.merchant.MerchantState
-import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
+import pangea.service.state.{CityExit, ItemMenu, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Наставник Казимир — руны на теле. Снимает узор руны с вещи из сумки и
@@ -25,9 +26,15 @@ import zio.{Task, ZIO}
 case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryRepository, content: SceneContent) extends State {
   import MentorKazimirState._
 
+  /** «Первый узор»: принести большую плиту — по осколкам он читать не станет. */
+  private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Kazimir, "Kaz")
+
   private val branch = new Branch(
     routes = Map(
       "KazimirMenu"        -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MentorKazimir) },
+      quest.questAction    -> Target.Run { (u, _, r) => questTalk(u, r) },
+      quest.acceptAction   -> Target.Run { (u, _, r) => quest.accept(u, r) *> enter(u, r).as(StateType.MentorKazimir) },
+      quest.declineAction  -> Target.Run { (u, _, r) => enter(u, r).as(StateType.MentorKazimir) },
       "Brand"              -> Target.Run { (u, _, r) => brandMenu(u, r) },
       "BrandList"          -> Target.Run { (u, ua, r) => brandList(u, ua, r) },
       "BrandRune"          -> Target.Run { (u, ua, r) => brandRune(u, ua, r) },
@@ -54,12 +61,45 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
   override def targetStates: Set[StateType] = branch.gotoTargets + StateType.MentorKazimir
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(content.text("kazimir.intro"), List(
-      content.choice("Brand", "kazimir.brandLabel").copy(row = Some(0)),
-      content.choice("Deepen", "kazimir.deepenLabel").copy(row = Some(1)),
-      Choice("Runes", content.text("kazimir.runesLabel"), row = Some(2)),
-      content.choice("LeaveMentorKazimir", "kazimir.back").copy(row = Some(3)),
-      CityExit.button(content, Some(3)))))
+    quest.load(user).flatMap { quests =>
+      renderer.show(user, Screen(content.text("kazimir.intro"), List(
+        content.choice("Brand", "kazimir.brandLabel").copy(row = Some(0)),
+        content.choice("Deepen", "kazimir.deepenLabel").copy(row = Some(1)),
+        Choice("Runes", content.text("kazimir.runesLabel"), row = Some(2))) ++
+        quest.button(quests).map(_.copy(row = Some(3))).toList ++ List(
+        content.choice("LeaveMentorKazimir", "kazimir.back").copy(row = Some(4)),
+        CityExit.button(content, Some(4)))))
+    }
+
+  // ── «Первый узор» ─────────────────────────────────────────────
+
+  private def questTalk(user: User, renderer: Renderer): Task[StateType] =
+    quest.load(user).flatMap { quests =>
+      if (quests.isDone(NpcQuest.Kazimir)) enter(user, renderer)
+      else if (!quests.isTaken(NpcQuest.Kazimir)) quest.offer(user, renderer, quest.text("intro"))
+      else turnIn(user, renderer)
+    }.as(StateType.MentorKazimir)
+
+  /** Сдача: плита уходит Казимиру, герой получает имя в гильдии и опыт. */
+  private def turnIn(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      hero <- getHero(user)
+      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+      _ <- inv.items.data.find(bigRune) match {
+        case None => renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> enter(user, renderer)
+        case Some(stone) =>
+          for {
+            _    <- inventoryRepo.removeItem(stone.id, hero.id).mapError(e => new Throwable(e.toString))
+            _    <- heroDao.updateGuildReputation(user.userId, hero.guildReputation + QuestReputation)
+            done <- quest.complete(user, hero, identity)
+            (_, expLine) = done
+            _    <- renderer.show(user, Screen(quest.text("outro"), Nil))
+            _    <- renderer.show(user, Screen(quest.format("reward",
+                      "rep" -> QuestReputation.toString, "exp" -> expLine), Nil))
+            _    <- enter(user, renderer)
+          } yield ()
+      }
+    } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -427,6 +467,12 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
 }
 
 object MentorKazimirState {
+
+  /** Сколько имени в гильдии даёт Казимир за первую прочитанную плиту. */
+  val QuestReputation: Long = 50L
+
+  /** Та самая целая плита: малые руны ему не годятся. */
+  def bigRune(item: Item): Boolean = item.runeStone.exists(_.size == RuneStoneSize.Big)
   /** Рун на странице «Рун»: у каждой описание, поэтому меньше, чем кнопок в списках. */
   val RunesPerPage: Int = 5
 }
