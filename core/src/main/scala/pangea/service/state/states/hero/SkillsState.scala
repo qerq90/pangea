@@ -26,7 +26,10 @@ case class SkillsState(heroDao: HeroDao, content: SceneContent) extends State {
 
   private val branch = new Branch(
     routes = Map(
-      "SkillsList"     -> Target.Run { (u, _, r) => writeScene(u, SkillsScene(page = Some(0))) *> showList(u, r).as(StateType.Skills) },
+      // Назад из карточки — на ту же страницу, откуда ушли.
+      // Назад из карточки — на ту же страницу: сцену трогать незачем,
+      // в ней только номер страницы и есть.
+      "SkillsList"     -> Target.Run { (u, _, r) => showList(u, r).as(StateType.Skills) },
       "SkillsPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "SkillsNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "BackFromSkills" -> Target.Goto(StateType.HeroStats)

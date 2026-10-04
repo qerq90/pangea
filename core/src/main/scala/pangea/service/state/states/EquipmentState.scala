@@ -22,7 +22,8 @@ case class EquipmentState(
 
   private val branch = new Branch(
     routes = Map(
-      "EquipmentList" -> Target.Run { (u, _, r) => writeScene(u, EquipmentScene(page = Some(0))) *> showList(u, r).as(StateType.Equipment) },
+      // Назад из карточки — на ту же страницу, откуда ушли.
+      "EquipmentList" -> Target.Run { (u, _, r) => backToList(u) *> showList(u, r).as(StateType.Equipment) },
       "EquipmentPrev" -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "EquipmentNext" -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Unequip"       -> Target.Run { (u, _, r) => unequipSelected(u, r) },
@@ -252,6 +253,10 @@ case class EquipmentState(
       Option.when(page < totalPages - 1)(Choice(nextId, content.text("common.next"), row = Some(row)))
     ).flatten
   }
+
+  /** Закрыть карточку, не трогая страницу списка. */
+  private def backToList(user: User): Task[Unit] =
+    readScene(user).flatMap(scene => writeScene(user, scene.copy(selectedSlot = None)))
 
   private def readScene(user: User): Task[EquipmentScene] =
     UiScene.read(heroDao, user.userId, UiScene.Equipment, EquipmentScene())
