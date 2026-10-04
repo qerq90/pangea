@@ -68,12 +68,17 @@ final case class MonsterSlot(
   currentArmor:  Long,
   marked:        Boolean,
   currentEnergy: Long,
-  effects:       BattleEffects
+  effects:       BattleEffects,
+  // Минибосс, если на этом месте стоит он: его правила ездят вместе с ним, а
+  // не живут на бою. Иначе удар по его призванной крысе считался бы ударом по
+  // нему самому (см. SoloPveBattle.activeSlot/withActive).
+  boss:          Option[String] = None
 ) {
   def toMonster: Monster =
     Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked)
 
-  def name: String = toMonster.name
+  def name: String =
+    boss.flatMap(pangea.model.monster.MiniBoss.byName).map(_.monsterName).getOrElse(toMonster.name)
 
   /** Имя для кнопки — см. `Monster.shortName`. */
   def shortName: String = toMonster.shortName
@@ -102,7 +107,8 @@ object MonsterSlot {
       marked        <- c.getOrElse[Boolean]("marked")(false)
       currentEnergy <- c.getOrElse[Long]("currentEnergy")(0L)
       effects       <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
-    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects)
+      boss          <- c.getOrElse[Option[String]]("boss")(None)
+    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects, boss)
 }
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */
@@ -230,6 +236,17 @@ final case class GroupState(
 
   /** Моб `others(idx)` пал: из строя — в павшие, его место пустеет. Таран в него
     * сгорает. Чужой индекс — ничего. */
+  /** Убрать слот, НЕ записывая его в павшие: эту крысу не убили — её съели, и
+    * добычи за неё герою не причитается (см. Крысиный король, «Объединение»). */
+  def devour(idx: Int): GroupState =
+    others.lift(idx) match {
+      case None    => this
+      case Some(_) =>
+        val pos = posOf(idx)
+        copy(others = others.patch(idx, Nil, 1), places = places.patch(idx, Nil, 1),
+             pendingMove = pendingMove.filter(_ != pos))
+    }
+
   def withoutSlot(idx: Int): GroupState =
     others.lift(idx) match {
       case None       => this

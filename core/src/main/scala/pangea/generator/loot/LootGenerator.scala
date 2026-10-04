@@ -297,9 +297,14 @@ object LootGenerator {
       floorLvl: Long = 1L
   ): (List[LootDrop], Rng) = {
     val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
-    val count       = (extra + bossLvl).toInt.max(1)
+    // С Крысиного короля вещей вдвое меньше: он роняет не набор, а ингредиенты.
+    val raw         = extra + bossLvl
+    val count       = (if (boss == MiniBoss.RatKing) raw / 2L else raw).toInt.max(1)
     (0 until count).foldLeft((List.empty[LootDrop], r0, true)) { case ((acc, r, hide), _) =>
-      if (boss == MiniBoss.WhiteWolf) {
+      if (boss == MiniBoss.RatKing) {
+        val (drop, r2) = ratKingDrop(boss, r)
+        (acc :+ drop, r2, hide)
+      } else if (boss == MiniBoss.WhiteWolf) {
         val (drop, r2) = wolfDrop(boss, bossLvl, heroLvl, floorLvl, hide, r)
         (acc :+ drop, r2, hide && !isHide(drop))
       } else {
@@ -386,6 +391,22 @@ object LootGenerator {
     else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
     else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
+  /** С Крысиного короля: кровь и большая руна идут по два билета, чумные
+    * черви — по одному. Вещей своего набора у него нет: набора пока нет и
+    * самого (см. [[MiniBoss.set]]). */
+  private def ratKingDrop(boss: MiniBoss, rng: Rng): (LootDrop, Rng) = {
+    val (roll, r1) = rng.between(0L, RatKingTickets)
+    if (roll < RatKingBloodTickets) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
+    else if (roll < RatKingBloodTickets + RatKingRuneTickets) bigRune(r1)
+    else (LootDrop.Gear(MaterialGenerator.item(MaterialKind.PlagueWorms)), r1)
+  }
+
+  /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25. */
+  val RatKingBloodTickets: Long = 50L
+  val RatKingRuneTickets:  Long = 50L
+  val RatKingWormTickets:  Long = 25L
+  val RatKingTickets:      Long = RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets
+
   /** Большая руна с минибосса: вид равновероятен среди всех, как и в добыче. */
   private def bigRune(rng: Rng): (LootDrop, Rng) = {
     val (rune, r1) = rng.pick(RuneStone.all)
@@ -396,13 +417,18 @@ object LootGenerator {
     * границах игры — на первом уровне разброс не уводит вещь в нулевой, на
     * последнем в 151-й. Имя перекатываем как сетовое: имя набора встаёт вместо
     * титула. */
-  private def setGear(boss: MiniBoss, heroLvl: Long, rarity: ItemRarity, rng: Rng): (LootDrop, Rng) = {
-    val (delta, r2) = rng.between(-1L, 2L)
-    val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
-    val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, rarity, r2)
-    val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, boss.set, r3)
-    (LootDrop.Gear(item.copy(name = name, set = Some(boss.set))), r4)
-  }
+  private def setGear(boss: MiniBoss, heroLvl: Long, rarity: ItemRarity, rng: Rng): (LootDrop, Rng) =
+    boss.set match {
+      // Босс без набора сюда не ходит (его добыча своя) — но если дойдёт,
+      // пусть лучше выпадет руна, чем вещь неизвестно чья.
+      case None => bigRune(rng)
+      case Some(set) =>
+        val (delta, r2) = rng.between(-1L, 2L)
+        val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
+        val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, rarity, r2)
+        val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, set, r3)
+        (LootDrop.Gear(item.copy(name = name, set = Some(set))), r4)
+    }
 
   /** Шанс (в %), что предмет с элементаля окажется ингредиентом, а не вещью набора. */
   val ElementalIngredientChancePct: Long = 40L

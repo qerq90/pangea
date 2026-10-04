@@ -13,7 +13,7 @@ import pangea.model.cave.{CaveDir, CaveGenerator, CaveRates, CaveScene, RoomKind
 import pangea.model.hero.{Hero, Knowledge}
 import pangea.generator.item.GemGenerator
 import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, MapZone, MaterialKind}
-import pangea.model.monster.{Monster, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.rune.{RuneStone, RuneStoneSize}
 import pangea.model.squad.UndeadForm
 import pangea.model.schedule.TaskKind
@@ -373,7 +373,9 @@ case class MonsterCaveState(
           wall(scene).flatMap(line => renderer.show(user, Screen(line, Nil))) *> showRoom(user, scene, renderer)
         case Some(idx) =>
           val moved = scene.copy(at = idx)
-          if (moved.room.monsters > 0) getHero(user).flatMap(fight(user, _, moved, idx, renderer))
+          if (moved.room.monsters > 0 && moved.room.kind == RoomKind.Lair)
+            getHero(user).flatMap(fightKing(user, _, moved, idx, renderer))
+          else if (moved.room.monsters > 0) getHero(user).flatMap(fight(user, _, moved, idx, renderer))
           else writeScene(user, moved) *>
             renderer.show(user, Screen(content.text("cave.moved"), Nil)) *>
             showRoom(user, moved, renderer)
@@ -425,6 +427,7 @@ case class MonsterCaveState(
       case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
       case RoomKind.Treasure => content.text(if (room.done) "cave.room.treasureDug" else "cave.room.treasure")
       case RoomKind.Stairs   => content.text("sewer.room.stairs")
+      case RoomKind.Lair     => content.text(if (room.monsters > 0) "sewer.room.lair" else "sewer.room.lairEmpty")
       case RoomKind.Empty => emptyRoom(scene)
     }
   }
@@ -445,6 +448,7 @@ case class MonsterCaveState(
     case RoomKind.Rest  => Some("cave.act.rest")
     case RoomKind.Altar => Some("cave.act.altar")
     case RoomKind.Stairs => Some("sewer.act.down")
+    case RoomKind.Lair   => None
     case RoomKind.Empty => None
   }
 
@@ -502,6 +506,32 @@ case class MonsterCaveState(
       _ <- heroDao.writeActiveBattle(user.userId, battle.copy(noKin = true).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format(key(scene, "ambush"), "count" -> count.toString), Nil))
+    } yield StateType.Battle
+  }
+
+  /** Логово: та самая большая крыса, из-за которой всё и затевалось. Бой с ним
+    * идёт по правилам минибосса, а не кучки: он зовёт себе подмогу уровнем в
+    * задание и поглощает её, когда прижмёт. Комнату помечаем выбитой заранее —
+    * вернуться из боя можно только победив. */
+  private def fightKing(user: User, hero: Hero, scene: CaveScene, idx: Int, renderer: Renderer): Task[StateType] = {
+    val king  = MiniBoss.RatKing
+    val lvl   = king.bossLvl(hero.lvl)
+    val stats = king.stats(lvl)
+    val boss  = Monster(0L, lvl, Race.Animal, Rarity.Legendary, stats)
+    val base  = SoloPveBattle.from(boss, hero)
+    val battle = base.copy(
+      bossKind  = Some(king.entryName),
+      minionLvl = scene.questLvl.max(1L),
+      // Всякая рана от него гноится: удар, дошедший до HP, травит героя.
+      effects   = base.effects.copy(monsterPoisonsOnHit = king.poisonsOnHit),
+      // Звать со стороны ему некого: кого надо, он позовёт сам.
+      noKin     = true)
+    val next = scene.withRoom(idx, _.copy(monsters = 0, done = true))
+    val routing = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
+    for {
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeSceneData(user.userId, routing.asJson)
+      _ <- renderer.show(user, Screen(content.text("sewer.king"), Nil))
     } yield StateType.Battle
   }
 

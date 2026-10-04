@@ -11,7 +11,7 @@ import pangea.model.battle.SoloPveBattle
 import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKind, SewerRates}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, MaterialKind}
-import pangea.model.monster.{Monster, MonsterRaceFactor, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, MonsterRaceFactor, Race, Rarity}
 import pangea.model.quest.{BoardData, BoardKind, BoardSlot, Difficulty}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -124,9 +124,17 @@ object SewerSpec extends ZIOSpecDefault {
       assertTrue(deep.forall(d => d.rooms.size >= SewerRates.DeepMinRooms && d.rooms.size <= SewerRates.DeepMaxRooms)) &&
       assertTrue(deep.forall(d => reachable(d) == d.rooms.size)) &&
       assertTrue(deep.forall { d =>
-        val total = d.rooms.map(_.monsters).sum
-        total >= SewerRates.DeepMinMonsters && total <= SewerRates.DeepMaxMonsters
+        // Крысы считаются без логова: там ждёт король, а не кучка.
+        val total = d.rooms.filterNot(_.kind == RoomKind.Lair).map(_.monsters).sum
+        total >= SewerRates.DeepMinMonsters - SewerRates.DeepMaxGroup &&
+          total <= SewerRates.DeepMaxMonsters
       }) &&
+      // Логово ровно одно, не у входа, и король в нём один
+      assertTrue(deep.forall(_.rooms.count(_.kind == RoomKind.Lair) == 1)) &&
+      assertTrue(deep.forall(_.rooms.head.kind != RoomKind.Lair)) &&
+      assertTrue(deep.forall(_.rooms.find(_.kind == RoomKind.Lair).exists(_.monsters == SewerRates.KingCount))) &&
+      // пока король жив, ярус не выбит
+      assertTrue(deep.forall(!_.cleared)) &&
       assertTrue(deep.forall(!_.rooms.exists(_.kind == RoomKind.Rest))) &&
       assertTrue(deep.forall(!_.rooms.exists(_.kind == RoomKind.Stairs))) &&
       // алтарь внизу — как повезёт, примерно в половине
@@ -210,7 +218,12 @@ object SewerSpec extends ZIOSpecDefault {
       val pelt   = pangea.generator.item.MaterialGenerator.item(MaterialKind.RatPelt)
       assertTrue(spoils.toSet == Set[MaterialKind](MaterialKind.RatPelt, MaterialKind.RatTail,
         MaterialKind.PlagueWorms, MaterialKind.RatKingBlood)) &&
-      assertTrue(spoils.forall(m => m.worthless && !m.isHerb && m.doubloonPrice == 0L)) &&
+      // Шкурки, хвосты и черви не стоят ничего; кровь короля Ришелье берёт
+      // золотом — это редкий ингредиент будущего набора.
+      assertTrue(spoils.filterNot(_ == MaterialKind.RatKingBlood)
+        .forall(m => m.worthless && !m.isHerb && m.doubloonPrice == 0L)) &&
+      assertTrue(!MaterialKind.RatKingBlood.worthless &&
+        MaterialKind.RatKingBlood.doubloonPrice == 5L) &&
       assertTrue(spoils.forall(_.description.nonEmpty)) &&
       // шкаф герой набивает руками — что в нём держать, решает он сам
       assertTrue(ArtifactKind.Wardrobe.accepts(pelt)) &&
@@ -308,7 +321,7 @@ object SewerSpec extends ZIOSpecDefault {
         after <- dao.getHeroByUserId(userId).map(_.get)
         scene <- sceneOf(dao)
         board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
-      } yield assertTrue(said.contains("ищите ход вниз")) &&
+      } yield assertTrue(said.contains("ещё слышна возня")) &&
               assertTrue(after.exp == 0L && scene.exists(!_.rewarded)) &&
               assertTrue(board.slots.forall(!_.done))
     },
@@ -330,6 +343,34 @@ object SewerSpec extends ZIOSpecDefault {
               // закрыто объявление о крысах; смежное, про пещеру, не тронуто
               assertTrue(board.slots.find(_.kind == BoardKind.SewerRats).exists(_.done)) &&
               assertTrue(board.slots.find(_.kind == BoardKind.CaveClear).exists(!_.done))
+    },
+
+    test("в логове ждёт король: бой с минибоссом, а не с кучкой") {
+      for {
+        t <- cave(hero(lvl = 10L))
+        (state, dao, _, r) = t
+        _      <- dao.writeSceneData(userId,
+                    smallSewer(monsters = 0, kind = RoomKind.Lair, floor = 2).copy(at = 0).asJson)
+        // в комнате с логовом король стоит сам, комнату занимает он
+        _      <- dao.writeSceneData(userId, smallSewer(monsters = 0, kind = RoomKind.Lair, floor = 2)
+                    .copy(rooms = List(
+                      CaveRoom(0, 0, 0, RoomKind.Empty, done = true),
+                      CaveRoom(0, 1, SewerRates.KingCount, RoomKind.Lair))).asJson)
+        out    <- state.action(testUser, tap("CaveForward"), r)
+        battle <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+        said   <- texts(r)
+        loot   <- dao.readSceneData(userId).map(_.flatMap(_.as[pangea.service.state.states.LootState.LootData].toOption))
+        back    = loot.flatMap(_.eventData).flatMap(_.as[CaveScene].toOption)
+      } yield assertTrue(out == StateType.Battle && said.contains("Крысиный король")) &&
+              assertTrue(battle.exists(_.boss.contains(MiniBoss.RatKing))) &&
+              // уровень босса — от уровня героя, а не от задания
+              assertTrue(battle.exists(_.monsterLvl == MiniBoss.RatKing.bossLvl(10L))) &&
+              // звать ему некого, зато своих он позовёт сам — уровнем в задание
+              assertTrue(battle.exists(b => b.noKin && b.minionLvl == 7L)) &&
+              // всякая рана от него гноится
+              assertTrue(battle.exists(_.effects.monsterPoisonsOnHit)) &&
+              // вернёмся в ту же канализацию, с выбитым логовом
+              assertTrue(back.exists(s => s.sewer && s.floor == 2 && s.cleared))
     },
 
     test("из канализации уходят в город, а не в лабиринт") {

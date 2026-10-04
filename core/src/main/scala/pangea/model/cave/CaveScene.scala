@@ -21,6 +21,7 @@ object RoomKind extends Enum[RoomKind] {
   case object Altar extends RoomKind // алтарь тёмных сил: поднимает добычу обратно
   case object Treasure extends RoomKind // клад по карте: она и привела сюда
   case object Stairs extends RoomKind // ход вниз: только в канализации, и только с первого яруса
+  case object Lair   extends RoomKind // логово Крысиного короля: нижний ярус канализации
 
   implicit val encoder: Encoder[RoomKind] = (k: RoomKind) => k.entryName.asJson
   implicit val decoder: Decoder[RoomKind] = (c: HCursor) => c.as[String].map(RoomKind.withName)
@@ -254,6 +255,12 @@ object SewerRates {
   val RarityPool: List[Rarity] =
     List.fill(70)(Rarity.Uncommon) ++ List.fill(30)(Rarity.Rare)
 
+  /** Крысиный король один, но комната с ним считается занятой, пока он жив:
+    * по этому счётчику канализация и понимает, что выбита не вся. Крысы,
+    * которым выпало логово, уступают ему место — ярус недосчитается кучки. */
+  val KingCount: Int     = 1
+  val DeepMaxGroup: Int  = 5
+
   /** Сколько герой добирается до канализации, взяв объявление с доски. */
   val RoadMs: Long = 10L * 60L * 1000L
 }
@@ -288,13 +295,26 @@ object CaveGenerator {
   }
 
   /** Нижний ярус: короткий, без угла для отдыха и без хода дальше — дальше
-    * некуда. Герой оказывается на нём сразу внутри: наверх он уже спустился. */
+    * некуда. В самой дальней от входа клетке сидит Крысиный король: пока он жив,
+    * канализация не выбита. Герой оказывается на ярусе сразу внутри: наверх он
+    * уже спустился. */
   def sewerDeep(questLvl: Long, rng: Rng): (CaveScene, Rng) = {
     val (rooms, next) = build(SewerRates.DeepMinRooms, SewerRates.DeepMaxRooms,
       SewerRates.DeepMinMonsters, SewerRates.DeepMaxMonsters, SewerRates.DeepAltarChancePct,
       withRest = false, withStairs = false, rng)
-    (CaveScene(Race.Animal.entryName, rooms, inside = true, sewer = true, questLvl = questLvl,
-      floor = 2), next)
+    (CaveScene(Race.Animal.entryName, withLair(rooms), inside = true, sewer = true,
+      questLvl = questLvl, floor = 2), next)
+  }
+
+  /** Посадить короля в самую дальнюю от входа клетку: идти к нему через весь
+    * ярус. Крыс из его комнаты не выгоняем — пусть сторожат вместе с ним, но
+    * считается она логовом: там ждёт он. */
+  private def withLair(rooms: List[CaveRoom]): List[CaveRoom] = {
+    val far = rooms.zipWithIndex.drop(1)
+      .maxByOption { case (r, _) => (math.abs(r.x) + math.abs(r.y), r.x, r.y) }
+    far.fold(rooms) { case (_, idx) =>
+      rooms.updated(idx, rooms(idx).copy(kind = RoomKind.Lair, monsters = SewerRates.KingCount))
+    }
   }
 
   /** Клубок комнат с мобами и находками — то общее, из чего сложены и пещера, и

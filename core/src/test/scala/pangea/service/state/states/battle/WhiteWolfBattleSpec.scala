@@ -116,7 +116,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       assertTrue(wolf.dotDamageTakenMult == 1.2) &&
       assertTrue(Element.values.forall(e => wolf.damageTakenMult(e) == 1.0) && wolf.plainDamageTakenMult == 1.0) &&
       assertTrue(wolf.attackElement.contains(Element.Cold) && !wolf.immuneToBurn) &&
-      assertTrue(wolf.ingredient == MaterialKind.WhiteWolfHide && wolf.set == ItemSet.Hunter)
+      assertTrue(wolf.ingredient == MaterialKind.WhiteWolfHide && wolf.set.contains(ItemSet.Hunter))
     },
 
     test("экран боя: имя «Белый Волк» и раса «Животное»") {

@@ -70,7 +70,14 @@ case class SoloPveBattle(
   noKin:          Boolean = false,
   // Бой на арене: какая это строка боя и кто напротив. Пока оно есть, в ответ
   // на ход никто не бьёт — соперник ответит своим ходом, а итог решает арена.
-  arena:          Option[ArenaRef] = None
+  arena:          Option[ArenaRef] = None,
+  // Уровень тех, кого минибосс зовёт себе на помощь: у Крысиного короля это
+  // уровень задания, по которому катается вся канализация. 0 — звать некого.
+  minionLvl:      Long = 0L,
+  // Сколько урона минибосс уже принял в этом раунде от удара и умения героя:
+  // по нему считается предел (см. MiniBoss.roundDamageCapPct). Обнуляется, когда
+  // босс берёт свой ход.
+  bossTaken:      Long = 0L
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -81,15 +88,19 @@ case class SoloPveBattle(
   def activeSlot: MonsterSlot = MonsterSlot(
     lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
     currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
-    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart)
+    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, boss = bossKind)
 
   /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
     * геройская половина эффектов (и разовые флаги героя вроде «Крепкости»)
-    * остаётся как была. Минибоссы в группе не бывают, поэтому их поля не трогаем. */
+    * остаётся как была. Минибосс ездит вместе со своим слотом: пока в полях
+    * стоит призванная им крыса, бой про босса ничего не знает — и правила босса
+    * к ней не относятся. Счётчики его круга (`bossTurn`, `bossCharges`) живут на
+    * бою: босс в бою один, и ходит он, только стоя в полях. */
   def withActive(slot: MonsterSlot): SoloPveBattle = copy(
     monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
-    monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects))
+    monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
+    bossKind = slot.boss)
 
   /** Пара пуста: активный моб стоит не напротив героя. */
   def unpaired: Boolean = !group.paired
@@ -437,8 +448,10 @@ object SoloPveBattle {
       escapesAfter        <- c.getOrElse[Int]("escapesAfter")(0)
       noKin               <- c.getOrElse[Boolean]("noKin")(false)
       arena               <- c.getOrElse[Option[ArenaRef]]("arena")(None)
+      minionLvl           <- c.getOrElse[Long]("minionLvl")(0L)
+      bossTaken           <- c.getOrElse[Long]("bossTaken")(0L)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName, divineUsed, escapesAfter, noKin, arena)
+                         story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken)
 }

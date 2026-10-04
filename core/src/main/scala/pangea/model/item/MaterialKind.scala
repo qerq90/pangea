@@ -198,15 +198,18 @@ object MaterialKind extends Enum[MaterialKind] {
     override val worthless: Boolean = true
   }
 
+  /** Единственное в канализации, за что платят: редкий ингредиент будущего
+    * набора, и Ришелье берёт его золотом, как железо огненного. */
   case object RatKingBlood extends MaterialKind("Кровь крысиного короля") {
     override val description: String =
-      "Тёмная и густая: в склянке стоит колом и не оседает. Носят её в себе не все крысы, " +
-      "а только те, что подходили к нему близко. Что с ней делать, пока не знает никто."
-    override val worthless: Boolean = true
+      "Жуткая кровь что не растекается как обычная кровь, а пытается соединиться в идеальную " +
+      "сферу. У неё это не получается, но зрелище живой двигающейся крови не для слабонервных."
+    override val doubloonPrice: Long = 5L
   }
 
-  /** Всё, что выносят из канализации: не продаётся, в хранилища не кладётся. */
-  val sewerSpoils: IndexedSeq[MaterialKind] = values.filter(_.worthless)
+  /** Всё, что выносят из канализации. Кровь короля среди них одна чего-то
+    * стоит, прочее не берёт никто. */
+  val sewerSpoils: List[MaterialKind] = List(RatPelt, RatTail, PlagueWorms, RatKingBlood)
 
   /** Травы данного ранга — из них выбирается находка на поляне. */
   def herbsOfRank(rank: Int): IndexedSeq[MaterialKind] = values.filter(_.herbRank == rank)
