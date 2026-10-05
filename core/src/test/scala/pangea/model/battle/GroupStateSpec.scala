@@ -203,6 +203,55 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(pulled.pullFree.isEmpty)
     },
 
+    // ── Башни не перегораживают улицу ────────────────────────────────────────
+
+    test("за башнями не топчутся: моб перешагивает её и встаёт сразу за ней") {
+      // Герой на первом месте, моб на шестнадцатом, башни на четырнадцатом и
+      // пятнадцатом. Шаг в сторону героя — сразу на тринадцатое.
+      val mob   = monster(Race.Orc, 100L)
+      val tower = monster(Race.Construct, 500L, Rarity.Rare)
+      val b0    = SoloPveBattle.fromGroup(List(mob, tower, tower, mob), hero, Nil)
+      val b     = b0.copy(group = b0.group.copy(heroPos = 1, activePos = 1, places = List(14, 15, 16)))
+      val (after, moved) = b.closeIn
+      assertTrue(b.stepTowardsHero(16).contains(13)) &&
+      assertTrue(after.group.places == List(14, 15, 13)) &&
+      assertTrue(moved.map(_._2) == List(13)) &&
+      // сами башни с места не сошли
+      assertTrue(after.group.others.map(_.race).take(2).forall(_ == Race.Construct.entryName)) &&
+      // живого моба так не перешагнуть: за ним очередь
+      assertTrue(b.copy(group = b.group.copy(places = List(14, 15, 13)))
+        .stepTowardsHero(14).isEmpty)
+    },
+
+    test("разрыв в строю: задние спускаются вниз, а на места башен не встают") {
+      // Герой на первом, мобы на 2–5, пусто на 6–13, башни на 14–15, за ними
+      // пятеро на 16–20. Десять мобов — это потолок строя.
+      val mob   = monster(Race.Orc, 100L)
+      val tower = monster(Race.Construct, 500L, Rarity.Rare)
+      // Строй: активный на втором, трое за ним, две башни и четверо позади них.
+      val all   = List(mob) ++ List.fill(3)(mob) ++ List(tower, tower) ++ List.fill(4)(mob)
+      val b0    = SoloPveBattle.fromGroup(all, hero, Nil)
+      val start = b0.copy(group = b0.group.copy(
+        heroPos = 1, activePos = 2,
+        places = List(3, 4, 5, 14, 15, 16, 17, 18, 19)))
+      val towerPlaces = Set(14, 15)
+      // Крутим раунды и смотрим, как строй смыкается.
+      val steps = Iterator.iterate(start)(_.closeIn._1).take(20).toList
+      val last  = steps.last
+      def mobPlaces(b: SoloPveBattle): List[Int] =
+        (b.group.activePos :: b.group.places.zip(b.group.others)
+          .collect { case (p, s) if s.race != Race.Construct.entryName => p }).sorted
+      assertTrue(steps.forall(b => b.group.places.zip(b.group.others)
+        .forall { case (p, s) => s.race == Race.Construct.entryName || !towerPlaces.contains(p) })) &&
+      // башни никуда не делись и стоят там же
+      assertTrue(steps.forall(b => b.group.places.zip(b.group.others)
+        .collect { case (p, s) if s.race == Race.Construct.entryName => p }.sorted == List(14, 15))) &&
+      // задние спустились и встали вплотную за передними, без дыр
+      assertTrue(mobPlaces(last) == List(2, 3, 4, 5, 6, 7, 8, 9)) &&
+      // и дальше строй стоит: ближние уже достают героя
+      assertTrue(last.closeIn._1.group.places.sorted == last.group.places.sorted)
+    },
+
     test("группа переживает сериализацию, а старая запись без группы читается как 1 на 1") {
       val b    = SoloPveBattle.fromGroup(trio, hero, List(1L, 2L, 3L))
       val back = b.asJson.as[SoloPveBattle].toOption.get
