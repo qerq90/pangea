@@ -1,6 +1,6 @@
 package pangea.service.state.states.events
 
-import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.generic.semiauto.deriveEncoder
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, Json}
 import pangea.dao.hero.HeroDao
@@ -59,7 +59,9 @@ case class RaceRevengeState(heroDao: HeroDao, content: SceneContent) extends Sta
     for {
       hero <- getHero(user)
       race  = Race.withName(scene.race)
-      named = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, race, Rarity.Legendary)
+      // Имя выбрано заранее и лежит в сцене: уход в «Персонаж» и возврат
+      // показывают того же, кто потом и выйдет.
+      named = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, race, Rarity.Legendary, scene.named)
       lines = content.list("revenge.scenes")
       text  = lines(scene.scene % lines.size)
                 .replace("{race}", race.toString)
@@ -94,7 +96,7 @@ case class RaceRevengeState(heroDao: HeroDao, content: SceneContent) extends Sta
       hero    <- getHero(user)
       race     = Race.withName(scene.race)
       lvl      = hero.lvl.toInt
-      monsters = MonsterGenerator.generateOfRaceAndRarity(lvl, race, Rarity.Legendary) ::
+      monsters = MonsterGenerator.generateOfRaceAndRarity(lvl, race, Rarity.Legendary, scene.named) ::
                    List.fill(Elders)(MonsterGenerator.generateOfRaceAndRarity(lvl, race, Rarity.Mythical))
       energies <- ZIO.foreach(monsters)(m =>
                     Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
@@ -130,15 +132,22 @@ object RaceRevengeState {
 
   /** Кто пришёл и каким текстом: сцена переживает уход в «Персонаж». Сколько
     * их сочтено, в сцене не хранится — вслух это число всё равно не называют. */
-  final case class RevengeScene(race: String, scene: Int)
+  final case class RevengeScene(race: String, scene: Int, named: Option[String] = None)
 
   object RevengeScene {
     implicit val encoder: Encoder[RevengeScene] = deriveEncoder
-    implicit val decoder: Decoder[RevengeScene] = deriveDecoder
+    // Рукописный декодер: сцена живёт в scene_data, и новое поле не должно
+    // ронять уже начатую встречу (см. заметку о производных декодерах).
+    implicit val decoder: Decoder[RevengeScene] = (c: io.circe.HCursor) =>
+      for {
+        race  <- c.get[String]("race")
+        idx   <- c.getOrElse[Int]("scene")(0)
+        named <- c.getOrElse[Option[String]]("named")(None)
+      } yield RevengeScene(race, idx, named)
   }
 
   /** Монстры расплаты — для тех, кто собирает встречу снаружи (лабиринт). */
-  def gather(race: Race, heroLvl: Long): List[Monster] =
-    MonsterGenerator.generateOfRaceAndRarity(heroLvl.toInt, race, Rarity.Legendary) ::
+  def gather(race: Race, heroLvl: Long, named: Option[String] = None): List[Monster] =
+    MonsterGenerator.generateOfRaceAndRarity(heroLvl.toInt, race, Rarity.Legendary, named) ::
       List.fill(Elders)(MonsterGenerator.generateOfRaceAndRarity(heroLvl.toInt, race, Rarity.Mythical))
 }

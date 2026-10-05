@@ -147,7 +147,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     user: User, race: pangea.model.monster.Race, log: pangea.model.hero.KillLog
   ): Task[StateType] =
     for {
-      scene <- Random.nextIntBounded(1000).map(RevengeScene(race.entryName, _))
+      seed  <- Random.nextLong
+      named  = MonsterGenerator.legendaryName(race, Rng(seed))._1
+      scene <- Random.nextIntBounded(1000).map(RevengeScene(race.entryName, _, named))
       _     <- KillLogData.write(heroDao, user.userId, log.markAvenged(race))
       _     <- heroDao.writeSceneData(user.userId, scene.asJson)
     } yield StateType.RaceRevenge
@@ -158,8 +160,16 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     * придёт (придёт следующая, если герой снова помешает). */
   private def gangTrap(
     user: User, hero: Hero, race: Race, log: pangea.model.hero.KillLog, renderer: Renderer
+  ): Task[StateType] = for {
+    seed  <- Random.nextLong
+    res   <- trapBattle(user, hero, race, log, MonsterGenerator.legendaryName(race, Rng(seed))._1, renderer)
+  } yield res
+
+  private def trapBattle(
+    user: User, hero: Hero, race: Race, log: pangea.model.hero.KillLog,
+    gangName: Option[String], renderer: Renderer
   ): Task[StateType] = {
-    val named  = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, race, Rarity.Legendary)
+    val named  = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, race, Rarity.Legendary, gangName)
     // Удар из-за угла: доля атаки именного, но не больше, чем у героя осталось
     // без одного, — засада калечит, а не убивает.
     val raw    = (named.fightStats.atk * DungeonState.TrapDamagePct / 100L).max(1L)
@@ -191,7 +201,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     * добрался первым. Стоит на четверти сил и драться не хочет — если за
     * [[BrewRates.SentenceRounds]] раунда его не добить, уйдёт. */
   private def sentencedPrey(user: User, hero: Hero, race: Race, renderer: Renderer): Task[StateType] = {
-    val monster = MonsterGenerator.generateOfRaceAndRarity(hero.dungeonLevel, race, Rarity.Legendary)
+    // Имя приговорённому достаётся из списка его расы — как и всякому именному.
+    val monster = MonsterGenerator.generateOfRaceAndRarity(hero.dungeonLevel, race, Rarity.Legendary,
+      MonsterGenerator.legendaryName(race, Rng(hero.lvl * 31L + hero.dungeonLevel.toLong))._1)
     val hp      = (monster.fightStats.hp * BrewRates.SentenceHpPct / 100L).max(1L)
     val armor   = monster.fightStats.armor * BrewRates.SentenceHpPct / 100L
     val battle  = SoloPveBattle.from(monster, hero).copy(

@@ -153,13 +153,18 @@ object DungeonStateSpec extends ZIOSpecDefault {
         screens   <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
         full       = pangea.generator.monster.MonsterGenerator
                        .generateOfRaceAndRarity(doomed.dungeonLevel, race, pangea.model.monster.Rarity.Legendary)
+        pool       = pangea.model.monster.Monster.legendaryNames.getOrElse(race, Nil)
       } yield assertTrue(result == StateType.Battle) &&
               // именное существо этого рода — легендарное, и оно уже изранено
               assertTrue(battle.monsterRace == race.entryName && battle.rarity == pangea.model.monster.Rarity.Legendary) &&
               assertTrue(battle.monsterCurrentHp == full.fightStats.hp * pangea.model.item.BrewRates.SentenceHpPct / 100L) &&
+              assertTrue(full.fightStats.hp > 0L) &&
               assertTrue(battle.monsterCurrentArmor == full.fightStats.armor * pangea.model.item.BrewRates.SentenceHpPct / 100L) &&
               assertTrue(battle.escapesAfter == pangea.model.item.BrewRates.SentenceRounds) &&
-              assertTrue(screens.contains("кровавому следу") && screens.contains(full.name)) &&
+              // имя у именного своё, из списка его расы, — и на экране то же,
+              // с кем герой сейчас сойдётся
+              assertTrue(screens.contains("кровавому следу") && screens.contains(battle.monsterName)) &&
+              assertTrue(pool.contains(battle.monsterName)) &&
               // приговор сгорел на встрече
               assertTrue(!updated.statBoosts.hasActive(
                 pangea.model.item.BrewRates.SentenceBoost + race.entryName, now))
