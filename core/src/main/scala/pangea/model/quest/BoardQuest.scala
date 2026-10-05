@@ -38,6 +38,10 @@ sealed abstract class BoardKind(val key: String, val difficulty: Int) extends En
   /** Называет ли задание расу: у трофейного она в самом тексте. */
   def needsRace: Boolean = false
 
+  /** Называет ли задание отвар: гномам нужен один определённый, и какой
+    * именно — решается, когда объявление вывешивают. */
+  def needsBrew: Boolean = false
+
   /** Выездное: герой уходит на него прямо от доски и добирается по дороге
     * ([[pangea.model.state.StateType.QuestRoad]]). Прочие он делает попутно, в
     * лабиринте, когда они ему встретятся. */
@@ -61,6 +65,12 @@ object BoardKind extends Enum[BoardKind] {
 
   /** «Найти пещеру и выбить всех до последнего» — раса пещеры не важна. */
   case object CaveClear extends BoardKind("cave", 15)
+
+  /** «Припасы в дальний поход»: гномья дружина берёт десять склянок одного
+    * толка — и только все разом. Сдаётся на доске, ходить никуда не надо. */
+  case object DwarfSupply extends BoardKind("dwarves", 5) {
+    override def needsBrew: Boolean = true
+  }
 
   /** «Разбойники в городе» — выездное: герой уходит ждать их в подворотне.
     * Сложность, как и у канализации, своя у каждого объявления. */
@@ -94,7 +104,12 @@ final case class BoardSlot(
   race:  Option[String] = None,
   taken: Boolean        = false,
   done:  Boolean        = false,
-  lvl:   Long           = 0L
+  lvl:   Long           = 0L,
+  // Какой отвар просят и чьё имя стоит на заказе. Имя — бросок, по которому
+  // выбирается строка из списка дружин (`questBoard.bands`): так список можно
+  // править, не трогая уже вывешенные объявления.
+  brew:  Option[String] = None,
+  band:  Int            = 0
 ) {
   /** Взято и сделано, но ещё не оплачено. */
   def ready: Boolean = taken && done
@@ -107,7 +122,8 @@ final case class BoardSlot(
 object BoardSlot {
   implicit val encoder: Encoder[BoardSlot] = (s: BoardSlot) => Json.obj(
     "kind" -> s.kind.asJson, "race" -> s.race.asJson,
-    "taken" -> s.taken.asJson, "done" -> s.done.asJson, "lvl" -> s.lvl.asJson)
+    "taken" -> s.taken.asJson, "done" -> s.done.asJson, "lvl" -> s.lvl.asJson,
+    "brew" -> s.brew.asJson, "band" -> s.band.asJson)
 
   implicit val decoder: Decoder[BoardSlot] = (c: HCursor) =>
     for {
@@ -116,7 +132,9 @@ object BoardSlot {
       taken <- c.getOrElse[Boolean]("taken")(false)
       done  <- c.getOrElse[Boolean]("done")(false)
       lvl   <- c.getOrElse[Long]("lvl")(0L)
-    } yield BoardSlot(kind, race, taken, done, lvl)
+      brew  <- c.getOrElse[Option[String]]("brew")(None)
+      band  <- c.getOrElse[Int]("band")(0)
+    } yield BoardSlot(kind, race, taken, done, lvl, brew, band)
 }
 
 /** Доска героя на эту неделю: номер недели, раздел и восемь объявлений.
@@ -200,8 +218,8 @@ object BoardRates {
   /** Состав доски: столько-то объявлений каждого вида. Здесь и только здесь —
     * весь расклад, его ещё предстоит пересобрать вместе с новыми заданиями. */
   val Layout: List[(BoardKind, Int)] =
-    List(BoardKind.Trophy -> 4, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
-         BoardKind.SewerRats -> 1, BoardKind.Thieves -> 1)
+    List(BoardKind.Trophy -> 3, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
+         BoardKind.SewerRats -> 1, BoardKind.Thieves -> 1, BoardKind.DwarfSupply -> 1)
 
   /** Номер недели по Москве, считая с понедельника: нулевой день эпохи —
     * четверг, поэтому к нему прибавляются три дня до ближайшего понедельника. */
@@ -224,4 +242,8 @@ object BoardRates {
 
   /** Дублон за трофейное задание — как и был, один. */
   val TrophyDoubloons: Long = 1L
+
+  /** Сколько склянок одного толка берёт гномья дружина. По одной не берут —
+    * только весь ящик разом. */
+  val BrewsWanted: Int = 10
 }

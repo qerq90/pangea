@@ -83,10 +83,9 @@ class StateHandler(
       case None => ZIO.unit  // писал не игрок — молчим
       case Some(sender) =>
         lock.withLock(sender.userId) {
-          // Номера сообщений у беседы свои, и с номерами из лички они
-          // пересекаются — поэтому чатовые события считаем отрицательными,
-          // иначе повтор-защита приняла бы их за уже виденные.
-          userRepo.checkAndRecordEvent(sender.userId, -eventId).flatMap { fresh =>
+          // Ключ события беседы приходит готовым (см. ChatCommand.eventKey):
+          // он отрицательный, чтобы не путаться с номерами из лички.
+          userRepo.checkAndRecordEvent(sender.userId, eventId).flatMap { fresh =>
             ZIO.when(fresh)(startTransfer(sender, targetVk, query, renderer)).unit
           }
         }
@@ -101,9 +100,8 @@ class StateHandler(
       case None => ZIO.unit
       case Some(sender) =>
         lock.withLock(sender.userId) {
-          // Номера событий беседы считаем отрицательными — как и у «Передать»,
-          // иначе повтор-защита путала бы их с номерами из лички.
-          userRepo.checkAndRecordEvent(sender.userId, -eventId).flatMap { fresh =>
+          // Ключ события беседы — как и у «Передать», уже отрицательный.
+          userRepo.checkAndRecordEvent(sender.userId, eventId).flatMap { fresh =>
             ZIO.when(fresh)(tellAboutSelf(sender, command)).unit
           }
         }

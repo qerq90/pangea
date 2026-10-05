@@ -5,7 +5,7 @@ import pangea.domain.Rng
 import pangea.engine.SceneContent
 import pangea.model.cave.SewerRates
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails, ItemType, Rarity, TrophyKind}
+import pangea.model.item.{BrewKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest._
 import pangea.model.state.StateType
@@ -77,8 +77,9 @@ object QuestBoardSpec extends ZIOSpecDefault {
       assertTrue(slots.count(_.kind == BoardKind.CaveClear) == 1) &&
       assertTrue(slots.count(_.kind == BoardKind.SewerRats) == 1) &&
       assertTrue(slots.count(_.kind == BoardKind.Thieves) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 4) &&
-      assertTrue(races.size == 4 && races.distinct.size == 4) &&
+      assertTrue(slots.count(_.kind == BoardKind.DwarfSupply) == 1) &&
+      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 3) &&
+      assertTrue(races.size == 3 && races.distinct.size == 3) &&
       // сложности: трофей — один знак, караван и пещера — пятнадцать
       assertTrue(BoardKind.Trophy.difficulty == 1 && BoardKind.CaravanRout.difficulty == 15) &&
       assertTrue(BoardKind.CaveClear.difficulty == 15)
@@ -257,6 +258,50 @@ object QuestBoardSpec extends ZIOSpecDefault {
       } yield assertTrue(novice.board == BoardTier.Novice && next.board == BoardTier.Seasoned)
     },
 
+    test("заказ гномов: десять склянок одного толка, и всё разом") {
+      val orders = (1L to 300L).toList.map(s =>
+        QuestBoardState.roll(Rng(s)).find(_.kind == BoardKind.DwarfSupply).get)
+      val brews  = orders.flatMap(_.brew)
+      assertTrue(BoardKind.DwarfSupply.difficulty == 5 && BoardRates.BrewsWanted == 10) &&
+      // отвар всегда первого ранга, и он катается
+      assertTrue(brews.forall(b => BrewKind.rank1.exists(_.entryName == b))) &&
+      assertTrue(brews.distinct.size >= 5) &&
+      // дружина тоже катается, и ходить за этим никуда не надо
+      assertTrue(orders.map(_.band).distinct.size > 50) &&
+      assertTrue(!BoardKind.DwarfSupply.away && !BoardKind.DwarfSupply.rolledLvl)
+    },
+
+    test("ящик берут полным: девяти склянок мало, десять уходят разом") {
+      val kind  = BrewKind.rank1.head
+      def flask(id: Long) = BrewKind.item(kind).copy(id = id)
+      val nine  = (1L to 9L).toList.map(flask)
+      val twelve = (1L to 12L).toList.map(flask)
+      def order(items: List[Item]) =
+        for {
+          t <- board(items = items)
+          (state, dao, inv, r) = t
+          _     <- state.action(testUser, tap("BoardMine"), r)
+          fresh <- saved(dao)
+          one    = fresh.copy(slots = List(BoardSlot(BoardKind.DwarfSupply,
+                     taken = true, brew = Some(kind.entryName), band = 3)))
+          _     <- dao.writeQuestData(userId, one.asJson)
+          _     <- state.action(testUser, tap(s"${QuestBoardState.HandPrefix}0"), r)
+          said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          data  <- saved(dao)
+          h     <- dao.getHeroByUserId(userId).map(_.get)
+        } yield (said, data, inv.snapshot.size, h)
+      for {
+        few  <- order(nine)
+        many <- order(twelve)
+      } yield assertTrue(few._1.contains("Ящик берут только полным")) &&
+              // девять остались при герое, объявление висит
+              assertTrue(few._3 == 9 && few._2.slots.size == 1 && few._4.doubloons == 0L) &&
+              // из двенадцати уходит ровно десять
+              assertTrue(many._3 == 2 && many._2.slots.isEmpty) &&
+              assertTrue(many._4.doubloons == BoardRates.Doubloons) &&
+              assertTrue(many._1.contains("пересчитывают его дважды"))
+    },
+
     test("у всех разделов и видов заданий есть тексты") {
       for {
         c <- ZIO.attempt(SceneContent.load())
@@ -265,7 +310,10 @@ object QuestBoardSpec extends ZIOSpecDefault {
               assertTrue(List("markCaravan", "markCave", "doneCaravan", "doneCave", "doneSewer", "taken",
                 "paid", "paidTrophy", "noTrophy", "notYet", "stateAway", "goLabel", "depart")
                 .forall(f => c.text(s"questBoard.$f").nonEmpty)) &&
-              assertTrue(List("enter", "wait", "arrived", "lost").forall(f => c.text(s"questRoad.$f").nonEmpty))
+              assertTrue(List("enter", "wait", "arrived", "lost").forall(f => c.text(s"questRoad.$f").nonEmpty)) &&
+              assertTrue(List("stateBrews", "noBrews", "paidBrews").forall(f => c.text(s"questBoard.$f").nonEmpty)) &&
+              assertTrue(c.list("questBoard.bands").size >= 10) &&
+              assertTrue(c.list("questBoard.bands").distinct.size == c.list("questBoard.bands").size)
     }
   )
 }

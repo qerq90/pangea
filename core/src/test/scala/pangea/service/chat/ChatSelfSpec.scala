@@ -61,6 +61,52 @@ object ChatSelfSpec extends ZIOSpecDefault {
       assertTrue(ChatCommand.selfCommand("").isEmpty)
     },
 
+    test("две команды подряд из беседы не глотаются: у них разные ключи") {
+      // ВК шлёт боту нулевой id для сообщений беседы, а настоящий номер кладёт
+      // в conversation_message_id. На нулях две команды подряд выглядели для
+      // защиты от повторов одним сообщением, и вторая молча пропадала.
+      val first  = ChatCommand.eventKey(0L, Some(101L))
+      val second = ChatCommand.eventKey(0L, Some(102L))
+      for {
+        t <- handler(heroWith(Some(blade)))
+        (state, api, _) = t
+        _    <- state.selfToChat(vkId, ChatCommand.Self.Gear, first)
+        _    <- state.selfToChat(vkId, ChatCommand.Self.Gear, second)
+        said <- api.chatMessages
+        // а вот честный повтор того же сообщения по-прежнему гасится
+        _    <- state.selfToChat(vkId, ChatCommand.Self.Gear, second)
+        same <- api.chatMessages
+      } yield assertTrue(first != second && said.size == 2 && same.size == 2) &&
+              // ключ беседы отрицателен: с номерами лички он не столкнётся
+              assertTrue(first < 0L && second < 0L) &&
+              // нет conversation_message_id — берём то, что есть
+              assertTrue(ChatCommand.eventKey(55L, None) == -55L) &&
+              assertTrue(ChatCommand.eventKey(55L, Some(0L)) == -55L)
+    },
+
+    test("о себе рассказывают откуда угодно, не только из города") {
+      // Город кончается за воротами, а беседа — нет: в бою, в лабиринте и на
+      // дне канализации «Моё снаряжение» отвечает так же, как на площади.
+      val outside = List(StateType.Battle, StateType.Dungeon, StateType.MonsterCave,
+                         StateType.QuestRoad, StateType.Thieves, StateType.Loot)
+      ZIO.foreach(outside) { where =>
+        for {
+          t <- handler(heroWith(Some(blade)).copy(state = where))
+          (state, api, _) = t
+          _    <- state.selfToChat(vkId, ChatCommand.Self.Gear, eventId = 77L)
+          gear <- api.chatMessages
+          _    <- state.selfToChat(vkId, ChatCommand.Self.Profile, eventId = 78L)
+          both <- api.chatMessages
+        } yield (where, gear, both)
+      }.map { results =>
+        assertTrue(results.forall { case (_, gear, _) => gear.exists(_.contains("снаряжение")) }) &&
+        assertTrue(results.forall { case (_, gear, _) => gear.exists(_.contains(blade.displayTitle)) }) &&
+        assertTrue(results.forall { case (_, _, both) => both.sizeIs == 2 }) &&
+        // ни одно из этих состояний городским не считается — и это неважно
+        assertTrue(outside.forall(!StateType.cityStates.contains(_)))
+      }
+    },
+
     test("«Мой профиль» уходит в беседу и несёт то же, что экран «Персонаж»") {
       val h = heroWith(None)
       for {

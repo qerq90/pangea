@@ -6,6 +6,7 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.cave.SewerRates
+import pangea.model.item.BrewKind
 import pangea.model.hero.Hero
 import pangea.model.monster.Race
 import pangea.model.quest._
@@ -126,6 +127,9 @@ case class QuestBoardState(
       case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
       case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
       case BoardKind.Thieves     => content.text("questBoard.ask.thieves")
+      case BoardKind.DwarfSupply => content.format("questBoard.ask.dwarves",
+        "name" -> band(slot), "brew" -> brewOf(slot).map(_.label).getOrElse(""),
+        "count" -> BoardRates.BrewsWanted.toString)
     }
     val state =
       if (!slot.taken)   content.text("questBoard.stateFree")
@@ -133,6 +137,10 @@ case class QuestBoardState(
       else slot.kind match {
         case BoardKind.Trophy if trophyFor(slot, inv).isDefined => content.text("questBoard.stateReady")
         case BoardKind.Trophy                                   => content.text("questBoard.stateNoTrophy")
+        case BoardKind.DwarfSupply if brewsFor(slot, inv) >= BoardRates.BrewsWanted =>
+          content.text("questBoard.stateReady")
+        case BoardKind.DwarfSupply => content.format("questBoard.stateBrews",
+          "have" -> brewsFor(slot, inv).toString, "need" -> BoardRates.BrewsWanted.toString)
         case k if k.away                                        => content.text("questBoard.stateAway")
         case _                                                  => content.text("questBoard.stateHunting")
       }
@@ -149,7 +157,8 @@ case class QuestBoardState(
       Some(Choice(s"$prefix$idx", ItemMenu.truncate(content.format(key, "n" -> (idx + 1).toString)),
         color = ChoiceColor.Positive, row = row))
     if (!slot.taken) btn(TakePrefix, "questBoard.takeLabel")
-    else if (slot.ready || slot.kind == BoardKind.Trophy) btn(HandPrefix, "questBoard.handLabel")
+    else if (slot.ready || slot.kind == BoardKind.Trophy || slot.kind == BoardKind.DwarfSupply)
+      btn(HandPrefix, "questBoard.handLabel")
     // С выездного можно уйти, не доделав, — тогда к нему возвращаются той же дорогой.
     else if (slot.kind.away) btn(GoPrefix, "questBoard.goLabel")
     else None
@@ -217,6 +226,26 @@ case class QuestBoardState(
                   "item" -> trophy.displayTitle, "exp" -> exp.toString,
                   "doubloons" -> BoardRates.TrophyDoubloons.toString), Nil))
           }
+          case BoardKind.DwarfSupply =>
+            val wanted = brewOf(slot)
+            val have   = wanted.toList.flatMap(k => inv.filter(_.brew.contains(k)))
+            if (have.sizeIs < BoardRates.BrewsWanted)
+              renderer.show(user, Screen(content.format("questBoard.noBrews",
+                "brew" -> wanted.map(_.label).getOrElse(""), "have" -> have.size.toString,
+                "need" -> BoardRates.BrewsWanted.toString), Nil))
+            else {
+              val exp = BoardRates.exp(hero.lvl)
+              // Ящик уходит целиком: ровно десять склянок, остальное остаётся при герое.
+              ZIO.foreachDiscard(have.take(BoardRates.BrewsWanted))(i =>
+                inventoryRepo.removeItem(i.id, hero.id).mapError(asThrowable)) *>
+                pay(user, hero, exp, BoardRates.Doubloons) *>
+                save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
+                renderer.show(user, Screen(content.format("questBoard.paidBrews",
+                  "count" -> BoardRates.BrewsWanted.toString,
+                  "brew" -> wanted.map(_.label).getOrElse(""),
+                  "name" -> band(slot), "exp" -> exp.toString,
+                  "doubloons" -> BoardRates.Doubloons.toString), Nil))
+            }
           case _ if !slot.done => renderer.show(user, Screen(content.text("questBoard.notYet"), Nil))
           case _ =>
             val exp = BoardRates.exp(hero.lvl)
@@ -260,6 +289,19 @@ case class QuestBoardState(
 
   private def trophyFor(slot: BoardSlot, inv: List[pangea.model.item.Item]): Option[pangea.model.item.Item] =
     slot.race.flatMap(r => BoardTrophy.bestFor(inv, r))
+
+  private def brewOf(slot: BoardSlot): Option[BrewKind] =
+    slot.brew.flatMap(BrewKind.withNameOption)
+
+  private def brewsFor(slot: BoardSlot, inv: List[pangea.model.item.Item]): Int =
+    brewOf(slot).fold(0)(k => inv.count(_.brew.contains(k)))
+
+  /** Имя дружины на этом заказе: бросок слота по списку. Список можно править
+    * — уже вывешенные объявления от этого не рассыплются. */
+  private def band(slot: BoardSlot): String = {
+    val names = content.list("questBoard.bands")
+    names(math.floorMod(slot.band, names.size))
+  }
 
   private def bag(hero: Hero): Task[List[pangea.model.item.Item]] =
     inventoryRepo.get(hero.id).mapError(asThrowable).map(_.items.data.filter(_.id != 0L))
@@ -316,6 +358,10 @@ object QuestBoardState {
       if (kind.rolledLvl) {
         val (lvl, r1) = r.between(SewerRates.MinLvl, SewerRates.MaxLvl + 1L)
         (acc :+ BoardSlot(kind, lvl = lvl), used, r1)
+      } else if (kind.needsBrew) {
+        val (brew, r1) = r.pick(BrewKind.rank1.toList)
+        val (band, r2) = r1.between(0L, 1000L)
+        (acc :+ BoardSlot(kind, brew = Some(brew.entryName), band = band.toInt), used, r2)
       } else if (!kind.needsRace) (acc :+ BoardSlot(kind), used, r)
       else {
         val pool        = Race.mortals.toList.map(_.entryName).filterNot(used.contains)
