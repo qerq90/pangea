@@ -76,8 +76,9 @@ object QuestBoardSpec extends ZIOSpecDefault {
       assertTrue(slots.count(_.kind == BoardKind.CaravanRout) == 1) &&
       assertTrue(slots.count(_.kind == BoardKind.CaveClear) == 1) &&
       assertTrue(slots.count(_.kind == BoardKind.SewerRats) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 5) &&
-      assertTrue(races.size == 5 && races.distinct.size == 5) &&
+      assertTrue(slots.count(_.kind == BoardKind.Thieves) == 1) &&
+      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 4) &&
+      assertTrue(races.size == 4 && races.distinct.size == 4) &&
       // сложности: трофей — один знак, караван и пещера — пятнадцать
       assertTrue(BoardKind.Trophy.difficulty == 1 && BoardKind.CaravanRout.difficulty == 15) &&
       assertTrue(BoardKind.CaveClear.difficulty == 15)

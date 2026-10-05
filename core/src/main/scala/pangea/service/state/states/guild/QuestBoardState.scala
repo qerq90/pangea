@@ -125,6 +125,7 @@ case class QuestBoardState(
       case BoardKind.CaravanRout => content.text("questBoard.ask.caravan")
       case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
       case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
+      case BoardKind.Thieves     => content.text("questBoard.ask.thieves")
     }
     val state =
       if (!slot.taken)   content.text("questBoard.stateFree")

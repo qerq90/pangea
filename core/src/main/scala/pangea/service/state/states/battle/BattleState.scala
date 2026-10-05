@@ -2863,9 +2863,13 @@ case class BattleState(
 
   /** Экран подтверждения бегства (чистая навигация, состояние не меняется). */
   private def flee(user: User, renderer: Renderer): Task[StateType] =
-    renderer
-      .show(user, content.screen("battle.fleeConfirm"))
-      .as(StateType.Battle)
+    getBattle(user).flatMap { battle =>
+      // Западня: место и время выбирал не герой, и уйти отсюда некуда.
+      if (battle.noFlee)
+        renderer.show(user, Screen(content.format("battle.noFlee", "monster" -> battle.monsterName), Nil))
+          .as(StateType.Battle)
+      else renderer.show(user, content.screen("battle.fleeConfirm")).as(StateType.Battle)
+    }
 
   /** Подтверждённое бегство: моб делает один удар (без каста/тиков/регена, как и
     * прежде). Умер герой — Death; иначе — Fled (бой очистит commit). */

@@ -211,6 +211,16 @@ object MaterialKind extends Enum[MaterialKind] {
     * стоит, прочее не берёт никто. */
   val sewerSpoils: List[MaterialKind] = List(RatPelt, RatTail, PlagueWorms, RatKingBlood)
 
+  /** Снят с городского вора. Хозяин у кошелька есть, и гильдия знает, как его
+    * найти, — а можно и не искать. Уровень у кошелька свой, по тому вору, с
+    * которого он снят: от него и считается благодарность. */
+  case object StolenPurse extends MaterialKind("Краденый кошелёк") {
+    override val description: String =
+      "Чужой кошелёк, затянутый чужим узлом. Хозяина по нему в гильдии найдут — за это там и " +
+      "благодарят. А можно развязать самому, и тогда искать будет уже некого."
+    override val worthless: Boolean = true
+  }
+
   /** Травы данного ранга — из них выбирается находка на поляне. */
   def herbsOfRank(rank: Int): IndexedSeq[MaterialKind] = values.filter(_.herbRank == rank)
 

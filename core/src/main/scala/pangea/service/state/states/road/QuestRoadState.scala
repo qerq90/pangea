@@ -6,11 +6,13 @@ import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.cave.{CaveGenerator, SewerRates}
+import pangea.model.monster.Race
 import pangea.model.quest.BoardKind
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.service.schedule.Scheduler
+import pangea.service.state.states.events.thieves.{ThievesScene, ThievesState}
 import pangea.service.state.{State, UserAction}
 import zio.{Random, Task, ZIO}
 
@@ -51,7 +53,7 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.MonsterCave, StateType.QuestRoad, StateType.GlobalMap)
+    Set(StateType.MonsterCave, StateType.Thieves, StateType.QuestRoad, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -93,6 +95,18 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
             _         <- heroDao.writeSceneData(user.userId, scene.asJson)
             _         <- renderer.show(user, Screen(content.text("questRoad.arrived"), Nil))
           } yield StateType.MonsterCave
+
+        // Подворотня у таверны: кто выйдет и сколько их, решается здесь — до
+        // ночи этого не знает никто.
+        case Some(r) if r.kind == BoardKind.Thieves =>
+          for {
+            raceIdx <- Random.nextIntBounded(Race.mortals.size)
+            count   <- Random.nextIntBetween(ThievesState.MinThieves, ThievesState.MaxThieves + 1)
+            scene    = ThievesScene(Race.mortals(raceIdx).entryName, r.lvl.max(SewerRates.MinLvl), count)
+            _       <- heroDao.writeSceneData(user.userId, scene.asJson)
+            _       <- renderer.show(user, Screen(content.text("thieves.alley"), Nil))
+          } yield StateType.Thieves
+
         case _ => lost(user, renderer)
       }
     } yield res

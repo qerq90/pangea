@@ -77,7 +77,10 @@ case class SoloPveBattle(
   // Сколько урона минибосс уже принял в этом раунде от удара и умения героя:
   // по нему считается предел (см. MiniBoss.roundDamageCapPct). Обнуляется, когда
   // босс берёт свой ход.
-  bossTaken:      Long = 0L
+  bossTaken:      Long = 0L,
+  // Западня: бежать отсюда некуда. Так дерутся те, кто сам выбрал место и
+  // время, — городская банда, подкараулившая героя в лабиринте.
+  noFlee:         Boolean = false
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -450,8 +453,10 @@ object SoloPveBattle {
       arena               <- c.getOrElse[Option[ArenaRef]]("arena")(None)
       minionLvl           <- c.getOrElse[Long]("minionLvl")(0L)
       bossTaken           <- c.getOrElse[Long]("bossTaken")(0L)
+      noFlee              <- c.getOrElse[Boolean]("noFlee")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
-                         story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken)
+                         story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
+                         noFlee)
 }
