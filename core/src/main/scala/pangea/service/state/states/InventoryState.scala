@@ -12,7 +12,7 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, QuestItemKind}
+import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, MaterialKind, QuestItemKind, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
@@ -53,6 +53,8 @@ case class InventoryState(
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
       "CombineRune"       -> Target.Run { (u, _, r) => combineRuneSelected(u, r) },
       "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) },
+      "PurseReturn"       -> Target.Run { (u, _,  r) => returnPurse(u, r) },
+      "PurseOpen"         -> Target.Run { (u, _,  r) => openPurse(u, r) },
       "BreakGem"          -> Target.Run { (u, _,  r) => offerBreak(u, r) },
       "BreakGemPick"      -> Target.Run { (u, ua, r) => confirmBreak(u, ua, r) },
       "BreakGemDo"        -> Target.Run { (u, ua, r) => doBreak(u, ua, r) },
@@ -152,11 +154,15 @@ case class InventoryState(
           val canSocket  = item.gem.isDefined
           // Ломать можно и камни в гнёздах вещи, и сам камень, лежащий в сумке.
           val canBreak   = GemBreaking.hasGems(item)
+          // Краденый кошелёк: вернуть хозяину через гильдию или развязать самому.
+          val isPurse    = item.material.contains(MaterialKind.StolenPurse)
           val choices  = List(
             Option.when(canEquip)(content.choice("Equip", "inventory.equip").copy(row = Some(0))),
             Option.when(canCombine)(content.choice("CombineMap", "inventory.combineMap").copy(color = ChoiceColor.Positive, row = Some(0))),
             Option.when(canFoldRune)(content.choice("CombineRune", "inventory.combineRune").copy(color = ChoiceColor.Positive, row = Some(0))),
             Option.when(canSocket)(content.choice("SocketInsert", "inventory.socket").copy(color = ChoiceColor.Positive, row = Some(0))),
+            Option.when(isPurse)(content.choice("PurseReturn", "purse.return").copy(color = ChoiceColor.Positive, row = Some(0))),
+            Option.when(isPurse)(content.choice("PurseOpen", "purse.open").copy(row = Some(0))),
             Option.when(canBreak)(content.choice("BreakGem", "inventory.breakGem").copy(color = ChoiceColor.Negative, row = Some(0))),
             Option.when(canSocket)(content.choice("CrushGem", "inventory.crushGem").copy(color = ChoiceColor.Negative, row = Some(0))),
             // Пыль сыплется на оружие: разовое покрытие на один бой.
@@ -546,6 +552,47 @@ case class InventoryState(
       res <- if (keepScreen) ZIO.succeed(StateType.Inventory) else showList(user, renderer)
     } yield res
 
+  // ── Краденый кошелёк ───────────────────────────────────────────────────────
+
+  /** Вернуть кошелёк хозяину: гильдия берётся его найти и благодарит так же,
+    * как за реликвию того же уровня. */
+  private def returnPurse(user: User, renderer: Renderer): Task[StateType] =
+    withPurse(user, renderer) { (item, hero) =>
+      val gained = TrophyKind.reputationFor(TrophyKind.Relic.coef, item.lvl)
+      val total  = hero.guildReputation + gained
+      for {
+        _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
+        _ <- heroDao.updateGuildReputation(user.userId, total)
+        _ <- NpcQuestLog.onReputation(heroDao, user.userId, gained)
+        _ <- renderer.show(user, Screen(content.format("purse.returned",
+               "reputation" -> gained.toString, "total" -> total.toString), Nil))
+        r <- backToList(user) *> showList(user, renderer).as(StateType.Inventory)
+      } yield r
+    }
+
+  /** Развязать самому: горсть серебра, а изредка — то, чего воры и сами не
+    * поняли. */
+  private def openPurse(user: User, renderer: Renderer): Task[StateType] =
+    withPurse(user, renderer) { (item, hero) =>
+      for {
+        roll   <- Random.nextIntBetween(1, InventoryState.PurseJackpotIn + 1)
+        jackpot = roll == 1
+        amount <- if (jackpot) ZIO.succeed(InventoryState.PurseJackpot)
+                  else Random.nextLongBetween(InventoryState.PurseMinSilver, InventoryState.PurseMaxSilver + 1L)
+        _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
+        _ <- heroDao.updateSilver(user.userId, hero.silver + amount)
+        _ <- ZIO.when(jackpot)(renderer.show(user, Screen(content.text("purse.jackpot"), Nil)))
+        _ <- renderer.show(user, Screen(content.format("purse.opened", "silver" -> amount.toString), Nil))
+        r <- backToList(user) *> showList(user, renderer).as(StateType.Inventory)
+      } yield r
+    }
+
+  private def withPurse(user: User, renderer: Renderer)(f: (Item, Hero) => Task[StateType]): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      if (item.material.contains(MaterialKind.StolenPurse)) f(item, hero)
+      else showList(user, renderer)
+    }
+
   private def dropSelected(user: User, renderer: Renderer): Task[StateType] =
     for {
       scene <- readScene(user)
@@ -895,6 +942,15 @@ case class InventoryState(
 }
 
 object InventoryState {
+
+  /** Краденый кошелёк, если его развязать: от горсти серебра до увесистой.
+    * Один из двухсот оказывается набит редкой монетой — воры и сами этого не
+    * поняли. */
+  val PurseMinSilver: Long = 10L
+  val PurseMaxSilver: Long = 800L
+  val PurseJackpotIn: Int  = 200   // 0,5%
+  val PurseJackpot:   Long = 100000L
+
 
   /** Сколько родов помещается в ряд на экране приговора. */
   val RacesPerRow: Int = 3

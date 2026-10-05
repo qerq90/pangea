@@ -118,13 +118,19 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       doomed  = sentencedRace(hero, now)
       // Расплата: раса, которой герой проредил ряды, ждёт своей очереди.
       // Таких рас может накопиться несколько — выходят по одной за осмотр.
-      killLog <- KillLogData.read(heroDao, user.userId)
+      killLog0 <- KillLogData.read(heroDao, user.userId)
+      // Городская банда отсчитывает осмотры: герой помешал им по объявлению
+      // с доски, и однажды они его найдут (см. GangGrudge).
+      killLog  = killLog0.stepGang
+      _       <- ZIO.when(killLog != killLog0)(KillLogData.write(heroDao, user.userId, killLog))
+      gang     = killLog.gangDue
       avengers = killLog.owed(KillLogData.RevengeEvery).headOption
       // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле.
       pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
-      result <- if (avengers.isDefined) revenge(user, avengers.get, killLog)
+      result <- if (gang.isDefined) gangTrap(user, hero, gang.get, killLog, renderer)
+                else if (avengers.isDefined) revenge(user, avengers.get, killLog)
                 else if (doomed.isDefined) sentencedPrey(user, hero, doomed.get, renderer)
                 else if (called) wolfOnCall(user, hero, renderer)
                 else event match {
@@ -145,6 +151,35 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       _     <- KillLogData.write(heroDao, user.userId, log.markAvenged(race))
       _     <- heroDao.writeSceneData(user.userId, scene.asJson)
     } yield StateType.RaceRevenge
+
+  /** Банда дождалась: её именной бьёт героя первым, из-за угла. Удар ложится
+    * ДО боя — в бой герой входит уже раненым, — и уйти оттуда нельзя: место и
+    * время выбирал не он. Счёты на этом сведены, второй раз эта шайка не
+    * придёт (придёт следующая, если герой снова помешает). */
+  private def gangTrap(
+    user: User, hero: Hero, race: Race, log: pangea.model.hero.KillLog, renderer: Renderer
+  ): Task[StateType] = {
+    val named  = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, race, Rarity.Legendary)
+    // Удар из-за угла: доля атаки именного, но не больше, чем у героя осталось
+    // без одного, — засада калечит, а не убивает.
+    val raw    = (named.fightStats.atk * DungeonState.TrapDamagePct / 100L).max(1L)
+    val toArmor = raw.min(hero.fightStats.armor)
+    val toHp    = (raw - toArmor).min((hero.fightStats.hp - 1L).max(0L))
+    val hurt    = hero.fightStats.copy(
+      armor = hero.fightStats.armor - toArmor,
+      hp    = (hero.fightStats.hp - toHp).max(1L))
+    val battle  = SoloPveBattle.from(named, hero.copy(fightStats = hurt)).copy(noFlee = true)
+    for {
+      _ <- heroDao.updateFightStats(user.userId, hurt)
+      _ <- KillLogData.write(heroDao, user.userId, log.gangSettled)
+      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      _ <- heroDao.writeSceneData(user.userId, io.circe.Json.Null)
+      _ <- renderer.show(user, Screen(
+             content.format(s"thieves.ambushScene.${race.entryName}",
+               "name" -> named.name, "gang" -> content.text(s"thieves.gang.${race.entryName}"),
+               "damage" -> (toArmor + toHp).toString), Nil))
+    } yield StateType.Battle
+  }
 
   /** Какой род приговорён, если приговор ещё держится. */
   private def sentencedRace(hero: Hero, nowMs: Long): Option[Race] =
@@ -341,6 +376,10 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 }
 
 object DungeonState {
+
+  /** Сколько процентов своей атаки именной вкладывает в удар из засады. Герой
+    * после него остаётся жив — хотя бы на единице HP. */
+  val TrapDamagePct: Long = 150L
 
   // Диапазон выслеживания прохода вглубь: 2–5 минут. Игроку длительность не
   // сообщается — время определяется по стенным часам (`nowMs + rnd`).

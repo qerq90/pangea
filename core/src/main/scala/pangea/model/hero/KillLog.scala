@@ -12,7 +12,28 @@ import pangea.model.monster.Race
   * @param byRace  раса (entryName) → сколько её положили за всю жизнь
   * @param avenged раса → сколько раз она уже приходила за расплатой
   */
-final case class KillLog(byRace: Map[String, Long] = Map.empty, avenged: Map[String, Int] = Map.empty) {
+final case class KillLog(
+  byRace:  Map[String, Long] = Map.empty,
+  avenged: Map[String, Int]  = Map.empty,
+  // Городская банда, которой герой помешал по объявлению с доски: её раса и
+  // сколько осмотров лабиринта осталось до того, как она его найдёт. Пусто —
+  // никто за ним не идёт.
+  gang:    Option[String]    = None,
+  gangIn:  Int               = 0
+) {
+
+  /** Банда затаила обиду: найдёт героя через `after` осмотров лабиринта. */
+  def grudge(race: Race, after: Int): KillLog =
+    copy(gang = Some(race.entryName), gangIn = after.max(1))
+
+  /** Осмотр прошёл — банда на шаг ближе. */
+  def stepGang: KillLog = if (gang.isEmpty) this else copy(gangIn = (gangIn - 1).max(0))
+
+  /** Банда дождалась своего часа и выходит прямо сейчас. */
+  def gangDue: Option[Race] = gang.filter(_ => gangIn <= 0).flatMap(Race.withNameOption)
+
+  /** Счёты сведены: банда больше не ищет. */
+  def gangSettled: KillLog = copy(gang = None, gangIn = 0)
 
   def count(race: Race): Long = byRace.getOrElse(race.entryName, 0L)
 
@@ -48,7 +69,8 @@ object KillLog {
   val empty: KillLog = KillLog()
 
   implicit val encoder: Encoder[KillLog] = (k: KillLog) =>
-    Json.obj("byRace" -> k.byRace.asJson, "avenged" -> k.avenged.asJson)
+    Json.obj("byRace" -> k.byRace.asJson, "avenged" -> k.avenged.asJson,
+             "gang" -> k.gang.asJson, "gangIn" -> k.gangIn.asJson)
 
   /** Рукописный декодер: журнал живёт в JSONB, и новое поле не должно стирать
     * уже накопленный счёт (см. заметку о производных декодерах). */
@@ -56,5 +78,7 @@ object KillLog {
     for {
       byRace  <- c.getOrElse[Map[String, Long]]("byRace")(Map.empty)
       avenged <- c.getOrElse[Map[String, Int]]("avenged")(Map.empty)
-    } yield KillLog(byRace, avenged)
+      gang    <- c.getOrElse[Option[String]]("gang")(None)
+      gangIn  <- c.getOrElse[Int]("gangIn")(0)
+    } yield KillLog(byRace, avenged, gang, gangIn)
 }

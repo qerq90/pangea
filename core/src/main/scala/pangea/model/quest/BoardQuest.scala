@@ -62,6 +62,13 @@ object BoardKind extends Enum[BoardKind] {
   /** «Найти пещеру и выбить всех до последнего» — раса пещеры не важна. */
   case object CaveClear extends BoardKind("cave", 15)
 
+  /** «Разбойники в городе» — выездное: герой уходит ждать их в подворотне.
+    * Сложность, как и у канализации, своя у каждого объявления. */
+  case object Thieves extends BoardKind("thieves", 1) {
+    override def away: Boolean      = true
+    override def rolledLvl: Boolean = true
+  }
+
   /** «Крысы в канализации» — выездное: герой уходит туда прямо от доски.
     * Сложность у каждого объявления своя, по уровню задания, поэтому ставка
     * вида здесь служебная (см. [[BoardSlot.difficulty]]). */
@@ -193,8 +200,8 @@ object BoardRates {
   /** Состав доски: столько-то объявлений каждого вида. Здесь и только здесь —
     * весь расклад, его ещё предстоит пересобрать вместе с новыми заданиями. */
   val Layout: List[(BoardKind, Int)] =
-    List(BoardKind.Trophy -> 5, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
-         BoardKind.SewerRats -> 1)
+    List(BoardKind.Trophy -> 4, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
+         BoardKind.SewerRats -> 1, BoardKind.Thieves -> 1)
 
   /** Номер недели по Москве, считая с понедельника: нулевой день эпохи —
     * четверг, поэтому к нему прибавляются три дня до ближайшего понедельника. */
