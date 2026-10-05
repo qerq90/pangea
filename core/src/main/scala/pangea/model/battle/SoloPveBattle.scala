@@ -228,15 +228,40 @@ case class SoloPveBattle(
       order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), idx) =>
         val pos  = b.group.places(idx)
         val dist = pos - b.group.heroPos
-        val next = if (dist > 0) pos - 1 else pos + 1
         val far  = math.abs(dist) > GroupState.Reach
-        val free = next >= 1 && next != b.group.heroPos && !b.group.hasMonster(next)
         val busy = b.group.allyAt(pos).exists(_.alive)
         // Сооружение стоит там, где стоит: подтягивать его к герою нечем.
-        if (!far || !free || busy || !movable(b.group.others(idx))) (b, moved)
-        else (b.copy(group = b.group.copy(places = b.group.places.updated(idx, next))), moved :+ (b.group.others(idx) -> next))
+        if (!far || busy || !movable(b.group.others(idx))) (b, moved)
+        else b.stepTowardsHero(pos) match {
+          case None       => (b, moved)
+          case Some(next) =>
+            (b.copy(group = b.group.copy(places = b.group.places.updated(idx, next))),
+             moved :+ (b.group.others(idx) -> next))
+        }
       }
     }
+
+  /** Куда шагнёт моб с места `pos` в сторону героя.
+    *
+    * Обычно на соседнее место, если оно свободно. Стоит там сооружение —
+    * проходит насквозь и встаёт за ним, на первое свободное: башню не обойти
+    * стороной, но она и не перегораживает улицу. Иначе те, кому в караване
+    * выпало место позади башен, топтались бы там до конца боя, пока герой
+    * разбирает охрану в одиночку.
+    *
+    * Живого моба так не перешагнуть: за ним очередь, и она движется сама. */
+  def stepTowardsHero(pos: Int): Option[Int] = {
+    val step = if (pos > group.heroPos) -1 else 1
+    @annotation.tailrec
+    def walk(at: Int): Option[Int] = {
+      val next = at + step
+      if (next < 1 || next == group.heroPos) None
+      else if (!group.hasMonster(next)) Some(next)
+      else if (monsterAt(next).exists(s => !movable(s))) walk(next)
+      else None
+    }
+    walk(pos)
+  }
 
   /** Герой лежит — тому, кто стоял напротив него, больше нечего делать:
     * лежачего мобы не добивают, а бить со своего места ему некого. Он отвязывается
