@@ -233,7 +233,7 @@ object SewerSpec extends ZIOSpecDefault {
 
     // ── Дорога ───────────────────────────────────────────────────────────────
 
-    test("дорога: десять минут без кнопок, потом канализация по уровню задания") {
+    test("дорога: десять минут, потом канализация по уровню задания") {
       for {
         t <- road()
         (state, dao, sched, r) = t
@@ -246,10 +246,28 @@ object SewerSpec extends ZIOSpecDefault {
         scene  <- sceneOf(dao)
         said   <- texts(r)
         cancels <- sched.cancelled
-      } yield assertTrue(start.choices.isEmpty && start.hideKeyboard) &&
+      } yield assertTrue(start.choices.map(_.id) == List("RoadBack")) &&
               assertTrue(early == StateType.QuestRoad && said.contains("Осталось примерно")) &&
               assertTrue(out == StateType.MonsterCave) &&
               assertTrue(scene.exists(s => s.sewer && s.questLvl == 12L && s.floor == 1 && !s.inside)) &&
+              assertTrue(cancels.contains(userId -> TaskKind.QuestRoad))
+    },
+
+    test("с дороги можно повернуть назад, не дожидаясь конца") {
+      for {
+        t <- road()
+        (state, dao, sched, r) = t
+        _       <- dao.writeSceneData(userId, RoadProgress(0L, BoardKind.SewerRats, 12L).asJson)
+        _       <- state.enter(testUser, r)
+        screen  <- r.sentScreens.map(_.last)
+        out     <- state.action(testUser, tap("RoadBack"), r)
+        after   <- dao.readSceneData(userId)
+        said    <- texts(r)
+        cancels <- sched.cancelled
+      } yield assertTrue(screen.choices.map(_.id) == List("RoadBack")) &&
+              assertTrue(out == StateType.GlobalMap && after.contains(io.circe.Json.Null)) &&
+              assertTrue(said.contains("поворачиваете обратно")) &&
+              // задачу поллера снимаем: на месте героя уже не ждут
               assertTrue(cancels.contains(userId -> TaskKind.QuestRoad))
     },
 
