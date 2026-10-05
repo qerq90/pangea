@@ -26,10 +26,17 @@ object VkEvent {
     payload:      Option[String],
     fromId:       Option[Long]        = None,
     replyMessage: Option[Nested]      = None,
-    fwdMessages:  Option[List[Nested]] = None
+    fwdMessages:  Option[List[Nested]] = None,
+    // Номер сообщения ВНУТРИ беседы. В личке его нет, а вот в беседе ВК шлёт
+    // боту `id = 0` и настоящий номер кладёт сюда.
+    conversationMessageId: Option[Long] = None
   ) {
     /** Беседа, а не личка: у бесед `peer_id` начинается с 2000000000. */
     def fromChat: Boolean = peerId >= VkEvent.ChatPeerBase
+
+    /** Ключ сообщения беседы для защиты от повторов (см. `ChatCommand.eventKey`). */
+    def chatEventKey: Long =
+      pangea.service.chat.ChatCommand.eventKey(id, conversationMessageId)
 
     /** Кому адресована команда: автор процитированного или пересланного. */
     def quotedAuthor: Option[Long] =

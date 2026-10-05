@@ -47,7 +47,7 @@ final class ServerLive(
             // Пароль админ-панели приходит обычным сообщением, а лог отдаётся
             // наружу — в логе от него остаётся только метка.
             val logged = AdminPanel.maskSecrets(msg.text, adminConfig.password)
-            ZIO.logInfo(s"peer=${msg.peerId} from=${msg.fromId.getOrElse(0L)} text=$logged payload=${msg.payload.getOrElse("")}") *>
+            ZIO.logInfo(s"peer=${msg.peerId} from=${msg.fromId.getOrElse(0L)} id=${msg.id} cmid=${msg.conversationMessageId.getOrElse(0L)} text=$logged payload=${msg.payload.getOrElse("")}") *>
               // Беседа — не игрок: её peer_id за героя принимать нельзя, оттуда
               // мы слушаем только команды вроде «Передать».
               (if (msg.fromChat) handleChat(msg)
@@ -76,11 +76,11 @@ final class ServerLive(
       case None => ZIO.unit
       case Some(from) =>
         ChatCommand.selfCommand(msg.text) match {
-          case Some(command) => stateHandler.selfToChat(VkId(from.toString), command, msg.id)
+          case Some(command) => stateHandler.selfToChat(VkId(from.toString), command, msg.chatEventKey)
           case None =>
             (msg.quotedAuthor, ChatCommand.transferQuery(msg.text)) match {
               case (Some(to), Some(query)) if to > 0L =>
-                stateHandler.transferFromChat(VkId(from.toString), VkId(to.toString), query, msg.id)
+                stateHandler.transferFromChat(VkId(from.toString), VkId(to.toString), query, msg.chatEventKey)
               case _ => ZIO.unit
             }
         }
