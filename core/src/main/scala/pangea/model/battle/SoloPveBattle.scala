@@ -91,7 +91,8 @@ case class SoloPveBattle(
   def activeSlot: MonsterSlot = MonsterSlot(
     lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
     currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
-    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, boss = bossKind)
+    currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, boss = bossKind,
+    customName = customName)
 
   /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
     * геройская половина эффектов (и разовые флаги героя вроде «Крепкости»)
@@ -103,7 +104,7 @@ case class SoloPveBattle(
     monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
     monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
-    bossKind = slot.boss)
+    bossKind = slot.boss, customName = slot.customName)
 
   /** Пара пуста: активный моб стоит не напротив героя. */
   def unpaired: Boolean = !group.paired
@@ -393,6 +394,7 @@ object SoloPveBattle {
     monsterCurrentHp    = monster.fightStats.hp,
     monsterCurrentArmor = monster.fightStats.armor,
     monsterMarked       = monster.marked,
+    customName          = monster.customName,
     skillSlots          = hero.activeSkillSlots,
     // Зеркальный настой выпит до боя — копии входят в бой вместе с героем.
     effects             = BattleEffects(heroMirrors = hero.weaponDust.mirrors),
@@ -411,11 +413,13 @@ object SoloPveBattle {
   /** Бой против группы: мобы встают по местам 1, 2, … подряд; в паре с героем
     * — тот, что на его месте, а если там пусто — свободный (см. `settle`).
     * Раса первого запоминается — подкрепление приходит такой же. */
-  def fromGroup(monsters: List[Monster], hero: Hero, startEnergies: List[Long], squad: Boolean = true): SoloPveBattle = {
+  def fromGroup(monsters0: List[Monster], hero: Hero, startEnergies: List[Long], squad: Boolean = true): SoloPveBattle = {
+    // Двое именных одной расы под одним именем в бой не выходят.
+    val monsters = Monster.distinctNames(monsters0)
     val energies = startEnergies.padTo(monsters.size, 0L)
     val slots = monsters.zip(energies).map { case (m, e) =>
       MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
-        m.fightStats.armor, m.marked, e, BattleEffects.empty)
+        m.fightStats.armor, m.marked, e, BattleEffects.empty, customName = m.customName)
     }
     val head = from(monsters.head, hero, squad).copy(monsterCurrentEnergy = energies.head)
     head.copy(group = head.group.copy(others = slots.tail, originRace = Some(monsters.head.race.entryName),

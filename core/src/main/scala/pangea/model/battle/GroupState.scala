@@ -72,10 +72,12 @@ final case class MonsterSlot(
   // Минибосс, если на этом месте стоит он: его правила ездят вместе с ним, а
   // не живут на бою. Иначе удар по его призванной крысе считался бы ударом по
   // нему самому (см. SoloPveBattle.activeSlot/withActive).
-  boss:          Option[String] = None
+  boss:          Option[String] = None,
+  // Своё имя этого существа, если оно именное (легендарный из списка расы).
+  customName:    Option[String] = None
 ) {
   def toMonster: Monster =
-    Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked)
+    Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked, customName)
 
   def name: String =
     boss.flatMap(pangea.model.monster.MiniBoss.byName).map(_.monsterName).getOrElse(toMonster.name)
@@ -108,7 +110,9 @@ object MonsterSlot {
       currentEnergy <- c.getOrElse[Long]("currentEnergy")(0L)
       effects       <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       boss          <- c.getOrElse[Option[String]]("boss")(None)
-    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects, boss)
+      customName    <- c.getOrElse[Option[String]]("customName")(None)
+    } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects,
+                        boss, customName)
 }
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */

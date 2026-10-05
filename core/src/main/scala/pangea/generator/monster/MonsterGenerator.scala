@@ -79,13 +79,33 @@ object MonsterGenerator {
     val (markRoll, rng3) = rng2.between(0L, 100L)
     val marked     = MarkedRarities.contains(rarity) && markRoll < MarkedChance
     val finalStats = if (marked) boost(stats, MarkedMultiplier) else stats
-    (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked), rng3)
+    val (name, rng4) = legendaryName(race, rarity, rng3)
+    (Monster(0L, dungeonLevel.toLong, race, rarity, finalStats, marked, name), rng4)
   }
+
+  /** Имя легендарного: из списка его расы, наугад. У прочих редкостей имени
+    * нет — их зовут по расе и тиру (см. [[Monster.namesByRaceRarity]]).
+    * Бросок тратится только на легендарных: у остальных RNG не трогается, и
+    * порядок бросков в боевых тестах не плывёт. */
+  def legendaryName(race: Race, rarity: Rarity, rng: Rng): (Option[String], Rng) =
+    if (rarity != Legendary) (None, rng)
+    else Monster.legendaryNames.get(race).filter(_.nonEmpty) match {
+      case None        => (None, rng)
+      case Some(names) => val (n, next) = rng.pick(names); (Some(n), next)
+    }
+
+  /** То же, но когда имя нужно само по себе — например, чтобы запомнить его в
+    * сцене и показать до боя тем же, кем он потом и выйдет. */
+  def legendaryName(race: Race, rng: Rng): (Option[String], Rng) =
+    legendaryName(race, Legendary, rng)
 
   /** Моб заданных расы и редкости — когда сюжет решает сам, кто вышел навстречу
     * (трое бандитов первых трёх тиров, брат девицы). Метки тьмы у таких нет. */
-  def generateOfRaceAndRarity(dungeonLevel: Int, race: Race, rarity: Rarity): Monster =
-    Monster(0L, dungeonLevel.toLong, race, rarity, buildStats(dungeonLevel, rarity, race))
+  def generateOfRaceAndRarity(
+      dungeonLevel: Int, race: Race, rarity: Rarity, name: Option[String] = None
+  ): Monster =
+    Monster(0L, dungeonLevel.toLong, race, rarity, buildStats(dungeonLevel, rarity, race),
+      customName = name)
 
   /** Гарантированно «Отмеченный тьмой» моб заданного уровня — для механики
     * выслеживания прохода вглубь. Редкость роллится среди Rare+ (в тех же
@@ -97,7 +117,8 @@ object MonsterGenerator {
     val (race, rng1)   = rng.pick(Race.mortals.toList)
     val (rarity, rng2) = rng1.pick(markedRarityPool)
     val stats = boost(buildStats(dungeonLevel, rarity, race), MarkedMultiplier)
-    (Monster(0L, dungeonLevel.toLong, race, rarity, stats, marked = true), rng2)
+    val (name, rng3) = legendaryName(race, rarity, rng2)
+    (Monster(0L, dungeonLevel.toLong, race, rarity, stats, marked = true, name), rng3)
   }
 
   // +X% ко всем показателям (атака/HP зажаты снизу единицей, как в buildStats).
