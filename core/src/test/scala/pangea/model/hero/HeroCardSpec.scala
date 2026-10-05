@@ -32,10 +32,11 @@ object HeroCardSpec extends ZIOSpecDefault {
     test("раса видна в скобках: орку приписали силу, а ум убавили") {
       val h    = hero(Race.Orc)
       val card = h.getInfo(0L)
-      // ×1.2 силы и тела, ×0.8 ума и ловкости — родное у всех четырёх по десять
+      // ×1.2 силы и тела, ×0.8 ума и ловкости — родное у всех четырёх по десять.
+      // Первым стоит родное, в скобках — то, с чем герой выходит в бой.
       assertTrue(h.nativeBaseStats.str == 10L && h.nativeBaseStats.int == 10L) &&
-      assertTrue(card.contains("СИЛ 12 (10)") && card.contains("ТЕЛО 12 (10)")) &&
-      assertTrue(card.contains("ЛОВ 8 (10)") && card.contains("ИНТ 8 (10)"))
+      assertTrue(card.contains("СИЛ 10 (12)") && card.contains("ТЕЛО 10 (12)")) &&
+      assertTrue(card.contains("ЛОВ 10 (8)") && card.contains("ИНТ 10 (8)"))
     },
 
     test("травма и зелье двигают текущее, родное стоит на месте") {
@@ -48,7 +49,7 @@ object HeroCardSpec extends ZIOSpecDefault {
       val card = hurt.getInfo(0L)
       assertTrue(hurt.nativeBaseStats == base.nativeBaseStats) &&
       // сила выросла наполовину — текущее пятнадцать, родное десять
-      assertTrue(hurt.effectiveBaseStats(0L).str == 15L && card.contains("СИЛ 15 (10)")) &&
+      assertTrue(hurt.effectiveBaseStats(0L).str == 15L && card.contains("СИЛ 10 (15)")) &&
       // а когда всё пройдёт, останется родное
       assertTrue(base.getInfo(0L).contains("СИЛ 10") && !base.getInfo(0L).contains("СИЛ 10 ("))
     },
@@ -67,9 +68,10 @@ object HeroCardSpec extends ZIOSpecDefault {
     },
 
     test("скобка появляется только при разнице") {
+      // родное снаружи, нынешнее в скобках
       assertTrue(Hero.withNative(7L, 7L) == "7") &&
-      assertTrue(Hero.withNative(9L, 7L) == "9 (7)") &&
-      assertTrue(Hero.withNative(5L, 7L) == "5 (7)")
+      assertTrue(Hero.withNative(9L, 7L) == "7 (9)") &&
+      assertTrue(Hero.withNative(5L, 7L) == "7 (5)")
     }
   )
 }

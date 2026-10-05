@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
 import pangea.dao.hero.HeroDao
 import pangea.domain.Rng
-import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
+import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.cave.{CaveGenerator, SewerRates}
 import pangea.model.monster.Race
 import pangea.model.quest.BoardKind
@@ -48,9 +48,17 @@ object RoadProgress {
 case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: SceneContent) extends State {
 
   private val branch = new Branch(
-    routes   = Map("RoadDone" -> Target.Run { (u, _, r) => arrive(u, r) }),
+    routes = Map(
+      "RoadDone" -> Target.Run { (u, _, r) => arrive(u, r) },
+      "RoadBack" -> Target.Run { (u, _, r) => turnBack(u, r) }
+    ),
     fallback = Target.Run { (u, _, r) => onTick(u, r) }
   )
+
+  /** Единственная кнопка в пути: повернуть назад. Объявление остаётся взятым —
+    * от доски можно будет выдвинуться снова. */
+  private def backButton: Choice =
+    content.choice("RoadBack", "questRoad.back").copy(color = ChoiceColor.Negative, row = Some(0))
 
   override def targetStates: Set[StateType] =
     Set(StateType.MonsterCave, StateType.Thieves, StateType.QuestRoad, StateType.GlobalMap)
@@ -61,7 +69,7 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
       road <- readRoad(user)
       left  = road.map(r => (SewerRates.RoadMs - (now - r.startedAt)).max(0L)).getOrElse(SewerRates.RoadMs)
       _    <- renderer.show(user, Screen(
-                content.format("questRoad.enter", "remaining" -> remaining(left)), Nil, hideKeyboard = true))
+                content.format("questRoad.enter", "remaining" -> remaining(left)), List(backButton)))
     } yield ()
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
@@ -76,7 +84,7 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
         case Some(r) if now - r.startedAt >= SewerRates.RoadMs => arrive(user, renderer)
         case Some(r) =>
           renderer.show(user, Screen(content.format("questRoad.wait",
-            "remaining" -> remaining(SewerRates.RoadMs - (now - r.startedAt))), Nil, hideKeyboard = true))
+            "remaining" -> remaining(SewerRates.RoadMs - (now - r.startedAt))), List(backButton)))
             .as(StateType.QuestRoad)
         case None => lost(user, renderer)
       }
@@ -110,6 +118,13 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
         case _ => lost(user, renderer)
       }
     } yield res
+
+  /** Передумал на полпути. Дорога бросается, задача поллера снимается, а
+    * объявление остаётся взятым: к нему можно выдвинуться снова, от доски. */
+  private def turnBack(user: User, renderer: Renderer): Task[StateType] =
+    scheduler.cancel(user.userId, TaskKind.QuestRoad) *>
+      heroDao.writeSceneData(user.userId, Json.Null) *>
+      renderer.show(user, Screen(content.text("questRoad.turnedBack"), Nil)).as(StateType.GlobalMap)
 
   /** Дороги в колонке нет (её затёрли или задание не из выездных) — не бросать
     * же героя в чистом поле: возвращаем в город. */
