@@ -693,7 +693,10 @@ case class BattleState(
           promoted  = promoteAfterKill(allied)
           sided    <- sideMobsPhase(promoted, now)
           promoted2 = promoteAfterKill(sided)
-          ended    <- endRound(battle, promoted2)
+          // Охрану доломали союзники, пока герой лежал, — башням некого
+          // прикрывать, и бой кончается так же, как если бы её добил он сам.
+          abandoned = towersAlone(promoted2)
+          ended    <- endRound(battle, abandoned)
           res       = ended
           state    <- res.outcome match {
             case Outcome.Victory =>

@@ -374,6 +374,28 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(scr.contains("отряд отбился, и вы приходите в себя"))
     },
 
+    test("герой лежит, союзники добили охрану — башням некого прикрывать, и это победа") {
+      // Караван: охранник в паре с героем и башня в хвосте. Герой лежит,
+      // союзник добивает охранника — башня остаётся одна, и бой кончен.
+      val h     = hero(allies = List(ally(pos = 2)))
+      val tower = Monster(0L, lvl, Race.Construct, Rarity.Rare,
+                    FightStats(atk = 1, hp = 9999L, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
+      val b0    = SoloPveBattle.fromGroup(List(monster(1L), tower), h, Nil)
+      // Башня стоит в хвосте, напротив союзника никого — он бьёт охранника в паре.
+      val down  = b0.copy(group = b0.group.copy(heroDown = true, places = List(3)))
+      for {
+        t <- makeState(h.copy(fightStats = h.fightStats.copy(hp = 0L)), down)
+        (state, dao, r) = t
+        _    <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+        out  <- state.action(testUser, tap("SquadTick"), r)
+        said <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        up   <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(out == StateType.Loot) &&
+              assertTrue(said.contains("приходите в себя")) &&
+              // герой поднимается, как и при обычной победе отряда
+              assertTrue(up.fightStats.hp == BattleState.DownReviveHp)
+    },
+
     test("моб напротив лежачего уходит к союзнику, если есть куда") {
       val h    = hero(allies = List(ally(pos = 2)))
       val up   = group(h, 1000L)

@@ -166,6 +166,20 @@ object SewerSpec extends ZIOSpecDefault {
       assertTrue(Monster(0L, 5L, Race.Animal, Rarity.Rare, null).name == "Чумная крыса")
     },
 
+    test("крысе нечем лечиться: ни фляги себе, ни соседу, ни починки доспеха") {
+      val forRats = pangea.model.skill.MonsterSkill.values.filter(_.availableTo(Race.Animal))
+      val flask   = pangea.model.skill.MonsterSkill.HealingFlask
+      val repair  = pangea.model.skill.MonsterSkill.EmergencyRepair
+      assertTrue(!forRats.contains(flask) && !forRats.contains(repair)) &&
+      // бить ей по-прежнему есть чем
+      assertTrue(forRats.contains(pangea.model.skill.MonsterSkill.QuickStrike)) &&
+      assertTrue(forRats.contains(pangea.model.skill.MonsterSkill.CrushingStrike)) &&
+      // у тех, кто носит пояс и доспех, всё на месте
+      assertTrue(Race.mortals.forall(r => flask.availableTo(r) && repair.availableTo(r))) &&
+      // сооружения и прочие боссовые расы тоже себя не латают
+      assertTrue(Race.bossRaces.forall(r => !flask.availableTo(r) && !repair.availableTo(r)))
+    },
+
     test("статы крысы: мяса мало, брони нет, зато вёрткая") {
       val f   = MonsterRaceFactor.of(Race.Animal)
       val rat = MonsterGenerator.generateOfRaceAndRarity(10, Race.Animal, Rarity.Uncommon).fightStats

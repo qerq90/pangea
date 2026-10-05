@@ -11,7 +11,9 @@ import pangea.service.state.states.battle.BattleState
  * очков (см. [[MonsterEnergy]]), моб копит их по столько-то за раунд и применяет
  * самое дорогое из того, что сейчас по карману, ПОВЕРХ обычной атаки.
  *
- * Четыре первых умения — базовые: они есть у любой расы и стоят 0.8 обычной цены.
+ * Четыре первых умения — базовые и стоят 0.8 обычной цены. Бить ими может
+ * кто угодно, а вот фляга и починка доспеха — только тем, у кого есть руки и
+ * карманы: зверь из канализации не достаёт склянку и не латает броню.
  * Остальные раздаются по расам через [[races]] — у мурлока свои, у демона свои.
  *
  * `template` — описание эффекта с двумя плейсхолдерами: `{name}` — имя моба,
@@ -92,6 +94,10 @@ object MonsterSkill extends Enum[MonsterSkill] {
     label    = "Исцеляющая фляга",
     template = "{name} выпивает из своей фляги и восстанавливает {} HP!"
   ) {
+    /** Фляга есть у того, кто носит пояс: зверью и сооружениям её не достать —
+      * ни себе, ни соседу (см. `BattleState.selfAid`/`allyAid`). */
+    override val races: Set[Race] = Race.mortals.toSet
+
     def applicable(battle: SoloPveBattle): Boolean = battle.monsterCurrentHp < battle.monsterStats.hp
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
@@ -118,6 +124,9 @@ object MonsterSkill extends Enum[MonsterSkill] {
     label    = "Экстренная починка",
     template = "{name} выливает металлическую жижу на свои доспехи. Повреждения в его брони затягиваются на глазах! Восстановлено {} брони."
   ) {
+    /** Латать доспех нечем и некому, если доспеха нет: это умение смертных. */
+    override val races: Set[Race] = Race.mortals.toSet
+
     def applicable(battle: SoloPveBattle): Boolean = battle.monsterCurrentArmor < monsterMaxArmor(battle)
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
