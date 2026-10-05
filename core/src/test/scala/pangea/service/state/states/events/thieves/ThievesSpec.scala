@@ -39,8 +39,15 @@ object ThievesSpec extends ZIOSpecDefault {
 
   private def texts(r: TestRenderer): Task[String] = r.sentScreens.map(_.map(_.text).mkString("\n"))
 
-  private def scene(count: Int, race: Race, lvl: Long, fought: Boolean = false) =
-    ThievesScene(race.entryName, lvl, count, fought)
+  private def scene(count: Int, race: Race, lvl: Long) =
+    ThievesScene(race.entryName, lvl, count)
+
+  private def spoils(h: Hero = hero()) =
+    for {
+      dao <- TestHeroDao.withHero(userId, h)
+      r   <- TestRenderer.make
+      c   <- content
+    } yield (ThievesSpoilsState(dao, c), dao, r)
 
   private val taken: BoardData =
     BoardData(0L, "novice", List(BoardSlot(BoardKind.Thieves, taken = true, lvl = 12L)))
@@ -58,6 +65,8 @@ object ThievesSpec extends ZIOSpecDefault {
         t <- alley()
         (state, dao, _, r, _) = t
         _      <- dao.writeSceneData(userId, scene(count = 5, race = Race.Orc, lvl = 9L).asJson)
+        // Выбирать герою не из чего: нода сама ставит бой и уводит в него.
+        _      <- state.enter(testUser, r)
         out    <- state.action(testUser, tap("ThievesFight"), r)
         battle <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
         said   <- texts(r)
@@ -71,18 +80,21 @@ object ThievesSpec extends ZIOSpecDefault {
               assertTrue(battle.exists(_.noKin)) &&
               assertTrue(said.contains("это они")) &&
               // из боя вернёмся сюда же, и уже с отметкой «дрались»
-              assertTrue(loot.exists(_.returnState.contains(StateType.Thieves))) &&
-              assertTrue(back.exists(s => s.fought && s.count == 5)) &&
+              assertTrue(loot.exists(_.returnState.contains(StateType.ThievesSpoils))) &&
+              assertTrue(back.exists(_.count == 5)) &&
+              // кнопок в подворотне нет — ход идёт сам, без игрока
+              assertTrue(state.autoAdvance.contains(StateType.Battle)) &&
               assertTrue(ThievesState.MinThieves == 3 && ThievesState.MaxThieves == 6)
     },
 
     test("после драки: кошелёк с каждого, отметка на доске и обида банды") {
       for {
-        t <- alley()
-        (state, dao, _, r, _) = t
+        t <- spoils()
+        (state, dao, r) = t
         _     <- dao.writeQuestData(userId, taken.asJson)
-        _     <- dao.writeSceneData(userId, scene(count = 4, race = Race.Goblin, lvl = 12L, fought = true).asJson)
-        out   <- state.enter(testUser, r).as(StateType.Loot)
+        _     <- dao.writeSceneData(userId, scene(count = 4, race = Race.Goblin, lvl = 12L).asJson)
+        _     <- state.enter(testUser, r)
+        out    = state.autoAdvance.getOrElse(StateType.GlobalMap)
         loot  <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
         board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
         log   <- dao.readKillLog(userId).map(_.flatMap(_.as[KillLog].toOption).get)
@@ -99,6 +111,20 @@ object ThievesSpec extends ZIOSpecDefault {
               assertTrue(log.gang.contains(Race.Goblin.entryName)) &&
               assertTrue(log.gangIn >= GangGrudge.MinExplores && log.gangIn <= GangGrudge.MaxExplores) &&
               assertTrue(log.gangDue.isEmpty)
+    },
+
+    test("ход идёт сам: ни одна из нод не ждёт кнопки и не бросает героя") {
+      for {
+        t <- spoils()
+        (state, dao, r) = t
+        // сцену потеряли — добычи нет, но и в пустом экране герой не застрянет
+        _    <- state.enter(testUser, r)
+        loot <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
+        a1   <- alley()
+      } yield assertTrue(state.autoAdvance.contains(StateType.Loot)) &&
+              assertTrue(loot.exists(l => l.items.isEmpty && l.returnState.contains(StateType.GlobalMap))) &&
+              // засада уводит в бой сама, без нажатия
+              assertTrue(a1._1.autoAdvance.contains(StateType.Battle))
     },
 
     // ── Кошелёк ──────────────────────────────────────────────────────────────

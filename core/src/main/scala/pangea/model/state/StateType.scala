@@ -114,7 +114,9 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object QuestRoad extends StateType
 
   // Подворотня у таверны: засада на городских воров по объявлению с доски.
-  case object Thieves extends StateType
+  // Эффект-нода: сразу в бой. Вторая — то, что с них сняли.
+  case object Thieves       extends StateType
+  case object ThievesSpoils extends StateType
 
   // Поход за сокровищем по карте клада.
   case object Outskirts    extends StateType // «За городом»: выбор карты и отправка в поход

@@ -39,6 +39,7 @@ import pangea.model.state.StateType.{
   QuestBoard,
   QuestRoad,
   Thieves,
+  ThievesSpoils,
   Registration,
   Rest,
   RottenJoe,
@@ -119,7 +120,7 @@ import pangea.service.state.states.guild.{
 import pangea.service.state.states.events.item.FoundItemState
 import pangea.service.state.states.marisa.{MarisaHuntState, MarisaSearchState}
 import pangea.service.state.states.road.QuestRoadState
-import pangea.service.state.states.events.thieves.ThievesState
+import pangea.service.state.states.events.thieves.{ThievesSpoilsState, ThievesState}
 import pangea.service.state.states.murloc.{MurlocElderState, MurlocVillageState}
 import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.gustavo.{
@@ -266,6 +267,7 @@ object StatesMap {
           QuestBoard        -> QuestBoardState(heroDao, inventoryRepo, scheduler, content),
           QuestRoad         -> QuestRoadState(heroDao, scheduler, content),
           Thieves           -> ThievesState(heroDao, content),
+          ThievesSpoils     -> ThievesSpoilsState(heroDao, content),
           Innkeeper         -> InnkeeperState(heroDao, inventoryRepo, content, bank),
           Mercenaries       -> MercenariesState(heroDao, inventoryRepo, content),
           SilverVein        -> SilverVeinState(heroDao, scheduler, content),
