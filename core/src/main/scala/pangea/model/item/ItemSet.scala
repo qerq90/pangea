@@ -109,6 +109,22 @@ object ItemSet extends Enum[ItemSet] {
     val KillHpRestorePct: Long    = 10L
     val KillArmorRestorePct: Long = 10L
 
+    /** Сколько чужой крови достанется одному вампиру (порог 10).
+      *
+      * `bleedOnOtherSide` — урон, который кровотечение нанесло за раунд
+      * ЧУЖОЙ стороне; `vampires` — сколько вампиров на СВОЕЙ. Кровь
+      * делится ровно между ними: двое — каждому половина.
+      *
+      * Счёт идёт по сторонам, а не по всем кровоточащим сразу: вампиры
+      * одной стороны пьют кровь только соперников, и наоборот; кто именно
+      * заставил кровоточить, значения не имеет.
+      *
+      * Сегодня вампир в бою всегда один — сам герой, и правило отдаёт ему
+      * всю кровь. Написано оно под будущее, где вампиров на стороне может
+      * оказаться несколько. */
+    def bleedHealShare(bleedOnOtherSide: Long, vampires: Int): Long =
+      if (vampires <= 0 || bleedOnOtherSide <= 0L) 0L else bleedOnOtherSide / vampires.toLong
+
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$EvasionPct% к уклонению."),
       SetBonus(4,  s"+$LifestealPct% вампиризма."),

@@ -9,6 +9,7 @@ import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
+import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
@@ -2097,11 +2098,15 @@ case class BattleState(
       (tickedBattle, monsterEffectLine, bleedDealt) =
         if (heroAlive) tickMonsterEffects(battleWithEnergy, ticked.monsterName, tickedHero.sets.burnGrowthMult)
         else (battleWithEnergy, "", 0L)
-      // «Упырь» (порог 10): чужая кровь идёт герою в лечение.
+      // «Упырь» (порог 10): кровь ЧУЖОЙ стороны идёт в лечение и делится ровно
+      // между вампирами СВОЕЙ. Сегодня вампир один — сам герой, поэтому ему
+      // достаётся всё (см. ItemSet.Ghoul.bleedHealShare).
+      vampiresOnHeroSide = if (tickedHero.sets.healsFromBleed) 1 else 0
+      bleedShare         = ItemSet.Ghoul.bleedHealShare(bleedDealt, vampiresOnHeroSide)
       heroFedByBleed =
-        if (bleedDealt > 0 && tickedHero.sets.healsFromBleed)
+        if (bleedShare > 0L)
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(
-            hp = (tickedHero.fightStats.hp + bleedDealt).min(tickedHero.effectiveMaxHp(nowMs))))
+            hp = (tickedHero.fightStats.hp + bleedShare).min(tickedHero.effectiveMaxHp(nowMs))))
         else tickedHero
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
