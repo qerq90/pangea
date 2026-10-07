@@ -752,14 +752,21 @@ case class MonsterCaveState(
     }
 
   /** Уход. Из пещеры герой возвращается в лабиринт, из канализации — в город:
-    * он и пришёл-то сюда из гильдии, по объявлению. */
+    * он и пришёл-то сюда из гильдии, по объявлению.
+    *
+    * Объявление на этом кончается: сцена стирается, и ни в ту пещеру, ни в ту
+    * канализацию дороги больше нет. Зачищенная уже отмечена сделанной — её
+    * провал не трогает. */
   private def leave(user: User, renderer: Renderer): Task[StateType] =
     readScene(user).flatMap { scene =>
       val sewer = scene.exists(_.sewer)
+      val quest = if (sewer) BoardKind.SewerRats else BoardKind.CaveClear
       scheduler.cancel(user.userId, TaskKind.CaveRest) *>
         heroDao.writeSceneData(user.userId, Json.Null) *>
-        renderer.show(user, Screen(content.text(if (sewer) "sewer.left" else "cave.left"), Nil))
-          .as(if (sewer) StateType.GlobalMap else StateType.Dungeon)
+        renderer.show(user, Screen(content.text(if (sewer) "sewer.left" else "cave.left"), Nil)) *>
+        BoardProgress.markFailed(heroDao, user.userId, quest).flatMap(failed =>
+          ZIO.when(failed)(renderer.show(user, Screen(content.text("questBoard.failed"), Nil)))) *>
+        ZIO.succeed(if (sewer) StateType.GlobalMap else StateType.Dungeon)
     }
 
   // ── Вспомогательное ────────────────────────────────────────────────────────

@@ -13,11 +13,12 @@ import pangea.model.quest._
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.schedule.Scheduler
 import pangea.service.state.states.guild.QuestBoardState._
 import pangea.service.state.states.road.{QuestRoadState, RoadProgress}
-import pangea.service.state.{CityExit, ItemMenu, State, UserAction}
+import pangea.service.state.{CityExit, ItemMenu, QuestStash, State, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -39,6 +40,7 @@ import java.util.concurrent.TimeUnit
 case class QuestBoardState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
+  artifactRepo:  ArtifactRepository,
   scheduler:     Scheduler,
   content:       SceneContent
 ) extends State {
@@ -108,8 +110,8 @@ case class QuestBoardState(
       now   <- nowMs
       hero  <- getHero(user)
       data  <- load(user, hero, now)
-      inv   <- bag(hero)
-      lines  = data.slots.zipWithIndex.map { case (s, i) => line(s, i, inv) }
+      stash <- QuestStash.findAll(inventoryRepo, artifactRepo, hero)
+      lines  = data.slots.zipWithIndex.map { case (s, i) => line(s, i, stash.map(_.item)) }
       text   = content.format("questBoard.board",
                  "title" -> data.board.title, "quests" -> lines.mkString("\n\n"), "left" -> left(now))
       keys   = data.slots.zipWithIndex.flatMap { case (s, i) => button(s, i) } ++ List(
@@ -211,7 +213,8 @@ case class QuestBoardState(
       now  <- nowMs
       hero <- getHero(user)
       data <- load(user, hero, now)
-      inv  <- bag(hero)
+      stash <- QuestStash.findAll(inventoryRepo, artifactRepo, hero)
+      inv   = stash.map(_.item)
       _ <- data.slot(idx).filter(_.taken) match {
         case None       => ZIO.unit
         case Some(slot) => slot.kind match {
@@ -219,7 +222,8 @@ case class QuestBoardState(
             case None => renderer.show(user, Screen(content.text("questBoard.noTrophy"), Nil))
             case Some(trophy) =>
               val exp = BoardRates.trophyExp(trophy.lvl, BoardTrophy.coef(trophy))
-              inventoryRepo.removeItem(trophy.id, hero.id).mapError(asThrowable) *>
+              // Трофей уходит оттуда, где лежал: из сумки, из ларца или из живой сумки.
+              QuestStash.take(inventoryRepo, artifactRepo, hero, stash.filter(_.item.id == trophy.id)) *>
                 pay(user, hero, exp, BoardRates.TrophyDoubloons) *>
                 save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
                 renderer.show(user, Screen(content.format("questBoard.paidTrophy",
@@ -228,7 +232,7 @@ case class QuestBoardState(
           }
           case BoardKind.DwarfSupply =>
             val wanted = brewOf(slot)
-            val have   = wanted.toList.flatMap(k => inv.filter(_.brew.contains(k)))
+            val have   = wanted.toList.flatMap(k => stash.filter(_.item.brew.contains(k)))
             if (have.sizeIs < BoardRates.BrewsWanted)
               renderer.show(user, Screen(content.format("questBoard.noBrews",
                 "brew" -> wanted.map(_.label).getOrElse(""), "have" -> have.size.toString,
@@ -236,8 +240,7 @@ case class QuestBoardState(
             else {
               val exp = BoardRates.exp(hero.lvl)
               // Ящик уходит целиком: ровно десять склянок, остальное остаётся при герое.
-              ZIO.foreachDiscard(have.take(BoardRates.BrewsWanted))(i =>
-                inventoryRepo.removeItem(i.id, hero.id).mapError(asThrowable)) *>
+              QuestStash.take(inventoryRepo, artifactRepo, hero, have.take(BoardRates.BrewsWanted)) *>
                 pay(user, hero, exp, BoardRates.Doubloons) *>
                 save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
                 renderer.show(user, Screen(content.format("questBoard.paidBrews",
@@ -303,9 +306,6 @@ case class QuestBoardState(
     names(math.floorMod(slot.band, names.size))
   }
 
-  private def bag(hero: Hero): Task[List[pangea.model.item.Item]] =
-    inventoryRepo.get(hero.id).mapError(asThrowable).map(_.items.data.filter(_.id != 0L))
-
   private def left(now: Long): String = {
     val mins = (BoardRates.untilNextWeek(now) / 60000L).max(1L)
     val days = mins / (60L * 24L)
@@ -336,7 +336,6 @@ case class QuestBoardState(
 
   private def nowMs: Task[Long] = ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
 
-  private def asThrowable(e: Any): Throwable = new Throwable(e.toString)
 }
 
 object QuestBoardState {

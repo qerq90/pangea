@@ -87,6 +87,63 @@ object ThievesSpec extends ZIOSpecDefault {
               assertTrue(ThievesState.MinThieves == 3 && ThievesState.MaxThieves == 6)
     },
 
+    test("сбежал или пал в подворотне — задание провалено и пропало с доски") {
+      import pangea.model.battle.SoloPveBattle
+      import pangea.model.monster.Rarity
+      import pangea.model.stats.FightStats
+      val thief = ThievesScene(Race.Orc.entryName, 12L, 1)
+      /** Бой с одним вором; роутинг добычи тот же, что ставит подворотня. */
+      def fight(h: Hero, thiefAtk: Long) =
+        for {
+          dao <- TestHeroDao.withHero(userId, h)
+          r   <- TestRenderer.make
+          c   <- content
+          battle = SoloPveBattle(
+                     monsterLvl = 12L, monsterRace = Race.Orc.entryName,
+                     monsterRarity = Rarity.Common.entryName,
+                     monsterStats = FightStats(atk = thiefAtk, hp = 100000, armor = 0, defence = 0,
+                                               evasion = 0, accuracy = 9999, energy = 0),
+                     monsterCurrentHp = 100000L, monsterCurrentArmor = 0L)
+          _   <- dao.writeActiveBattle(userId, battle.asJson)
+          _   <- dao.writeQuestData(userId, taken.asJson)
+          _   <- dao.writeSceneData(userId,
+                   LootData(Nil, Nil, returnState = Some(StateType.ThievesSpoils),
+                            eventData = Some(thief.asJson)).asJson)
+          state = pangea.service.state.states.battle.BattleState(
+                    dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
+        } yield (state, dao, r)
+      val tough = hero().copy(fightStats = FightStats(atk = 10, hp = 100000, armor = 0, defence = 0,
+                                                      evasion = 9999, accuracy = 9999, energy = 0))
+      val dying = hero().copy(
+        baseStats  = hero().baseStats.copy(agi = 0),
+        fightStats = FightStats(atk = 10, hp = 1, armor = 0, defence = 0,
+                                evasion = 0, accuracy = 9999, energy = 0))
+      def boardOf(dao: TestHeroDao) =
+        dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+      for {
+        fled <- fight(tough, thiefAtk = 1).flatMap { case (state, dao, r) =>
+                  for {
+                    out   <- state.action(testUser, tap("ConfirmFlee"), r)
+                    said  <- texts(r)
+                    board <- boardOf(dao)
+                    loot  <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
+                  } yield (out, said, board, loot)
+                }
+        died <- fight(dying, thiefAtk = 9999).flatMap { case (state, dao, r) =>
+                  for {
+                    out   <- state.action(testUser, tap("Attack"), r)
+                    said  <- texts(r)
+                    board <- boardOf(dao)
+                  } yield (out, said, board)
+                }
+      } yield assertTrue(fled._1 == StateType.Dungeon && fled._3.slots.isEmpty) &&
+              assertTrue(fled._2.contains("не уверен, что смогу найти их во второй раз")) &&
+              assertTrue(died._1 == StateType.Death && died._3.slots.isEmpty) &&
+              assertTrue(died._2.contains("задание провалено")) &&
+              // роутинг к экрану поживы стёрт: кошельков не будет, идти туда незачем
+              assertTrue(fled._4.isEmpty)
+    },
+
     test("после драки: кошелёк с каждого, отметка на доске и обида банды") {
       for {
         t <- spoils()

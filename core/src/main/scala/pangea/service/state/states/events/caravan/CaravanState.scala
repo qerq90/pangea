@@ -355,9 +355,11 @@ case class CaravanState(
       }
 
   /** Ушёл с поклажей и без боя: вещи забирает экран добычи, караван на этом
-    * кончается. */
+    * кончается — а вместе с ним и объявление, если герой шёл по нему: охрану он
+    * не перебил, и второго такого обоза ему не найти. */
   private def slipAway(user: User, scene: CaravanScene, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(content.text("caravan.sneak.away"), Nil)) *>
+      failQuest(user, renderer) *>
       heroDao.writeSceneData(user.userId, LootData(items = scene.goods, silvers = Nil).asJson)
         .as(StateType.Loot)
 
@@ -407,9 +409,18 @@ case class CaravanState(
 
   // ── Уход и вспомогательное ────────────────────────────────────────────────
 
+  /** Уйти, не тронув обоз. Объявление на этом и кончается: караван уходит своей
+    * дорогой, и найти его второй раз негде. */
   private def leave(user: User, renderer: Renderer): Task[StateType] =
     heroDao.writeSceneData(user.userId, Json.Null) *>
-      renderer.show(user, Screen(content.text("caravan.left"), Nil)).as(StateType.Dungeon)
+      renderer.show(user, Screen(content.text("caravan.left"), Nil)) *>
+      failQuest(user, renderer).as(StateType.Dungeon)
+
+  /** Цель упущена — объявление пропадает с доски. Разгромленная охрана уже
+    * отмечена сделанной, и её это не касается. */
+  private def failQuest(user: User, renderer: Renderer): Task[Unit] =
+    BoardProgress.markFailed(heroDao, user.userId, BoardKind.CaravanRout).flatMap(failed =>
+      ZIO.when(failed)(renderer.show(user, Screen(content.text("questBoard.failed"), Nil))).unit)
 
   private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     parseAction(ua.payload) match {

@@ -264,7 +264,7 @@ object StatesMap {
             itemRepo,
             content
           ),
-          QuestBoard        -> QuestBoardState(heroDao, inventoryRepo, scheduler, content),
+          QuestBoard        -> QuestBoardState(heroDao, inventoryRepo, artifactRepo, scheduler, content),
           QuestRoad         -> QuestRoadState(heroDao, scheduler, content),
           Thieves           -> ThievesState(heroDao, content),
           ThievesSpoils     -> ThievesSpoilsState(heroDao, content),

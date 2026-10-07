@@ -13,7 +13,7 @@ import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
-import pangea.model.quest.NpcQuest
+import pangea.model.quest.{BoardKind, NpcQuest}
 import pangea.model.item.{BrewKind, BrewRates, FlaskEffect, FlaskRates, Item, ItemDetails, PassiveKind, PotionKind, DivineKind, DivineRates}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
@@ -32,7 +32,7 @@ import pangea.model.arena.ArenaRates
 import pangea.service.state.states.arena.ArenaBattle
 import pangea.service.state.states.battle.BattleState.ArenaOwnActions
 import pangea.service.schedule.Scheduler
-import pangea.service.state.{AzatData, MarisaQuest, NpcQuestLog, State, UserAction, KillLogData}
+import pangea.service.state.{AzatData, BoardProgress, MarisaQuest, NpcQuestLog, State, UserAction, KillLogData}
 import zio.{Random, Task, ZIO}
 import java.util.concurrent.TimeUnit
 
@@ -404,15 +404,49 @@ case class BattleState(
           showDown(user, down, renderer)
       case Outcome.Death =>
         (persistHero *> persistSquad *> clearDust).uninterruptible *> showLog *> showGroup *>
-          renderer.show(user, Screen(content.text("battle.death"), Nil)).as(StateType.Death)
+          renderer.show(user, Screen(content.text("battle.death"), Nil)) *>
+          failQuestBehind(user, renderer).as(StateType.Death)
       case Outcome.Fled =>
         // Сюжетный бой идёт не в лабиринте — бежать из него в город.
         val to = if (res.battle.story.isDefined) StateType.GlobalMap else StateType.Dungeon
         (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
           showLog *> showGroup *>
-          renderer.show(user, Screen(content.text("battle.fled"), Nil)).as(to)
+          renderer.show(user, Screen(content.text("battle.fled"), Nil)) *>
+          failQuestBehind(user, renderer).as(to)
     }
   }
+
+  /** За каким заданием герой пришёл в этот бой: видно по роутингу добычи — он
+    * говорит, куда бой вернётся, а значит и откуда герой здесь. Караван и
+    * пещера с канализацией ходят своими состояниями, воры — экраном поживы.
+    * Пещеру и канализацию различает сама сцена. */
+  private def questBehind(user: User): Task[Option[BoardKind]] =
+    heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LootState.LootData].toOption).flatMap { loot =>
+      loot.returnState.flatMap {
+        case StateType.ThievesSpoils => Some(BoardKind.Thieves)
+        case StateType.Caravan       => Some(BoardKind.CaravanRout)
+        case StateType.MonsterCave   =>
+          val sewer = loot.eventData.flatMap(_.as[pangea.model.cave.CaveScene].toOption).exists(_.sewer)
+          Some(if (sewer) BoardKind.SewerRats else BoardKind.CaveClear)
+        case _ => None
+      }
+    })
+
+  /** Герой отступил от квестовой цели — сбежал или пал. Цель на этом потеряна:
+    * объявление пропадает с доски. Сделанное задание (`done`) это не трогает —
+    * охрану он уже перебил, а плату берут у доски. */
+  private def failQuestBehind(user: User, renderer: Renderer): Task[Unit] =
+    questBehind(user).flatMap {
+      case None       => ZIO.unit
+      case Some(kind) =>
+        BoardProgress.markFailed(heroDao, user.userId, kind).flatMap { failed =>
+          // Цель потеряна — возвращаться к ней некуда: роутинг добычи стираем,
+          // иначе он остался бы висеть и повёл бы героя к пустой сцене.
+          ZIO.when(failed)(
+            heroDao.writeSceneData(user.userId, Json.Null) *>
+              renderer.show(user, Screen(content.text("questBoard.failed"), Nil))).unit
+        }
+    }
 
   // ── Бой на арене ────────────────────────────────────────────────────────────
 

@@ -30,4 +30,13 @@ object BoardProgress {
       if (next == data) zio.ZIO.succeed(false)
       else heroDao.writeQuestData(userId, next.asJson).as(true)
     }
+
+  /** Провалить задание такого вида: объявление пропадает с доски. Возвращает,
+    * было ли что проваливать. */
+  def markFailed(heroDao: HeroDao, userId: UserId, kind: BoardKind): Task[Boolean] =
+    load(heroDao, userId).flatMap { data =>
+      val next = data.markFailed(kind)
+      if (next == data) zio.ZIO.succeed(false)
+      else heroDao.writeQuestData(userId, next.asJson).as(true)
+    }
 }
