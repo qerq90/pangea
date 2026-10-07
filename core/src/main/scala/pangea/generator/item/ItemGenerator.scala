@@ -29,13 +29,13 @@ object ItemGenerator {
     ((param + param / 100.0 * pct).toLong, next)
   }
 
-  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(4+R3) ±20%;
+  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(6+R3) ±20%;
   // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%. R3 = rarity.factorR3.
   private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
     val r3 = item.rarity.factorR3
     item.itemType match {
       case ItemType.Weapon =>
-        val (bonus, next) = modifySpread(item.lvl * (3.0 + r3), rng, 20L)
+        val (bonus, next) = modifySpread(item.lvl * (6.0 + r3), rng, 20L)
         (item.withAttack(item.attack + bonus), next)
       case ItemType.ChestPlate =>
         val (bonus, next) = modifySpread(item.lvl * (12.0 + r3), rng, 10L)
