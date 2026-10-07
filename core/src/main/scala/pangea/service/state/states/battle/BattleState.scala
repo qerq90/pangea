@@ -149,7 +149,10 @@ case class BattleState(
   private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long,
                             note: String)(turn: Turn): Task[StateType] =
     for {
-      result <- turn(hero, battle, now)
+      struck <- turn(hero, battle, now)
+      // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
+      // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
+      result  = ghoulFeast(battle, struck, now)
       // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
       // именно источник добил героя до полоски, а что за этот ход он её перешёл.
       guarded = stoneGuardRescue(hero, result, now)
@@ -178,9 +181,7 @@ case class BattleState(
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
       hinted  = plainSteelHint(hero, pulled)
-      // «Упырь» (порог 12): пир за каждого павшего в этом ходу — ещё в бою.
-      fed     = ghoulFeast(battle, hinted, now)
-      state  <- commit(user, fed, now, renderer, hero, note)
+      state  <- commit(user, hinted, now, renderer, hero, note)
     } yield state
 
   /** Башни стоят, пока есть кого прикрывать. Не осталось живой охраны — бой
@@ -1893,9 +1894,9 @@ case class BattleState(
         battle     = battle.copy(effects = battle.effects.copy(heroMirrors = left)),
         mirrored   = true))
     } else
-      // «Охотник» (порог 10): герой читает замах и с шансом отводит удар целиком.
-      // Бросок тратится только если набор собран — порядок бросков в тестах не плывёт.
-      chanceRoll(hero.sets.blockChancePct > 0L, hero.sets.blockChancePct).flatMap {
+      // Отвести обычный удар целиком: механика готова, но ставку пока никто не
+      // даёт (см. HeroSets.blockAttackChancePct) — броска при нуле нет.
+      chanceRoll(hero.sets.blockAttackChancePct > 0L, hero.sets.blockAttackChancePct).flatMap {
         case true =>
           ZIO.succeed(MobStrike(
             newHp      = hero.fightStats.hp,
@@ -2003,8 +2004,13 @@ case class BattleState(
             ms   = best(idx)
             paid = battle.copy(monsterCurrentEnergy = (battle.monsterCurrentEnergy - ms.cost(battle.monsterLvl)).max(0L))
             cast = ms.cast(paid, hero, nowMs)
+            hurts = cast.heroHp < hero.fightStats.hp || cast.heroArmor < hero.fightStats.armor
+            // «Охотник» (порог 10): приём, который должен был навредить, с шансом
+            // срывается целиком — и так каждый раз, а не единожды за бой.
+            blocked <- chanceRoll(hurts && hero.sets.blockSkillChancePct > 0L, hero.sets.blockSkillChancePct)
           } yield
-            (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
+            if (blocked) (cast.battle, hero, content.text("battle.hunterBlockSkill"))
+            else (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
         else ZIO.succeed((battle, hero, ""))
     } yield out
 

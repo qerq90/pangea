@@ -126,7 +126,7 @@ object ItemSet extends Enum[ItemSet] {
     val EnergyPct: Long        = 10L
     val AgiRegenMult: Long     = 2L
     val RepeatChancePct: Long  = 25L
-    val BlockChancePct: Long   = 10L
+    val BlockSkillChancePct: Long = 10L
     val SkillCritBonusPct: Long = 10L
 
     def bonuses: List[SetBonus] = List(
@@ -134,7 +134,7 @@ object ItemSet extends Enum[ItemSet] {
       SetBonus(4,  s"+$EnergyPct% к энергии. Ловкость восстанавливает в $AgiRegenMult раза больше энергии за раунд."),
       SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд."),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, s"$BlockChancePct% шанс заблокировать урон от атаки противника."),
+      SetBonus(10, s"$BlockSkillChancePct% шанс заблокировать урон от атакующего умения противника."),
       SetBonus(12, s"+$SkillCritBonusPct% к шансу критического применения всех атакующих умений.")
     )
   }

@@ -5,6 +5,7 @@ import pangea.engine.SceneContent
 import pangea.model.battle.{Buff, Burn, HeroBattleState, Regen, SoloPveBattle}
 import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
+import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -856,15 +857,19 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(!screens.map(_.text).mkString("\n").contains("Промах не в счёт"))
     },
 
-    test("«Охотник» 10: удар противника с шансом отводится целиком") {
+    test("«Охотник» 10: приём противника с шансом срывается, и так каждый раз") {
       val hero = hunterHero(10).copy(fightStats = strongHero.fightStats.copy(hp = 500, armor = 0))
-      // Броски: разброс удара героя, попадание моба, затем бросок блока.
-      // Единица в блоке — прокнуло, сотня — нет.
+      // Моб с полным запасом энергии применяет умение каждый раунд.
+      val casting = strongBattle.copy(
+        monsterStats         = strongBattle.monsterStats.copy(energy = MonsterEnergy.maxEnergy(1L)),
+        monsterCurrentEnergy = MonsterEnergy.maxEnergy(1L))
+      // Броски раунда: разброс удара героя, попадание моба (3 — промах, чтобы
+      // обычная атака не мешала счёту), выбор умения, затем бросок блока.
       def round(blockRoll: Int, h: pangea.model.hero.Hero) =
         for {
-          t             <- makeState(h, strongBattle)
+          t             <- makeState(h, casting)
           (state, dao, r) = t
-          _             <- TestRandom.feedInts(60, 99, blockRoll)
+          _             <- TestRandom.feedInts(60, 3, 0, blockRoll)
           _             <- TestRandom.feedLongs(100L)
           _             <- state.action(testUser, tap("Attack"), r)
           after         <- dao.getHeroByUserId(userId).map(_.get)
@@ -873,9 +878,19 @@ object BattleStateSpec extends ZIOSpecDefault {
       for {
         blocked <- round(1, hero)
         passed  <- round(100, hero)
-      } yield assertTrue(pangea.model.item.ItemSet.Hunter.BlockChancePct == 10L) &&
-              assertTrue(blocked._1 == 500L && blocked._2.contains("отводите удар")) &&
-              assertTrue(passed._1 < 500L && !passed._2.contains("отводите удар"))
+      } yield assertTrue(pangea.model.item.ItemSet.Hunter.BlockSkillChancePct == 10L) &&
+              assertTrue(hero.sets.blockSkillChancePct == 10L) &&
+              // прокнуло — урона нет, не прокнуло — есть
+              assertTrue(blocked._1 == 500L && blocked._2.contains("срываете его приём")) &&
+              assertTrue(passed._1 < 500L && !passed._2.contains("срываете его приём"))
+    },
+
+    test("блок обычного удара остался в механике, но пока его никто не даёт") {
+      // Ставка нулевая у любого набора: механика готова под будущие бонусы, а
+      // броска при нуле нет вовсе — порядок бросков в боях не плывёт.
+      assertTrue(hunterHero(12).sets.blockAttackChancePct == 0L) &&
+      assertTrue(ghoulHero(12).sets.blockAttackChancePct == 0L) &&
+      assertTrue(strongHero.sets.blockAttackChancePct == 0L)
     },
 
     test("«Охотник» 12: умение с шансом критует вдвое, без набора — никогда") {

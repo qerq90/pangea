@@ -133,9 +133,15 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   def repeatOnMissChancePct: Long =
     if (has(ItemSet.Hunter, 6)) ItemSet.Hunter.RepeatChancePct else 0L
 
-  /** Шанс (в %) заблокировать урон от атаки противника (порог 10). */
-  def blockChancePct: Long =
-    if (has(ItemSet.Hunter, 10)) ItemSet.Hunter.BlockChancePct else 0L
+  /** Шанс (в %) заблокировать урон от атакующего умения противника
+   *  («Охотник», порог 10). */
+  def blockSkillChancePct: Long =
+    if (has(ItemSet.Hunter, 10)) ItemSet.Hunter.BlockSkillChancePct else 0L
+
+  /** Шанс (в %) отвести ОБЫЧНЫЙ удар противника целиком. Пока его не
+   *  даёт ни один набор — механика стоит готовой под будущие бонусы
+   *  (см. `BattleState.mobStrike`). Ноль — броска нет вовсе. */
+  def blockAttackChancePct: Long = 0L
 
   /** Прибавка к шансу крита всех атакующих умений, в п.п. (порог 12).
    *  У «Удара в слабое место» свой шанс от интеллекта — набор прибавляется
