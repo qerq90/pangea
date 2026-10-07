@@ -303,12 +303,11 @@ object DailyQuestSpec extends ZIOSpecDefault {
         DailyRates.silver(l) / green == 6L
       }) &&
       // опыт — пятидесятая часть порога, то есть два процента уровня на любом уровне
-      assertTrue((3L to Hero.MaxLevel).forall { l =>
+      assertTrue((2L to Hero.MaxLevel).forall { l =>
         DailyRates.exp(l) == Hero.neededExpForLevel(l) / 50L
       }) &&
-      // на первых двух уровнях эта доля совсем мала — держит пол
-      assertTrue((1L to 2L).forall(l =>
-        DailyRates.exp(l) == 5L && Hero.neededExpForLevel(l) / 50L < 5L)) &&
+      // на первом уровне эта доля совсем мала — держит пол
+      assertTrue(DailyRates.exp(1L) == 5L && Hero.neededExpForLevel(1L) / 50L < 5L) &&
       assertTrue(DailyKind.BankLot.doubloons == 2L) &&
       assertTrue(DailyKind.BankRelic.doubloons == 5L) &&
       assertTrue(DailyKind.BankGem.doubloons == 5L) &&
