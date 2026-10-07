@@ -448,6 +448,35 @@ object CaravanSpec extends ZIOSpecDefault {
               assertTrue(said.contains("Вы пропускаете караван"))
     },
 
+    test("уход от каравана по объявлению валит задание: оно пропадает с доски") {
+      import pangea.model.quest.{BoardData, BoardKind, BoardSlot}
+      /** Объявление на столе и сцена каравана; `done` — охрану уже перебили. */
+      def go(action: String, done: Boolean) =
+        for {
+          t <- caravan()
+          (state, dao, _, r) = t
+          _    <- dao.writeQuestData(userId,
+                    BoardData(slots = List(BoardSlot(BoardKind.CaravanRout, taken = true, done = done))).asJson)
+          _    <- put(dao, scene(stage = CaravanRates.StageMoment, smoke = true, weakened = true))
+          // оба броска кражи удачные: подкрался и ушёл незамеченным
+          _    <- TestRandom.feedInts(1, 1)
+          _    <- state.action(testUser, tap(action), r)
+          said <- texts(r)
+          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        } yield (said, data)
+      for {
+        left   <- go("CaravanLeave", done = false)
+        // тихая кража тоже уводит караван: охрана цела, задание не сделано
+        sneaked <- go("CaravanSneak", done = false)
+        // а разгромленную охрану уход не отменяет — за платой идут к доске
+        after  <- go("CaravanLeave", done = true)
+      } yield assertTrue(left._2.slots.isEmpty &&
+                         left._1.contains("не уверен, что смогу найти их во второй раз")) &&
+              assertTrue(sneaked._2.slots.isEmpty) &&
+              assertTrue(after._2.slots.size == 1 && after._2.slots.head.done) &&
+              assertTrue(!after._1.contains("задание провалено"))
+    },
+
     test("караван переживает уход в «Персонаж»: тот же состав, тот же товар") {
       for {
         t <- caravan()

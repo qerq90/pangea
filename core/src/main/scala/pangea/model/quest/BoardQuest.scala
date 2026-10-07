@@ -165,6 +165,14 @@ final case class BoardData(
       case idx => updated(idx)(_.copy(done = true))
     }
 
+  /** Убрать с доски первое взятое и незакрытое задание такого вида: цель
+    * потеряна, второй раз её не найти. Ничего не взято — ничего не меняем. */
+  def markFailed(kind: BoardKind): BoardData =
+    slots.indexWhere(s => s.kind == kind && s.taken && !s.done) match {
+      case -1  => this
+      case idx => copy(slots = slots.patch(idx, Nil, 1))
+    }
+
   /** Взято ли сейчас задание такого вида (и ещё не закрыто). */
   def hunting(kind: BoardKind): Boolean =
     slots.exists(s => s.kind == kind && s.taken && !s.done)

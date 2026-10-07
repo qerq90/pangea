@@ -11,7 +11,8 @@ import pangea.model.quest._
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.states.road.RoadProgress
-import pangea.service.state.{BoardProgress, UserAction}
+import pangea.model.artifact.ArtifactKind
+import pangea.service.state.{BoardProgress, QuestStash, UserAction}
 import pangea.test._
 import zio.ZIO
 import zio.test._
@@ -37,14 +38,20 @@ object QuestBoardSpec extends ZIOSpecDefault {
   /** Полдень понедельника 5 октября 2026 по Москве. */
   private val monday = 1791183600000L
 
-  private def board(lvl: Long = 10L, items: List[Item] = Nil) =
+  /** Доска героя. `casket` и `livingBag` — что лежит в Ларце Азата и Живой
+    * сумке: задания смотрят и туда (см. QuestStash). */
+  private def board(lvl: Long = 10L, items: List[Item] = Nil,
+                    casket: List[Item] = Nil, livingBag: List[Item] = Nil) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero(lvl))
       inv       = TestInventoryRepository.withItems(items)
+      arts      = TestArtifactRepository.of(
+                    casket = TestArtifactRepository.artifact(pangea.model.artifact.ArtifactKind.Casket, tier = 1, items = casket),
+                    bag    = TestArtifactRepository.artifact(pangea.model.artifact.ArtifactKind.LivingBag, tier = 1, items = livingBag))
       sched    <- TestScheduler.make
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (QuestBoardState(heroDao, inv, sched, content), heroDao, inv, renderer)
+    } yield (QuestBoardState(heroDao, inv, arts, sched, content), heroDao, inv, renderer, arts)
 
   private def saved(dao: TestHeroDao) =
     dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
@@ -101,7 +108,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("выездное уводит от доски в дорогу, а поллеру оставляет задачу") {
       for {
         t <- board()
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _     <- state.action(testUser, tap("BoardMine"), r)
         fresh <- saved(dao)
         idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
@@ -121,7 +128,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("с выездного можно уйти и выдвинуться к нему снова") {
       for {
         t <- board()
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _     <- state.action(testUser, tap("BoardMine"), r)
         fresh <- saved(dao)
         idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
@@ -140,7 +147,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("стена досок: своя открыта, чужая отвечает своим отказом") {
       for {
         t <- board(lvl = 10L)
-        (state, _, _, r) = t
+        (state, _, _, r, _) = t
         _      <- state.enter(testUser, r)
         wall   <- r.sentScreens.map(_.last)
         _      <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Veteran.key), r)
@@ -156,7 +163,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("брать можно хоть всё разом") {
       for {
         t <- board()
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _    <- state.action(testUser, tap("BoardMine"), r)
         _    <- ZIO.foreachDiscard(0 until BoardRates.Slots)(i =>
                   state.action(testUser, tap(s"${QuestBoardState.TakePrefix}$i"), r))
@@ -171,7 +178,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
       val alien  = trophy(3L, Race.Elf, 10L, TrophyKind.Relic)
       for {
         t <- board(items = List(sack, relic, alien))
-        (state, dao, inv, r) = t
+        (state, dao, inv, r, _) = t
         _     <- state.action(testUser, tap("BoardMine"), r)
         // кладём на доску заведомо орочье задание
         fresh <- saved(dao)
@@ -191,7 +198,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("без трофея сдать нельзя, и сумку не трогают") {
       for {
         t <- board(items = List(trophy(1L, Race.Elf, 5L)))
-        (state, dao, inv, r) = t
+        (state, dao, inv, r, _) = t
         _    <- state.action(testUser, tap("BoardMine"), r)
         fresh <- saved(dao)
         orcs  = fresh.copy(slots = List(BoardSlot(BoardKind.Trophy, Some(Race.Orc.entryName), taken = true)))
@@ -206,7 +213,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("караван и пещера отмечаются в пути, а платят на доске") {
       for {
         t <- board()
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _      <- state.action(testUser, tap("BoardMine"), r)
         fresh  <- saved(dao)
         taken   = fresh.copy(slots = List(
@@ -232,7 +239,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("в понедельник доска переписывается вместе со взятым") {
       for {
         t <- board()
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _      <- state.action(testUser, tap("BoardMine"), r)
         _      <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}0"), r)
         before <- saved(dao)
@@ -248,7 +255,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
     test("перерос раздел — доска меняется на новую") {
       for {
         t <- board(lvl = 25L)
-        (state, dao, _, r) = t
+        (state, dao, _, r, _) = t
         _      <- state.action(testUser, tap("BoardMine"), r)
         novice <- saved(dao)
         grown   = hero(26L)
@@ -279,7 +286,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
       def order(items: List[Item]) =
         for {
           t <- board(items = items)
-          (state, dao, inv, r) = t
+          (state, dao, inv, r, _) = t
           _     <- state.action(testUser, tap("BoardMine"), r)
           fresh <- saved(dao)
           one    = fresh.copy(slots = List(BoardSlot(BoardKind.DwarfSupply,
@@ -300,6 +307,84 @@ object QuestBoardSpec extends ZIOSpecDefault {
               assertTrue(many._3 == 2 && many._2.slots.isEmpty) &&
               assertTrue(many._4.doubloons == BoardRates.Doubloons) &&
               assertTrue(many._1.contains("пересчитывают его дважды"))
+    },
+
+    test("склянки считают и в Живой сумке, и в Ларце — но не в шкафу") {
+      val kind = BrewKind.rank1.head
+      def flask(id: Long) = BrewKind.item(kind).copy(id = id)
+      /** Шесть склянок при герое, четыре — там, куда скажут. */
+      def order(bag: List[Item], casket: List[Item] = Nil, livingBag: List[Item] = Nil,
+                wardrobe: List[Item] = Nil) =
+        for {
+          heroDao  <- TestHeroDao.withHero(userId, hero(10L))
+          inv       = TestInventoryRepository.withItems(bag)
+          arts      = TestArtifactRepository.of(
+                        casket = TestArtifactRepository.artifact(ArtifactKind.Casket, 1, items = casket),
+                        bag    = TestArtifactRepository.artifact(ArtifactKind.LivingBag, 1, items = livingBag),
+                        wardrobe = TestArtifactRepository.artifact(ArtifactKind.Wardrobe, 1, items = wardrobe))
+          sched    <- TestScheduler.make
+          r        <- TestRenderer.make
+          content  <- ZIO.attempt(SceneContent.load())
+          state     = QuestBoardState(heroDao, inv, arts, sched, content)
+          _        <- state.action(testUser, tap("BoardMine"), r)
+          fresh    <- saved(heroDao)
+          one       = fresh.copy(slots = List(BoardSlot(BoardKind.DwarfSupply,
+                        taken = true, brew = Some(kind.entryName), band = 3)))
+          _        <- heroDao.writeQuestData(userId, one.asJson)
+          _        <- state.action(testUser, tap(s"${QuestBoardState.HandPrefix}0"), r)
+          said     <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          data     <- saved(heroDao)
+          kept     <- arts.get(pangea.model.hero.HeroId(1L)).map(a =>
+                        (a.casket.items.data.size, a.bag.items.data.size, a.wardrobe.items.data.size))
+        } yield (said, data, inv.snapshot.size, kept)
+      for {
+        inLivingBag <- order((1L to 6L).toList.map(flask), livingBag = (7L to 10L).toList.map(flask))
+        inCasket    <- order((1L to 6L).toList.map(flask), casket = (7L to 10L).toList.map(flask))
+        inWardrobe  <- order((1L to 6L).toList.map(flask), wardrobe = (7L to 10L).toList.map(flask))
+      } yield
+        // Живая сумка сама ловит склянки с добычи — без неё задание было не выполнить
+        assertTrue(inLivingBag._2.slots.isEmpty && inLivingBag._3 == 0 && inLivingBag._4._2 == 0) &&
+        // ларец смотрят тем же правилом
+        assertTrue(inCasket._2.slots.isEmpty && inCasket._3 == 0 && inCasket._4._1 == 0) &&
+        // а в шкаф не смотрят ни при каких обстоятельствах: шесть — это шесть
+        assertTrue(inWardrobe._1.contains("Ящик берут только полным")) &&
+        assertTrue(inWardrobe._2.slots.size == 1 && inWardrobe._3 == 6 && inWardrobe._4._3 == 4) &&
+        assertTrue(!QuestStash.Searched.contains(ArtifactKind.Wardrobe)) &&
+        assertTrue(QuestStash.Searched.toSet == Set[ArtifactKind](ArtifactKind.Casket, ArtifactKind.LivingBag))
+    },
+
+    test("трофей берут и из ларца, и из живой сумки") {
+      val race = Race.Orc
+      def order(where: String) =
+        for {
+          heroDao  <- TestHeroDao.withHero(userId, hero(10L))
+          inv       = TestInventoryRepository.withItems(Nil)
+          item      = trophy(5L, race, lvl = 10L)
+          arts      = TestArtifactRepository.of(
+                        casket = TestArtifactRepository.artifact(ArtifactKind.Casket, 1,
+                                   items = if (where == "casket") List(item) else Nil),
+                        bag    = TestArtifactRepository.artifact(ArtifactKind.LivingBag, 1,
+                                   items = if (where == "bag") List(item) else Nil))
+          sched    <- TestScheduler.make
+          r        <- TestRenderer.make
+          content  <- ZIO.attempt(SceneContent.load())
+          state     = QuestBoardState(heroDao, inv, arts, sched, content)
+          _        <- state.action(testUser, tap("BoardMine"), r)
+          fresh    <- saved(heroDao)
+          one       = fresh.copy(slots = List(BoardSlot(BoardKind.Trophy, race = Some(race.entryName), taken = true)))
+          _        <- heroDao.writeQuestData(userId, one.asJson)
+          _        <- state.action(testUser, tap(s"${QuestBoardState.HandPrefix}0"), r)
+          data     <- saved(heroDao)
+          h        <- heroDao.getHeroByUserId(userId).map(_.get)
+          left     <- arts.get(pangea.model.hero.HeroId(1L)).map(a => a.casket.items.data ++ a.bag.items.data)
+        } yield (data, h.doubloons, left)
+      for {
+        fromCasket <- order("casket")
+        fromBag    <- order("bag")
+      } yield assertTrue(fromCasket._1.slots.isEmpty && fromCasket._2 == BoardRates.TrophyDoubloons) &&
+              assertTrue(fromBag._1.slots.isEmpty && fromBag._2 == BoardRates.TrophyDoubloons) &&
+              // трофей ушёл оттуда, где лежал
+              assertTrue(fromCasket._3.isEmpty && fromBag._3.isEmpty)
     },
 
     test("у всех разделов и видов заданий есть тексты") {

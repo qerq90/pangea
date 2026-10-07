@@ -694,6 +694,31 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(stay == StateType.MonsterCave) &&
               assertTrue(left == StateType.Dungeon && after.contains(io.circe.Json.Null)) &&
               assertTrue(cancels.contains(userId -> TaskKind.CaveRest))
+    },
+
+    test("уход из пещеры по объявлению валит задание: второй такой пещеры не найти") {
+      import pangea.model.quest.{BoardData, BoardKind, BoardSlot}
+      def go(kind: BoardKind, sewer: Boolean, done: Boolean) =
+        for {
+          t <- cave()
+          (state, dao, _, _, r) = t
+          _    <- dao.writeQuestData(userId,
+                    BoardData(slots = List(BoardSlot(kind, taken = true, done = done))).asJson)
+          _    <- put(dao, smallCave().copy(sewer = sewer))
+          out  <- state.action(testUser, tap("CaveOut"), r).zipRight(state.action(testUser, tap("CaveOutYes"), r))
+          said <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        } yield (out, said, data)
+      for {
+        fromCave  <- go(BoardKind.CaveClear, sewer = false, done = false)
+        fromSewer <- go(BoardKind.SewerRats, sewer = true,  done = false)
+        // зачищенную пещеру уход не отменяет: плату забирают у доски
+        cleared   <- go(BoardKind.CaveClear, sewer = false, done = true)
+      } yield assertTrue(fromCave._3.slots.isEmpty &&
+                         fromCave._2.contains("не уверен, что смогу найти их во второй раз")) &&
+              // канализация уходит так же — и герой возвращается в город, а не в лабиринт
+              assertTrue(fromSewer._3.slots.isEmpty && fromSewer._1 == StateType.GlobalMap) &&
+              assertTrue(cleared._3.slots.size == 1 && !cleared._2.contains("задание провалено"))
     }
   )
 }
