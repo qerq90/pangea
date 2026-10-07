@@ -231,6 +231,33 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
     test("пурпурное и легендарное не-оружие: всегда ровно одно гнездо") {
       val dists = List(Rarity.Violet, Rarity.Orange).flatMap(r => gearSlots.map(socketDist(_, r, 300L)))
       assertTrue(dists.forall(_.keySet == Set(1)))
+    },
+
+    test("атака падает только на оружие — ни шлемов, ни колец с прибавкой к урону") {
+      val items = (1L to 4000L).toList.flatMap { seed =>
+        Rarity.values.toList.map(r => ItemGenerator.createItemAtLevel(20L, r, Rng(seed))._1)
+      }
+      val withAttack = items.filter(_.attack > 0)
+      assertTrue(items.size > 1000) &&
+      // атака есть — значит это оружие, и ничто иное
+      assertTrue(withAttack.forall(_.itemType == ItemType.Weapon)) &&
+      // у оружия она есть всегда: обязательная прибавка никуда не делась
+      assertTrue(items.filter(_.itemType == ItemType.Weapon).forall(_.attack > 0)) &&
+      // прочие слоты не остались пустыми: главный стат им достался другой
+      assertTrue(items.filterNot(_.itemType == ItemType.Weapon)
+        .forall(i => i.armor > 0 || i.defence > 0 || i.accuracy > 0 || i.evasion > 0 || i.hp > 0))
+    },
+
+    test("пересборка в кубе тоже не вешает атаку на броню") {
+      val slots = List(ItemType.Helmet, ItemType.ChestPlate, ItemType.Ring, ItemType.Boots,
+        ItemType.Amulet, ItemType.Belt, ItemType.Gloves, ItemType.Pants)
+      val gear = (1L to 400L).toList.flatMap { seed =>
+        slots.map(t => ItemGenerator.createItemOfType(t, 20L, Rarity.Orange, Rng(seed))._1)
+      }
+      val weapons = (1L to 200L).toList
+        .map(seed => ItemGenerator.createItemOfType(ItemType.Weapon, 20L, Rarity.Orange, Rng(seed))._1)
+      assertTrue(gear.forall(_.attack == 0)) &&
+      assertTrue(weapons.forall(_.attack > 0))
     }
   )
 }

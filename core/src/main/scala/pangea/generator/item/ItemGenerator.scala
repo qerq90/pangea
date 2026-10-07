@@ -48,7 +48,11 @@ object ItemGenerator {
   private def updateExtraParams(n: Long, item: Item, rng: Rng): (Item, Rng) =
     if (n <= 0) (item, rng)
     else {
-      val (stat, rng1) = rng.pick(Stat.values.toList)
+      // Атака не ложится ни на что, кроме оружия: шлем с прибавкой к урону —
+      // это прошлое. Прочим слотам достаётся всё остальное.
+      val pool = if (item.itemType == ItemType.Weapon) Stat.values.toList
+                 else Stat.values.toList.filterNot(_ == Stat.Attack)
+      val (stat, rng1) = rng.pick(pool)
       val (modified, rng2) = stat match {
         case Stat.Attack =>
           val (v, r) =
@@ -143,8 +147,10 @@ object ItemGenerator {
           rng3c
         )
       } else {
-        val (attack, rng3b)   = modifyParameter(rarity.factorR * itemLvl, rng3z)
-        val (evasion, rng3c) = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
+        // Лёгкий профиль: меткость и уклонение. Атаки здесь нет — её даёт
+        // только оружие (см. applyMandatory и Stat.Attack в updateExtraParams).
+        val (accuracy, rng3b) = modifyParameter(rarity.factorR * itemLvl, rng3z)
+        val (evasion, rng3c)  = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
             id,
@@ -152,8 +158,8 @@ object ItemGenerator {
             itemLvl,
             rarity,
             itemType,
-            attack = attack,
-            accuracy = 0,
+            attack = 0,
+            accuracy = accuracy,
             energy = 0,
             armor = 0,
             defence = 0,

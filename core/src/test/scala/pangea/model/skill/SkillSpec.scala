@@ -48,30 +48,32 @@ object SkillSpec extends ZIOSpecDefault {
           )
         )
       },
-      test("Стоимость энергии считается по формуле от уровня (герой lvl 10)") {
+      test("Стоимость энергии — своя формула плюс общая надбавка (герой lvl 10)") {
+        // Надбавка одна на всех и сидит в каждом из чисел ниже.
+        val _ = assertTrue(Skill.EnergyCostBonus == 1L)
         assertTrue(
-          Skill.SweepingStrike.energyCost(hero10) == 20L
-        ) && // 10 + lvl
+          Skill.SweepingStrike.energyCost(hero10) == 21L
+        ) && // 10 + lvl + надбавка; lvl
         assertTrue(
-          Skill.QuickStrike.energyCost(hero10) == 10L
-        ) && // 5 + 0.5·lvl
-        assertTrue(Skill.CunningStrike.energyCost(hero10) == 20L) && // 10 + lvl
-        assertTrue(Skill.MinorHeal.energyCost(hero10) == 15L) && // 10 + 0.5·lvl
-        assertTrue(Skill.Ram.energyCost(hero10) == 25L) &&       // 15 + lvl
+          Skill.QuickStrike.energyCost(hero10) == 11L
+        ) && // 5 + lvl + надбавка; 0.5·lvl
+        assertTrue(Skill.CunningStrike.energyCost(hero10) == 21L) && // 10 + lvl + надбавка; lvl
+        assertTrue(Skill.MinorHeal.energyCost(hero10) == 16L) && // 10 + lvl + надбавка; 0.5·lvl
+        assertTrue(Skill.Ram.energyCost(hero10) == 26L) &&       // 15 + lvl
         assertTrue(
-          Skill.BloodHarvest.energyCost(hero10) == 13L
-        ) && // 8 + 0.5·lvl
-        assertTrue(Skill.Reinforcement.energyCost(hero10) == 20L) && // 10 + lvl
-        assertTrue(Skill.Bleeding.energyCost(hero10) == 13L) && // 8 + 0.5·lvl
-        assertTrue(Skill.Restoration.energyCost(hero10) == 35L) && // 15 + 2·lvl
+          Skill.BloodHarvest.energyCost(hero10) == 14L
+        ) && // 8 + lvl + надбавка; 0.5·lvl
+        assertTrue(Skill.Reinforcement.energyCost(hero10) == 21L) && // 10 + lvl + надбавка; lvl
+        assertTrue(Skill.Bleeding.energyCost(hero10) == 14L) && // 8 + lvl + надбавка; 0.5·lvl
+        assertTrue(Skill.Restoration.energyCost(hero10) == 36L) && // 15 + lvl + надбавка; 2·lvl
         assertTrue(
-          Skill.WeakSpotStrike.energyCost(hero10) == 20L
+          Skill.WeakSpotStrike.energyCost(hero10) == 21L
         ) &&                                                // 10 + lvl
-        assertTrue(Skill.Bulwark.energyCost(hero10) == 22L) && // 12 + lvl
-        assertTrue(Skill.BladeWhirl.energyCost(hero10) == 22L) && // 12 + lvl
-        assertTrue(Skill.FanCut.energyCost(hero10) == 15L) &&     // 10 + 0.5·lvl
-        assertTrue(Skill.BattleCry.energyCost(hero10) == 22L) &&  // 12 + lvl
-        assertTrue(Skill.Shove.energyCost(hero10) == 22L)         // 12 + lvl
+        assertTrue(Skill.Bulwark.energyCost(hero10) == 23L) && // 12 + lvl + надбавка; lvl
+        assertTrue(Skill.BladeWhirl.energyCost(hero10) == 23L) && // 12 + lvl + надбавка; lvl
+        assertTrue(Skill.FanCut.energyCost(hero10) == 16L) &&     // 10 + 0.5·lvl
+        assertTrue(Skill.BattleCry.energyCost(hero10) == 23L) &&  // 12 + lvl
+        assertTrue(Skill.Shove.energyCost(hero10) == 23L)         // 12 + lvl
       },
       test("Кулдауны и стартовые кд в бою соответствуют ТЗ") {
         assertTrue(
@@ -138,7 +140,7 @@ object SkillSpec extends ZIOSpecDefault {
       },
       test("Описание в инвентаре подставляет стоимость энергии и КД") {
         val d = Skill.Ram.describe(hero10) // Ram: cooldown = 3
-        assertTrue(d.contains("расходует 25 энергии")) &&
+        assertTrue(d.contains(s"расходует ${25L + Skill.EnergyCostBonus} энергии")) &&
         assertTrue(!d.contains("{}")) &&
         assertTrue(d.contains("Перезарядка: 3 хода")) &&
         // склонение: 1 → ход, 2–4 → хода
