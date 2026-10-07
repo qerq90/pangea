@@ -1,7 +1,7 @@
 package pangea.model.skill
 
 import enumeratum._
-import pangea.model.battle.{Element, Poison, SoloPveBattle}
+import pangea.model.battle.{Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.monster.Race
 import pangea.service.state.states.battle.BattleState
@@ -14,6 +14,10 @@ import pangea.service.state.states.battle.BattleState
  * Четыре первых умения — базовые и стоят 0.8 обычной цены. Бить ими может
  * кто угодно, а вот фляга и починка доспеха — только тем, у кого есть руки и
  * карманы: зверь из канализации не достаёт склянку и не латает броню.
+ *
+ * Отравленного и стихийного оружия в этом списке нет: раса ходит с ним всегда,
+ * и заготавливать его умением незачем (см. `Race.weaponPoison` и
+ * `Race.weaponElement`).
  * Остальные раздаются по расам через [[races]] — у мурлока свои, у демона свои.
  *
  * `template` — описание эффекта с двумя плейсхолдерами: `{name}` — имя моба,
@@ -138,47 +142,6 @@ object MonsterSkill extends Enum[MonsterSkill] {
       Cast(battle.copy(monsterCurrentArmor = newArm), hero.fightStats.hp, hero.fightStats.armor, line)
     }
   }
-
-  /** «Порошок!» — одноразовая заготовка: моб посыпает оружие и до конца боя бьёт
-   *  иначе. Что именно даёт порошок, решает раса: у мурлока и эльфа — яд на
-   *  атаках, у демона, гнома и каджита — стихия. Текст у всех один: игрок видит
-   *  только, что моб что-то высыпал, и должен насторожиться сам. */
-  sealed abstract class Powder(race: Race) extends MonsterSkill(
-    label    = "Порошок!",
-    template = "{name} достал странную пыль и высыпал на своё оружие. Надо быть осторожнее."
-  ) {
-    /** Чем порошок меняет бой — накладывается один раз, при высыпании. */
-    protected def enchant(effects: pangea.model.battle.BattleEffects): pangea.model.battle.BattleEffects
-
-    override val races: Set[Race]   = Set(race)
-    override val costFactor: Double = MonsterEnergy.RacialCostFactor
-
-    /** Ровно один раз за бой: высыпать дважды нечего. */
-    def applicable(battle: SoloPveBattle): Boolean = !battle.effects.monsterPowderUsed
-
-    def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
-      val enchanted = enchant(battle.effects).copy(monsterPowderUsed = true)
-      Cast(battle.copy(effects = enchanted), hero.fightStats.hp, hero.fightStats.armor,
-        template.replace("{name}", battle.monsterName))
-    }
-  }
-
-  /** Порошок, от которого удары начинают травить. */
-  sealed trait PoisonPowder { self: Powder =>
-    protected def enchant(e: pangea.model.battle.BattleEffects) = e.copy(monsterPoisonsOnHit = true)
-  }
-
-  /** Порошок, переводящий удары в стихию. */
-  sealed abstract class ElementPowder(race: Race, element: Element) extends Powder(race) {
-    protected def enchant(e: pangea.model.battle.BattleEffects) =
-      e.copy(monsterAttackElement = Some(element.entryName))
-  }
-
-  case object MurlocPowder  extends Powder(Race.Murloc) with PoisonPowder
-  case object ElfPowder     extends Powder(Race.Elf)    with PoisonPowder
-  case object DemonPowder   extends ElementPowder(Race.Demon,   Element.Fire)
-  case object GnomePowder   extends ElementPowder(Race.Gnome,   Element.Cold)
-  case object KhajiitPowder extends ElementPowder(Race.Khajiit, Element.Air)
 
   /** Мурлочий «Грязный удар»: бьёт слабее обычного, зато всегда травит. Защита
    *  героя срезает урон процентно, как и у прочих ударов. */

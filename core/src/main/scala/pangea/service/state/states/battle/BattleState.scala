@@ -769,22 +769,24 @@ case class BattleState(
 
   /** Ответ на ход героя: моб в паре бьёт и кастует ([[monsterPhase]]); пары
     * нет — только геройская сторона конца раунда ([[quietPhase]]). */
-  private def respond(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String], skip: Set[Long]): Task[TurnResult] =
+  private def respond(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String],
+                      skip: Set[Long], vampHeal: Long = 0L): Task[TurnResult] =
     // На арене напротив живой игрок: он не отвечает тут же, а бьёт своим
     // ходом. Ход героя кончается тиками — и уходит сопернику.
-    if (battle.arena.isDefined) quietPhase(hero, battle, nowMs, log, skip)
-    else if (battle.group.paired) monsterPhase(hero, battle, nowMs, log, skip)
-    else quietPhase(hero, battle, nowMs, log, skip)
+    if (battle.arena.isDefined) quietPhase(hero, battle, nowMs, log, skip, vampHeal)
+    else if (battle.group.paired) monsterPhase(hero, battle, nowMs, log, skip, vampHeal)
+    else quietPhase(hero, battle, nowMs, log, skip, vampHeal)
 
   /** Конец раунда без моба в паре: тик бафов и кулдаунов, раны и реген героя,
     * энергия. Мобы ходят потом сами — как мобы вне пары. */
-  private def quietPhase(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String], skip: Set[Long]): Task[TurnResult] =
+  private def quietPhase(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String],
+                         skip: Set[Long], vampHeal: Long = 0L): Task[TurnResult] =
     ZIO.succeed {
       val ticked = battle.tickBuffs(skip)
       val (tickedHero, tickedBattle, heroEffectLine) = tickHeroEffects(hero, ticked, nowMs)
       val alive = tickedHero.fightStats.hp > 0
       val fed   = if (alive) regainEnergy(tickedHero, nowMs) else tickedHero
-      val lines = if (heroEffectLine.isEmpty) log else log :+ heroEffectLine
+      val lines = (if (heroEffectLine.isEmpty) log else log :+ heroEffectLine) ++ vampLine(vampHeal)
       TurnResult(fed, tickedBattle, lines, if (alive) Outcome.Continue else Outcome.Death)
     }
 
@@ -937,19 +939,20 @@ case class BattleState(
             // урона и поджигает бьющего. Скованный холодом молчит.
             thornsResult = bossThorns(healedHero, updated, battle.monsterCurrentArmor, resisted)
             (thornedHero, thornedBattle, thornsLine) = thornsResult
-            log1 = log :+ (attackLine + dotIndicators(thornedBattle))
+            log1 = log :+ attackLine
             log2 =
               if (poisonsNow || gemPoisons || coatPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
               else log1
-            log3 =
-              if (vampGained > 0) log2 :+ content.format("battle.vampirism", "healed" -> vampGained.toString)
-              else log2
-            log4 = (log3 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
+            // Сам вампиризм о себе не говорит: его число уезжает в конец раунда и
+            // там складывается с чужой кровью в одну строку (см. vampLine). Если
+            // раунд кончился раньше хода моба, строку дописываем здесь же.
+            log4 = (log2 ++ elemLog) ++ Vector(thornsLine).filter(_.nonEmpty)
+            fed  = log4 ++ vampLine(vampGained)
             r <-
-              if (!retaliate) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Continue))
-              else if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, log4, nowMs, skip))
-              else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, log4, Outcome.Death))
-              else respond(thornedHero, thornedBattle, nowMs, log4, skip)
+              if (!retaliate) ZIO.succeed(TurnResult(thornedHero, thornedBattle, fed, Outcome.Continue))
+              else if (thornedBattle.monsterCurrentHp <= 0) ZIO.succeed(victoryByHero(thornedHero, thornedBattle, fed, nowMs, skip))
+              else if (thornedHero.fightStats.hp <= 0) ZIO.succeed(TurnResult(thornedHero, thornedBattle, fed, Outcome.Death))
+              else respond(thornedHero, thornedBattle, nowMs, log4, skip, vampGained)
           } yield r
         } else {
           val attackLine = content.format("battle.miss", "chance" -> heroHitPct.toString)
@@ -1675,11 +1678,12 @@ case class BattleState(
     (red0 - (battle.effects.monsterColdDefenceCut + burnCut) / 100.0).max(0.0)
   }
 
-  /** Стихия, которой бьёт моб: своя по природе (Белый волк — холодом) либо
-    * наведённая «Порошком!», если он его высыпал. */
+  /** Стихия, которой бьёт моб. У минибосса она своя (Белый волк — холодом), у
+    * прочих — расовая: каджит всегда с ветром, демон с огнём, гном с холодом,
+    * человек и гоблин с молнией (см. [[Race.weaponElement]]). */
   private def powderElement(battle: SoloPveBattle): Option[Element] =
     battle.boss.flatMap(_.attackElement)
-      .orElse(battle.effects.monsterAttackElement.flatMap(Element.withNameOption))
+      .orElse(Race.withNameOption(battle.monsterRace).flatMap(_.weaponElement))
 
   /** Доли урона по броне и HP от стихии удара моба. У каменного элементаля
     * свой раскол, он важнее — там это природа удара, а не стихия. */
@@ -1860,17 +1864,24 @@ case class BattleState(
   private def monsterDotDamage(battle: SoloPveBattle, base: Long): Long =
     battle.boss.map(_.dotDamageTakenMult).filter(_ != 1.0).fold(base)(m => (base * m).toLong)
 
-  /** Компактная сводка активных DoT на мобе для приписки к строкам атаки:
-    * ` (🟢 -N ❤)(🔴 -N ❤)(🔥 -N ❤)`. Пусто, если эффектов нет. */
-  private def dotIndicators(battle: SoloPveBattle): String = {
-    val maxHp = battle.monsterStats.hp
-    val parts = List(
-      battle.effects.monsterPoison.map(p => s"🟢 -${monsterDotDamage(battle, p.damageOn(maxHp))} ❤"),
-      battle.effects.monsterBleed.map(b => s"🔴 -${monsterDotDamage(battle, b.damageOn(maxHp))} ❤"),
-      battle.effects.monsterBurn.map(bn => s"🔥 -${bn.damageOn(maxHp)} ❤")
-    ).flatten
-    if (parts.isEmpty) "" else parts.mkString(" (", ")(", ")")
-  }
+  /** Строка тика DoT в конце раунда. Одна на все три — яд, кровотечение и
+    * пламя: меняется только значок с именем эффекта. Больше их нигде в логе не
+    * поминают, чтобы одно и то же число не попадалось игроку трижды за раунд;
+    * сколько снимется за ход, видно в шапке рядом с HP. */
+  private def dotTick(icon: String, label: String, damage: Long, monster: String): String =
+    content.format("battle.dotTick", "icon" -> icon, "dot" -> label,
+      "damage" -> damage.toString, "monster" -> monster)
+
+  /** То же в сторону ГЕРОЯ: имя моба тут ни при чём. */
+  private def heroDotTick(icon: String, label: String, damage: Long): String =
+    content.format("battle.heroDotTick", "icon" -> icon, "dot" -> label, "damage" -> damage.toString)
+
+  /** Вампиризм за раунд — одной строкой, как реген, и не важно, откуда он пришёл:
+    * череп в оружии, «Упырь» (порог 4), вампирская фляга или чужая кровь (порог
+    * 10). Пусто, если пить было нечего. */
+  private def vampLine(healed: Long): Vector[String] =
+    if (healed > 0L) Vector(content.format("battle.vampirism", "healed" -> healed.toString))
+    else Vector.empty
 
   // ── Ход монстра ─────────────────────────────────────────────────────────────
 
@@ -1949,8 +1960,12 @@ case class BattleState(
             // Огонь уже отыгран поджогом выше, здесь остаются холод и воздух.
             procElement = powderElement(battle).filter(e => e == Element.Cold || e == Element.Air)
             mobProc <- chanceRoll(procElement.isDefined, Element.ProcChancePct)
-            // Порошок мурлока и эльфа: удар, дошедший до HP, всегда травит.
-            poisons = battle.effects.monsterPoisonsOnHit && newHp < hero.fightStats.hp
+            // Отравленное оружие: удар, дошедший до HP, травит. Мурлок и эльф
+            // ходят так всегда (Race.weaponPoison), Крысиному королю это
+            // поставлено флагом при встрече.
+            poisonedBlade = battle.effects.monsterPoisonsOnHit ||
+                              Race.withNameOption(battle.monsterRace).exists(_.weaponPoison)
+            poisons = poisonedBlade && newHp < hero.fightStats.hp
             effectsAfterHit = {
               val burned =
                 if (!ignites) battle.effects
@@ -2020,7 +2035,8 @@ case class BattleState(
       battle: SoloPveBattle,
       nowMs: Long,
       log: Vector[String],
-      skip: Set[Long]
+      skip: Set[Long],
+      vampHeal: Long
   ): Task[TurnResult] =
     for {
       ticked <- ZIO.succeed(battle.tickBuffs(skip))
@@ -2108,20 +2124,25 @@ case class BattleState(
           tickedHero.copy(fightStats = tickedHero.fightStats.copy(
             hp = (tickedHero.fightStats.hp + bleedShare).min(tickedHero.effectiveMaxHp(nowMs))))
         else tickedHero
+      // Выпито за раунд: вампиризм с удара плюс чужая кровь. Считаем по
+      // РЕАЛЬНОМУ приросту HP — у полного героя лечить уже нечего, и в логе тогда
+      // не появится числа, которого он не получил.
+      bleedGained = heroFedByBleed.fightStats.hp - tickedHero.fightStats.hp
+      drunk       = vampHeal + bleedGained
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
       // выше максимума. «Сосредоточенность» множит реген на 1.1. Пока герой жив.
       finalHeroWithEnergy = if (heroAlive) regainEnergy(heroFedByBleed, nowMs) else heroFedByBleed
 
       // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
-      // порядке) каст моба, тик яда моба, тик регена героя — только непустые.
+      // порядке) каст моба, тики DoT на мобе, тики и реген героя, и последним —
+      // вампиризм. Только непустые.
       monsterLog = {
-        // К строке атаки моба приписываем сводку активных DoT (яд/кровь/огонь) —
-        // берём состояние ДО тика конца раунда (finalBattle), как на стороне игрока.
-        val base       = (log :+ "") :+ (mobLine + dotIndicators(finalBattle))
+        val base       = (log :+ "") :+ mobLine
         val withCast   = if (castLine.nonEmpty) base :+ castLine else base
         val withPoison = if (monsterEffectLine.nonEmpty) withCast :+ monsterEffectLine else withCast
-        if (heroEffectLine.nonEmpty) withPoison :+ heroEffectLine else withPoison
+        val withHero   = if (heroEffectLine.nonEmpty) withPoison :+ heroEffectLine else withPoison
+        withHero ++ vampLine(drunk)
       }
 
       outcome =
@@ -2168,22 +2189,19 @@ case class BattleState(
         val dmg   = bossDamageTaken(hero, battle, burn.damageOn(maxHp))
         (hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - dmg).max(0L))),
          battle.copy(effects = battle.effects.copy(heroBurn = Some(burn.grown))),
-         content.format("battle.elemental.burnTick", "damage" -> dmg.toString))
+         heroDotTick(Burn.Icon, Burn.Label, dmg))
       case None => (hero, battle, "")
     }
     // Яд на герое: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
-    // Гниль Джо и отравленное оружие мобов делят одно поле, но не одну строку:
-    // разъедающая гниль — это про минибосса, у обычного яда свой текст.
+    // Гниль Джо тикает той же строкой, что любой другой яд: своё у минибосса —
+    // само отравление («Ядовитые зловония…»), а не его последствия.
     val (poisonedHero, poisonedBattle, poisonLine) = burnedBattle.effects.heroPoison match {
       case Some(poison) =>
         val dmg = poison.damageOn(burnedHero.effectiveMaxHp(nowMs))
-        val key =
-          if (burnedBattle.boss.contains(MiniBoss.RottenJoe)) "battle.joe.poisonTick"
-          else "battle.heroPoisonTick"
         (burnedHero.copy(fightStats = burnedHero.fightStats.copy(
            hp = (burnedHero.fightStats.hp - dmg).max(0L))),
          burnedBattle.copy(effects = burnedBattle.effects.copy(heroPoison = poison.decayed)),
-         content.format(key, "damage" -> dmg.toString))
+         heroDotTick(Poison.Icon, Poison.Label, dmg))
       case None => (burnedHero, burnedBattle, "")
     }
     // Кровотечение на герое (пасть и когти волка): % макс.HP мимо брони, не
@@ -2193,7 +2211,7 @@ case class BattleState(
         val dmg = bleed.damageOn(poisonedHero.effectiveMaxHp(nowMs))
         (poisonedHero.copy(fightStats = poisonedHero.fightStats.copy(
            hp = (poisonedHero.fightStats.hp - dmg).max(0L))),
-         content.format("battle.heroBleedTick", "damage" -> dmg.toString))
+         heroDotTick(Bleed.Icon, Bleed.Label, dmg))
       case None => (poisonedHero, "")
     }
     val (finalHero, finalBattle, regenLine) = poisonedBattle.effects.heroRegen match {
@@ -2234,14 +2252,14 @@ case class BattleState(
       val dmg = monsterDotDamage(battle, p.damageOn(maxHp))
       hp = (hp - dmg).max(0L)
       eff = eff.copy(monsterPoison = p.decayed)
-      lines = lines :+ content.format("battle.poisonTick", "damage" -> dmg.toString, "monster" -> monsterName)
+      lines = lines :+ dotTick(Poison.Icon, Poison.Label, dmg, monsterName)
     }
     eff.monsterBleed.foreach { b =>
       val dmg = monsterDotDamage(battle, b.damageOn(maxHp))
       hp = (hp - dmg).max(0L)
       bled += dmg
       // Кровотечение не затухает — сила остаётся прежней.
-      lines = lines :+ content.format("battle.bleedTick", "damage" -> dmg.toString, "monster" -> monsterName)
+      lines = lines :+ dotTick(Bleed.Icon, Bleed.Label, dmg, monsterName)
     }
     eff.monsterBurn.foreach { bn =>
       val dmg = bn.damageOn(maxHp)
@@ -2250,7 +2268,7 @@ case class BattleState(
       // сохраняя саму кривую роста (+2 п.п. до порога, дальше +1).
       eff = eff.copy(monsterBurn = Some(
         (1L to burnGrowthMult.max(1L)).foldLeft(bn)((b, _) => b.grown)))
-      lines = lines :+ content.format("battle.burnTick", "damage" -> dmg.toString, "monster" -> monsterName)
+      lines = lines :+ dotTick(Burn.Icon, Burn.Label, dmg, monsterName)
     }
     (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"), bled)
   }
@@ -2624,11 +2642,11 @@ case class BattleState(
       .withEffects(effects)
     if (newHp <= 0) {
       val (swept, splashLog) = splash(hit, armorDmg + hpDmg)
-      next(hero, swept, Vector(skillLine + dotIndicators(hit)) ++ splashLog)
+      next(hero, swept, Vector(skillLine) ++ splashLog)
     } else
       resolveElementProcs(hero, hit).flatMap { case (afterProcs, elemLog) =>
         val (swept, splashLog) = splash(afterProcs, armorDmg + hpDmg)
-        next(hero, swept, Vector(skillLine + dotIndicators(afterProcs)) ++ elemLog ++ splashLog)
+        next(hero, swept, Vector(skillLine) ++ elemLog ++ splashLog)
       }
   }
 

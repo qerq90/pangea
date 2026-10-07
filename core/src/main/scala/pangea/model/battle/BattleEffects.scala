@@ -14,6 +14,11 @@ case class Poison(pct: Int) {
 }
 
 object Poison {
+  /** Как эффект зовётся в логе боя: все три DoT говорят одной строкой, меняется
+   *  только это имя со значком (см. BattleState.dotTick). */
+  val Icon: String  = "🟢"
+  val Label: String = "Яд"
+
   val OnHit: Int         = 8
   val DecayPerRound: Int = 2
   val HealCut: Int       = 4
@@ -37,6 +42,9 @@ case class Bleed(pct: Int) {
 }
 
 object Bleed {
+  val Icon: String  = "🔴"
+  val Label: String = "Кровотечение"
+
   def of(pct: Int): Option[Bleed] = if (pct <= 0) None else Some(Bleed(pct))
 
   implicit val encoder: Encoder[Bleed] = deriveEncoder
@@ -62,6 +70,9 @@ case class Burn(pct: Int) {
 }
 
 object Burn {
+  val Icon: String  = "🔥"
+  val Label: String = "Пламя"
+
   val Initial: Int         = 2  // стартовый % при поджоге
   val GrowthThreshold: Int = 10
   val GrowthBelow: Int     = 2
@@ -144,15 +155,13 @@ case class BattleEffects(
   // Залп валунов срезает защиту и уклонение, вязкая земля — точность и уклонение.
   heroStunnedTurns:     Int                        = 0,
   heroGroundedTurns:    Int                        = 0,
-  // Яд НА ГЕРОЕ — им травит Гнилой Джо своим смрадом и мобы, посыпавшие оружие
-  // порошком.
+  // Яд НА ГЕРОЕ — им травит Гнилой Джо своим смрадом и всякий, у кого
+  // отравлено оружие.
   heroPoison:           Option[Poison]             = None,
-  // «Порошок!» — расовое умение на один раз за бой. Флаг помнит, что он уже
-  // высыпан (второй раз моб его не применит), а два следующих поля — что именно
-  // он дал: ядовитые атаки либо стихию, которой теперь бьёт моб.
-  monsterPowderUsed:    Boolean                    = false,
+  // Удар этого моба, дошедший до HP, травит. У мурлоков и эльфов так всегда
+  // (см. Race.weaponPoison), флагом его ставят тем, кому он положен по сцене —
+  // например Крысиному королю.
   monsterPoisonsOnHit:  Boolean                    = false,
-  monsterAttackElement: Option[String]             = None,
   // Моб бьёт слабее: подожжённый камень, поднявшийся Джо. Проценты у каждого
   // свои, поэтому храним и срок, и силу.
   monsterWeakenedTurns: Int                        = 0,
@@ -189,7 +198,7 @@ case class BattleEffects(
   heroMirrors:          Int                        = 0
 ) {
 
-  /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы, порошок. Геройская
+  /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы. Геройская
     * половина обнулена. Нужно, когда моб уходит из пары в слот группы — его
     * эффекты уезжают с ним, а не остаются на следующем противнике. */
   def monsterPart: BattleEffects = BattleEffects(
@@ -200,9 +209,7 @@ case class BattleEffects(
     mobAirBoostTurns         = mobAirBoostTurns,
     monsterDefenceDebuff     = monsterDefenceDebuff,
     chilledTurns             = chilledTurns,
-    monsterPowderUsed        = monsterPowderUsed,
     monsterPoisonsOnHit      = monsterPoisonsOnHit,
-    monsterAttackElement     = monsterAttackElement,
     monsterWeakenedTurns     = monsterWeakenedTurns,
     monsterWeakenedPct       = monsterWeakenedPct,
     monsterMaxArmorCut       = monsterMaxArmorCut,
@@ -240,9 +247,7 @@ case class BattleEffects(
       mobAirBoostTurns         = mp.mobAirBoostTurns,
       monsterDefenceDebuff     = mp.monsterDefenceDebuff,
       chilledTurns             = mp.chilledTurns,
-      monsterPowderUsed        = mp.monsterPowderUsed,
       monsterPoisonsOnHit      = mp.monsterPoisonsOnHit,
-      monsterAttackElement     = mp.monsterAttackElement,
       monsterWeakenedTurns     = mp.monsterWeakenedTurns,
       monsterWeakenedPct       = mp.monsterWeakenedPct,
       monsterMaxArmorCut       = mp.monsterMaxArmorCut,

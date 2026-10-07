@@ -256,7 +256,9 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
         (_, after, log, _) = r
         maxHp = wolf.stats(bossLvl).hp
         expected = maxHp * 10L / 100L * 120L / 100L
-      } yield assertTrue(log.contains(s"Яд снимает $expected HP") && log.contains(s"🔴 -$expected")) &&
+      // Яд и кровь говорят одной строкой на двоих — разными остались имя и значок.
+      } yield assertTrue(log.contains(s"Яд снимает $expected HP") &&
+                         log.contains(s"Кровотечение снимает $expected HP")) &&
               assertTrue(after.get.monsterCurrentHp == maxHp - 2L * expected) // удар героя ушёл в броню
     },
 
