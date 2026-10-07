@@ -546,8 +546,7 @@ object MiniBoss extends Enum[MiniBoss] {
 
     def ingredient: MaterialKind = MaterialKind.RatKingBlood
 
-    /** Набора под его кровь ещё нет — она копится под будущие рецепты. */
-    def set: Option[ItemSet] = None
+    def set: Option[ItemSet] = Some(ItemSet.Rat)
   }
 
   /** Минибосс по имени варианта — для восстановления из сохранённого боя. */

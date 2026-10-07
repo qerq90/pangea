@@ -136,13 +136,15 @@ case class MercenariesState(
 
 object MercenariesState {
 
-  /** Ключ в scenes.yaml: `mercenaries.<key>`. Нежити здесь нет — её не нанимают,
-   *  а поднимают на алтаре в пещере. */
+  /** Ключ в scenes.yaml: `mercenaries.<key>`. Нежити и крысы за столом не
+   *  бывает — первую поднимают на алтаре, вторая сама выскакивает в бою; ключи
+   *  им заведены, чтобы ветка была полной. */
   def key(kind: AllyKind): String = kind match {
     case AllyKind.Human  => "human"
     case AllyKind.Murloc => "murloc"
     case AllyKind.Gnome  => "gnome"
     case AllyKind.Undead => "undead"
+    case AllyKind.Rat    => "rat"
   }
 
   /** Кто сейчас за столом. */

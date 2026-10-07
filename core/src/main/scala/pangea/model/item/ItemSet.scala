@@ -155,6 +155,34 @@ object ItemSet extends Enum[ItemSet] {
     )
   }
 
+  // ── Крыса ───────────────────────────────────────────────────────────────────
+  case object Rat extends ItemSet("Крыса", "Крысы") {
+    val ArmorPct: Long        = SetRates.StatBonusPct
+    val PoisonChancePct: Long = 30L
+    val PoisonPct: Int        = 3
+    val SummonChancePct: Long = 5L
+    val DotTakenCutPct: Long  = 50L
+
+    /** На сколько п.п. за раунд слабеет кровотечение на герое (порог 10): до
+      * набора оно не затухало вовсе — только лечение снимало его целиком. Шаг
+      * тот же, что у яда (`Poison.DecayPerRound`), чтобы правило читалось одно на
+      * оба эффекта; число здесь своё — вариант enum не ходит за ним в другой
+      * пакет (см. комментарий к [[SetRates]] про циклы инициализации). */
+    val BleedDecayPerRound: Int = 2
+
+    def bonuses: List[SetBonus] = List(
+      SetBonus(2,  s"+$ArmorPct% к броне."),
+      SetBonus(4,  s"$PoisonChancePct% шанс, что ваша атака, нанёсшая урон по HP, отравит врага на $PoisonPct%."),
+      SetBonus(6,  s"$SummonChancePct% шанс за раунд, что из-под ваших ног выскочит крыса и встанет в строй. " +
+                   "После боя она остаётся при вас на сутки."),
+      SetBonus(8,  SetRates.HpBonusText),
+      SetBonus(10, s"Яд и кровотечение на вас снимают вдвое меньше HP, а кровотечение вдобавок затухает " +
+                   s"на $BleedDecayPerRound% в раунд, как яд."),
+      SetBonus(12, "Из-под ваших ног выскакивают Чумные крысы. Если в начале боя при вас нет ни одной крысы, " +
+                   "одна приходит сразу.")
+    )
+  }
+
   /** Набор по имени-титулу из названия предмета (третье слово). */
   def byTitle(title: String): Option[ItemSet] = values.find(_.title == title)
 

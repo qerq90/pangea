@@ -195,6 +195,20 @@ final case class GroupState(
   /** Союзник на позиции `pos`. */
   def allyAt(pos: Int): Option[BattleAlly] = allies.find(_.position == pos)
 
+  /** Свободные места СВОЕЙ стороны: ни герой, ни союзник их не занимают. Мест у
+    * отряда [[Formation.HeroPlaces]] — глубже, в хвосте чужого строя, стоять
+    * некому. */
+  def freeAllyPlaces: List[Int] =
+    (1 to Formation.HeroPlaces).toList.filterNot(p => p == heroPos || allyAt(p).isDefined)
+
+  /** Ближайшее к герою свободное место своей стороны (при равном расстоянии —
+    * правее): туда встаёт тот, кто выскочил у него из-под ног. */
+  def nearestFreeAllyPlace: Option[Int] =
+    freeAllyPlaces.sortBy(p => (math.abs(p - heroPos), -p)).headOption
+
+  /** Есть ли при герое крыса в этом бою (набор «Крыса»). */
+  def hasRatAlly: Boolean = allies.exists(_.kind == AllyKind.Rat)
+
   /** Строй для показа — до самого дальнего занятого места по обеим сторонам. */
   def rows: Int = (size :: allies.map(_.position)).max
 

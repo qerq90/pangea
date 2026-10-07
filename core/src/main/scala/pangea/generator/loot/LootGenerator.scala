@@ -297,12 +297,13 @@ object LootGenerator {
       floorLvl: Long = 1L
   ): (List[LootDrop], Rng) = {
     val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
-    // С Крысиного короля вещей вдвое меньше: он роняет не набор, а ингредиенты.
+    // С Крысиного короля вещей вдвое меньше: большую часть его добычи составляют
+    // ингредиенты, вещи набора «Крыса» идут лишь на четверть билетов.
     val raw         = extra + bossLvl
     val count       = (if (boss == MiniBoss.RatKing) raw / 2L else raw).toInt.max(1)
     (0 until count).foldLeft((List.empty[LootDrop], r0, true)) { case ((acc, r, hide), _) =>
       if (boss == MiniBoss.RatKing) {
-        val (drop, r2) = ratKingDrop(boss, r)
+        val (drop, r2) = ratKingDrop(boss, heroLvl, r)
         (acc :+ drop, r2, hide)
       } else if (boss == MiniBoss.WhiteWolf) {
         val (drop, r2) = wolfDrop(boss, bossLvl, heroLvl, floorLvl, hide, r)
@@ -391,21 +392,30 @@ object LootGenerator {
     else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
     else setGear(boss, heroLvl, ItemRarity.Blue, rng)
 
-  /** С Крысиного короля: кровь и большая руна идут по два билета, чумные
-    * черви — по одному. Вещей своего набора у него нет: набора пока нет и
-    * самого (см. [[MiniBoss.set]]). */
-  private def ratKingDrop(boss: MiniBoss, rng: Rng): (LootDrop, Rng) = {
+  /** С Крысиного короля: кровь и большая руна идут по два билета, чумные черви —
+    * по одному, и столько же по одному на вещь набора «Крыса» каждой из двух
+    * редкостей. Доли крови, руны и червей между собой прежние — вещи им билетов
+    * не отнимали, а добавили своих. */
+  private def ratKingDrop(boss: MiniBoss, heroLvl: Long, rng: Rng): (LootDrop, Rng) = {
     val (roll, r1) = rng.between(0L, RatKingTickets)
     if (roll < RatKingBloodTickets) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
     else if (roll < RatKingBloodTickets + RatKingRuneTickets) bigRune(r1)
-    else (LootDrop.Gear(MaterialGenerator.item(MaterialKind.PlagueWorms)), r1)
+    else if (roll < RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets)
+      (LootDrop.Gear(MaterialGenerator.item(MaterialKind.PlagueWorms)), r1)
+    else if (roll < RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets + RatKingPurpleTickets)
+      setGear(boss, heroLvl, ItemRarity.Purple, r1)
+    else setGear(boss, heroLvl, ItemRarity.Blue, r1)
   }
 
-  /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25. */
-  val RatKingBloodTickets: Long = 50L
-  val RatKingRuneTickets:  Long = 50L
-  val RatKingWormTickets:  Long = 25L
-  val RatKingTickets:      Long = RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets
+  /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25, вещь
+    * набора 25 фиолетовая и 25 синяя. */
+  val RatKingBloodTickets:  Long = 50L
+  val RatKingRuneTickets:   Long = 50L
+  val RatKingWormTickets:   Long = 25L
+  val RatKingPurpleTickets: Long = 25L
+  val RatKingBlueTickets:   Long = 25L
+  val RatKingTickets:       Long = RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets +
+    RatKingPurpleTickets + RatKingBlueTickets
 
   /** Большая руна с минибосса: вид равновероятен среди всех, как и в добыче. */
   private def bigRune(rng: Rng): (LootDrop, Rng) = {

@@ -75,7 +75,13 @@ case class Hero(
   // Защита больше не умножает броню (теперь она снижает урон процентно — см.
   // `BattleState.damageReduction`). Максимум брони — сумма брони со снаряжения
   // плюс прокачка у Мастера Горна.
-  def maxArmor: Long = equipment.allArmor + masterHornBoosts.armor
+  /** Потолок брони: что дало снаряжение и рог мастера, плюс процент от «Крысы»
+   *  (порог 2). Процент кладём в потолок, а не в итоговый боевой стат: иначе
+   *  прибавку срезала бы первая же починка брони. */
+  def maxArmor: Long = {
+    val base = equipment.allArmor + masterHornBoosts.armor
+    base + base * sets.armorBonusPct / 100L
+  }
 
   /** Максимум брони с учётом травм: штраф на броню режет потолок. Без травм
    *  равен `maxArmor`. Текущая броня (`fightStats.armor`) тратится в бою и

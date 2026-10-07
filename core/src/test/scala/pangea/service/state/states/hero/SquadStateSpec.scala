@@ -37,6 +37,33 @@ object SquadStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("SquadState")(
 
+    test("крыса держится сутки и убегает со своим прощанием, а в карточке у неё зубы вместо стихии") {
+      val form   = UndeadForm("Чумная крыса", lvl,
+        pangea.model.stats.FightStats(atk = 40, hp = 400, armor = 200, defence = 5,
+                                      evasion = 20, accuracy = 80, energy = 50))
+      val withRat = baseHero.copy(squad = Squad.empty.summonRat(form, lvl, 0L))
+      def open(after: Long) =
+        for {
+          t <- makeState(withRat)
+          (state, dao, r) = t
+          _     <- TestClock.adjust(Duration.fromMillis(after))
+          _     <- state.enter(testUser, r)
+          // карточка союзника: её показывают по месту в строю
+          _     <- state.action(testUser, pick("SquadAlly", 2), r)
+          said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+          squad <- dao.getHeroByUserId(userId).map(_.get.squad)
+        } yield (said, squad)
+      for {
+        early <- open(AllyRates.RatMs - 1L)
+        late  <- open(AllyRates.RatMs)
+      } yield assertTrue(early._2.allies.size == 1 && early._2.hasRat) &&
+              // в карточке на месте стихии — зубы, статы её собственные
+              assertTrue(early._1.contains("Чумная крыса") && early._1.contains("зубы")) &&
+              assertTrue(early._1.contains("400/400")) &&
+              assertTrue(late._1.contains("утекает в ближайшую щель")) &&
+              assertTrue(late._2.allies.isEmpty && late._2.offDuty.isEmpty && late._2.away.isEmpty)
+    },
+
     test("поднятого хватает на сутки: потом кости рассыпаются, и отряд его не ждёт") {
       val form  = UndeadForm("Гоблин немощный раб", 16L, AllyKind.Human.stats(3L))
       val risen = baseHero.copy(squad = Squad.empty.raise(form, lvl, 0L))

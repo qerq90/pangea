@@ -63,8 +63,8 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
 
     test("ингредиенты минибоссов: ~35% кладов, ступень зоны плюс 0..1 штук, любой ингредиент любого босса") {
       import pangea.model.monster.MiniBoss
-      // Клад отдаёт ингредиенты наборов. Кровь Крысиного короля сюда не идёт:
-      // набора под неё нет, и берут её только с него самого.
+      // Клад отдаёт ингредиенты наборов — всех, у кого набор есть. Кровь
+      // Крысиного короля вошла сюда вместе с набором «Крыса».
       val pool = TreasureHuntGenerator.bossIngredients.toSet
       val handfuls = rewards.map(_.materials.filter(m => m.material.exists(pool.contains)))
       val with_    = handfuls.count(_.nonEmpty)
@@ -72,9 +72,10 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
         assertTrue(with_ > rewards.size * 28 / 100 && with_ < rewards.size * 42 / 100) &&
         assertTrue(handfuls.forall(h => h.isEmpty || h.size == zone.tier || h.size == 1 + zone.tier)) &&
         assertTrue(handfuls.exists(_.size == zone.tier) && handfuls.exists(_.size == 1 + zone.tier)) &&
-        // все ингредиенты встречаются, шкура волка в том числе
+        // все ингредиенты встречаются, шкура волка и кровь короля в том числе
         assertTrue(handfuls.flatten.flatMap(_.material).toSet == pool) &&
-        assertTrue(!pool.contains(MiniBoss.RatKing.ingredient))
+        assertTrue(pool.contains(MiniBoss.RatKing.ingredient)) &&
+        assertTrue(pool.size == MiniBoss.values.size)
     },
 
     test("редкие травы — только знающему цветы 2 ранга, ~15%, тем же счётом") {

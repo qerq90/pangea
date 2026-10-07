@@ -1891,6 +1891,7 @@ battle:
   beltAttack: "⚔ Зелье атаки: +{atk} к атаке на {rounds} ходов."
   beltEnergy: "⚡ Зелье энергии: восстановлено {energy} энергии. Энергия: {cur}/{max}"
   poisonApplied: "🟢 {monster} отравлен!"
+  ratCall: "🐀 Из-под ваших ног выскакивает {name} и встаёт в строй на место {n}!"
   dotTick: "{icon} {dot} снимает {damage} HP с {monster}."
   heroDotTick: "{icon} {dot} снимает с вас {damage} HP."
   comboFireAir: "🔥💨 Огонь и воздух, объединив усилия, наносят чудовищный урон… (-{damage})"
@@ -3180,6 +3181,7 @@ squad:
   card: "{name}\n{race}, стихия {element} — позиция {pos}\n\n ❤ {hp}/{maxHp}  🧥 Броня {armor}/{maxArmor}  ⚡ Энергия {energy}/{maxEnergy}\n ⚔ Атк {atk}  🛡 Защ {defence}\n 🎯 Точн {accuracy}  👁 Укл {evasion}"
   posHero: "вы"
   posFree: "пусто"
+  noElement: "🦷 зубы"
   moveLabel: "На {n} ({who})"
   dismissLabel:
     label: "Выгнать"
@@ -3191,6 +3193,7 @@ squad:
   dismissed: "{name} молча собирает вещи и уходит."
   dayOver: "⏳ {name} отработал свой день и уходит: «Срок вышел. Отдохну — и снова за дальним столом в таверне.»"
   undeadCrumbled: "💀 Тёмная энергия что держала кости {name} вместе истощилась и они развалились."
+  ratFled: "🐀 {name} больше не ждёт: дёргает усами, оглядывается на вас — и утекает в ближайшую щель. Под землёй таких много."
   toList: "К отряду"
   back:
     label: "↩ Назад"

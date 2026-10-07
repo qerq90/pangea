@@ -15,7 +15,9 @@ import pangea.model.stats.FightStats
 sealed abstract class AllyKind(
   val name:     String,
   val race:     Race,
-  val element:  Element,
+  /** Чем бьёт: прок этой стихии роллится на его ударах. None — ничем, просто
+    * зубами (крыса, прибежавшая на набор «Крыса»). */
+  val element:  Option[Element],
   /** Выше этого уровня наёмник не становится сильнее. */
   val maxLvl:   Long,
   val hpPerLvl:       Long,
@@ -26,6 +28,10 @@ sealed abstract class AllyKind(
   val defencePerLvl:  Long,
   val evasionPerLvl:  Long
 ) extends EnumEntry {
+
+  /** Пользуется ли умениями ([[AllySkill]]). Крыса не умеет ничего, кроме
+    *  укуса: ни фляги, ни починки брони, ни дробящего удара. */
+  def usesSkills: Boolean = true
 
   /** Уровень, по которому считаются статы: не выше потолка наёмника. */
   def effectiveLvl(lvl: Long): Long = lvl.max(1L).min(maxLvl)
@@ -67,6 +73,10 @@ object AllyRates {
     * поднялись. Дальше они рассыпаются, и ждать этого союзника неоткуда. */
   val UndeadMs: Long = 24L * 60L * 60L * 1000L
 
+  /** Сколько крыса, выскочившая на набор «Крыса», держится при герое после боя:
+   *  сутки, потом убегает обратно под землю. Ждать её неоткуда — придёт новая. */
+  val RatMs: Long = 24L * 60L * 60L * 1000L
+
   /** Мест в строю вместе с героем: герой и до десяти союзников. Число берём из
     * единой схемы строя — у врагов мест больше, и за одиннадцатым начинается
     * хвост, куда отряду не дотянуться (см. [[pangea.model.battle.Formation]]). */
@@ -77,30 +87,40 @@ object AllyKind extends Enum[AllyKind] {
 
   /** Йорген Кремень: воин, бьёт огнём. Растёт до пятого уровня — он и сам
     * говорит, что помнит только строй, а не подвиги. */
-  case object Human extends AllyKind("Йорген Кремень", Race.Human, Element.Fire, maxLvl = 5L,
+  case object Human extends AllyKind("Йорген Кремень", Race.Human, Some(Element.Fire), maxLvl = 5L,
     hpPerLvl = 125L, armorPerLvl = 150L, atkPerLvl = 20L, energyPerLvl = 100L,
     accuracyPerLvl = 100L, defencePerLvl = 40L, evasionPerLvl = 100L)
 
   /** Плюх: мурлок-ловкач, бьёт молнией. Тянется дальше всех — до десятого. */
-  case object Murloc extends AllyKind("Плюх", Race.Murloc, Element.Lightning, maxLvl = 10L,
+  case object Murloc extends AllyKind("Плюх", Race.Murloc, Some(Element.Lightning), maxLvl = 10L,
     hpPerLvl = 100L, armorPerLvl = 100L, atkPerLvl = 30L, energyPerLvl = 100L,
     accuracyPerLvl = 150L, defencePerLvl = 30L, evasionPerLvl = 150L)
 
   /** Брамбл Медноус: гном-воин, бьёт холодом. Потолок — седьмой уровень. */
-  case object Gnome extends AllyKind("Брамбл Медноус", Race.Gnome, Element.Cold, maxLvl = 7L,
+  case object Gnome extends AllyKind("Брамбл Медноус", Race.Gnome, Some(Element.Cold), maxLvl = 7L,
     hpPerLvl = 80L, armorPerLvl = 175L, atkPerLvl = 20L, energyPerLvl = 100L,
     accuracyPerLvl = 100L, defencePerLvl = 50L, evasionPerLvl = 60L)
 
   /** Поднятый с алтаря: раса, имя и статы у него свои — они лежат на самом
     * союзнике ([[UndeadForm]]), а не на виде. Здесь только то, что общее у всей
     * нежити: она бьёт холодом и в таверне не сидит. */
-  case object Undead extends AllyKind("Поднятый", Race.Undead, Element.Cold, maxLvl = 1L,
+  case object Undead extends AllyKind("Поднятый", Race.Undead, Some(Element.Cold), maxLvl = 1L,
     hpPerLvl = 0L, armorPerLvl = 0L, atkPerLvl = 0L, energyPerLvl = 0L,
     accuracyPerLvl = 0L, defencePerLvl = 0L, evasionPerLvl = 0L)
 
+  /** Крыса, выскочившая из-под ног на набор «Крыса»: имя, уровень и статы у неё
+    * свои — она тот же моб, что водится в канализации, только на стороне героя
+    * (см. [[UndeadForm]] и `Squad.summonRat`). Стихии у неё нет, зубы и всё;
+    * нанять её негде, а держится она сутки и потом убегает. */
+  case object Rat extends AllyKind("Крыса", Race.Animal, None, maxLvl = 1L,
+    hpPerLvl = 0L, armorPerLvl = 0L, atkPerLvl = 0L, energyPerLvl = 0L,
+    accuracyPerLvl = 0L, defencePerLvl = 0L, evasionPerLvl = 0L) {
+    override def usesSkills: Boolean = false
+  }
+
   val values: IndexedSeq[AllyKind] = findValues
 
-  /** Кого можно нанять за столом таверны. Нежить туда не садится. */
+  /** Кого можно нанять за столом таверны. Нежить и крысы туда не садятся. */
   val hireable: List[AllyKind] = List(Human, Murloc, Gnome)
 
   /** Сколько отваров берут Плюх и Брамбл на этом уровне героя. */

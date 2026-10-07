@@ -97,7 +97,23 @@ case class BattleState(
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     getBattle(user).flatMap { battle =>
-      if (battle.group.heroDown) showDown(user, battle, renderer).unit else showScreen(user, renderer)
+      if (battle.group.heroDown) showDown(user, battle, renderer).unit
+      else startingRat(user, battle, renderer) *> showScreen(user, renderer)
+    }
+
+  /** «Крыса», порог 12: если в начале боя при герое нет ни одной крысы, одна
+    * приходит сразу, без броска. «Начало боя» — пока не кончился первый раунд:
+    * уход за снаряжением и возврат на том же раунде второй крысы не приводят, а
+    * павшую в бою она уже не заменяет. */
+  private def startingRat(user: User, battle: SoloPveBattle, renderer: Renderer): Task[Unit] =
+    getHero(user).flatMap { hero =>
+      if (!hero.sets.startsWithRat || battle.group.round > 0 || battle.group.hasRatAlly) ZIO.unit
+      else callRat(hero, battle) match {
+        case None => ZIO.unit
+        case Some((joined, line)) =>
+          heroDao.writeActiveBattle(user.userId, joined.asJson) *>
+            renderer.show(user, Screen(line, Nil)).unit
+      }
     }
 
   override def action(
@@ -177,13 +193,48 @@ case class BattleState(
       // уходят, бой на этом кончается победой.
       abandoned = towersAlone(promoted3)
       ended   <- endRound(battle, abandoned)
+      // «Крыса» (порог 6): раз в раунд у героя из-под ног может выскочить своя.
+      ratted  <- ratCall(hero, ended)
       // Напротив героя пусто, а свободный моб появился — он шагает к герою.
-      pulled  = pullFreeStep(ended)
+      pulled  = pullFreeStep(ratted)
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
       hinted  = plainSteelHint(hero, pulled)
       state  <- commit(user, hinted, now, renderer, hero, note)
     } yield state
+
+  /** Крыса из-под ног героя встаёт в строй на его стороне — если там есть
+    * свободное место. Она тот же моб, что водится в канализации: обычная на
+    * пороге 6, чумная на пороге 12 ([[HeroSets.summonsPlagueRats]]), уровнем в
+    * самого героя. `home = 0` помечает её как пришедшую не из отряда — после боя
+    * по этому признаку она в отряд и попадает (см. [[squadAfterBattle]]).
+    *
+    * Возвращает бой и строку для лога, либо None, если встать некуда. */
+  private def callRat(hero: Hero, battle: SoloPveBattle): Option[(SoloPveBattle, String)] =
+    battle.group.nearestFreeAllyPlace.map { pos =>
+      val rarity = if (hero.sets.summonsPlagueRats) Rarity.Rare else Rarity.Uncommon
+      val rat    = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, Race.Animal, rarity)
+      val form   = pangea.model.squad.UndeadForm(rat.name, hero.lvl, rat.fightStats)
+      val ally   = BattleAlly(pangea.model.squad.AllyKind.Rat, pos,
+        hp = rat.fightStats.hp, armor = rat.fightStats.armor, energy = rat.fightStats.energy,
+        stats = rat.fightStats, lvl = hero.lvl, undead = Some(form), home = 0)
+      (battle.copy(group = battle.group.copy(allies = battle.group.allies :+ ally)),
+       content.format("battle.ratCall", "name" -> rat.name, "n" -> pos.toString))
+    }
+
+  /** «Крыса», порог 6: раз в раунд из-под ног героя может выскочить крыса. Пока
+    * герой лежит, звать её некому; бросок без набора не тратится. */
+  private def ratCall(hero: Hero, res: TurnResult): Task[TurnResult] =
+    chanceRoll(
+      res.outcome == Outcome.Continue && res.endsRound && !res.battle.group.heroDown &&
+        hero.sets.ratSummonChancePct > 0,
+      hero.sets.ratSummonChancePct
+    ).map {
+      case false => res
+      case true  => callRat(hero, res.battle).fold(res) { case (joined, line) =>
+        res.copy(battle = joined, log = res.log :+ line)
+      }
+    }
 
   /** Башни стоят, пока есть кого прикрывать. Не осталось живой охраны — бой
     * кончен: стрелки уходят, сами башни в добычу и опыт не идут. */
@@ -300,8 +351,11 @@ case class BattleState(
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
         ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
     // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
+    // Крыса, выскочившая из-под ног (`home = 0`), после боя остаётся при герое —
+    // даже если до этого отряда у него не было вовсе.
     val persistSquad =
-      ZIO.when(res.hero.squad.nonEmpty || res.battle.group.alliesGone.nonEmpty)(
+      ZIO.when(res.hero.squad.nonEmpty || res.battle.group.alliesGone.nonEmpty ||
+               res.battle.group.allies.exists(_.home <= 0))(
         heroDao.updateSquad(user.userId, squadAfterBattle(res.hero, res.battle, nowMs)))
     // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
     val clearDust =
@@ -917,6 +971,16 @@ case class BattleState(
               if (!setBleeds) effects
               else effects.copy(monsterBleed = Some(
                 effects.monsterBleed.map(_.stackedWith(hero.sets.bleedPct)).getOrElse(Bleed(hero.sets.bleedPct))))
+            // «Крыса» (порог 4): шанс, что удар по HP ещё и отравит. Бросок без
+            // набора не тратится — детерминизм боевых тестов.
+            setPoisons <- chanceRoll(
+                            hero.sets.poisonOnHitChancePct > 0 && hpDmg > 0 && newHp > 0,
+                            hero.sets.poisonOnHitChancePct)
+            effectsRat =
+              if (!setPoisons) effectsBled
+              else effectsBled.copy(monsterPoison = Some(
+                effectsBled.monsterPoison.map(p => Poison(p.pct + hero.sets.poisonPct))
+                  .getOrElse(Poison(hero.sets.poisonPct))))
             // Череп в оружии и «Упырь» (порог 4): вампиризм с урона по HP. Кровь
             // пьётся только с раны — удар, целиком поглощённый бронёй, не лечит.
             maxHp      = hero.effectiveMaxHp(nowMs)
@@ -927,7 +991,7 @@ case class BattleState(
             flaskSteal = if (flaskBite) (hpDmg * FlaskRates.VampiricPct / 100L).max(0L) else 0L
             healedHero = if (vamp + setSteal + flaskSteal > 0) hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp + vamp + setSteal + flaskSteal).min(maxHp))) else hero
             vampGained = healedHero.fightStats.hp - hero.fightStats.hp
-            effectsFed = if (!flaskBite) effectsBled else effectsBled.copy(heroVampiricHits = effectsBled.heroVampiricHits - 1)
+            effectsFed = if (!flaskBite) effectsRat else effectsRat.copy(heroVampiricHits = effectsRat.heroVampiricHits - 1)
             hitBattle = noteBossDamage(battle, armorDmg + hpDmg)
               .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
               .withEffects(effectsFed)
@@ -941,7 +1005,8 @@ case class BattleState(
             (thornedHero, thornedBattle, thornsLine) = thornsResult
             log1 = log :+ attackLine
             log2 =
-              if (poisonsNow || gemPoisons || coatPoisons) log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
+              if (poisonsNow || gemPoisons || coatPoisons || setPoisons)
+                log1 :+ content.format("battle.poisonApplied", "monster" -> battle.monsterName)
               else log1
             // Сам вампиризм о себе не говорит: его число уезжает в конец раунда и
             // там складывается с чужой кровью в одну строку (см. vampLine). Если
@@ -2195,26 +2260,33 @@ case class BattleState(
     // Яд на герое: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
     // Гниль Джо тикает той же строкой, что любой другой яд: своё у минибосса —
     // само отравление («Ядовитые зловония…»), а не его последствия.
+    // «Крыса» (порог 10): зараза герою не новость — яд и кровь снимают с него
+    // вдвое меньше.
+    val dotMult = hero.sets.heroDotTakenMult
     val (poisonedHero, poisonedBattle, poisonLine) = burnedBattle.effects.heroPoison match {
       case Some(poison) =>
-        val dmg = poison.damageOn(burnedHero.effectiveMaxHp(nowMs))
+        val dmg = (poison.damageOn(burnedHero.effectiveMaxHp(nowMs)) * dotMult).toLong
         (burnedHero.copy(fightStats = burnedHero.fightStats.copy(
            hp = (burnedHero.fightStats.hp - dmg).max(0L))),
          burnedBattle.copy(effects = burnedBattle.effects.copy(heroPoison = poison.decayed)),
          heroDotTick(Poison.Icon, Poison.Label, dmg))
       case None => (burnedHero, burnedBattle, "")
     }
-    // Кровотечение на герое (пасть и когти волка): % макс.HP мимо брони, не
-    // затухает — снимает его только лечение (см. activeHeal).
-    val (bledHero, bleedLine) = poisonedBattle.effects.heroBleed match {
+    // Кровотечение на герое (пасть и когти волка): % макс.HP мимо брони. Само
+    // собой оно не затухает — снимает его только лечение (см. activeHeal); с
+    // «Крысой» (порог 10) рана затягивается, как слабеет яд.
+    val (bledHero, bledBattle, bleedLine) = poisonedBattle.effects.heroBleed match {
       case Some(bleed) =>
-        val dmg = bleed.damageOn(poisonedHero.effectiveMaxHp(nowMs))
+        val dmg   = (bleed.damageOn(poisonedHero.effectiveMaxHp(nowMs)) * dotMult).toLong
+        val decay = hero.sets.heroBleedDecayPerRound
+        val left  = if (decay <= 0) Some(bleed) else Bleed.of(bleed.pct - decay)
         (poisonedHero.copy(fightStats = poisonedHero.fightStats.copy(
            hp = (poisonedHero.fightStats.hp - dmg).max(0L))),
+         poisonedBattle.copy(effects = poisonedBattle.effects.copy(heroBleed = left)),
          heroDotTick(Bleed.Icon, Bleed.Label, dmg))
-      case None => (poisonedHero, "")
+      case None => (poisonedHero, poisonedBattle, "")
     }
-    val (finalHero, finalBattle, regenLine) = poisonedBattle.effects.heroRegen match {
+    val (finalHero, finalBattle, regenLine) = bledBattle.effects.heroRegen match {
       case Some(regen) =>
         val maxHp  = bledHero.effectiveMaxHp(nowMs)
         // Регенерация горением НЕ режется: это не действие игрока, а эффект,
@@ -2224,10 +2296,10 @@ case class BattleState(
         val healed = newHp - bledHero.fightStats.hp
         (
           bledHero.copy(fightStats = bledHero.fightStats.copy(hp = newHp)),
-          poisonedBattle.copy(effects = poisonedBattle.effects.copy(heroRegen = regen.decayed)),
+          bledBattle.copy(effects = bledBattle.effects.copy(heroRegen = regen.decayed)),
           content.format("battle.regenTick", "healed" -> healed.toString)
         )
-      case None => (bledHero, poisonedBattle, "")
+      case None => (bledHero, bledBattle, "")
     }
     // Строки бывают непустыми одновременно (горим, травимся и регенерируем) — склеиваем.
     (finalHero, finalBattle, List(burnLine, poisonLine, bleedLine, regenLine).filter(_.nonEmpty).mkString("\n"))
@@ -3037,7 +3109,8 @@ case class BattleState(
       // 2) случайное умение из тех, что по карману и к месту
       a1 = b1.group.allies.find(_.kind == a.kind).getOrElse(a)
       target2 = allyTarget(a1, b1)
-      options = AllySkill.values.toList.filter { s =>
+      // Крыса умений не знает — только кусает (см. AllyKind.usesSkills).
+      options = if (!a1.kind.usesSkills) Nil else AllySkill.values.toList.filter { s =>
         s.cost(a1.lvl) <= a1.energy && (s match {
           case AllySkill.QuickStrike | AllySkill.CrushingStrike => target2.isDefined
           case AllySkill.HealingFlask    => a1.hp < a1.stats.hp
@@ -3106,22 +3179,26 @@ case class BattleState(
         else for {
           spread <- Random.nextLongBetween(80L, 121L)
           base    = (raw * spread / 100L).max(1L)
-          resist  = tmp.boss.map(_.damageTakenMult(elem)).getOrElse(1.0)
+          // Крыса бьёт зубами, без стихии: грани урона у неё обычные, а боссовое
+          // сопротивление — как у голой стали (см. AllyKind.element).
+          resist  = tmp.boss.map(b => elem.fold(b.plainDamageTakenMult)(b.damageTakenMult)).getOrElse(1.0)
           dmg     = (base * resist).toLong.max(1L)
           (armorDmg, hpDmg) = if (crushing) (0L, dmg) else {
             val cut       = (dmg * (1.0 - BattleState.defenceReduction(effectiveMonsterDefence(tmp), 0L, a.stats.atk))).toLong.max(1L)
             val rawArmor  = math.min(tmp.monsterCurrentArmor, cut)
             val rawHp     = cut - rawArmor
-            val aDmg      = math.min(tmp.monsterCurrentArmor, (rawArmor * elem.armorMult).toLong).max(0L)
-            val lightning = if (elem == Element.Lightning) (aDmg * Element.Lightning.ArmorToHpFrac).toLong else 0L
-            (aDmg, ((rawHp * elem.hpMult).toLong + lightning).max(0L))
+            val armorMult = elem.map(_.armorMult).getOrElse(1.0)
+            val hpMult    = elem.map(_.hpMult).getOrElse(1.0)
+            val aDmg      = math.min(tmp.monsterCurrentArmor, (rawArmor * armorMult).toLong).max(0L)
+            val lightning = if (elem.contains(Element.Lightning)) (aDmg * Element.Lightning.ArmorToHpFrac).toLong else 0L
+            (aDmg, ((rawHp * hpMult).toLong + lightning).max(0L))
           }
           newHp    = (tmp.monsterCurrentHp - hpDmg).max(0L)
           hit      = tmp.copy(monsterCurrentHp = newHp, monsterCurrentArmor = tmp.monsterCurrentArmor - armorDmg)
           dealt    = armorDmg + hpDmg
           // Прок стихии считается молча — строки его в лог союзника не идут.
           procRoll <- if (newHp > 0L) Random.nextIntBetween(1, 101) else ZIO.succeed(100)
-          procced  = if (newHp > 0L && procRoll <= Element.ProcChancePct) applyProcs(hit, Set(elem))._1 else hit
+          procced  = if (newHp > 0L && procRoll <= Element.ProcChancePct) applyProcs(hit, elem.toSet)._1 else hit
           guarded  = procced.withEffects(procced.effects)
           // обратно: активный — как есть, слот — в строй; добитый слот — в павшие
           result =
@@ -3168,11 +3245,19 @@ case class BattleState(
 
   /** Отряд после боя: состояние союзников из боя, выбывшие — кто в отлучку,
     * кто насовсем. Наёмника уносит свиток на сутки, а поднятый с алтаря
-    * рассыпается прахом — возвращаться ему неоткуда. */
+    * рассыпается прахом — возвращаться ему неоткуда. Крыса, выскочившая в бою
+    * из-под ног (её признак — `home = 0`, в отряде её ещё нет), остаётся при
+    * герое на [[pangea.model.squad.AllyRates.RatMs]]. */
   private def squadAfterBattle(hero: Hero, battle: SoloPveBattle, nowMs: Long): pangea.model.squad.Squad = {
+    val (joined, fromSquad) = battle.group.allies.partition(_.home <= 0)
     // Позиции могли поменяться за бой (Таран, «Переместиться») — вместе с героем.
-    val synced = battle.group.allies.foldLeft(hero.squad.copy(heroPos = battle.group.heroPos)) { (s, a) =>
+    val synced0 = fromSquad.foldLeft(hero.squad.copy(heroPos = battle.group.heroPos)) { (s, a) =>
       s.updateAt(a.home)(old => a.toAlly.copy(hiredUntil = old.hiredUntil))
+    }
+    // Выжившие крысы — в отряд, на свободные места; павших в бою среди них нет
+    // (их уже унесло в alliesGone), а если мест не хватило — лишняя разбегается.
+    val synced = joined.filter(_.alive).foldLeft(synced0) { (s, a) =>
+      a.undead.fold(s)(form => s.summonRat(form, a.lvl, nowMs))
     }
     // Павших убираем разом: по одному нельзя — строй смыкается, и вторая
     // позиция указала бы уже не на того.
