@@ -7,10 +7,11 @@ import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
 import pangea.model.stats.FightStats
 
-/** Поднятый с алтаря тёмных сил: он не растёт с героем и не нанимается, а
- *  живёт тем, что было в трофее, — поэтому имя, уровень и потолки статов лежат
- *  прямо на нём. Раса у всех такая нежить одна (см. [[AllyKind.Undead]]), а
- *  имя остаётся от того, кем он был при жизни. */
+/** Своя форма союзника: имя, уровень и потолки статов прямо на нём, а не от
+ *  уровня героя. Так живут те, кого не наняли, а добыли: поднятый с алтаря
+ *  (имя остаётся от того, кем он был при жизни, см. [[AllyKind.Undead]]) и
+ *  крыса, выскочившая из-под ног на набор «Крыса» ([[AllyKind.Rat]]) — она тот
+ *  же моб, что водится в канализации. Имя типа осталось от первого из них. */
 final case class UndeadForm(name: String, lvl: Long, stats: FightStats)
 
 object UndeadForm {
@@ -27,10 +28,10 @@ object UndeadForm {
 
 /** Союзник в отряде: кто, на какой позиции, что с ним сейчас и до какого
  *  момента он при герое (`hiredUntil`, epoch ms). Потолки считаются от уровня
- *  героя ([[AllyKind.stats]]), здесь — только текущее. У поднятого с алтаря
- *  вместо этого своя форма ([[UndeadForm]]): его статы от уровня героя не
- *  зависят, а срок — не найм, а то, насколько хватит тёмной силы
- *  ([[AllyRates.UndeadMs]]). */
+ *  героя ([[AllyKind.stats]]), здесь — только текущее. У добытого союзника —
+ *  поднятого с алтаря и крысы — вместо этого своя форма ([[UndeadForm]]): его
+ *  статы от уровня героя не зависят, а срок — не найм, а то, насколько хватит
+ *  тёмной силы ([[AllyRates.UndeadMs]]) или терпения крысы ([[AllyRates.RatMs]]). */
 final case class Ally(
   kind:       AllyKind,
   position:   Int,
@@ -48,12 +49,13 @@ final case class Ally(
   /** Уровень, по которому он дерётся. */
   def lvlAt(heroLvl: Long): Long = undead.map(_.lvl).getOrElse(kind.effectiveLvl(heroLvl))
 
-  /** Найм истёк — отработал свой день. Поднятый не уходит, а рассыпается:
-    * у него свой срок, см. [[crumbled]]. */
+  /** Найм истёк — отработал свой день. Добытый союзник не уходит так: у него
+    * свой срок, см. [[crumbled]]. */
   def expired(nowMs: Long): Boolean = undead.isEmpty && hiredUntil <= nowMs
 
-  /** Тёмная сила в костях кончилась. Поднятый без срока — из тех, кого
-    * подняли до того, как срок вообще завели: такому его ставит
+  /** Срок добытого союзника вышел: у поднятого кончилась тёмная сила в костях,
+    * у крысы — терпение. Поднятый без срока — из тех, кого подняли до того, как
+    * срок вообще завели: такому его ставит
     * [[Squad.settleUndead]], а не рассыпает на месте. */
   def crumbled(nowMs: Long): Boolean = undead.isDefined && hiredUntil > 0L && hiredUntil <= nowMs
 
@@ -172,6 +174,17 @@ final case class Squad(
   /** Поднятый занимает место того, кто на нём стоял. */
   def replaceAt(pos: Int, form: UndeadForm, lvl: Long, nowMs: Long): Squad =
     copy(allies = allies.filterNot(_.position == pos) :+ risen(form, pos, lvl, nowMs)).compact
+
+  /** Крыса из-под ног встаёт на свободное место и держится [[AllyRates.RatMs]].
+    * Мест нет — отряд как был: лишней крысе в строю стоять негде. */
+  def summonRat(form: UndeadForm, lvl: Long, nowMs: Long): Squad =
+    freePosition.fold(this)(p => copy(allies = allies :+
+      Ally(AllyKind.Rat, p, 0L, 0L, 0L,
+        hiredUntil = nowMs + AllyRates.RatMs, undead = Some(form)).restored(lvl)))
+
+  /** Есть ли при герое хоть одна крыса: по ней порог 12 набора «Крыса» решает,
+    * выдавать ли одну на входе в бой. */
+  def hasRat: Boolean = allies.exists(_.kind == AllyKind.Rat)
 
   private def risen(form: UndeadForm, pos: Int, lvl: Long, nowMs: Long): Ally =
     Ally(AllyKind.Undead, pos, 0L, 0L, 0L,

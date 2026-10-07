@@ -25,9 +25,15 @@ object SquadDuty {
     else
       heroDao.updateSquad(user.userId, squad) *>
         ZIO.foreachDiscard(gone)(a =>
-          renderer.show(user, Screen(
-            content.format(if (a.undead.isDefined) "squad.undeadCrumbled" else "squad.dayOver",
-              "name" -> a.name), Nil))) *>
+          renderer.show(user, Screen(content.format(leaveKey(a), "name" -> a.name), Nil))) *>
         ZIO.succeed(hero.copy(squad = squad))
+  }
+
+  /** Чем прощаются: наёмник отработал день, кости поднятого рассыпались, а крыса
+    * просто утекла в щель. */
+  private def leaveKey(a: pangea.model.squad.Ally): String = a.kind match {
+    case pangea.model.squad.AllyKind.Rat => "squad.ratFled"
+    case _ if a.undead.isDefined         => "squad.undeadCrumbled"
+    case _                               => "squad.dayOver"
   }
 }

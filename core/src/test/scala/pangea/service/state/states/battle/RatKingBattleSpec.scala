@@ -8,7 +8,7 @@ import pangea.generator.loot.LootGenerator.LootDrop
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.{BattleEffects, MonsterSlot, SoloPveBattle}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemType, MaterialKind, Rarity}
+import pangea.model.item.{Item, ItemSet, ItemType, MaterialKind, Rarity, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -114,8 +114,8 @@ object RatKingBattleSpec extends ZIOSpecDefault {
       assertTrue(king.energyRegen(bossLvl) == 7L * bossLvl) &&
       assertTrue(king.expReward(bossLvl) == 100L * bossLvl) &&
       assertTrue(king.monsterName == "Крысиный король" && king.race == Race.Animal) &&
-      // три шага в круге, набора под него ещё нет, кровь — его ингредиент
-      assertTrue(king.abilities == 3 && king.set.isEmpty) &&
+      // три шага в круге, набор под него — «Крыса», кровь — его ингредиент
+      assertTrue(king.abilities == 3 && king.set.contains(ItemSet.Rat)) &&
       assertTrue(king.ingredient == MaterialKind.RatKingBlood) &&
       assertTrue(king.poisonsOnHit && king.fightsInGroup && king.roundDamageCapPct == 20L)
     },
@@ -216,11 +216,12 @@ object RatKingBattleSpec extends ZIOSpecDefault {
 
     // ── Добыча ───────────────────────────────────────────────────────────────
 
-    test("дроп с короля: кровь и большая руна по два билета, черви — один") {
+    test("дроп с короля: кровь и руна по два билета, черви и вещи «Крысы» — по одному") {
       val drops = (1L to 2000L).toList.flatMap(s =>
         LootGenerator.rollMiniBoss(king, bossLvl, 10L, Rng(s))._1)
       val mats  = drops.collect { case LootDrop.Gear(i) => i.material }.flatten
       val runes = drops.collect { case LootDrop.Rune(i) => i.name }
+      val gear  = drops.collect { case LootDrop.Gear(i) if i.set.isDefined => i }
       val blood = mats.count(_ == MaterialKind.RatKingBlood)
       val worms = mats.count(_ == MaterialKind.PlagueWorms)
       assertTrue(mats.toSet == Set[MaterialKind](MaterialKind.RatKingBlood, MaterialKind.PlagueWorms)) &&
@@ -228,11 +229,14 @@ object RatKingBattleSpec extends ZIOSpecDefault {
       // 50 : 50 : 25 — крови и рун поровну, червей вдвое меньше
       assertTrue(blood > worms * 3 / 2 && blood < worms * 5 / 2) &&
       assertTrue(runes.size > worms * 3 / 2 && runes.size < worms * 5 / 2) &&
-      // ни трофеев, ни серебра, ни вещей набора — набора у него нет
+      // вещи у него только своего набора, 25 + 25 билетов: их примерно как червей вдвое
+      assertTrue(gear.nonEmpty && gear.forall(_.set.contains(ItemSet.Rat))) &&
+      assertTrue(gear.map(_.rarity).toSet == Set[ItemRarity](ItemRarity.Purple, ItemRarity.Blue)) &&
+      assertTrue(gear.size > worms * 3 / 2 && gear.size < worms * 5 / 2) &&
+      // ни трофеев, ни серебра, ни дублонов
       assertTrue(!drops.exists {
         case _: LootDrop.Trophy | _: LootDrop.Silver | _: LootDrop.Doubloons => true
-        case LootDrop.Gear(i) => i.set.isDefined
-        case _                => false
+        case _                                                              => false
       })
     },
 

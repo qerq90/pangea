@@ -74,7 +74,10 @@ case class SquadState(heroDao: HeroDao, content: SceneContent) extends State {
         case Some(a) =>
           val s = a.statsAt(hero.lvl)
           val text = content.format("squad.card",
-            "name" -> a.name, "race" -> a.kind.race.toString, "element" -> a.kind.element.emoji, "pos" -> a.position.toString,
+            // Крыса бьёт без стихии — в её карточке на этом месте зубы.
+            "name" -> a.name, "race" -> a.kind.race.toString,
+            "element" -> a.kind.element.map(_.emoji).getOrElse(content.text("squad.noElement")),
+            "pos" -> a.position.toString,
             "hp" -> a.hp.toString, "maxHp" -> s.hp.toString, "armor" -> a.armor.toString, "maxArmor" -> s.armor.toString,
             "energy" -> a.energy.toString, "maxEnergy" -> s.energy.toString,
             "atk" -> s.atk.toString, "accuracy" -> s.accuracy.toString, "defence" -> s.defence.toString, "evasion" -> s.evasion.toString)

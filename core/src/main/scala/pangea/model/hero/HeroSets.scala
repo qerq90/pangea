@@ -44,6 +44,11 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   /** +% к точности от «Охотника» (порог 2). */
   def accuracyBonusPct: Long = if (has(ItemSet.Hunter, 2)) ItemSet.Hunter.AccuracyPct else 0L
 
+  /** +% к броне от «Крысы» (порог 2). В отличие от прочих двоек поднимает не
+   *  итоговый боевой стат, а ПОТОЛОК брони (`Hero.maxArmor`): иначе прибавка
+   *  срезалась бы при первой же починке. */
+  def armorBonusPct: Long = if (has(ItemSet.Rat, 2)) ItemSet.Rat.ArmorPct else 0L
+
   /** Плоская прибавка к макс. HP: +300 за каждый набор, добравший до порога 8. */
   def flatHp: Long = ItemSet.values.count(has(_, 8)) * ItemSet.HpFlatBonus
 
@@ -148,6 +153,34 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
    *  к нему, а не умножает урон второй раз: четверного удара больше нет. */
   def skillCritBonusPct: Long =
     if (has(ItemSet.Hunter, 12)) ItemSet.Hunter.SkillCritBonusPct else 0L
+
+  // ── «Крыса» ─────────────────────────────────────────────────────────────────
+
+  /** Шанс (в %), что обычная атака, прошедшая в HP, отравит врага (порог 4). */
+  def poisonOnHitChancePct: Long =
+    if (has(ItemSet.Rat, 4)) ItemSet.Rat.PoisonChancePct else 0L
+
+  /** Сила накладываемого набором яда, в % макс. HP цели. */
+  def poisonPct: Int = ItemSet.Rat.PoisonPct
+
+  /** Шанс (в %), что в начале раунда к герою выскочит крыса (порог 6). */
+  def ratSummonChancePct: Long =
+    if (has(ItemSet.Rat, 6)) ItemSet.Rat.SummonChancePct else 0L
+
+  /** Множитель яда и кровотечения НА ГЕРОЕ (порог 10): они снимают вдвое меньше. */
+  def heroDotTakenMult: Double =
+    if (has(ItemSet.Rat, 10)) (100L - ItemSet.Rat.DotTakenCutPct) / 100.0 else 1.0
+
+  /** На сколько п.п. за раунд слабеет кровотечение на герое (порог 10). Ноль —
+   *  рана не затягивается сама, как было до набора. */
+  def heroBleedDecayPerRound: Int =
+    if (has(ItemSet.Rat, 10)) ItemSet.Rat.BleedDecayPerRound else 0
+
+  /** Приходят ли на зов чумные крысы вместо обычных (порог 12). */
+  def summonsPlagueRats: Boolean = has(ItemSet.Rat, 12)
+
+  /** Даётся ли крыса сразу, если в начале боя при герое нет ни одной (порог 12). */
+  def startsWithRat: Boolean = has(ItemSet.Rat, 12)
 }
 
 object HeroSets {

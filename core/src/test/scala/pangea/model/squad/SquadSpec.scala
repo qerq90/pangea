@@ -27,9 +27,11 @@ object SquadSpec extends ZIOSpecDefault {
       assertTrue(AllyKind.Human.energyRegen(lvl) == 35L && AllyKind.Murloc.energyRegen(lvl) == 70L) &&
       assertTrue(AllyKind.brewsFor(1L) == 1L && AllyKind.brewsFor(4L) == 1L && AllyKind.brewsFor(5L) == 1L &&
                  AllyKind.brewsFor(10L) == 2L && AllyKind.brewsFor(23L) == 4L) &&
-      assertTrue(AllyKind.Human.element == pangea.model.battle.Element.Fire &&
-                 AllyKind.Murloc.element == pangea.model.battle.Element.Lightning &&
-                 AllyKind.Gnome.element == pangea.model.battle.Element.Cold)
+      assertTrue(AllyKind.Human.element.contains(pangea.model.battle.Element.Fire) &&
+                 AllyKind.Murloc.element.contains(pangea.model.battle.Element.Lightning) &&
+                 AllyKind.Gnome.element.contains(pangea.model.battle.Element.Cold)) &&
+      // крыса бьёт зубами: стихии у неё нет, статы и имя — из своей формы
+      assertTrue(AllyKind.Rat.element.isEmpty && !AllyKind.hireable.contains(AllyKind.Rat))
     },
 
     test("найм: на первую свободную позицию, здоровым; повторно — нет") {
