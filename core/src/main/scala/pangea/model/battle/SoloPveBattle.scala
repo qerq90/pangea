@@ -204,12 +204,30 @@ case class SoloPveBattle(
   def slainActive: SlainMonster =
     SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName)
 
-  /** Подкрепление встаёт на первое свободное место за строем. */
+  /** Куда встанет пришедший: за спины своих, на первое место позади последнего
+    * из них. Хвост схемы занят (в караване там башни) — на самое дальнее
+    * свободное место, какое есть. Мест нет совсем — None, такой ждёт в очереди.
+    *
+    * Место героя тут ни при чём: у чужой стороны своя нумерация, и то, что герой
+    * зашёл глубоко, подкрепление вглубь не отодвигает (см. `GroupState.size`). */
+  def reinforcementPlace: Option[Int] = {
+    // Строй — это те, кто ходит: башни стоят поодаль, и вставать за них незачем,
+    // своих они не ведут.
+    val walkers = ((group.activePos, activeSlot) :: group.entries).collect {
+      case (pos, slot) if movable(slot) => pos
+    }
+    val behind = (0 :: walkers).max + 1
+    (behind to Formation.MonsterPlaces).find(p => !group.hasMonster(p))
+      .orElse(group.freePlaces.lastOption)
+  }
+
+  /** Подкрепление встаёт за строем; не нашлось места — ждёт в очереди. */
   def withReinforcement(slot: MonsterSlot): SoloPveBattle =
-    copy(group = group.copy(others = group.others :+ slot, places = group.places :+ (group.size + 1)))
+    reinforcementPlace.fold(copy(group = group.copy(queue = group.queue :+ slot)))(pos =>
+      copy(group = group.copy(others = group.others :+ slot, places = group.places :+ pos)))
 
   /** Есть ли место в строю ещё для одного. */
-  def hasRoom: Boolean = group.aliveCount < GroupState.MaxMonsters
+  def hasRoom: Boolean = reinforcementPlace.isDefined
 
   /** Пришедший встаёт в строй, если есть место, иначе — в очередь за ним. */
   def admit(slot: MonsterSlot): SoloPveBattle =
@@ -437,8 +455,15 @@ object SoloPveBattle {
 
   /** Бой против группы: мобы встают по местам 1, 2, … подряд; в паре с героем
     * — тот, что на его месте, а если там пусто — свободный (см. `settle`).
-    * Раса первого запоминается — подкрепление приходит такой же. */
-  def fromGroup(monsters0: List[Monster], hero: Hero, startEnergies: List[Long], squad: Boolean = true): SoloPveBattle = {
+    * Раса первого запоминается — подкрепление приходит такой же.
+    *
+    * Мест у врагов ровно [[Formation.MonsterPlaces]] — кому не хватило, ждут в
+    * очереди и входят, как только место освободится. `towers` — сколько
+    * сооружений идёт в конце списка: им отданы последние места схемы, они с них
+    * не сходят и в очередь не попадают никогда (караван без своих стрелков —
+    * уже не караван). */
+  def fromGroup(monsters0: List[Monster], hero: Hero, startEnergies: List[Long],
+                squad: Boolean = true, towers: Int = 0): SoloPveBattle = {
     // Двое именных одной расы под одним именем в бой не выходят.
     val monsters = Monster.distinctNames(monsters0)
     val energies = startEnergies.padTo(monsters.size, 0L)
@@ -446,9 +471,20 @@ object SoloPveBattle {
       MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
         m.fightStats.armor, m.marked, e, BattleEffects.empty, customName = m.customName)
     }
+    // Хотя бы один боец в строю нужен: с него начинается бой, и сооружению эта
+    // роль не подходит — оно не ходит и не встаёт в пару.
+    val towerCount         = towers.max(0).min(slots.size - 1)
+    val (fighters, towered) = slots.splitAt(slots.size - towerCount)
+    val towerPlaces         = ((Formation.MonsterPlaces - towerCount + 1) to Formation.MonsterPlaces).toList
+    // Место первого занято им самим, последние — башнями: остальным остаётся то,
+    // что между.
+    val (standing, waiting) = fighters.tail.splitAt(Formation.MonsterPlaces - towerCount - 1)
     val head = from(monsters.head, hero, squad).copy(monsterCurrentEnergy = energies.head)
-    head.copy(group = head.group.copy(others = slots.tail, originRace = Some(monsters.head.race.entryName),
-      places = (2 to monsters.size).toList)).settle
+    head.copy(group = head.group.copy(
+      others     = standing ++ towered,
+      places     = (2 to standing.size + 1).toList ++ towerPlaces,
+      queue      = waiting,
+      originRace = Some(monsters.head.race.entryName))).settle
   }
 
   implicit val encoder: Encoder[SoloPveBattle] = deriveEncoder

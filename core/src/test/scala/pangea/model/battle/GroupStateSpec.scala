@@ -33,6 +33,61 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.group.aliveCount == 3)
     },
 
+    // ── Единая схема строя ────────────────────────────────────────────────────
+    test("схема одна на все бои: одиннадцать мест отряду, пятнадцать врагам") {
+      assertTrue(Formation.HeroPlaces == 11 && Formation.MonsterPlaces == 15) &&
+      // и никто не держит своего числа на стороне
+      assertTrue(GroupState.MaxMonsters == Formation.MonsterPlaces) &&
+      assertTrue(pangea.model.squad.AllyRates.Positions == Formation.HeroPlaces) &&
+      // хвост чужого строя — за местами отряда: туда ему не дотянуться
+      assertTrue(Formation.MonsterPlaces > Formation.HeroPlaces)
+    },
+
+    test("в обычный бой встают до пятнадцати, остальные ждут за строем") {
+      val horde = List.fill(20)(monster(Race.Orc, 100L))
+      val b     = SoloPveBattle.fromGroup(horde, hero, Nil)
+      assertTrue(b.group.places == (2 to Formation.MonsterPlaces).toList) &&
+      assertTrue(b.group.aliveCount == Formation.MonsterPlaces) &&
+      assertTrue(b.group.queue.size == 20 - Formation.MonsterPlaces) &&
+      assertTrue(!b.hasRoom && b.group.freePlaces.isEmpty) &&
+      // вся схема занята, и ни одного места сверх неё
+      assertTrue(b.placesInOrder.size == Formation.MonsterPlaces && b.placesInOrder.forall(_._2.isDefined))
+    },
+
+    test("сооружениям отдан хвост строя, и в очередь они не попадают") {
+      val guards = List.fill(18)(monster(Race.Orc, 100L))
+      val towers = List.fill(2)(monster(Race.Construct, 500L))
+      val b      = SoloPveBattle.fromGroup(guards ++ towers, hero, Nil, towers = towers.size)
+      val tail   = List(Formation.MonsterPlaces - 1, Formation.MonsterPlaces)
+      assertTrue(b.group.places.takeRight(2) == tail) &&
+      assertTrue(tail.flatMap(b.monsterAt).forall(_.race == Race.Construct.entryName)) &&
+      // охрана встала перед башнями, остальные ждут
+      assertTrue(b.group.places.dropRight(2) == (2 to Formation.MonsterPlaces - 2).toList) &&
+      assertTrue(b.group.queue.size == 18 - (Formation.MonsterPlaces - 2)) &&
+      assertTrue(b.group.queue.forall(_.race == Race.Orc.entryName))
+    },
+
+    test("подкрепление встаёт за своими, но дальше схемы не уходит") {
+      val slot  = SoloPveBattle.fromGroup(List(monster(Race.Orc, 999L)), hero, Nil).activeSlot
+      // Строй забит под завязку: пришедшему места нет, он ждёт за ним
+      val full  = (1 to Formation.MonsterPlaces - 1).foldLeft(SoloPveBattle.fromGroup(trio.take(1), hero, Nil))(
+                    (b, _) => b.withReinforcement(slot))
+      val over  = full.withReinforcement(slot)
+      // Башни стоят в хвосте, но строй — это те, кто ходит: пришедший встаёт за
+      // охраной, а не за башнями, и прорехи впереди не занимает — их смыкает строй
+      val towers  = List.fill(2)(monster(Race.Construct, 500L))
+      val caravan = SoloPveBattle.fromGroup(trio.take(3) ++ towers, hero, Nil, towers = 2)
+      val gap     = caravan.sideFallen(0).withReinforcement(slot)   // пало место 2
+      // Охрана дошла до самых башен — свободного места нет совсем
+      val packed  = SoloPveBattle.fromGroup(List.fill(13)(monster(Race.Orc, 100L)) ++ towers, hero, Nil, towers = 2)
+      assertTrue(full.group.places.max == Formation.MonsterPlaces && !full.hasRoom) &&
+      assertTrue(over.group.places.max == Formation.MonsterPlaces && over.group.queue.size == 1) &&
+      assertTrue(caravan.reinforcementPlace.contains(4)) &&
+      assertTrue(gap.group.places.last == 4 && !gap.group.occupied(2)) &&
+      assertTrue(packed.group.freePlaces.isEmpty && packed.reinforcementPlace.isEmpty) &&
+      assertTrue(packed.admit(slot).group.queue.size == 1)
+    },
+
     test("обычный бой 1 на 1 — группа из одного") {
       val b = SoloPveBattle.from(trio.head, hero)
       assertTrue(!b.isGroup) && assertTrue(b.group == GroupState.empty) &&

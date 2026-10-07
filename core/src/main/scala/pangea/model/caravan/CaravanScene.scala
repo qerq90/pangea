@@ -100,10 +100,10 @@ object CaravanRates {
   val MinTowers: Int = 1
   val MaxTowers: Int = 2
 
-  /** Башни стоят поодаль от свалки и не двигаются: первая на этом месте,
-    * вторая следом. Между ними и охраной остаются пустые места строя — до
+  /** Башни стоят поодаль от свалки и не двигаются: им отдан хвост строя —
+    * последние места единой схемы (см. [[pangea.model.battle.Formation]]). До
     * стрелков ещё надо добежать, а они бьют с любого расстояния. */
-  val TowerPlace: Int = 14
+  val TowerPlace: Int = pangea.model.battle.Formation.MonsterPlaces - MaxTowers + 1
 
   /** На сколько процентов испуг уводит охрану и сколько её остаётся всегда. */
   val ScarePct: Long   = 25L

@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{Formation, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Monster, Race, Rarity}
@@ -257,16 +257,29 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("прибежал сородич"))
     },
 
-    test("выше десяти мобов подкрепление не приходит") {
-      val ten = group(List.fill(10)(1000L): _*)
+    test("строй врагов полон — подкрепление не приходит") {
+      // Мест у чужой стороны ровно столько, сколько в единой схеме (Formation).
+      val full = group(List.fill(Formation.MonsterPlaces)(1000L): _*)
       for {
-        t <- makeState(hero(), ten)
+        t <- makeState(hero(), full)
         (state, dao, r) = t
         _     <- quietRound(99, 1)
         _     <- state.action(testUser, aimed("Attack", 1), r)
         after <- battleOf(dao)
-      } yield assertTrue(after.group.aliveCount == 10) &&
-              assertTrue(after.group.others.size == 9)
+      } yield assertTrue(after.group.aliveCount == Formation.MonsterPlaces) &&
+              assertTrue(after.group.others.size == Formation.MonsterPlaces - 1) &&
+              assertTrue(after.group.places.max == Formation.MonsterPlaces)
+    },
+
+    test("герой ходит по своей стороне: за одиннадцатое место шагу нет, сколько бы врагов ни стояло глубже") {
+      val full = group(List.fill(Formation.MonsterPlaces)(1000L): _*)
+      val deep = full.copy(group = full.group.copy(heroPos = Formation.HeroPlaces))
+      val mid  = full.copy(group = full.group.copy(heroPos = 5))
+      // враги стоят до пятнадцатого, но хвост строя — не сторона отряда
+      assertTrue(deep.group.rows == Formation.MonsterPlaces) &&
+      assertTrue(BattleState.stepTargets(deep) == List(Formation.HeroPlaces - 1)) &&
+      assertTrue(BattleState.stepTargets(mid) == List(4, 6)) &&
+      assertTrue(BattleState.stepTargets(full) == List(2))
     },
 
     test("после Тарана герой стоит между двумя мобами — бьют сбоку оба, а не только сосед справа") {
@@ -409,20 +422,23 @@ object GroupBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(noCall.group.slain.size == 1 && noCall.group.others.size == 7 && noCall.group.queue.isEmpty)
     },
 
-    test("мифический выжил первый раунд — зовёт; одиннадцатому и дальше места нет, они ждут за строем") {
+    test("мифический выжил первый раунд — зовёт; кому места в строю нет, ждут за ним") {
       val chief = Monster(0L, lvl, Race.Orc, Rarity.Mythical,
         FightStats(atk = 20, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
-      val eight = List.fill(8)(monster(1000L))
+      // Строй забит до последнего места, кроме одного: зову есть куда поставить
+      // ровно одного, остальные уйдут за спины.
+      val eight = List.fill(Formation.MonsterPlaces - 2)(monster(1000L))
       for {
         t <- makeState(hero(), SoloPveBattle.fromGroup(chief :: eight, hero(), Nil))
         (state, dao, r) = t
-        // герой попал, вожак ответил; сосед на месте 2 бьёт сбоку; подкрепления нет (9 в строю);
+        // герой попал, вожак ответил; сосед на месте 2 бьёт сбоку; подкрепления нет;
         // зов: трое 1–3 ранга — обычный, необычный, редкий; место есть только одному
         _       <- TestRandom.feedInts(60, 99, 99, 99, 3, 0, 1, 2) *> TestRandom.feedLongs(100L, 100L, 100L, 5L, 5L, 5L)
         _       <- state.action(testUser, aimed("Attack", 1), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-      } yield assertTrue(after.group.aliveCount == 10 && after.group.others.size == 9) &&
+      } yield assertTrue(after.group.aliveCount == Formation.MonsterPlaces &&
+                         after.group.others.size == Formation.MonsterPlaces - 1) &&
               assertTrue(after.group.others.last.rarity == Rarity.Common.entryName &&
                          after.group.queue.map(_.rarity) == List(Rarity.Uncommon, Rarity.Rare).map(_.entryName)) &&
               assertTrue(screens.contains("Ещё 2 не находят места и ждут за строем")) &&
@@ -431,13 +447,15 @@ object GroupBattleSpec extends ZIOSpecDefault {
 
     test("очередь: место освободилось — следующий выходит из-за спин; строй пуст, а очередь нет — победы нет") {
       val slot = SoloPveBattle.fromGroup(List(monster(500L)), hero(), Nil).activeSlot
-      val full = (1 to 9).foldLeft(group(1000L))((b, _) => b.withReinforcement(slot))   // 10 в строю
+      // Забиваем строй до последнего места схемы.
+      val full = (1 to Formation.MonsterPlaces - 1).foldLeft(group(1000L))((b, _) => b.withReinforcement(slot))
       val withQueue = full.admit(slot.copy(currentHp = 777L)).admit(slot.copy(currentHp = 888L))
       val freed = withQueue.sideFallen(0).admitQueued
       val lone  = group(10L).copy(group = group(10L).group.copy(queue = List(slot.copy(currentHp = 777L)))).copy(monsterCurrentHp = 0L)
       val next  = lone.promoteNext
-      assertTrue(full.group.aliveCount == 10 && !full.hasRoom) &&
-      assertTrue(withQueue.group.others.size == 9 && withQueue.group.queue.map(_.currentHp) == List(777L, 888L)) &&
+      assertTrue(full.group.aliveCount == Formation.MonsterPlaces && !full.hasRoom) &&
+      assertTrue(withQueue.group.others.size == Formation.MonsterPlaces - 1 &&
+                 withQueue.group.queue.map(_.currentHp) == List(777L, 888L)) &&
       assertTrue(freed._2.map(_.currentHp) == List(777L) && freed._1.group.queue.map(_.currentHp) == List(888L)) &&
       assertTrue(freed._1.group.others.exists(_.currentHp == 777L)) &&
       assertTrue(next.exists(b => b.monsterCurrentHp == 777L && b.group.queue.isEmpty && b.group.slain.size == 1))
