@@ -374,6 +374,52 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(scr.contains("отряд отбился, и вы приходите в себя"))
     },
 
+    test("«Упырь» 12: пир только за своих убитых — добил союзник, герой не лечится") {
+      // Набор «Упырь» на двенадцать предметов целиком.
+      val slots = List(ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
+        ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
+        ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Weapon)
+      val ghoulEq = slots.zipWithIndex.foldLeft(TestFixtures.emptyEquipment) { case (eq, (t, i)) =>
+        val it = Item(400L + i, "Предмет", 1L, ItemRarity.Blue, t,
+          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+          set = Some(pangea.model.item.ItemSet.Ghoul))
+        i match {
+          case 0  => eq.copy(helmet = it)
+          case 1  => eq.copy(shoulderPads = it)
+          case 2  => eq.copy(chestPlate = it)
+          case 3  => eq.copy(bracelets = it)
+          case 4  => eq.copy(gloves = it)
+          case 5  => eq.copy(pants = it)
+          case 6  => eq.copy(boots = it)
+          case 7  => eq.copy(amulet = it)
+          case 8  => eq.copy(firstRing = it)
+          case 9  => eq.copy(secondRing = it)
+          case 10 => eq.copy(belt = it)
+          case _  => eq.copy(weapon = it)
+        }
+      }
+      // Герой ранен и бьёт слишком слабо, чтобы кого-то добить; союзник напротив
+      // соседа добивает его сам.
+      val h = hero(atk = 1L, allies = List(ally(pos = 2))).copy(equipment = ghoulEq)
+      val wounded = h.copy(fightStats = h.fightStats.copy(hp = 100L, armor = 0L))
+      for {
+        t <- makeState(wounded, group(wounded, 100000L, 1L))
+        (state, dao, r) = t
+        _     <- TestRandom.feedInts(60, 3, 90, 90)
+        _     <- TestRandom.feedLongs(100L, 100L)
+        _     <- state.action(testUser, aimed("Attack", 1), r)
+        after <- dao.getHeroByUserId(userId).map(_.get)
+        b1    <- battleOf(dao)
+        said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(wounded.sets.feastsOnKill) &&
+              // союзник кого-то уложил
+              assertTrue(b1.group.slain.nonEmpty) &&
+              // а пира нет: герой никого не убивал. (HP при этом растёт — у
+              // двенадцати предметов работает и порог 10, лечащий чужой кровью.)
+              assertTrue(!said.contains("жуткий пир")) &&
+              assertTrue(after.fightStats.hp > 0L)
+    },
+
     test("герой лежит, союзники добили охрану — башням некого прикрывать, и это победа") {
       // Караван: охранник в паре с героем и башня в хвосте. Герой лежит,
       // союзник добивает охранника — башня остаётся одна, и бой кончен.

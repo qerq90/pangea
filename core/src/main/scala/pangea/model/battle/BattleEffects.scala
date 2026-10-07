@@ -137,9 +137,6 @@ case class BattleEffects(
   // элементаль и его шипы.
   heroBurn:             Option[Burn]               = None,
   heroPoisonousAttacks: Boolean                    = false,
-  // Флаги «один раз за бой» набора «Охотник» (пороги 10 и 12).
-  cancelSpent:          Boolean                    = false,
-  doubleSpent:          Boolean                    = false,
   // Сколько ходов элементаль ещё скован холодом: шипы молчат, его атаки не
   // поджигают, точность срезана (см. MiniBoss.FireElemental.ChilledTurns).
   chilledTurns:         Int                        = 0,
@@ -221,8 +218,6 @@ case class BattleEffects(
     heroRegen            = heroRegen,
     heroBurn             = heroBurn,
     heroPoisonousAttacks = heroPoisonousAttacks,
-    cancelSpent          = cancelSpent,
-    doubleSpent          = doubleSpent,
     heroStunnedTurns     = heroStunnedTurns,
     heroGroundedTurns    = heroGroundedTurns,
     heroPoison           = heroPoison,
