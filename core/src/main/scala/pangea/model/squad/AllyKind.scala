@@ -67,10 +67,10 @@ object AllyRates {
     * поднялись. Дальше они рассыпаются, и ждать этого союзника неоткуда. */
   val UndeadMs: Long = 24L * 60L * 60L * 1000L
 
-  /** Мест в строю вместе с героем: герой и до десяти союзников. Столько же
-    * мест и у мобов ([[pangea.model.battle.GroupState.MaxMonsters]]), так что
-    * строй сходится место в место. */
-  val Positions: Int = 11
+  /** Мест в строю вместе с героем: герой и до десяти союзников. Число берём из
+    * единой схемы строя — у врагов мест больше, и за одиннадцатым начинается
+    * хвост, куда отряду не дотянуться (см. [[pangea.model.battle.Formation]]). */
+  val Positions: Int = pangea.model.battle.Formation.HeroPlaces
 }
 
 object AllyKind extends Enum[AllyKind] {

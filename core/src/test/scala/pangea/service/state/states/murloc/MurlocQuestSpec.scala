@@ -2,7 +2,7 @@ package pangea.service.state.states.murloc
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{Formation, SoloPveBattle}
 import pangea.model.hero.{Achievement, Hero}
 import pangea.model.item.{Item, ItemType, QuestItemKind, Rarity}
 import pangea.model.monster.{Monster, Race, Rarity => MobRarity}
@@ -200,9 +200,17 @@ object MurlocQuestSpec extends ZIOSpecDefault {
           front   = battle.monstersInOrder
           queue   = battle.group.queue
         } yield assertTrue(res == StateType.Battle && battle.story.contains(MurlocQuest.RaidStory)) &&
-                assertTrue(front.size == 10 && front.forall(m => m.race == Race.Murloc.entryName && m.lvl == 7L)) &&
-                assertTrue(front.forall(m => Set(MobRarity.Uncommon, MobRarity.Rare).map(_.entryName).contains(m.rarity))) &&
-                assertTrue(queue.size == 13 && queue.forall(m => m.race == Race.Murloc.entryName && m.lvl == 7L)) &&
+                // Строй налёта — десять второго–третьего ранга, но мест у врагов
+                // больше (единая схема), и за передними сразу встают первые из
+                // тех, кто ждал: поле заполняется до отказа.
+                assertTrue(front.size == Formation.MonsterPlaces &&
+                           front.forall(m => m.race == Race.Murloc.entryName && m.lvl == 7L)) &&
+                assertTrue(front.take(MurlocQuest.RaidFront)
+                             .forall(m => Set(MobRarity.Uncommon, MobRarity.Rare).map(_.entryName).contains(m.rarity))) &&
+                assertTrue(front.drop(MurlocQuest.RaidFront)
+                             .forall(m => Set(MobRarity.Rare, MobRarity.Mythical).map(_.entryName).contains(m.rarity))) &&
+                assertTrue(queue.size == MurlocQuest.RaidQueue + 1 - (Formation.MonsterPlaces - MurlocQuest.RaidFront) &&
+                           queue.forall(m => m.race == Race.Murloc.entryName && m.lvl == 7L)) &&
                 assertTrue(queue.init.forall(m => Set(MobRarity.Rare, MobRarity.Mythical).map(_.entryName).contains(m.rarity))) &&
                 assertTrue(queue.last.rarity == MobRarity.Legendary.entryName && queue.last.name == "Старый Мрачноглаз") &&
                 assertTrue(loot.returnState.contains(StateType.MurlocVillage) && loot.eventData.flatMap(_.as[Progress].toOption).exists(_.step == Step.AfterRaid)) &&

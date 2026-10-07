@@ -7,7 +7,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
@@ -1144,7 +1144,7 @@ case class BattleState(
             rolled <- Random.nextIntBetween(king.SummonMin, king.SummonMax + 1)
             // Больше, чем влезет в строй, он не зовёт: очередь за спинами
             // копилась бы весь бой и вываливалась разом.
-            n      = rolled.min(GroupState.MaxMonsters - battle.group.aliveCount).max(1)
+            n      = rolled.min(battle.group.freePlaces.size).max(1)
             seeds <- ZIO.foreach(List.fill(n)(()))(_ => Random.nextLong)
             pcts  <- ZIO.foreach(seeds)(_ =>
                        Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L))
@@ -4211,10 +4211,14 @@ object BattleState {
 
   /** Куда герой может шагнуть: ровно одно место влево или вправо, и только в
     * пределах строя — за его край, туда, где никого нет и не будет, ходить
-    * незачем. Место может быть занято союзником (тогда поменяются) или пустым. */
+    * незачем. Дальше своей стороны ему тоже нельзя: мест у отряда
+    * [[Formation.HeroPlaces]], а хвост чужого строя — не его сторона, даже когда
+    * враги стоят глубже. Место может быть занято союзником (тогда поменяются)
+    * или пустым. */
   def stepTargets(battle: SoloPveBattle): List[Int] = {
-    val here = battle.group.heroPos
-    List(here - 1, here + 1).filter(p => p >= 1 && p <= battle.group.rows)
+    val here  = battle.group.heroPos
+    val edge  = battle.group.rows.min(Formation.HeroPlaces)
+    List(here - 1, here + 1).filter(p => p >= 1 && p <= edge)
   }
 
   /** Исход хода — определяет переход и терминальные действия в [[BattleState.commit]]. */

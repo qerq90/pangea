@@ -384,7 +384,9 @@ case class CaravanState(
       energies <- ZIO.foreach(guards ++ towers)(m =>
                     Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
                       .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
-      battle  = withTowers(SoloPveBattle.fromGroup(guards ++ towers, hero, energies), guards.size, towers.size)
+      // Башни идут последними: единая схема строя сама отдаёт им хвост (см.
+      // SoloPveBattle.fromGroup и CaravanRates.TowerPlace).
+      battle  = SoloPveBattle.fromGroup(guards ++ towers, hero, energies, towers = towers.size)
       last    = scene.wave >= scene.waves
       // Добычу с мобов экран добычи соберёт сам, а поклажу каравана он не
       // знает — за ней герой возвращается сюда же, к разбитому обозу.
@@ -396,18 +398,6 @@ case class CaravanState(
              if (scene.waves > 1) "caravan.battleWave" else "caravan.battle",
              "count" -> count.toString, "wave" -> scene.wave.toString, "of" -> scene.waves.toString), Nil))
     } yield StateType.Battle
-
-  /** Башни встают в хвост строя — с десятого места и ниже — и с него не сходят. */
-  private def withTowers(battle: SoloPveBattle, guards: Int, towers: Int): SoloPveBattle =
-    if (towers <= 0) battle
-    else {
-      val places = battle.group.places.zipWithIndex.map { case (p, i) =>
-        // Башни идут в списке последними: их места переносим в хвост строя.
-        val towerIdx = i - (guards - 1)
-        if (towerIdx >= 0) CaravanRates.TowerPlace + towerIdx else p
-      }
-      battle.copy(group = battle.group.copy(places = places))
-    }
 
   private def weaken(m: Monster, on: Boolean): Monster =
     if (!on) m
