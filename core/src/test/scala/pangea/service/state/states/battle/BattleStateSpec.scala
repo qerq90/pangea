@@ -41,6 +41,10 @@ object BattleStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
 
+  /** Встречается ли подстрока в тексте ровно один раз. */
+  private def once(text: String, needle: String): Boolean =
+    text.sliding(needle.length).count(_ == needle) == 1
+
   // Герой с высокой точностью — попадает практически всегда
   private def strongHero = TestFixtures.hero(userId).copy(
     fightStats = FightStats(atk = 50, hp = 200, armor = 0, defence = 0,
@@ -178,6 +182,11 @@ object BattleStateSpec extends ZIOSpecDefault {
     monsterCurrentHp    = 9999L,
     monsterCurrentArmor = 0L
   )
+
+  /** Тот же моб, но орк: единственная смертная раса без стихии и яда на оружии
+    * (см. Race.weaponElement/weaponPoison). Нужен там, где проверяется чистая
+    * механика брони и урона, а расовая стихия только мешала бы счёту. */
+  private val plainSteelBattle = strongBattle.copy(monsterRace = Race.Orc.entryName)
 
   private def makeState(hero: pangea.model.hero.Hero, battle: SoloPveBattle) =
     for {
@@ -647,8 +656,32 @@ object BattleStateSpec extends ZIOSpecDefault {
         _             <- TestRandom.feedLongs(100L)
         _             <- state.action(testUser, tap("Attack"), r)
         after         <- dao.getHeroByUserId(userId).map(_.get)
+        log           <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         maxHp          = hero.effectiveMaxHp(0L)
-      } yield assertTrue(after.fightStats.hp == (100L + 999L).min(maxHp))
+        drunk          = after.fightStats.hp - 100L
+      } yield assertTrue(after.fightStats.hp == (100L + 999L).min(maxHp)) &&
+              // и об этом сказано: одна строка в конце раунда на всё выпитое, с
+              // настоящим приростом HP, а не с тем, что лечение хотело дать
+              assertTrue(log.contains(s"Вампиризм восстановил $drunk HP!")) &&
+              assertTrue(once(log, "Вампиризм восстановил"))
+    },
+
+    test("кровь поминают один раз за раунд — одной строкой тика, общей для всех DoT") {
+      val hero = ghoulHero(10).copy(fightStats = strongHero.fightStats.copy(atk = 500, hp = 100))
+      val bleeding = strongBattle.copy(
+        effects = strongBattle.effects.copy(monsterBleed = Some(pangea.model.battle.Bleed(10))))
+      for {
+        t             <- makeState(hero, bleeding)
+        (state, _, r)  = t
+        _             <- TestRandom.feedInts(60, 90, 3, 90)
+        _             <- TestRandom.feedLongs(100L)
+        _             <- state.action(testUser, tap("Attack"), r)
+        // первый экран — лог раунда; второй, с шапкой боя, тут не при чём
+        round         <- r.sentScreens.map(_.map(_.text).headOption.getOrElse(""))
+      } yield assertTrue(round.contains("Кровотечение снимает 999 HP")) &&
+              // приписок (🔴 -999 ❤) к строкам удара больше нет: число одно, место одно
+              assertTrue(once(round, "999")) &&
+              assertTrue(!round.contains("🔴 -999"))
     },
 
     test("«Упырь» 12: каждый убитый — пир, по 10% HP и брони, сообщение показано") {
@@ -1003,7 +1036,7 @@ object BattleStateSpec extends ZIOSpecDefault {
 
     test("герой с 1 HP умирает от удара моба → переход в Death") {
       for {
-        triple               <- makeState(dyingHero, strongBattle)
+        triple               <- makeState(dyingHero, plainSteelBattle)
         (state, heroDao, renderer) = triple
         // Прямая атака (монстр ответит и убьёт)
         result               <- state.action(testUser, tap("Attack"), renderer)
@@ -1072,7 +1105,9 @@ object BattleStateSpec extends ZIOSpecDefault {
         fightStats = strongHero.fightStats.copy(hp = 1000L, armor = 1000L, defence = 0, evasion = 0),
         baseStats  = strongHero.baseStats.copy(agi = 0)
       )
-      val slowBattle = strongBattle
+      // Орк: голая сталь, вся она и уходит в броню. У человека на клинке молния,
+      // а она пятой частью бьёт мимо брони — тут это только мешало бы.
+      val slowBattle = plainSteelBattle
       for {
         triple               <- makeState(armoredHero, slowBattle)
         (state, heroDao, renderer) = triple

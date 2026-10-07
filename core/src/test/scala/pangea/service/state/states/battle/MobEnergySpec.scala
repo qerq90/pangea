@@ -111,71 +111,60 @@ object MobEnergySpec extends ZIOSpecDefault {
 
     test("базовые умения стоят 1.6 базовой цены, расовые — 3.0, округление вверх") {
       assertTrue(MonsterSkill.QuickStrike.cost(lvl) == 80L) &&      // 50 × 1.6
-      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) == 150L) &&    // 50 × 3.0
-      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 150L) &&
+      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) == 150L) &&    // 50 × 3.0
       // округление идёт вверх, а не вниз
       assertTrue(MonsterSkill.QuickStrike.cost(1L) == 52L) &&       // ceil(32 × 1.6) = 52
       // после расового умения в запасе остаётся ещё на базовое
-      assertTrue(MonsterSkill.MurlocPowder.cost(lvl) + MonsterSkill.QuickStrike.cost(lvl)
+      assertTrue(MonsterSkill.DirtyStrike.cost(lvl) + MonsterSkill.QuickStrike.cost(lvl)
                    <= MonsterEnergy.maxEnergy(lvl))
     },
 
     // ── Расовые пулы ──────────────────────────────────────────────────────────
     test("базовые умения есть у всех рас, расовые — только у своей") {
       assertTrue(Race.mortals.forall(MonsterSkill.QuickStrike.availableTo)) &&
-      assertTrue(MonsterSkill.MurlocPowder.availableTo(Race.Murloc)) &&
-      assertTrue(!MonsterSkill.MurlocPowder.availableTo(Race.Human)) &&
-      assertTrue(MonsterSkill.DemonPowder.availableTo(Race.Demon)) &&
-      assertTrue(MonsterSkill.GnomePowder.availableTo(Race.Gnome)) &&
-      assertTrue(MonsterSkill.KhajiitPowder.availableTo(Race.Khajiit)) &&
-      assertTrue(MonsterSkill.ElfPowder.availableTo(Race.Elf)) &&
-      assertTrue(!MonsterSkill.DirtyStrike.availableTo(Race.Elf))
+      assertTrue(MonsterSkill.DirtyStrike.availableTo(Race.Murloc)) &&
+      assertTrue(!MonsterSkill.DirtyStrike.availableTo(Race.Elf)) &&
+      assertTrue(!MonsterSkill.DirtyStrike.availableTo(Race.Human)) &&
+      // «Порошок!» убран совсем: отравленное и стихийное оружие теперь при расе
+      // всегда, заготавливать его умением незачем
+      assertTrue(!MonsterSkill.values.exists(_.label == "Порошок!"))
     },
 
-    test("моб берёт самое дорогое по карману: с полным запасом мурлок сыплет порошок") {
+    test("моб берёт самое дорогое по карману: с полным запасом мурлок бьёт грязно") {
       val h = hero()
       for {
         r <- strike(h, mobBattle(Race.Murloc, energy = MonsterEnergy.maxEnergy(lvl)), seedTurn(0))
         (after, _, log) = r
-      } yield assertTrue(log.contains("достал странную пыль")) &&
-              assertTrue(after.effects.monsterPowderUsed) &&
-              assertTrue(after.effects.monsterPoisonsOnHit)
+      } yield assertTrue(log.contains("грязную атаку")) &&
+              assertTrue(after.effects.heroPoison.isDefined)
     },
 
-    test("порошок высыпается один раз за бой") {
+    test("мурлок и эльф всегда с отравленным оружием — без всяких заготовок") {
       val h = hero()
-      val used = mobBattle(Race.Murloc, energy = MonsterEnergy.maxEnergy(lvl))
-      val already = used.copy(effects = used.effects.copy(monsterPowderUsed = true))
+      def poisonAfter(race: Race) =
+        strike(h, mobBattle(race, energy = 0L), seedTurn()).map { case (after, _, log) =>
+          (after.effects.heroPoison.isDefined, log.contains("Отравленное оружие"))
+        }
       for {
-        r <- strike(h, already, seedTurn(0))
-        (_, _, log) = r
-      } yield assertTrue(!log.contains("достал странную пыль")) &&
-              // вместо него ушёл «Грязный удар» — следующее по цене умение мурлока
-              assertTrue(log.contains("грязную атаку"))
+        murloc <- poisonAfter(Race.Murloc)
+        elf    <- poisonAfter(Race.Elf)
+        human  <- poisonAfter(Race.Human)
+      } yield assertTrue(Race.Murloc.weaponPoison && Race.Elf.weaponPoison) &&
+              assertTrue(murloc._1 && murloc._2) &&
+              assertTrue(elf._1 && elf._2) &&
+              // у человека яда на клинке нет — у него молния
+              assertTrue(!Race.Human.weaponPoison && !human._1)
     },
 
-    test("после порошка мурлока удары травят героя") {
-      val h = hero()
-      val b = mobBattle(Race.Murloc, energy = 0L)
-      val powdered = b.copy(effects = b.effects.copy(monsterPowderUsed = true, monsterPoisonsOnHit = true))
-      for {
-        r <- strike(h, powdered, seedTurn())
-        (after, _, log) = r
-      } yield assertTrue(after.effects.heroPoison.isDefined) &&
-              assertTrue(log.contains("Отравленное оружие"))
-    },
-
-    test("огненный порошок не бьёт сквозь броню: удар меньше брони в HP не проходит") {
+    test("огонь демона не бьёт сквозь броню: удар меньше брони в HP не проходит") {
       // Бой из лога: у героя брони с запасом, у демона — Огонь после порошка.
       // Раньше множители огня (0.8 по броне, 1.1 по HP) подставлялись в раскол
       // минибосса как ДОЛИ, и 110% удара уходило в HP мимо брони.
       val h = hero().copy(fightStats = FightStats(atk = 20, hp = 480L, armor = 1400L, defence = 0,
                                                   evasion = 0, accuracy = 9999, energy = 0))
       val b = mobBattle(Race.Demon, energy = 0L)
-      val fiery = b.copy(
-        monsterStats = b.monsterStats.copy(atk = 700),
-        effects = b.effects.copy(monsterPowderUsed = true,
-                                 monsterAttackElement = Some(pangea.model.battle.Element.Fire.entryName)))
+      // Демон ходит с огнём всегда — настраивать нечего.
+      val fiery = b.copy(monsterStats = b.monsterStats.copy(atk = 700))
       for {
         r <- strike(h, fiery, seedTurn(99))
         (_, updated, _) = r
@@ -184,16 +173,14 @@ object MobEnergySpec extends ZIOSpecDefault {
               assertTrue(updated.fightStats.armor > 0L)
     },
 
-    test("огонь порошка: в HP идёт только то, что вылилось за броню, с усилением 1.1") {
+    test("огонь демона: в HP идёт только то, что вылилось за броню, с усилением 1.1") {
       // Брони 100, удар ~700: броня встречает свои 100, но огонь по броне на 20%
       // слабее — с неё уходит 80, а остаток удара (600) идёт в HP с ×1.1.
       val h = hero().copy(fightStats = FightStats(atk = 20, hp = 5000L, armor = 100L, defence = 0,
                                                   evasion = 0, accuracy = 9999, energy = 0))
       val b = mobBattle(Race.Demon, energy = 0L)
-      val fiery = b.copy(
-        monsterStats = b.monsterStats.copy(atk = 700),
-        effects = b.effects.copy(monsterPowderUsed = true,
-                                 monsterAttackElement = Some(pangea.model.battle.Element.Fire.entryName)))
+      // Демон ходит с огнём всегда — настраивать нечего.
+      val fiery = b.copy(monsterStats = b.monsterStats.copy(atk = 700))
       for {
         r <- strike(h, fiery, seedTurn(99))
         (_, updated, _) = r
@@ -220,34 +207,38 @@ object MobEnergySpec extends ZIOSpecDefault {
     test("грязный удар мурлока бьёт слабее обычного, но всегда травит") {
       val h = hero()
       val b = mobBattle(Race.Murloc, energy = MonsterEnergy.maxEnergy(lvl))
-      val already = b.copy(effects = b.effects.copy(monsterPowderUsed = true))
       for {
-        r <- strike(h, already, seedTurn(0))
+        r <- strike(h, b, seedTurn(0))
         (after, _, log) = r
       } yield assertTrue(log.contains("медленно растекается яд")) &&
               assertTrue(after.effects.heroPoison.isDefined)
     },
 
-    test("порошок демона делает удары огненными, гнома — морозными, каджита — воздушными") {
-      val h = hero()
-      def elementAfter(race: Race) =
-        strike(h, mobBattle(race, energy = MonsterEnergy.maxEnergy(lvl)), seedTurn(0))
-          .map(_._1.effects.monsterAttackElement)
-      for {
-        demon   <- elementAfter(Race.Demon)
-        gnome   <- elementAfter(Race.Gnome)
-        khajiit <- elementAfter(Race.Khajiit)
-      } yield assertTrue(demon.contains("Fire")) &&
-              assertTrue(gnome.contains("Cold")) &&
-              assertTrue(khajiit.contains("Air"))
+    test("у каждой расы своя стихия на клинке, и она при ней всегда") {
+      val E = pangea.model.battle.Element
+      assertTrue(Race.Demon.weaponElement.contains(E.Fire)) &&
+      assertTrue(Race.Gnome.weaponElement.contains(E.Cold)) &&
+      assertTrue(Race.Khajiit.weaponElement.contains(E.Air)) &&
+      assertTrue(Race.Human.weaponElement.contains(E.Lightning)) &&
+      assertTrue(Race.Goblin.weaponElement.contains(E.Lightning)) &&
+      // у мурлока и эльфа вместо стихии яд
+      assertTrue(Race.Murloc.weaponElement.isEmpty && Race.Elf.weaponElement.isEmpty) &&
+      assertTrue(Race.Murloc.weaponPoison && Race.Elf.weaponPoison) &&
+      assertTrue(Race.mortals.filterNot(Set[Race](Race.Murloc, Race.Elf)).forall(!_.weaponPoison)) &&
+      // Орк пока ни с чем: ему ни стихии, ни яда не назначали — бьёт голой сталью
+      assertTrue(Race.Orc.weaponElement.isEmpty && !Race.Orc.weaponPoison) &&
+      // у всех прочих смертных есть либо стихия, либо яд
+      assertTrue(Race.mortals.filterNot(_ == Race.Orc)
+        .forall(r => r.weaponElement.isDefined || r.weaponPoison)) &&
+      // боссовым расам расового оружия не положено: у минибоссов стихия своя
+      assertTrue(Race.bossRaces.forall(r => r.weaponElement.isEmpty && !r.weaponPoison))
     },
 
-    // ── Проки стихии, которую дал порошок ─────────────────────────────────────
+    // ── Проки расовой стихии ───────────────────────────────────────────
     test("морозные удары моба грызут защиту героя — и срез копится") {
       val h = hero()
       val b = mobBattle(Race.Gnome, energy = 0L)
-      val frosty = b.copy(effects = b.effects.copy(
-        monsterPowderUsed = true, monsterAttackElement = Some("Cold")))
+      val frosty = b   // гном всегда с холодом
       for {
         // 60 — удар героя, 90 — удар моба, 1 — прок стихии прошёл
         r <- strike(h, frosty, seedTurn(1))
@@ -273,8 +264,7 @@ object MobEnergySpec extends ZIOSpecDefault {
     test("воздушный удар бодрит самого моба: точность и уклонение выше на 3 хода") {
       val h = hero()
       val b = mobBattle(Race.Khajiit, energy = 0L)
-      val windy = b.copy(effects = b.effects.copy(
-        monsterPowderUsed = true, monsterAttackElement = Some("Air")))
+      val windy = b   // каджит всегда с ветром
       for {
         r <- strike(h, windy, seedTurn(1))
         (after, _, log) = r
@@ -283,11 +273,10 @@ object MobEnergySpec extends ZIOSpecDefault {
               assertTrue(after.effects.mobAirBoostTurns == pangea.model.battle.Element.Air.ProcTurns)
     },
 
-    test("огненный порошок отыгрывается поджогом, а не этим проком") {
+    test("огонь демона отыгрывается поджогом, а не этим проком") {
       val h = hero()
       val b = mobBattle(Race.Demon, energy = 0L)
-      val fiery = b.copy(effects = b.effects.copy(
-        monsterPowderUsed = true, monsterAttackElement = Some("Fire")))
+      val fiery = b   // демон всегда с огнём
       for {
         r <- strike(h, fiery, seedTurn(1))
         (after, _, log) = r

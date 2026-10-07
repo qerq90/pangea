@@ -224,7 +224,8 @@ object FlaskBattleSpec extends ZIOSpecDefault {
               assertTrue(b2.effects.heroVampiricHits == 2 && b4.effects.heroVampiricHits == 0) &&
               assertTrue(h4.fightStats.hp == 10000L + 3L * (dealt * 30L / 100L)) &&
               assertTrue(h5.fightStats.hp == h4.fightStats.hp) && // четвёртый удар уже не лечит
-              assertTrue(log.contains("Вампиризм: восстановлено"))
+              // отчитывается он одной строкой в конце раунда, как реген
+              assertTrue(log.contains("Вампиризм восстановил"))
     },
 
     test("фляга яда: пока оружие смазано, удары по HP травят; фляга крови — пускают кровь; сошла — нет") {

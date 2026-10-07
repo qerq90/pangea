@@ -142,7 +142,8 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(log.contains("Ядовитые зловония")) &&
               assertTrue(after.exists(_.effects.heroPoison.isDefined)) &&
               assertTrue(u.fightStats.hp < 500000L) && // яд уже отгрыз своё
-              assertTrue(log.contains("Гниль разъедает вас"))
+              // тикает он общей для всех DoT строкой: своё у Джо — само отравление
+              assertTrue(log.contains("Яд снимает с вас"))
     },
 
     test("широкий удар бьёт на три четверти атаки") {

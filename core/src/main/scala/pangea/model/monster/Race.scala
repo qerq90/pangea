@@ -2,18 +2,33 @@ package pangea.model.monster
 
 import enumeratum._
 import io.circe.{Decoder, HCursor}
+import pangea.model.battle.Element
 
 sealed trait Race extends EnumEntry {
   val description: String
   val genitive: String // родительный падеж названия расы («Демона») — для имён трофеев
   /** Родительный падеж множественного числа («трое демонов», «группа мурлоков»). */
   val genitivePlural: String
+
+  /** Эта раса всегда ходит с отравленным оружием: удар, дошедший до HP, травит.
+   *  Мурлоки и эльфы — да, прочим достались стихии (см. [[weaponElement]]). */
+  def weaponPoison: Boolean = false
+
+  /** Стихия, которой намазано оружие этой расы: с ней она и ходит всегда, без
+   *  всяких заготовок. У боссовых рас своей нет — у минибоссов стихия удара
+   *  задана на самом минибоссе (см. [[MiniBoss.attackElement]]).
+   *
+   *  Орк — единственная смертная раса без стихии и без яда: он остаётся с голой
+   *  сталью, и это решено нарочно, а не забыто. */
+  def weaponElement: Option[Element] = None
 }
 
 object Race extends Enum[Race] with DoobieEnum[Race] {
   val values = findValues
 
   case object Human extends Race {
+    override def weaponElement: Option[Element] = Some(Element.Lightning)
+
     override def toString: String = "Человек"
     val genitive: String          = "Человека"
     val genitivePlural: String    = "людей"
@@ -38,6 +53,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Elf extends Race {
+    override def weaponPoison: Boolean = true
+
     override def toString: String = "Эльф"
     val genitive: String          = "Эльфа"
     val genitivePlural: String    = "эльфов"
@@ -62,6 +79,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Murloc extends Race {
+    override def weaponPoison: Boolean = true
+
     override def toString: String = "Мурлок"
     val genitive: String          = "Мурлока"
     val genitivePlural: String    = "мурлоков"
@@ -110,6 +129,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Goblin extends Race {
+    override def weaponElement: Option[Element] = Some(Element.Lightning)
+
     override def toString: String = "Гоблин"
     val genitive: String          = "Гоблина"
     val genitivePlural: String    = "гоблинов"
@@ -134,6 +155,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Demon extends Race {
+    override def weaponElement: Option[Element] = Some(Element.Fire)
+
     override def toString: String = "Демон"
     val genitive: String          = "Демона"
     val genitivePlural: String    = "демонов"
@@ -158,6 +181,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Gnome extends Race {
+    override def weaponElement: Option[Element] = Some(Element.Cold)
+
     override def toString: String = "Гном"
     val genitive: String          = "Гнома"
     val genitivePlural: String    = "гномов"
@@ -182,6 +207,8 @@ object Race extends Enum[Race] with DoobieEnum[Race] {
   }
 
   case object Khajiit extends Race {
+    override def weaponElement: Option[Element] = Some(Element.Air)
+
     override def toString: String = "Каджит"
     val genitive: String          = "Каджита"
     val genitivePlural: String    = "каджитов"
