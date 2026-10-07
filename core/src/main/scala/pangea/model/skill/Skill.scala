@@ -30,9 +30,13 @@ sealed abstract class Skill(
     */
   def baseValue(hero: Hero, nowMs: Long): Double
 
-  /** Стоимость применения в энергии (формула от уровня героя, округление вниз).
-    */
-  def energyCost(hero: Hero): Long
+  /** Своя стоимость умения в энергии (формула от уровня героя, округление
+    * вниз). Игрок видит и платит [[energyCost]] — её же с общей надбавкой. */
+  def baseEnergyCost(hero: Hero): Long
+
+  /** Стоимость применения: своя ставка плюс общая надбавка всем активным
+    * умениям ([[Skill.EnergyCostBonus]]). Одна ручка на весь список. */
+  final def energyCost(hero: Hero): Long = baseEnergyCost(hero) + Skill.EnergyCostBonus
 
   /** Описание навыка для инвентаря — с подставленной стоимостью энергии и
     * перезарядкой (КД). Оба хвоста собираются здесь, а не в тексте каждого
@@ -46,6 +50,12 @@ sealed abstract class Skill(
 }
 
 object Skill extends Enum[Skill] {
+
+  /** Надбавка к стоимости ЛЮБОГО активного умения, в энергии. Крутится
+    * одним числом: своя ставка у умения остаётся, а цена всем поднимается
+    * или падает разом (см. [[Skill.energyCost]]). */
+  val EnergyCostBonus: Long = 1L
+
   val values: IndexedSeq[Skill] = findValues
 
   /** Что делает навык. Спец-данные эффекта лежат в самом варианте (никаких
@@ -146,7 +156,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       1.0 * b.str + 4.0 * b.int + 0.4 * f.atk
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
   }
 
   case object QuickStrike
@@ -164,7 +174,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       4.0 * b.agi + 0.4 * f.accuracy + 4.0 * b.int + 0.3 * f.atk
     }
-    def energyCost(hero: Hero): Long = 5L + hero.lvl / 2L
+    def baseEnergyCost(hero: Hero): Long = 5L + hero.lvl / 2L
   }
 
   case object CunningStrike
@@ -183,7 +193,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       2.0 * b.str + 4.0 * b.int + 0.3 * f.atk + 0.5 * f.accuracy
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
   }
 
   case object Ram
@@ -202,7 +212,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.5 * f.defence + 0.75 * b.vit + 3.0 * b.int
     }
-    def energyCost(hero: Hero): Long = 15L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 15L + hero.lvl
   }
 
   case object BloodHarvest
@@ -222,7 +232,7 @@ object Skill extends Enum[Skill] {
       // Часть текущего HP «вкладывается» в урон (см. BloodHarvestHpToDamagePct).
       2.0 * b.str + 0.6 * f.atk + BloodHarvestHpToDamagePct / 100.0 * hero.fightStats.hp
     }
-    def energyCost(hero: Hero): Long = 8L + hero.lvl / 2L
+    def baseEnergyCost(hero: Hero): Long = 8L + hero.lvl / 2L
   }
 
   case object Bleeding
@@ -241,7 +251,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       4.0 * b.agi + 0.3 * f.accuracy + 0.3 * f.atk + 5.0 * b.int
     }
-    def energyCost(hero: Hero): Long = 8L + hero.lvl / 2L
+    def baseEnergyCost(hero: Hero): Long = 8L + hero.lvl / 2L
   }
 
   case object WeakSpotStrike
@@ -260,7 +270,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       2.0 * b.agi + 0.8 * f.accuracy + 4.0 * b.int + 0.1 * f.atk
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
   }
 
   case object BladeWhirl
@@ -279,7 +289,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       1.0 * b.str + 3.0 * b.int + 0.3 * f.atk
     }
-    def energyCost(hero: Hero): Long = 12L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
   case object FanCut
@@ -298,7 +308,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       2.0 * b.agi + 3.0 * b.int + 0.2 * f.accuracy
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl / 2L
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
   }
 
   // ── Бронные навыки ──────────────────────────────────────────────────────────
@@ -316,7 +326,7 @@ object Skill extends Enum[Skill] {
       val b = hero.effectiveBaseStats(nowMs)
       1.0 * b.vit + 2.0 * b.int + 0.2 * hero.effectiveMaxHp(nowMs)
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl / 2L
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
   }
 
   case object Reinforcement
@@ -335,7 +345,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.7 * f.defence + 0.2 * hero.effectiveMaxArmor(nowMs) + 4.0 * b.int
     }
-    def energyCost(hero: Hero): Long = 10L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
   }
 
   case object Restoration
@@ -353,7 +363,7 @@ object Skill extends Enum[Skill] {
       val b = hero.effectiveBaseStats(nowMs)
       3.0 * b.int + 2.0 * b.vit + 0.3 * hero.effectiveMaxHp(nowMs)
     }
-    def energyCost(hero: Hero): Long = 15L + 2L * hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 15L + 2L * hero.lvl
   }
 
   case object Bulwark
@@ -372,7 +382,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.35 * f.defence + 0.1 * hero.effectiveMaxArmor(nowMs) + 4.0 * b.int
     }
-    def energyCost(hero: Hero): Long = 12L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
   case object BattleCry
@@ -392,7 +402,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.2 * b.int + 0.1 * f.defence
     }
-    def energyCost(hero: Hero): Long = 12L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
   case object Shove
@@ -410,7 +420,7 @@ object Skill extends Enum[Skill] {
       val f = hero.effectiveFightStats(nowMs)
       0.5 * f.defence + 0.5 * b.vit + 2.0 * b.int
     }
-    def energyCost(hero: Hero): Long = 12L + hero.lvl
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
   // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.

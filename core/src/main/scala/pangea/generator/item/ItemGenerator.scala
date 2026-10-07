@@ -29,13 +29,13 @@ object ItemGenerator {
     ((param + param / 100.0 * pct).toLong, next)
   }
 
-  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(4+R3) ±20%;
+  // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(6+R3) ±20%;
   // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%. R3 = rarity.factorR3.
   private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
     val r3 = item.rarity.factorR3
     item.itemType match {
       case ItemType.Weapon =>
-        val (bonus, next) = modifySpread(item.lvl * (3.0 + r3), rng, 20L)
+        val (bonus, next) = modifySpread(item.lvl * (6.0 + r3), rng, 20L)
         (item.withAttack(item.attack + bonus), next)
       case ItemType.ChestPlate =>
         val (bonus, next) = modifySpread(item.lvl * (12.0 + r3), rng, 10L)
@@ -48,7 +48,11 @@ object ItemGenerator {
   private def updateExtraParams(n: Long, item: Item, rng: Rng): (Item, Rng) =
     if (n <= 0) (item, rng)
     else {
-      val (stat, rng1) = rng.pick(Stat.values.toList)
+      // Атака не ложится ни на что, кроме оружия: шлем с прибавкой к урону —
+      // это прошлое. Прочим слотам достаётся всё остальное.
+      val pool = if (item.itemType == ItemType.Weapon) Stat.values.toList
+                 else Stat.values.toList.filterNot(_ == Stat.Attack)
+      val (stat, rng1) = rng.pick(pool)
       val (modified, rng2) = stat match {
         case Stat.Attack =>
           val (v, r) =
@@ -143,8 +147,10 @@ object ItemGenerator {
           rng3c
         )
       } else {
-        val (attack, rng3b)   = modifyParameter(rarity.factorR * itemLvl, rng3z)
-        val (evasion, rng3c) = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
+        // Лёгкий профиль: меткость и уклонение. Атаки здесь нет — её даёт
+        // только оружие (см. applyMandatory и Stat.Attack в updateExtraParams).
+        val (accuracy, rng3b) = modifyParameter(rarity.factorR * itemLvl, rng3z)
+        val (evasion, rng3c)  = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
             id,
@@ -152,8 +158,8 @@ object ItemGenerator {
             itemLvl,
             rarity,
             itemType,
-            attack = attack,
-            accuracy = 0,
+            attack = 0,
+            accuracy = accuracy,
             energy = 0,
             armor = 0,
             defence = 0,
