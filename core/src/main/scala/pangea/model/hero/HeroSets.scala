@@ -133,11 +133,15 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   def repeatOnMissChancePct: Long =
     if (has(ItemSet.Hunter, 6)) ItemSet.Hunter.RepeatChancePct else 0L
 
-  /** Отменяется ли первая за бой вражеская способность, наносящая урон (порог 10). */
-  def cancelsFirstEnemySkill: Boolean = has(ItemSet.Hunter, 10)
+  /** Шанс (в %) заблокировать урон от атаки противника (порог 10). */
+  def blockChancePct: Long =
+    if (has(ItemSet.Hunter, 10)) ItemSet.Hunter.BlockChancePct else 0L
 
-  /** Удваивает ли первая за бой способность героя свой урон (порог 12). */
-  def doublesFirstSkill: Boolean = has(ItemSet.Hunter, 12)
+  /** Прибавка к шансу крита всех атакующих умений, в п.п. (порог 12).
+   *  У «Удара в слабое место» свой шанс от интеллекта — набор прибавляется
+   *  к нему, а не умножает урон второй раз: четверного удара больше нет. */
+  def skillCritBonusPct: Long =
+    if (has(ItemSet.Hunter, 12)) ItemSet.Hunter.SkillCritBonusPct else 0L
 }
 
 object HeroSets {

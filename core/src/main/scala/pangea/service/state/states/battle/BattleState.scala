@@ -178,7 +178,9 @@ case class BattleState(
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
       hinted  = plainSteelHint(hero, pulled)
-      state  <- commit(user, hinted, now, renderer, hero, note)
+      // «Упырь» (порог 12): пир за каждого павшего в этом ходу — ещё в бою.
+      fed     = ghoulFeast(battle, hinted, now)
+      state  <- commit(user, fed, now, renderer, hero, note)
     } yield state
 
   /** Башни стоят, пока есть кого прикрывать. Не осталось живой охраны — бой
@@ -289,12 +291,9 @@ case class BattleState(
       nowMs: Long,
       renderer: Renderer
   ): Task[StateType] = {
-    // «Упырь» (порог 12): победа — это пир, герой сразу восстанавливает часть HP
-    // и брони. Считаем ДО persistHero, чтобы восстановленное сохранилось вместе с
-    // остальным исходом боя, а сообщение попало в тот же лог.
     // Пузырьковый нектар: смерть, которой не будет. Считаем до persistHero,
     // чтобы спасённый герой сохранился вместе с остальным исходом.
-    val (res, bubbled) = bubbleRescue(ghoulFeast(raw, nowMs), nowMs)
+    val (res, bubbled) = bubbleRescue(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
         ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
@@ -1000,18 +999,24 @@ case class BattleState(
     )
   }
 
-  /** «Упырь» (порог 12): при убийстве врага герой мгновенно восстанавливает часть
-    * HP и брони. Проценты считаются от эффективных потолков, восстановленное не
-    * может опустить текущее значение (если оно почему-то выше потолка). Возвращает
-    * исход как есть, если набор не собран, победы не случилось или лечить нечего. */
-  private def ghoulFeast(res: TurnResult, nowMs: Long): TurnResult =
-    if (res.outcome != Outcome.Victory || !res.hero.sets.feastsOnKill) res
+  /** «Упырь» (порог 12): каждый убитый враг — пир, и герой восстанавливает часть
+    * HP и брони ТУТ ЖЕ, в бою, а не по его исходу. Считаем по числу павших за
+    * ход: в группе их может лечь несколько, и за каждого положена своя доля.
+    * Проценты считаются от эффективных потолков, восстановленное не может
+    * опустить текущее значение (если оно почему-то выше потолка). */
+  private def ghoulFeast(before: SoloPveBattle, res: TurnResult, nowMs: Long): TurnResult = {
+    // Павшие в строю попадают в `slain`; тот, кто остался в полях с нулём HP
+    // (последний в бою), в этот список не идёт — считаем его отдельно.
+    val inLine = res.battle.group.slain.size - before.group.slain.size
+    val active = if (res.battle.monsterCurrentHp <= 0L && before.monsterCurrentHp > 0L) 1 else 0
+    val kills  = (inLine + active).max(0)
+    if (kills <= 0 || !res.hero.sets.feastsOnKill) res
     else {
       val hero     = res.hero
       val maxHp    = hero.effectiveMaxHp(nowMs)
       val maxArmor = hero.effectiveMaxArmor(nowMs)
-      val newHp    = (hero.fightStats.hp + maxHp * hero.sets.feastHpPct / 100L).min(maxHp).max(hero.fightStats.hp)
-      val newArmor = (hero.fightStats.armor + maxArmor * hero.sets.feastArmorPct / 100L).min(maxArmor).max(hero.fightStats.armor)
+      val newHp    = (hero.fightStats.hp + maxHp * hero.sets.feastHpPct * kills / 100L).min(maxHp).max(hero.fightStats.hp)
+      val newArmor = (hero.fightStats.armor + maxArmor * hero.sets.feastArmorPct * kills / 100L).min(maxArmor).max(hero.fightStats.armor)
       val hpGained    = newHp - hero.fightStats.hp
       val armorGained = newArmor - hero.fightStats.armor
       if (hpGained <= 0 && armorGained <= 0) res
@@ -1020,6 +1025,7 @@ case class BattleState(
         log  = res.log :+ content.format("battle.ghoulFeast",
                  "hp" -> hpGained.toString, "armor" -> armorGained.toString))
     }
+  }
 
   /** Насколько урон героя по элементалю ослаблен или усилен его стихией: своя
     * стихия почти не вредит (огонь по огненному — 20%), противоположная бьёт
@@ -1886,7 +1892,20 @@ case class BattleState(
                        "monster" -> battle.monsterName, "left" -> left.toString)),
         battle     = battle.copy(effects = battle.effects.copy(heroMirrors = left)),
         mirrored   = true))
-    } else plainMobStrike(hero, battle, buffedEff, nowMs)
+    } else
+      // «Охотник» (порог 10): герой читает замах и с шансом отводит удар целиком.
+      // Бросок тратится только если набор собран — порядок бросков в тестах не плывёт.
+      chanceRoll(hero.sets.blockChancePct > 0L, hero.sets.blockChancePct).flatMap {
+        case true =>
+          ZIO.succeed(MobStrike(
+            newHp      = hero.fightStats.hp,
+            newArmor   = hero.fightStats.armor,
+            damage     = 0L,
+            extraLines = List(content.format("battle.hunterBlock", "monster" -> battle.monsterName)),
+            battle     = battle,
+            mirrored   = true))
+        case false => plainMobStrike(hero, battle, buffedEff, nowMs)
+      }
 
   private def plainMobStrike(hero: Hero, battle: SoloPveBattle, buffedEff: FightStats, nowMs: Long): Task[MobStrike] = {
     val monster = battle.toMonster
@@ -1984,13 +2003,8 @@ case class BattleState(
             ms   = best(idx)
             paid = battle.copy(monsterCurrentEnergy = (battle.monsterCurrentEnergy - ms.cost(battle.monsterLvl)).max(0L))
             cast = ms.cast(paid, hero, nowMs)
-            hurts = cast.heroHp < hero.fightStats.hp || cast.heroArmor < hero.fightStats.armor
-            cancels = hurts && hero.sets.cancelsFirstEnemySkill && !battle.effects.cancelSpent
           } yield
-            if (cancels)
-              (cast.battle.copy(effects = cast.battle.effects.copy(cancelSpent = true)), hero, content.text("battle.hunterCancel"))
-            else
-              (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
+            (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
         else ZIO.succeed((battle, hero, ""))
     } yield out
 
@@ -2478,13 +2492,16 @@ case class BattleState(
         case Skill.Effect.WeakSpotStrike =>
           for {
             roll <- Random.nextIntBetween(1, 101)
-            chance = (2L * hero.effectiveBaseStats(nowMs).int - aimed.monsterLvl).max(0L).min(95L)
+            // «Охотник» (порог 12) прибавляется к своему шансу умения, а не
+            // множит урон второй раз: четверного удара больше нет.
+            chance = (2L * hero.effectiveBaseStats(nowMs).int - aimed.monsterLvl + hero.sets.skillCritBonusPct)
+                       .max(0L).min(95L)
             doubled = roll <= chance
             value   = if (doubled) raw * 2L else raw
             line: (Long => String) = (dealt: Long) =>
               tmpl.replace("{}", dealt.toString) +
                 (if (doubled) "\n" + content.text("battle.weakSpotDouble") else "")
-            r <- dealSkillDamage(hero, bumped, value, line, next)
+            r <- dealSkillDamage(hero, bumped, value, line, next, critRolled = true)
           } yield r
 
         case Skill.Effect.BloodHarvest =>
@@ -2549,18 +2566,34 @@ case class BattleState(
       // Что тот же удар делает с остальным строем (Размашистый, Вихрь, Веерный
       // порез): получает бой после удара по цели и урон, который по ней реально
       // прошёл.
-      splash: (SoloPveBattle, Long) => (SoloPveBattle, Vector[String]) = (b, _) => (b, Vector.empty)
+      splash: (SoloPveBattle, Long) => (SoloPveBattle, Vector[String]) = (b, _) => (b, Vector.empty),
+      // Крит по этому умению уже разыгран снаружи («Удар в слабое место» катает
+      // свой шанс сам) — второй раз не катаем.
+      critRolled: Boolean = false
+  ): Task[TurnResult] =
+    // «Охотник» (порог 12): любое атакующее умение с шансом бьёт вдвое.
+    chanceRoll(!critRolled && hero.sets.skillCritBonusPct > 0L, hero.sets.skillCritBonusPct).flatMap { crit =>
+      dealSkillDamageCritted(hero, battle, value, line, next, splash, crit)
+    }
+
+  private def dealSkillDamageCritted(
+      hero: Hero,
+      battle: SoloPveBattle,
+      value: Long,
+      line: Long => String,
+      next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult],
+      splash: (SoloPveBattle, Long) => (SoloPveBattle, Vector[String]),
+      crit: Boolean
   ): Task[TurnResult] = {
-    // «Охотник» (порог 12): первая за бой способность, наносящая урон, бьёт вдвое.
-    val doubles = hero.sets.doublesFirstSkill && !battle.effects.doubleSpent
-    val raw     = if (doubles) value.max(1L) * 2L else value.max(1L)
+    val raw = if (crit) value.max(1L) * 2L else value.max(1L)
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
     // Предел босса за раунд делится между ударом и умением — счёт общий.
     val capped            = capBossDamage(battle, resisted)
     val (armorDmg, hpDmg) = splitElementalDamage(battle.monsterCurrentArmor, capped, hero)
-    val skillLine         = line(armorDmg + hpDmg) + capLine(resisted, capped).map("\n" + _).getOrElse("")
+    val critLine          = if (crit) "\n" + content.text("battle.skillCrit") else ""
+    val skillLine         = line(armorDmg + hpDmg) + critLine + capLine(resisted, capped).map("\n" + _).getOrElse("")
     val newArmor = battle.monsterCurrentArmor - armorDmg
     val newHp    = (battle.monsterCurrentHp - hpDmg).max(0L)
     // «Упырь» (порог 12): любое умение, нанёсшее урон, всегда пускает цели кровь.
@@ -2574,8 +2607,7 @@ case class BattleState(
       if (!hero.sets.skillsAlwaysIgnite || newHp <= 0) bledEffects0
       else bledEffects0.copy(monsterBurn = Some(
         bledEffects0.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)))
-    // Удвоение тратится на первом же уроне — даже если он добил моба.
-    val effects  = if (doubles) bledEffects.copy(doubleSpent = true) else bledEffects
+    val effects  = bledEffects
     val hit      = noteBossDamage(battle, armorDmg + hpDmg)
       .copy(monsterCurrentHp = newHp, monsterCurrentArmor = newArmor)
       .withEffects(effects)

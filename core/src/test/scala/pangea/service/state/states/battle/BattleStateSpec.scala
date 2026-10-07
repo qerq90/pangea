@@ -6,7 +6,6 @@ import pangea.model.battle.{Buff, Burn, HeroBattleState, Regen, SoloPveBattle}
 import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
-import pangea.model.skill.MonsterEnergy
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -177,13 +176,6 @@ object BattleStateSpec extends ZIOSpecDefault {
                                      evasion = 0, accuracy = 9999, energy = 0),
     monsterCurrentHp    = 9999L,
     monsterCurrentArmor = 0L
-  )
-
-  /** Тот же моб, но с полным запасом энергии: применяет умение каждый раунд.
-   *  Нужен там, где проверяется именно ответ на вражеское умение. */
-  private val castingBattle = strongBattle.copy(
-    monsterStats         = strongBattle.monsterStats.copy(energy = MonsterEnergy.maxEnergy(1L)),
-    monsterCurrentEnergy = MonsterEnergy.maxEnergy(1L)
   )
 
   private def makeState(hero: pangea.model.hero.Hero, battle: SoloPveBattle) =
@@ -658,7 +650,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(after.fightStats.hp == (100L + 999L).min(maxHp))
     },
 
-    test("«Упырь» 12: победа даёт пир — HP и броня восстановлены, сообщение показано") {
+    test("«Упырь» 12: каждый убитый — пир, по 10% HP и брони, сообщение показано") {
       val eq   = ghoulEquipment(12).copy(chestPlate = armorPiece(99L, armor = 100L))
       val hero = strongHero.copy(
         equipment  = eq,
@@ -675,9 +667,11 @@ object BattleStateSpec extends ZIOSpecDefault {
         // На 12 предметах работает и порог 4: удар (str 1×3 + атака 50 = 53)
         // сперва вернул 2% в HP, и только потом сработал пир.
         lifesteal      = 53L * 2L / 100L
+        ghoul          = pangea.model.item.ItemSet.Ghoul
       } yield assertTrue(result == StateType.Loot) &&
-              assertTrue(after.fightStats.hp == 10L + lifesteal + maxHp * 25L / 100L) &&
-              assertTrue(after.fightStats.armor == 100L * 20L / 100L) && // 20% от потолка брони
+              assertTrue(ghoul.KillHpRestorePct == 10L && ghoul.KillArmorRestorePct == 10L) &&
+              assertTrue(after.fightStats.hp == 10L + lifesteal + maxHp * ghoul.KillHpRestorePct / 100L) &&
+              assertTrue(after.fightStats.armor == 100L * ghoul.KillArmorRestorePct / 100L) &&
               assertTrue(screens.exists(_.text.contains("жуткий пир")))
     },
 
@@ -862,73 +856,85 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(!screens.map(_.text).mkString("\n").contains("Промах не в счёт"))
     },
 
-    test("«Охотник» 10: первая вредящая способность моба гасится, вторая уже проходит") {
+    test("«Охотник» 10: удар противника с шансом отводится целиком") {
       val hero = hunterHero(10).copy(fightStats = strongHero.fightStats.copy(hp = 500, armor = 0))
+      // Броски: разброс удара героя, попадание моба, затем бросок блока.
+      // Единица в блоке — прокнуло, сотня — нет.
+      def round(blockRoll: Int, h: pangea.model.hero.Hero) =
+        for {
+          t             <- makeState(h, strongBattle)
+          (state, dao, r) = t
+          _             <- TestRandom.feedInts(60, 99, blockRoll)
+          _             <- TestRandom.feedLongs(100L)
+          _             <- state.action(testUser, tap("Attack"), r)
+          after         <- dao.getHeroByUserId(userId).map(_.get)
+          said          <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        } yield (after.fightStats.hp, said)
       for {
-        t             <- makeState(hero, castingBattle)
-        (state, dao, r) = t
-        // Броски раунда: удар героя, удар моба, выбор умения среди равных по цене.
-        _             <- TestRandom.feedInts(60, 3, 0)
-        _             <- TestRandom.feedLongs(100L)
-        _             <- state.action(testUser, tap("Attack"), r)
-        afterFirst    <- dao.getHeroByUserId(userId).map(_.get)
-        battle1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        screens       <- r.sentScreens
-      } yield assertTrue(battle1.effects.cancelSpent) && // отмена израсходована
-              assertTrue(afterFirst.fightStats.hp == 500L) && // урон не прошёл
-              assertTrue(screens.map(_.text).mkString("\n").contains("срываете его приём"))
+        blocked <- round(1, hero)
+        passed  <- round(100, hero)
+      } yield assertTrue(pangea.model.item.ItemSet.Hunter.BlockChancePct == 10L) &&
+              assertTrue(blocked._1 == 500L && blocked._2.contains("отводите удар")) &&
+              assertTrue(passed._1 < 500L && !passed._2.contains("отводите удар"))
     },
 
-    test("«Охотник» 12: первое умение бьёт вдвое, второе — обычно") {
+    test("«Охотник» 12: умение с шансом критует вдвое, без набора — никогда") {
       val weapon = Item(5L, "Меч", 1L, ItemRarity.Blue, ItemType.Weapon,
         attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
         details = ItemDetails.Weapon(pangea.model.skill.Skill.SweepingStrike),
         set = Some(pangea.model.item.ItemSet.Hunter))
-      val hero = hunterHero(12).copy(
+      def hero(pieces: Int) = hunterHero(pieces).copy(
         fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
-        equipment  = hunterEquipment(12).copy(weapon = weapon))
+        equipment  = hunterEquipment(pieces).copy(weapon = weapon))
       // Готовность умения живёт в самом бою (skillSlots), а не выводится из
       // экипировки, — иначе слот считается незарегистрированным и ход не тратится.
       val withSlot = strongBattle.copy(
         skillSlots = List(pangea.model.battle.SkillSlotState(weapon.id, pangea.model.skill.Skill.SweepingStrike)))
-      // Контроль: тот же герой, но 10 предметов — порог 12 не набран, всё
-      // остальное (в т.ч. пороги 2/4/6/10) совпадает, значит разница только в удвоении.
-      val heroNoDouble = hunterHero(10).copy(
+      // Урон самого умения берём из его строки: за ним в том же ходу идёт
+      // обычная атака, и по HP моба их не разделить.
+      val Dealt = raw"нанеся ему (\d+) урона".r
+      def skillDamage(said: String): Long =
+        Dealt.findFirstMatchIn(said).map(_.group(1).toLong).getOrElse(-1L)
+      // Первый бросок хода с умением — бросок крита, дальше удар моба и разброс
+      // обычной атаки. Единица — крит прокнул, сотня — нет.
+      def strike(pieces: Int, critRoll: Int) =
+        for {
+          t             <- makeState(hero(pieces), withSlot)
+          (state, dao, r) = t
+          _             <- TestRandom.feedInts(critRoll, 60, 60)
+          _             <- TestRandom.feedLongs(100L, 100L)
+          _             <- state.action(testUser, tap(s"Skill_${weapon.id}"), r)
+          said          <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        } yield (skillDamage(said), said)
+      for {
+        critted <- strike(12, 1)
+        plain   <- strike(12, 100)
+      } yield assertTrue(pangea.model.item.ItemSet.Hunter.SkillCritBonusPct == 10L) &&
+              assertTrue(plain._1 > 0L && critted._1 == plain._1 * 2L) &&
+              assertTrue(critted._2.contains("урон удвоен")) &&
+              assertTrue(!plain._2.contains("урон удвоен"))
+    },
+
+    test("«Охотник» без порога 12: крит умению не светит ни при каком броске") {
+      val weapon = Item(5L, "Меч", 1L, ItemRarity.Blue, ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Weapon(pangea.model.skill.Skill.SweepingStrike),
+        set = Some(pangea.model.item.ItemSet.Hunter))
+      val withSlot = strongBattle.copy(
+        skillSlots = List(pangea.model.battle.SkillSlotState(weapon.id, pangea.model.skill.Skill.SweepingStrike)))
+      val hero = hunterHero(10).copy(
         fightStats = strongHero.fightStats.copy(atk = 100, energy = 1000),
         equipment  = hunterEquipment(10).copy(weapon = weapon))
       for {
         t             <- makeState(hero, withSlot)
         (state, dao, r) = t
-        // Два разброса: один на урон умения, второй на обычную атаку, которая
-        // идёт следом в том же ходу. Иначе второй бросок был бы случайным.
-        _             <- TestRandom.feedInts(60, 3, 90)
+        // Броска крита у него нет вовсе — первый бросок уходит на другое.
+        _             <- TestRandom.feedInts(1, 60, 60)
         _             <- TestRandom.feedLongs(100L, 100L)
         _             <- state.action(testUser, tap(s"Skill_${weapon.id}"), r)
-        battle1       <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        doubled        = withSlot.monsterCurrentHp - battle1.monsterCurrentHp
-
-        t2            <- makeState(heroNoDouble, withSlot)
-        (state2, dao2, r2) = t2
-        _             <- TestRandom.feedInts(60, 3, 90)
-        _             <- TestRandom.feedLongs(100L, 100L)
-        _             <- state2.action(testUser, tap(s"Skill_${weapon.id}"), r2)
-        battle2       <- dao2.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        plain          = withSlot.monsterCurrentHp - battle2.monsterCurrentHp
-
-        // За умением в том же ходу идёт обычная атака, поэтому в суммах сидит и
-        // она. Меряем её отдельно на тех же бросках и вычитаем — остаётся чистый
-        // урон умения, который и должен удвоиться.
-        t3            <- makeState(heroNoDouble, withSlot)
-        (state3, dao3, r3) = t3
-        _             <- TestRandom.feedInts(60, 3, 90)
-        _             <- TestRandom.feedLongs(100L)
-        _             <- state3.action(testUser, tap("Attack"), r3)
-        battle3       <- dao3.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        attackOnly     = withSlot.monsterCurrentHp - battle3.monsterCurrentHp
-      } yield assertTrue(battle1.effects.doubleSpent) &&
-              assertTrue(!battle2.effects.doubleSpent) &&
-              assertTrue(plain - attackOnly > 0L) &&
-              assertTrue(doubled - attackOnly == (plain - attackOnly) * 2L)
+        said          <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(hero.sets.skillCritBonusPct == 0L) &&
+              assertTrue(!said.contains("урон удвоен"))
     },
 
     test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {

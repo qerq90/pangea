@@ -106,17 +106,17 @@ object ItemSet extends Enum[ItemSet] {
     val LifestealPct: Long    = 2L
     val BleedChancePct: Long  = 30L
     val BleedPct: Int         = 4
-    val KillHpRestorePct: Long    = 25L
-    val KillArmorRestorePct: Long = 20L
+    val KillHpRestorePct: Long    = 10L
+    val KillArmorRestorePct: Long = 10L
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$EvasionPct% к уклонению."),
-      SetBonus(4,  s"+$LifestealPct% от нанесённого по HP урона восстанавливает вам HP."),
+      SetBonus(4,  s"+$LifestealPct% вампиризма."),
       SetBonus(6,  s"$BleedChancePct% шанс, что ваша атака, нанёсшая урон по HP, вызовет кровотечение $BleedPct%."),
       SetBonus(8,  SetRates.HpBonusText),
       SetBonus(10, "Урон от кровотечения врага также восстанавливает ваше HP."),
       SetBonus(12, "Ваши активные умения, наносящие урон, всегда накладывают кровотечение. " +
-                   s"При убийстве врага вы мгновенно восстанавливаете $KillHpRestorePct% HP и $KillArmorRestorePct% брони.")
+                   s"Каждый убитый враг тут же, в бою, восстанавливает вам $KillHpRestorePct% HP и $KillArmorRestorePct% брони.")
     )
   }
 
@@ -126,14 +126,16 @@ object ItemSet extends Enum[ItemSet] {
     val EnergyPct: Long        = 10L
     val AgiRegenMult: Long     = 2L
     val RepeatChancePct: Long  = 25L
+    val BlockChancePct: Long   = 10L
+    val SkillCritBonusPct: Long = 10L
 
     def bonuses: List[SetBonus] = List(
       SetBonus(2,  s"+$AccuracyPct% к точности."),
       SetBonus(4,  s"+$EnergyPct% к энергии. Ловкость восстанавливает в $AgiRegenMult раза больше энергии за раунд."),
       SetBonus(6,  s"$RepeatChancePct% шанс повторить атаку при промахе по врагу. Один раз за раунд."),
       SetBonus(8,  SetRates.HpBonusText),
-      SetBonus(10, "Первая применённая противником активная способность, наносящая вам урон, отменяется."),
-      SetBonus(12, "Первая применённая за бой активная способность, наносящая урон, наносит двойной урон.")
+      SetBonus(10, s"$BlockChancePct% шанс заблокировать урон от атаки противника."),
+      SetBonus(12, s"+$SkillCritBonusPct% к шансу критического применения всех атакующих умений.")
     )
   }
 
