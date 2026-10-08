@@ -386,18 +386,46 @@ case class SoloPveBattle(
       if (b.hasRoom) (b.withReinforcement(s), in :+ s) else (b.copy(group = b.group.copy(queue = b.group.queue :+ s)), in)
     }
 
-  /** Перемешать всех живых мобов по занятым местам: любой может оказаться
-    * напротив героя, сам герой с места не сходит, пустые места пустыми и
-    * остаются. `order` — новый порядок индексов по списку «активный :: others». */
-  def reorderMonsters(order: List[Int]): SoloPveBattle = {
-    val all = activeSlot :: group.others
-    // Сооружения в перемешивании не участвуют: их места закреплены, и обмен с
-    // ними сдвинул бы то, что сдвинуть нельзя.
-    if (order.sorted != all.indices.toList) this
-    else if (all.zipWithIndex.exists { case (slot, i) => !movable(slot) && order(i) != i }) this
+  /** Кого перемешивание поднимает с места, по возрастанию мест: все, кроме
+    * сооружений и тех, кто держит позицию сам. */
+  def movableInOrder: List[MonsterSlot] = monstersInOrder.filter(movable)
+
+  /** Перемешать строй: подвижные мобы тянут жребий и встают заново — сперва на
+    * все места, где напротив кто-то есть (герой, пока он на ногах, и живые
+    * союзники — от героя и дальше), а кому таких мест не досталось, те
+    * занимают первые свободные. Пустот после этого в строю не остаётся: кто
+    * стоял в хвосте, может оказаться в первом ряду, и наоборот.
+    *
+    * Сооружения в жребий не идут и мест своих не отдают: их не сдвинуть
+    * (см. [[movable]]), и раньше одна башня в караване отменяла перемешивание
+    * целиком. Герой с места не сходит.
+    *
+    * `order` — жребий: новый порядок по [[movableInOrder]]. Не перестановка
+    * или двигать некого — бой не меняется. */
+  def reshuffle(order: List[Int]): SoloPveBattle = {
+    val movers = movableInOrder
+    if (order.sorted != movers.indices.toList || movers.isEmpty) this
     else {
-      val shuffled = order.map(all)
-      withActive(shuffled.head).copy(group = group.copy(others = shuffled.tail))
+      val fixed  = ((group.activePos, activeSlot) :: group.entries).filterNot { case (_, s) => movable(s) }
+      val locked = fixed.map(_._1).toSet
+      // Места, где напротив кто-то стоит, — туда перемешивание ставит первыми:
+      // от места героя и дальше по союзникам. Лежачий герой целью не считается.
+      val contact = ((if (group.heroDown) Nil else List(group.heroPos)) ++
+                      group.allies.filter(_.alive).map(_.position))
+                      .distinct.filterNot(locked.contains)
+                      .sortBy(p => (math.abs(p - group.heroPos), p))
+      val spare = (1 to Formation.MonsterPlaces).toList.filterNot(p => locked(p) || contact.contains(p))
+      val spots = (contact ++ spare).take(movers.size).zip(order.map(movers))
+      val all   = (fixed ++ spots).sortBy(_._1)
+      // В полях боя — тот, кто встал напротив героя; напротив пусто (герой лежит
+      // или мест с ним не нашлось) — кто остался на прежнем месте полей, а в
+      // крайнем случае ближайший к герою.
+      val at = all.collectFirst { case (p, _) if p == group.heroPos => p }
+        .orElse(all.collectFirst { case (p, _) if p == group.activePos => p })
+        .getOrElse(all.minBy { case (p, _) => (math.abs(p - group.heroPos), p) }._1)
+      val (active, rest) = all.partition(_._1 == at)
+      withActive(active.head._2).copy(group = group.copy(
+        activePos = at, others = rest.map(_._2), places = rest.map(_._1)))
     }
   }
 
