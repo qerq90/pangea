@@ -180,6 +180,12 @@ object Queries {
   def readVaultStow(userId: UserId): Fragment =
     sql"select vault_stow from $tableName where user_id = $userId"
 
+  def writeBattlePrefs(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set battle_prefs = $data where user_id = $userId"
+
+  def readBattlePrefs(userId: UserId): Fragment =
+    sql"select battle_prefs from $tableName where user_id = $userId"
+
   def writeNpcQuests(userId: UserId, data: Json): Fragment =
     sql"update $tableName set npc_quests = $data where user_id = $userId"
 

@@ -20,8 +20,13 @@ final case class BattleAlly(
   /** Место, с которого союзник вошёл в бой: за бой он мог сойти с него
     * (Таран, «Переместиться»), а в отряде он записан под прежним — по нему
     * его там и находят. */
-  home:     Int                = 0
+  home:     Int                = 0,
+  /** Сколько раундов он ещё не чувствует миазм тьмы: лечение выводит из них
+    * на несколько раундов (см. ItemSet.Necromancer.MiasmaHealBlockRounds). */
+  miasmaCalm: Int              = 0
 ) {
+  /** Нежить ли он: миазмы её лечат, а живых — травят. */
+  def isUndead: Boolean = kind.race == Race.Undead
   def name: String  = undead.map(_.name).getOrElse(kind.name)
   def alive: Boolean = hp > 0L
   def hpPct: Long    = if (stats.hp <= 0L) 0L else hp * 100L / stats.hp
@@ -32,12 +37,30 @@ final case class BattleAlly(
 }
 
 object BattleAlly {
-  def of(a: Ally, lvl: Long): BattleAlly = {
-    val c = a.clamped(lvl)
+
+  /** Союзник выходит в бой. `undeadBoostPct` — насколько сильнее становится
+    * нежить от «Некроманта» (порог 4); `freshUndead` — выходит ли она целой,
+    * сколько бы ни была побита раньше (порог 6). Живых наёмников и зверей это
+    * не касается: поднимать их некому. */
+  def of(a: Ally, lvl: Long, undeadBoostPct: Long = 0L, freshUndead: Boolean = false): BattleAlly = {
+    val undead = a.kind.race == Race.Undead
+    val stats  = if (undead && undeadBoostPct > 0L) boosted(a.statsAt(lvl), undeadBoostPct) else a.statsAt(lvl)
+    // Побитый поднятый выходит целым только с порога 6; прочие — как есть, но
+    // не выше своих потолков.
+    val c = if (undead && freshUndead) a.copy(hp = stats.hp, armor = stats.armor, energy = stats.energy)
+            else a.clamped(lvl).copy(hp = a.hp.min(stats.hp), armor = a.armor.min(stats.armor))
     // В бою наёмник живёт по своему уровню, а не по геройскому: по нему и
     // статы, и цены умений, и восстановление энергии (см. AllyKind.maxLvl).
     // У поднятого с алтаря и уровень, и статы свои — от трофея.
-    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, a.statsAt(lvl), a.lvlAt(lvl), a.undead, a.position)
+    BattleAlly(c.kind, c.position, c.hp, c.armor, c.energy, stats, a.lvlAt(lvl), a.undead, a.position)
+  }
+
+  /** Статы нежити с прибавкой «Некроманта»: ровно на свой процент, по каждому
+    * числу. Арифметика поверх алтарного ослабления, а не вместо него. */
+  private def boosted(s: FightStats, pct: Long): FightStats = {
+    def up(v: Long): Long = v + v * pct / 100L
+    FightStats(atk = up(s.atk), hp = up(s.hp), armor = up(s.armor), defence = up(s.defence),
+      evasion = up(s.evasion), accuracy = up(s.accuracy), energy = up(s.energy))
   }
 
   implicit val encoder: Encoder[BattleAlly] = deriveEncoder
@@ -52,7 +75,8 @@ object BattleAlly {
       lvl      <- c.getOrElse[Long]("lvl")(1L)
       undead   <- c.getOrElse[Option[UndeadForm]]("undead")(None)
       home     <- c.getOrElse[Int]("home")(position)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home)
+      calm     <- c.getOrElse[Int]("miasmaCalm")(0)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm)
 }
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее

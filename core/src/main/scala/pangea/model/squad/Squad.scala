@@ -99,7 +99,11 @@ final case class Squad(
   heroPos: Int              = 1,
   allies:  List[Ally]       = Nil,
   away:    Map[String, Long] = Map.empty,
-  offDuty: Map[String, Long] = Map.empty
+  offDuty: Map[String, Long] = Map.empty,
+  /** Восставший, которому не нашлось места в строю («Некромант», порог 12): он
+    * ждёт у шатра, пока герой не решит, кем за него пожертвовать. Экран выбора
+    * — в «Отряде», как у алтаря в пещере. */
+  pendingRisen: Option[UndeadForm] = None
 ) {
   def isEmpty: Boolean  = allies.isEmpty
   def nonEmpty: Boolean = allies.nonEmpty
@@ -167,13 +171,14 @@ final case class Squad(
     copy(allies = allies.map(a => if (a.position == pos) f(a) else a))
 
   /** Поднятый встаёт на свободное место — и держится [[AllyRates.UndeadMs]] с
-    * этой минуты. Мест нет — отряд как был; заменой заведует [[replaceAt]]. */
-  def raise(form: UndeadForm, lvl: Long, nowMs: Long): Squad =
-    freePosition.fold(this)(p => copy(allies = allies :+ risen(form, p, lvl, nowMs)))
+    * этой минуты, а с «Некромантом» (порог 6) вдвое дольше: `lasts` — этот
+    * множитель. Мест нет — отряд как был; заменой заведует [[replaceAt]]. */
+  def raise(form: UndeadForm, lvl: Long, nowMs: Long, lasts: Long = 1L): Squad =
+    freePosition.fold(this)(p => copy(allies = allies :+ risen(form, p, lvl, nowMs, lasts)))
 
   /** Поднятый занимает место того, кто на нём стоял. */
-  def replaceAt(pos: Int, form: UndeadForm, lvl: Long, nowMs: Long): Squad =
-    copy(allies = allies.filterNot(_.position == pos) :+ risen(form, pos, lvl, nowMs)).compact
+  def replaceAt(pos: Int, form: UndeadForm, lvl: Long, nowMs: Long, lasts: Long = 1L): Squad =
+    copy(allies = allies.filterNot(_.position == pos) :+ risen(form, pos, lvl, nowMs, lasts)).compact
 
   /** Крыса из-под ног встаёт на свободное место и держится [[AllyRates.RatMs]].
     * Мест нет — отряд как был: лишней крысе в строю стоять негде. */
@@ -186,9 +191,25 @@ final case class Squad(
     * выдавать ли одну на входе в бой. */
   def hasRat: Boolean = allies.exists(_.kind == AllyKind.Rat)
 
-  private def risen(form: UndeadForm, pos: Int, lvl: Long, nowMs: Long): Ally =
+  /** Восставший в бою уходит с героем на [[AllyRates.RisenMs]]. Мест нет — он
+    * ждёт у шатра ([[pendingRisen]]), и в «Отряде» герой решит, кем за него
+    * пожертвовать. Ждущего второй раз не перебиваем: первый дождётся ответа. */
+  def admitRisen(form: UndeadForm, lvl: Long, nowMs: Long): Squad =
+    if (freePosition.isDefined) raise(form, lvl, nowMs, AllyRates.RisenLasts)
+    else if (pendingRisen.isDefined) this
+    else copy(pendingRisen = Some(form))
+
+  /** Ответ на вопрос «кем жертвуем»: ждущий занимает место этого союзника. */
+  def takeRisenPlace(pos: Int, lvl: Long, nowMs: Long): Squad =
+    pendingRisen.fold(this)(form =>
+      replaceAt(pos, form, lvl, nowMs, AllyRates.RisenLasts).copy(pendingRisen = None))
+
+  /** Ждущего отпускают: тело оседает прахом. */
+  def dismissRisen: Squad = copy(pendingRisen = None)
+
+  private def risen(form: UndeadForm, pos: Int, lvl: Long, nowMs: Long, lasts: Long): Ally =
     Ally(AllyKind.Undead, pos, 0L, 0L, 0L,
-      hiredUntil = nowMs + AllyRates.UndeadMs, undead = Some(form)).restored(lvl)
+      hiredUntil = nowMs + AllyRates.UndeadMs * lasts.max(1L), undead = Some(form)).restored(lvl)
 
   /** Все места заняты — новому нужно потеснить кого-то из своих. */
   def full: Boolean = freePosition.isEmpty
@@ -256,7 +277,8 @@ object Squad {
       allies  <- c.getOrElse[List[Ally]]("allies")(Nil)
       away    <- c.getOrElse[Map[String, Long]]("away")(Map.empty)
       offDuty <- c.getOrElse[Map[String, Long]]("offDuty")(Map.empty)
-    } yield Squad(heroPos, allies, away, offDuty)
+      pending <- c.getOrElse[Option[UndeadForm]]("pendingRisen")(None)
+    } yield Squad(heroPos, allies, away, offDuty, pending)
 
   implicit val meta: Meta[Squad] = new Meta(pgDecoderGet, pgEncoderPut)
 }

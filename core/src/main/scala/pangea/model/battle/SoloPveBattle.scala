@@ -448,7 +448,8 @@ object SoloPveBattle {
       if (squad) {
         val formation = hero.squad.compact
         GroupState(heroPos = formation.heroPos, activePos = 1,
-          allies = formation.inOrder.map(BattleAlly.of(_, hero.lvl)))
+          allies = formation.inOrder.map(BattleAlly.of(_, hero.lvl,
+            hero.sets.undeadAllyBoostPct, hero.sets.undeadEntersFresh)))
       }
       else GroupState()
   )
