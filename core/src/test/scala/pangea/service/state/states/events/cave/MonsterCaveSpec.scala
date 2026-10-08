@@ -138,8 +138,11 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         val total = c.rooms.map(_.monsters).sum
         total >= CaveRates.MinMonsters && total <= CaveRates.MaxMonsters
       }) &&
-      // Кучками по 3–5, и на пороге не бьют: во входной комнате пусто.
-      assertTrue(caves.forall(c => c.rooms.map(_.monsters).filter(_ > 0).forall(n => n >= 3 && n <= 5))) &&
+      // Кучками по 3–5, и на пороге не бьют: во входной комнате пусто. В логове
+      // особой пещеры стоит один хозяин — эта комната в счёт кучек не идёт.
+      assertTrue(caves.forall(c => c.rooms.filter(_.kind != RoomKind.Lair)
+                                    .map(_.monsters).filter(_ > 0).forall(n => n >= 3 && n <= 5))) &&
+      assertTrue(caves.forall(c => c.rooms.filter(_.kind == RoomKind.Lair).forall(_.monsters == 1))) &&
       assertTrue(caves.forall(_.rooms.head.monsters == 0)) &&
       assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Rest) == 1)) &&
       // Пещера пустой не бывает: мобы есть всегда.
@@ -541,9 +544,10 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       val caves = (1L to 300L).toList.map(seed => CaveGenerator.generate(Race.Orc.entryName, Rng(seed))._1)
       val withAltar = caves.count(_.rooms.exists(_.kind == RoomKind.Altar))
       assertTrue(caves.forall(_.rooms.count(_.kind == RoomKind.Altar) <= 1)) &&
-      // ровно половина с поправкой на случайность выборки: место привала
-      // алтарь больше не съедает — оно просто пропускается при выборе
-      assertTrue(withAltar > 120 && withAltar < 180) &&
+      // Половина с поправкой на случайность выборки: место привала алтарь не
+      // съедает, оно просто пропускается при выборе. В особой пещере (их
+      // десятая часть) алтарь стоит всегда, поэтому доля чуть выше половины.
+      assertTrue(withAltar > 120 && withAltar < 200) &&
       assertTrue(caves.forall(s => s.rooms.count(r => r.kind == RoomKind.Altar || r.kind == RoomKind.Rest) ==
                    (if (s.rooms.exists(_.kind == RoomKind.Altar)) 2 else 1))) &&
       // привал алтарём не вытесняется: угол для отдыха в пещере всё равно один

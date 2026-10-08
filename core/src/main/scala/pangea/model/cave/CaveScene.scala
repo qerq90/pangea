@@ -104,8 +104,15 @@ final case class CaveScene(
   treasure:   Option[MapZone] = None,
   sewer:     Boolean = false,
   questLvl:  Long    = 0L,
-  floor:     Int     = 1
+  floor:     Int     = 1,
+  /** Хозяин пещеры, если она особая: имя варианта минибосса. Он сидит в логове,
+    * и пока он жив, пещера не выбита. В пещере Некроманта вся родня внутри
+    * поднята — мобы те же по расе, но мёртвые (см. [[undeadMobs]]). */
+  boss:      Option[String] = None
 ) {
+
+  /** Поднята ли вся живность внутри: так живёт пещера Некроманта. */
+  def undeadMobs: Boolean = boss.contains("Necromancer")
 
   def room: CaveRoom = rooms.lift(at).getOrElse(rooms.head)
 
@@ -147,7 +154,8 @@ object CaveScene {
       "treasure"      -> s.treasure.asJson,
       "sewer"         -> s.sewer.asJson,
       "questLvl"      -> s.questLvl.asJson,
-      "floor"         -> s.floor.asJson)
+      "floor"         -> s.floor.asJson,
+      "boss"          -> s.boss.asJson)
 
   implicit val decoder: Decoder[CaveScene] = (c: HCursor) =>
     for {
@@ -169,8 +177,9 @@ object CaveScene {
       sewer     <- c.getOrElse[Boolean]("sewer")(false)
       questLvl  <- c.getOrElse[Long]("questLvl")(0L)
       floor     <- c.getOrElse[Int]("floor")(1)
+      boss      <- c.getOrElse[Option[String]]("boss")(None)
     } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil,
-                      rewarded, spent, pending, trophy, treasure, sewer, questLvl, floor)
+                      rewarded, spent, pending, trophy, treasure, sewer, questLvl, floor, boss)
 }
 
 /** Числа пещеры. Вынесены из компаньонов нарочно — их читают и генератор, и
@@ -220,6 +229,14 @@ object CaveRates {
   /** Шанс (в %), что в пещере окажется алтарь тёмных сил. Больше одного на
     * пещеру не бывает. */
   val AltarChancePct: Int = 50
+
+  /** Шанс (в %), что пещера окажется особой — с хозяином в логове. Кто именно
+    * им будет, решается поровну между [[BossPool]]. */
+  val BossChancePct: Int = 10
+
+  /** Кто может держать пещеру — имена вариантов `MiniBoss`. Строками, чтобы
+    * числа пещеры не тянули за собой весь модуль монстров. */
+  val BossPool: List[String] = List("Necromancer", "RatKing")
 
   /** Сколько процентов от взятого с мобов пещеры опыта она докладывает за
     * зачистку. Было двести — стало сто шестьдесят: финальная награда срезана на пятую часть. */
@@ -280,9 +297,19 @@ object CaveGenerator {
   /** Пещера расы `race`: связный клубок комнат, мобы кучками по 3–5 и ровно
     * один угол, где можно перевести дух. Первая комната — вход: в ней пусто. */
   def generate(race: String, rng: Rng): (CaveScene, Rng) = {
+    // Особая пещера: в ней сидит хозяин. Кто именно — решается поровну, а алтарь
+    // в таком месте стоит всегда: тёмные силы здесь и так на виду.
+    val (special, r0) = roll(rng, 100)
+    val (owner, r1) =
+      if (special >= CaveRates.BossChancePct) (Option.empty[String], r0)
+      else {
+        val (which, rr) = roll(r0, CaveRates.BossPool.size)
+        (Some(CaveRates.BossPool(which)), rr)
+      }
+    val altarPct = if (owner.isDefined) 100 else CaveRates.AltarChancePct
     val (rooms, next) = build(CaveRates.MinRooms, CaveRates.MaxRooms, CaveRates.MinMonsters,
-      CaveRates.MaxMonsters, CaveRates.AltarChancePct, withRest = true, withStairs = false, rng)
-    (CaveScene(race, rooms), next)
+      CaveRates.MaxMonsters, altarPct, withRest = true, withStairs = false, r1)
+    (CaveScene(race, owner.fold(rooms)(_ => withLair(rooms)), boss = owner), next)
   }
 
   /** Верхний ярус канализации: та же пещера теми же комнатами, только алтарь в
@@ -310,7 +337,11 @@ object CaveGenerator {
     * ярус. Крыс из его комнаты не выгоняем — пусть сторожат вместе с ним, но
     * считается она логовом: там ждёт он. */
   private def withLair(rooms: List[CaveRoom]): List[CaveRoom] = {
-    val far = rooms.zipWithIndex.drop(1)
+    // Привал, алтарь, клад и ход вниз логово не занимает: такую комнату оно
+    // перезаписало бы вместе с находкой, и пещера недосчиталась бы своего.
+    def plain(k: RoomKind): Boolean =
+      k != RoomKind.Rest && k != RoomKind.Altar && k != RoomKind.Treasure && k != RoomKind.Stairs
+    val far = rooms.zipWithIndex.drop(1).filter { case (r, _) => plain(r.kind) }
       .maxByOption { case (r, _) => (math.abs(r.x) + math.abs(r.y), r.x, r.y) }
     far.fold(rooms) { case (_, idx) =>
       rooms.updated(idx, rooms(idx).copy(kind = RoomKind.Lair, monsters = SewerRates.KingCount))

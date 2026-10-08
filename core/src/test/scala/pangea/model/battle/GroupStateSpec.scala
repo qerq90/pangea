@@ -129,17 +129,21 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(b.monsterAt(3).exists(_.currentHp == 300L))
     },
 
-    test("павший активный уходит в slain, к герою шагает ближайший (при равенстве — правее), его место пустеет; герой стоит") {
+    test("павший активный уходит в slain, место перед героем пустеет, а в полях — ближайший на своём месте") {
       val b    = SoloPveBattle.fromGroup(trio, hero, Nil).copy(monsterCurrentHp = 0L)
       val nxt  = b.promoteNext.get
       val edge = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(3).copy(monsterCurrentHp = 0L).promoteNext.get
       val mid  = SoloPveBattle.fromGroup(trio, hero, Nil).moveHeroTo(2).copy(monsterCurrentHp = 0L).promoteNext.get
+      // Замену к герою больше никто не подставляет: ближайший разворачивается в
+      // полях боя, но стоит там, где стоял, и напротив героя пусто.
       assertTrue(nxt.monsterCurrentHp == 200L && nxt.group.heroPos == 1) &&
-      assertTrue(nxt.placesInOrder.map(_._2.map(_.currentHp)) == List(Some(200L), None, Some(300L))) &&
+      assertTrue(nxt.group.activePos == 2 && !nxt.group.paired) &&
+      assertTrue(nxt.placesInOrder.map(_._2.map(_.currentHp)) == List(None, Some(200L), Some(300L))) &&
       assertTrue(nxt.group.slain.size == 1) &&
       assertTrue(nxt.group.slain.head.race == Race.Orc.entryName) &&
-      assertTrue(edge.group.heroPos == 3 && edge.monsterCurrentHp == 200L) &&
-      assertTrue(mid.group.heroPos == 2 && mid.monsterCurrentHp == 300L)   // равные — правее
+      // герой с места не сходит, а в полях — ближайший к нему (при равенстве правее)
+      assertTrue(edge.group.heroPos == 3 && edge.monsterCurrentHp == 200L && edge.group.activePos == 2) &&
+      assertTrue(mid.group.heroPos == 2 && mid.monsterCurrentHp == 300L && mid.group.activePos == 3)
     },
 
     test("последнему мобу заменить себя некем — это победа") {
@@ -226,16 +230,23 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(e.engage(1) == b) && assertTrue(b.engage(1) == b && b.engage(9) == b)
     },
 
-    test("павший активный: к герою шагает ближайший свободный, а занятый союзником — нет; никого свободного — пара пуста") {
+    test("после павшего пара пустеет: место перед героем занимают сами, шаг за шагом") {
       val ally2 = Ally(AllyKind.Human, 2, 10L, 10L, 0L)
       val h     = hero.copy(squad = Squad(heroPos = 1, allies = List(ally2)))
       val dead  = SoloPveBattle.fromGroup(trio, h, Nil).copy(monsterCurrentHp = 0L)
       val nxt   = dead.promoteNext.get
       val stuck = SoloPveBattle.fromGroup(trio.take(2), h, Nil).copy(monsterCurrentHp = 0L).promoteNext.get
-      assertTrue(nxt.group.paired && nxt.monsterCurrentHp == 300L) &&                 // № 3 свободен — шагнул, № 2 занят
-      assertTrue(nxt.group.others.map(_.currentHp) == List(200L) && nxt.group.places == List(2)) &&
+      // Ближайший встаёт в полях на своём месте, напротив героя пусто — но он в
+      // досягаемости и бьёт сбоку, как и герой его.
+      assertTrue(!nxt.group.paired && nxt.group.activePos == 2 && nxt.monsterCurrentHp == 200L) &&
+      assertTrue(nxt.group.others.map(_.currentHp) == List(300L) && nxt.group.places == List(3)) &&
+      assertTrue(nxt.group.attackTargets == List(2)) &&
       assertTrue(!stuck.group.paired && stuck.group.activePos == 2 && stuck.monsterCurrentHp == 200L) &&
-      assertTrue(stuck.group.others.isEmpty && stuck.group.slain.size == 1 && stuck.group.attackTargets == List(2))
+      assertTrue(stuck.group.others.isEmpty && stuck.group.slain.size == 1 && stuck.group.attackTargets == List(2)) &&
+      // а кто дошёл до места перед героем — тот и встал в пару
+      assertTrue(nxt.engageArrived.isEmpty) &&
+      assertTrue(nxt.copy(group = nxt.group.copy(places = List(1)))
+                   .engageArrived.exists(_.group.paired))
     },
 
     test("pullFree: освободившийся моб шагает к герою — сам активный или ближайший из строя") {

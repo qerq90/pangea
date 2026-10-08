@@ -876,22 +876,39 @@ case class BattleState(
   /** Конец раунда без моба в паре: тик бафов и кулдаунов, раны и реген героя,
     * энергия. Мобы ходят потом сами — как мобы вне пары. */
   private def quietPhase(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String],
-                         skip: Set[Long], vampHeal: Long = 0L): Task[TurnResult] =
-    ZIO.succeed {
-      val ticked = battle.tickBuffs(skip)
-      val (tickedHero, tickedBattle, heroEffectLine) = tickHeroEffects(hero, ticked, nowMs)
+                         skip: Set[Long], vampHeal: Long = 0L): Task[TurnResult] = {
+    // Минибосс, стоящий вне пары (Некромант за спинами своих), круга не теряет:
+    // колдует он тем же порядком, где бы ни стоял. Тому, кто ушёл из пары своим
+    // же шагом, этот ход не достаётся — он уже сходил в фазе пары.
+    val casted =
+      if (battle.boss.exists(_.holdsPosition) && battle.monsterCurrentHp > 0L)
+        bossTurnCast(hero, battle, nowMs)
+      else ZIO.succeed((battle, hero, ""))
+    casted.map { case (afterCast, castHero, castLine) =>
+      val ticked = afterCast.tickBuffs(skip)
+      val (tickedHero, tickedBattle, heroEffectLine) = tickHeroEffects(castHero, ticked, nowMs)
       val alive = tickedHero.fightStats.hp > 0
       val fed   = if (alive) regainEnergy(tickedHero, nowMs) else tickedHero
-      val lines = (if (heroEffectLine.isEmpty) log else log :+ heroEffectLine) ++ vampLine(vampHeal)
+      val lines = (log ++ Vector(castLine).filter(_.nonEmpty) ++
+                    Vector(heroEffectLine).filter(_.nonEmpty)) ++ vampLine(vampHeal)
       TurnResult(fed, tickedBattle, lines, if (alive) Outcome.Continue else Outcome.Death)
     }
+  }
 
-  /** Напротив героя пусто, а свободный моб есть — шагает к герою (конец раунда). */
+  /** Кто сам дошёл до места напротив героя, тот и встаёт с ним в пару (конец
+    * раунда). Издалека никого не тянем: павший в паре замены не подставляет, и
+    * место перед героем враги занимают сами, шаг за шагом. */
   private def pullFreeStep(res: TurnResult): TurnResult =
     if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.group.heroDown) res
-    else res.battle.pullFree match {
-      case None    => res
-      case Some(b) => res.copy(battle = b, sideLog = res.sideLog :+ content.format("battle.group.steps", "monster" -> b.monsterName))
+    else {
+      // Сперва тот, кто в полях боя, делает свой шаг, потом смотрим, не дошёл ли
+      // кто-нибудь до места напротив героя.
+      val stepped = res.battle.stepActiveTowardsHero.getOrElse(res.battle)
+      val paired  = stepped.engageArrived.getOrElse(stepped)
+      if (paired.group.paired && !res.battle.group.paired)
+        res.copy(battle = paired,
+          sideLog = res.sideLog :+ content.format("battle.group.steps", "monster" -> paired.monsterName))
+      else res.copy(battle = paired)
     }
 
   /** Базовая атака после умения, когда пары нет: по ближайшей досягаемой
@@ -1272,8 +1289,86 @@ case class BattleState(
       case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs)
       case Some(MiniBoss.WhiteWolf)      => wolfTurnCast(hero, battle, nowMs)
       case Some(MiniBoss.RatKing)        => ratKingTurnCast(hero, battle)
+      case Some(MiniBoss.Necromancer)    => necromancerTurnCast(hero, battle)
       case _                             => fireTurnCast(hero, battle, nowMs)
     }
+
+  /** Круг Некроманта: воскрешение → мистический шаг → созидание.
+    *
+    * Воскрешение поднимает ВСЮ его павшую нежить — целой, с полным HP и бронёй,
+    * — и забирает её из добычи: за одного и того же мертвеца дважды не платят
+    * (так же, как за крыс, съеденных королём). Шаг уводит его на самое дальнее
+    * от героя место своего строя, меняясь с тем, кто там стоял; прятаться
+    * некуда — пропуск, и тогда шаг ничего не стоит. Созидание поднимает нового
+    * мертвеца той же расы, что пещера, третьего или четвёртого ранга.
+    *
+    * Не хватило энергии — способность не применяется, но очередь сдвигается. */
+  private def necromancerTurnCast(
+      hero: Hero,
+      battle: SoloPveBattle
+  ): Task[(SoloPveBattle, Hero, String)] = {
+    val necro  = MiniBoss.Necromancer
+    val lvl    = battle.monsterLvl
+    val energy = battle.monsterCurrentEnergy
+    val next   = nextTurn(battle, necro)
+
+    def spend(cost: Long, b: SoloPveBattle): SoloPveBattle = b.copy(monsterCurrentEnergy = energy - cost)
+
+    battle.bossTurn match {
+      // 1) Воскрешение: все его павшие встают целыми и уходят из добычи.
+      case 0 =>
+        val cost  = necro.ReviveCostPerLvl * lvl
+        val fallen = battle.group.slain.filter(s => s.undead || s.race == Race.Undead.entryName)
+        if (energy < cost || fallen.isEmpty) ZIO.succeed((next, hero, ""))
+        else {
+          val raised = fallen.foldLeft(spend(cost, next)) { (b, s) =>
+            val m = MonsterGenerator.generateOfRaceAndRarity(
+              s.lvl.toInt, Race.withName(s.race), Rarity.withName(s.rarity))
+            val slot = MonsterSlot(s.lvl, s.race, s.rarity, m.fightStats, m.fightStats.hp,
+              m.fightStats.armor, s.marked, 0L, BattleEffects.empty, undead = true)
+            b.admit(slot)
+          }
+          // Из добычи они уходят: поднятый второй раз платы не стоит.
+          val cleared = raised.copy(group = raised.group.copy(
+            slain = raised.group.slain.filterNot(s => s.undead || s.race == Race.Undead.entryName)))
+          ZIO.succeed((cleared, hero, content.format("battle.necro.revive", "n" -> fallen.size.toString)))
+        }
+
+      // 2) Мистический шаг: за спины своих.
+      case 1 =>
+        val cost = necro.StepCostPerLvl * lvl
+        battle.necromancerHideaway match {
+          case None       => ZIO.succeed((next, hero, content.text("battle.necro.noHide")))
+          case Some(_) if energy < cost => ZIO.succeed((next, hero, ""))
+          case Some(pos)  =>
+            val moved = spend(cost, next).stepActiveTo(pos)
+            ZIO.succeed((moved, hero, content.format("battle.necro.step", "n" -> pos.toString)))
+        }
+
+      // 3) Созидание: поднимает нового мертвеца.
+      case _ =>
+        val cost = necro.CreateCostPerLvl * lvl
+        if (energy < cost || !battle.hasRoom) ZIO.succeed((next, hero, ""))
+        else
+          for {
+            pick   <- Random.nextIntBounded(necro.CreateRarities.size)
+            rarity  = necro.CreateRarities(pick)
+            // Поднимает он смертных — тех, кто в этой пещере жил. Боссовая раса
+            // сюда не годится: мобов такой расы генератор не знает.
+            race    = battle.group.originRace.flatMap(Race.withNameOption)
+                        .filter(Race.mortals.contains)
+                        .orElse(battle.group.others.flatMap(s => Race.withNameOption(s.race))
+                                  .find(Race.mortals.contains))
+                        .getOrElse(Race.Orc)
+            pct    <- Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+            m       = MonsterGenerator.generateOfRaceAndRarity(lvl.toInt, race, rarity)
+            slot    = MonsterSlot(m.lvl, race.entryName, rarity.entryName, m.fightStats,
+                        m.fightStats.hp, m.fightStats.armor, m.marked,
+                        MonsterEnergy.startEnergy(m.lvl, rarity, pct), BattleEffects.empty, undead = true)
+            joined  = spend(cost, next).admit(slot)
+          } yield (joined, hero, content.format("battle.necro.create", "name" -> slot.name))
+    }
+  }
 
   /** Круг Крысиного короля: призыв → пропуск → объединение. Ход он берёт раз в
     * раунд, поэтому здесь же обнуляется счётчик урона, который герой успел по
@@ -2428,6 +2523,15 @@ case class BattleState(
     var lines = Vector.empty[String]
     var bled  = 0L // урон кровотечения за этот тик — «Упырь» (порог 10) лечит им героя
 
+    // Поднятый мёртв: травить и обескровливать в нём нечего, и зараза с него
+    // сходит сама — ровно как с героя-нежити. Зато сухая плоть занимается
+    // охотнее: огонь по ней весомее и растёт быстрее.
+    val undead = battle.monsterUndead
+    if (undead && (eff.monsterPoison.isDefined || eff.monsterBleed.isDefined)) {
+      eff   = eff.copy(monsterPoison = None, monsterBleed = None)
+      lines = lines :+ content.format("battle.monsterUndeadImmune", "monster" -> monsterName)
+    }
+
     eff.monsterPoison.foreach { p =>
       val dmg = monsterDotDamage(battle, p.damageOn(maxHp))
       hp = (hp - dmg).max(0L)
@@ -2442,12 +2546,14 @@ case class BattleState(
       lines = lines :+ dotTick(Bleed.Icon, Bleed.Label, dmg, monsterName)
     }
     eff.monsterBurn.foreach { bn =>
-      val dmg = bn.damageOn(maxHp)
+      val fire = if (undead) ItemSet.Necromancer.UndeadFireTakenPct else 0L
+      val dmg  = bn.damageOn(maxHp) * (100L + fire) / 100L
       hp = (hp - dmg).max(0L)
       // «Дикое пламя» (порог 6) ускоряет рост: шаг применяется несколько раз,
-      // сохраняя саму кривую роста (+2 п.п. до порога, дальше +1).
-      eff = eff.copy(monsterBurn = Some(
-        (1L to burnGrowthMult.max(1L)).foldLeft(bn)((b, _) => b.grown)))
+      // сохраняя саму кривую роста (+2 п.п. до порога, дальше +1). На поднятом
+      // пламя растёт вдвое охотнее — тем же порядком.
+      val steps = burnGrowthMult.max(1L) * (if (undead) ItemSet.Necromancer.UndeadBurnGrowthMult else 1L)
+      eff = eff.copy(monsterBurn = Some((1L to steps).foldLeft(bn)((b, _) => b.grown)))
       lines = lines :+ dotTick(Burn.Icon, Burn.Label, dmg, monsterName)
     }
     (battle.copy(monsterCurrentHp = hp, effects = eff), lines.mkString("\n"), bled)
@@ -3185,10 +3291,8 @@ case class BattleState(
     else res.battle.promoteNext match {
       case None       => res
       case Some(next) =>
-        val fallen = res.battle.monsterName
-        val line =
-          if (next.group.paired) content.format("battle.group.fell", "monster" -> fallen, "next" -> next.monsterName)
-          else content.format("battle.group.fellNoStep", "monster" -> fallen)
+        // Замену к герою не подставляем — просто говорим, что место опустело.
+        val line = content.format("battle.group.fell", "monster" -> res.battle.monsterName)
         res.copy(battle = next, outcome = Outcome.Continue, log = res.log :+ line)
     }
 
@@ -3205,56 +3309,83 @@ case class BattleState(
     *
     * Герой-некромант на пороге 10 сам числится нежитью, поэтому своей же аурой
     * лечится. */
-  private def auraTick(res: TurnResult, on: Boolean): TurnResult =
-    res.hero.sets.auras.foldLeft(res)((acc, aura) => singleAura(acc, aura, on))
+  private def auraTick(res: TurnResult, on: Boolean): TurnResult = {
+    val byHero = res.hero.sets.auras.foldLeft(res)((acc, aura) => heroAura(acc, aura, on))
+    // Чужая аура: её держит моб, и платит он своей энергией. Правила те же — и
+    // она так же не разбирает, кто на поле свой.
+    byHero.battle.auraHolder.fold(byHero) { case (aura, _) => mobAura(byHero, aura) }
+  }
 
-  private def singleAura(res: TurnResult, aura: Aura, on: Boolean): TurnResult = {
+  /** Аура, которую держит моб (Некромант): энергия его, правила общие. Энергии
+    * не хватает — аура оседает, и строка об этом одна на всё поле. */
+  private def mobAura(res: TurnResult, aura: Aura): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound) res
+    else res.battle.auraHolder match {
+      case None => res
+      case Some((_, energy)) if energy < aura.minEnergy =>
+        res.copy(log = res.log :+ content.text(s"battle.aura.${aura.key}.mobFades"))
+      case Some((_, energy)) =>
+        val spent  = aura.cost(energy)
+        val paid   = res.copy(battle = res.battle.spendAuraEnergy(spent))
+        val lines  = Vector(content.format(s"battle.aura.${aura.key}.mobHolds", "energy" -> spent.toString))
+        applyAura(paid, aura, spent, lines)
+    }
+
+  private def heroAura(res: TurnResult, aura: Aura, on: Boolean): TurnResult =
     if (res.outcome != Outcome.Continue || !res.endsRound || !on) res
     else if (res.hero.fightStats.energy < aura.minEnergy)
       res.copy(log = res.log :+ content.text(s"battle.aura.${aura.key}.fades"))
     else {
       val spent = aura.cost(res.hero.fightStats.energy)
-      def power(maxHp: Long): Long = aura.power(maxHp, spent)
-
-      // ── Герой: платит силой и получает своё по своей природе ─────────────────
-      val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
-      val heroSign   = if (res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
-      val maxHp      = res.hero.effectiveMaxHp(0L)
-      val heroHp     = heroSign match {
-        // Лечение не опускает: текущее HP выше потолка аура не срезает.
-        case s if s > 0 => (res.hero.fightStats.hp + power(maxHp)).min(maxHp).max(res.hero.fightStats.hp)
-        case s if s < 0 => (res.hero.fightStats.hp - power(maxHp)).max(0L)
-        case _          => res.hero.fightStats.hp
-      }
-      val heroDelta = heroHp - res.hero.fightStats.hp
-      val hero1 = res.hero.copy(fightStats = res.hero.fightStats.copy(
-        energy = (res.hero.fightStats.energy - spent).max(0L), hp = heroHp))
-
-      // ── Союзники: та же мера, по их природе ─────────────────────────────────
-      val allies = res.battle.group.allies.map { a =>
-        val next = a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0))
-        val sign = if (a.miasmaCalm > 0 || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
-        sign match {
-          case s if s > 0 => next.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
-          case s if s < 0 => next.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
-          case _          => next
-        }
-      }
-      val fellAllies  = allies.filter(a => !a.alive && res.battle.group.allyAt(a.position).exists(_.alive))
-      val withAllies  = res.battle.copy(group = res.battle.group.copy(allies = allies))
-      val sweptAllies = fellAllies.foldLeft(withAllies)((b, a) => b.copy(group = b.group.withoutAlly(a.position)))
-
-      // ── Чужая сторона ───────────────────────────────────────────────────────
-      val battle2 = auraOnMonsters(sweptAllies, aura, power)
-      val lines =
-        content.format(s"battle.aura.${aura.key}.holds", "energy" -> spent.toString) +:
-          (Option.when(heroDelta > 0L)(
-             content.format(s"battle.aura.${aura.key}.feeds", "hp" -> heroDelta.toString)).toVector ++
-           Option.when(heroDelta < 0L)(
-             content.format(s"battle.aura.${aura.key}.burns", "hp" -> (-heroDelta).toString)).toVector ++
-           fellAllies.map(a => content.format("battle.ally.auraFell", "name" -> a.name)))
-      res.copy(hero = hero1, battle = battle2, log = res.log ++ lines)
+      val paid  = res.copy(hero = res.hero.copy(fightStats = res.hero.fightStats.copy(
+        energy = (res.hero.fightStats.energy - spent).max(0L))))
+      applyAura(paid, aura, spent,
+        Vector(content.format(s"battle.aura.${aura.key}.holds", "energy" -> spent.toString)))
     }
+
+  /** Сама аура: каждому на поле по его природе — герою, союзникам и чужой
+    * стороне. Энергию держатель к этому моменту уже заплатил, `head` — строка о
+    * самой ауре. Своё герой видит отдельной строкой, остальные — молча: в
+    * групповом бою это были бы двадцать строк. */
+  private def applyAura(res: TurnResult, aura: Aura, spent: Long, head: Vector[String]): TurnResult = {
+    def power(maxHp: Long): Long = aura.power(maxHp, spent)
+
+    // ── Герой ─────────────────────────────────────────────────────────────────
+    val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
+    val heroSign   = if (res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
+    val maxHp      = res.hero.effectiveMaxHp(0L)
+    val heroHp     = heroSign match {
+      // Лечение не опускает: текущее HP выше потолка аура не срезает.
+      case s if s > 0 => (res.hero.fightStats.hp + power(maxHp)).min(maxHp).max(res.hero.fightStats.hp)
+      case s if s < 0 => (res.hero.fightStats.hp - power(maxHp)).max(0L)
+      case _          => res.hero.fightStats.hp
+    }
+    val heroDelta = heroHp - res.hero.fightStats.hp
+    val hero1     = res.hero.copy(fightStats = res.hero.fightStats.copy(hp = heroHp))
+
+    // ── Союзники: та же мера, по их природе ───────────────────────────────────
+    val allies = res.battle.group.allies.map { a =>
+      val next = a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0))
+      val sign = if (a.miasmaCalm > 0 || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
+      sign match {
+        case s if s > 0 => next.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
+        case s if s < 0 => next.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
+        case _          => next
+      }
+    }
+    val fellAllies  = allies.filter(a => !a.alive && res.battle.group.allyAt(a.position).exists(_.alive))
+    val withAllies  = res.battle.copy(group = res.battle.group.copy(allies = allies))
+    val sweptAllies = fellAllies.foldLeft(withAllies)((b, a) => b.copy(group = b.group.withoutAlly(a.position)))
+
+    // ── Чужая сторона ─────────────────────────────────────────────────────────
+    val battle2 = auraOnMonsters(sweptAllies, aura, power)
+    val lines = head ++
+      Option.when(heroDelta > 0L)(
+        content.format(s"battle.aura.${aura.key}.feeds", "hp" -> heroDelta.toString)).toVector ++
+      Option.when(heroDelta < 0L)(
+        content.format(s"battle.aura.${aura.key}.burns", "hp" -> (-heroDelta).toString)).toVector ++
+      fellAllies.map(a => content.format("battle.ally.auraFell", "name" -> a.name))
+    res.copy(hero = hero1, battle = battle2, log = res.log ++ lines)
   }
 
   /** Аура по чужой стороне: каждому по его природе, павшие уходят в добычу.
@@ -3268,7 +3399,7 @@ case class BattleState(
     // Активный: его HP живут в полях боя.
     val afterActive = {
       val sign = if (battle.effects.monsterMiasmaCalm > 0 || battle.monsterCurrentHp <= 0L) 0
-                 else aura.sign(Nature.of(battle.monsterRace))
+                 else aura.sign(Nature.of(battle.monsterRace, battle.monsterUndead))
       battle.copy(
         monsterCurrentHp = touched(sign, battle.monsterCurrentHp, battle.monsterStats.hp),
         effects = battle.effects.copy(monsterMiasmaCalm = (battle.effects.monsterMiasmaCalm - 1).max(0)))
@@ -3276,7 +3407,7 @@ case class BattleState(
     // Слоты строя: павших убираем с конца, чтобы индексы не плыли.
     val slots = afterActive.group.others.zipWithIndex.map { case (slot, idx) =>
       val sign = if (slot.effects.monsterMiasmaCalm > 0 || !slot.alive) 0
-                 else aura.sign(Nature.of(slot.race))
+                 else aura.sign(Nature.of(slot.race, slot.undead))
       val hp   = touched(sign, slot.currentHp, slot.stats.hp)
       (slot.copy(currentHp = hp,
          effects = slot.effects.copy(monsterMiasmaCalm = (slot.effects.monsterMiasmaCalm - 1).max(0))),
@@ -4303,7 +4434,7 @@ case class BattleState(
     val text = content.format(
       if (battle0.group.paired) "battle.enter.text" else "battle.enter.noPair",
       "monster"         -> battle.monsterName,
-      "monsterRace"     -> battle.toMonster.race.toString,
+      "monsterRace"     -> battle.toMonster.raceName,
       "monsterHp"       -> battle.monsterCurrentHp.toString,
       "monsterMax"      -> battle.monsterStats.hp.toString,
       "monsterPoison"   -> monsterPoison,

@@ -299,12 +299,19 @@ object LootGenerator {
     val (extra, r0) = rng.between(0L, 2L) // 0 или 1 сверх BossLvL
     // С Крысиного короля вещей вдвое меньше: большую часть его добычи составляют
     // ингредиенты, вещи набора «Крыса» идут лишь на четверть билетов.
+    // Столько же вещей и с Некроманта: его добыча идёт тем же счётом, что у
+    // короля, — половина от уровня босса, но не меньше одной.
     val raw         = extra + bossLvl
-    val count       = (if (boss == MiniBoss.RatKing) raw / 2L else raw).toInt.max(1)
+    val halved      = boss == MiniBoss.RatKing || boss == MiniBoss.Necromancer
+    val count       = (if (halved) raw / 2L else raw).toInt.max(1)
     (0 until count).foldLeft((List.empty[LootDrop], r0, true)) { case ((acc, r, hide), _) =>
       if (boss == MiniBoss.RatKing) {
         val (drop, r2) = ratKingDrop(boss, heroLvl, r)
         (acc :+ drop, r2, hide)
+      } else if (boss == MiniBoss.Necromancer) {
+        val (roll, r1)  = r.between(0L, 100L)
+        val (drops, r2) = necromancerDrop(boss, roll, heroLvl, r1)
+        (acc ++ drops, r2, hide)
       } else if (boss == MiniBoss.WhiteWolf) {
         val (drop, r2) = wolfDrop(boss, bossLvl, heroLvl, floorLvl, hide, r)
         (acc :+ drop, r2, hide && !isHide(drop))
@@ -406,6 +413,31 @@ object LootGenerator {
       setGear(boss, heroLvl, ItemRarity.Purple, r1)
     else setGear(boss, heroLvl, ItemRarity.Blue, r1)
   }
+
+  /** С Некроманта: четверть — проклятые кости, половину делят фиолетовая и
+    * синяя вещи его набора, последнюю четверть — расколотый череп с парой
+    * дублонов. Череп здесь не случайный камень, а именно череп: ему и место в
+    * оружии некроманта. */
+  private def necromancerDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (List[LootDrop], Rng) =
+    if (roll < NecroBonesUntil) (List(LootDrop.Gear(MaterialGenerator.item(boss.ingredient))), rng)
+    else if (roll < NecroPurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng) match {
+      case (drop, r) => (List(drop), r)
+    }
+    else if (roll < NecroBlueUntil) setGear(boss, heroLvl, ItemRarity.Blue, rng) match {
+      case (drop, r) => (List(drop), r)
+    }
+    // Череп идёт с парой дублонов: это один ролл, но две записи в добыче.
+    else (List(
+      LootDrop.Gem(GemGenerator.item(pangea.model.item.GemKind.Skull, GemModel.MinGrade)),
+      LootDrop.Doubloons(NecroSkullDoubloons)), rng)
+
+  /** Границы роллов Некроманта: кости 25%, фиолетовая 25%, синяя 25%, череп с
+    * дублонами — остаток. */
+  val NecroBonesUntil:  Long = 25L
+  val NecroPurpleUntil: Long = 50L
+  val NecroBlueUntil:   Long = 75L
+  /** Сколько дублонов идёт вместе с черепом. */
+  val NecroSkullDoubloons: Long = 2L
 
   /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25, вещь
     * набора 25 фиолетовая и 25 синяя. */

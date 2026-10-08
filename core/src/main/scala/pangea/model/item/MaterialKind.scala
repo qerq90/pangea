@@ -207,6 +207,14 @@ object MaterialKind extends Enum[MaterialKind] {
     override val doubloonPrice: Long = 5L
   }
 
+  /** Остаётся от Некроманта: ингредиент его набора. Ришелье берёт их золотом,
+    * как кровь короля и железо огненного. */
+  case object CursedBones extends MaterialKind("Проклятые кости") {
+    override val description: String =
+      "Жуткие кости... даже спрятанными в рюкзаке, я слышу как они зовут меня..."
+    override val doubloonPrice: Long = 5L
+  }
+
   /** Всё, что выносят из канализации. Кровь короля среди них одна чего-то
     * стоит, прочее не берёт никто. */
   val sewerSpoils: List[MaterialKind] = List(RatPelt, RatTail, PlagueWorms, RatKingBlood)
