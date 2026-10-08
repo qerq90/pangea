@@ -21,6 +21,14 @@ object EquipmentStateSpec extends ZIOSpecDefault {
 
   // Индекс слотов в [[EquipmentState.slots]]
   private val WeaponSlotIdx = 12
+  private val Ring2SlotIdx  = 9
+
+  private def wearItem(itemId: Long): UserAction =
+    UserAction("", Some(s"""{"action":"EquipWear","id":"$itemId"}"""))
+
+  private def blade(id: Long, name: String, lvl: Long, atk: Int): Item =
+    Item(id, name, lvl, Rarity.Gray, ItemType.Weapon,
+         attack = atk, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
 
   private val sword = Item(10L, "Меч судьбы", 1L, Rarity.Blue, ItemType.Weapon,
                            attack = 20, accuracy = 5, energy = 0,
@@ -160,6 +168,83 @@ object EquipmentStateSpec extends ZIOSpecDefault {
         screens  <- renderer.sentScreens
       } yield assertTrue(updated.exists(_.equipment.weapon.itemType == ItemType.Weapon)) &&
               assertTrue(screens.exists(_.text.contains("надо бы очистить место прежде чем снять с себя")))
+    },
+
+    // ── Примерка из карточки слота ───────────────────────────────
+
+    test("карточка слота: характеристики надетого, кнопками — подходящее из сумки по уровню") {
+      val hero   = TestFixtures.hero(userId).copy(lvl = 5L,
+                     equipment = TestFixtures.emptyEquipment.copy(weapon = sword))
+      val fit1   = blade(21L, "Топор", lvl = 5L, atk = 30)
+      val fit2   = blade(22L, "Кинжал", lvl = 1L, atk = 10)
+      val tooBig = blade(23L, "Алебарда", lvl = 9L, atk = 90)
+      val helmet = Item(24L, "Шлем", 1L, Rarity.Gray, ItemType.Helmet,
+                        attack = 0, accuracy = 0, energy = 0, armor = 5, defence = 0, evasion = 0)
+      for {
+        quad                    <- makeState(hero, List(fit1, fit2, tooBig, helmet))
+        (state, _, _, renderer)  = quad
+        _      <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        screen <- renderer.sentScreens.map(_.last)
+        worn    = screen.choices.filter(_.id == "EquipWear").flatMap(_.data.get("id"))
+      } yield assertTrue(screen.text.contains(sword.name)) &&          // статы — надетого
+              assertTrue(screen.text.contains("Подходит из сумки: 2")) &&
+              // старшие сверху; не по уровню и чужой слот не предлагаются
+              assertTrue(worn == List("21", "22")) &&
+              assertTrue(screen.choices.exists(_.id == "Unequip"))
+    },
+
+    test("кнопка примерки надевает вещь, прежнюю кладёт в сумку и пересчитывает статы") {
+      val hero  = TestFixtures.hero(userId).copy(lvl = 5L,
+                    equipment  = TestFixtures.emptyEquipment.copy(weapon = sword),
+                    fightStats = TestFixtures.hero(userId).fightStats.copy(atk = sword.attack.toLong))
+      val axe   = blade(21L, "Топор", lvl = 5L, atk = 30)
+      for {
+        quad                              <- makeState(hero, List(axe))
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        _       <- state.action(testUser, wearItem(axe.id), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+        screens <- renderer.sentScreens.map(_.map(_.text))
+      } yield assertTrue(updated.equipment.weapon.id == axe.id) &&
+              assertTrue(updated.fightStats.atk == axe.attack.toLong) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(sword.id)) &&
+              assertTrue(screens.exists(_.contains("В сумку"))) &&
+              // остались в карточке, и в ней уже новое оружие
+              assertTrue(screens.last.contains(axe.name))
+    },
+
+    test("кольцо из карточки «Кольцо 2» меняет именно второе") {
+      val hero    = TestFixtures.hero(userId).copy(
+                      equipment = TestFixtures.emptyEquipment.copy(firstRing = ring1, secondRing = ring2))
+      val newRing = Item(25L, "Кольцо воли", 1L, Rarity.Blue, ItemType.Ring,
+                         attack = 7, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
+      for {
+        quad                              <- makeState(hero, List(newRing))
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectSlot(Ring2SlotIdx), renderer)
+        _       <- state.action(testUser, wearItem(newRing.id), renderer)
+        updated <- heroDao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(updated.equipment.firstRing.id  == ring1.id) &&
+              assertTrue(updated.equipment.secondRing.id == newRing.id) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(ring2.id))
+    },
+
+    test("подбор длиннее страницы листается") {
+      val hero   = TestFixtures.hero(userId).copy(lvl = 5L)
+      val blades = (1L to 9L).toList.map(i => blade(30L + i, s"Меч $i", lvl = 1L, atk = i.toInt))
+      for {
+        quad                    <- makeState(hero, blades)
+        (state, _, _, renderer)  = quad
+        _      <- state.action(testUser, selectSlot(WeaponSlotIdx), renderer)
+        first  <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("EquipPickNext"), renderer)
+        second <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(first.choices.count(_.id == "EquipWear") == EquipmentState.PickPerPage) &&
+              assertTrue(first.text.contains("стр. 1/2")) &&
+              assertTrue(first.choices.exists(_.id == "EquipPickNext")) &&
+              assertTrue(second.choices.count(_.id == "EquipWear") == 2) &&
+              assertTrue(second.text.contains("стр. 2/2")) &&
+              assertTrue(second.choices.exists(_.id == "EquipPickPrev"))
     },
 
     test("надеть два кольца из инвентаря через детальные экраны → оба в разных слотах") {
