@@ -160,7 +160,7 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(!screens.exists(_.contains("сбоку")))
     },
 
-    test("активный пал — в пару встаёт следующий, бой продолжается, павший ждёт добычи") {
+    test("активный пал — место перед героем пустеет, бой продолжается, павший ждёт добычи") {
       for {
         t <- makeState(hero(atk = 100000L), group(10L, 1000L))
         (state, dao, r) = t
@@ -172,7 +172,9 @@ object GroupBattleSpec extends ZIOSpecDefault {
               assertTrue(after.monsterCurrentHp == 1000L) &&
               assertTrue(after.group.others.isEmpty) &&
               assertTrue(after.group.slain.size == 1) &&
-              assertTrue(screens.contains("На его место встаёт"))
+              // замену к герою никто не подставляет: второй остался на своём месте
+              assertTrue(!after.group.paired && after.group.activePos == 2) &&
+              assertTrue(screens.contains("Место перед вами опустело"))
     },
 
     test("добивание ударом восстанавливает энергию за раунд — и когда в пару встаёт следующий") {
@@ -557,8 +559,9 @@ object GroupBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(after.group.slain.size == 1) &&
               assertTrue(after.monsterStats.hp == 1000L && after.monsterCurrentHp < 742L) &&
-              // цель освободилась и шагнула к герою; № 3 остался на своём месте с дугой в боку
-              assertTrue(after.group.paired && after.group.heroPos == 1) &&
+              // павший замены не подставил: цель осталась на своём месте, напротив
+              // героя пусто, а № 3 стоит с дугой в боку
+              assertTrue(!after.group.paired && after.group.activePos == 2 && after.group.heroPos == 1) &&
               assertTrue(byPos.keySet == Set(3) && byPos(3).currentHp == 871L) &&
               assertTrue(screens.linesIterator.count(_.contains("Дуга удара задевает")) == 2 && screens.contains("пал."))
     },
@@ -671,7 +674,8 @@ object GroupBattleSpec extends ZIOSpecDefault {
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(mid.consumableUsedThisRound) &&
-              assertTrue(screens.contains("пал.") && after.group.paired && after.monsterStats.hp == 1000L) &&
+              // павший замены не подставил, но раунд всё равно кончился
+              assertTrue(screens.contains("пал.") && !after.group.paired && after.monsterStats.hp == 1000L) &&
               // раунд кончился: фляга снова доступна, чужой кулдаун оттикал, свой — начнёт со следующего хода
               assertTrue(!after.consumableUsedThisRound) &&
               assertTrue(after.slotByItem(202L).exists(_.cooldown == 0)) &&

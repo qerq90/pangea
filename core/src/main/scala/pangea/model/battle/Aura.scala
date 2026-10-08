@@ -24,6 +24,10 @@ object Nature extends Enum[Nature] {
   }
 
   def of(race: String): Nature = Race.withNameOption(race).fold(Neither: Nature)(of)
+
+  /** Природа существа с поправкой на то, поднято ли оно: поднятый орк — уже не
+    * орк по природе, хотя раса у него прежняя (см. `Monster.undead`). */
+  def of(race: String, undead: Boolean): Nature = if (undead) Undead else of(race)
 }
 
 /** Числа аур — отдельно от компаньона [[Aura]], как [[pangea.model.item.SetRates]]:

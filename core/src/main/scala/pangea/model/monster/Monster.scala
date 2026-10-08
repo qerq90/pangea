@@ -12,7 +12,11 @@ case class Monster(
   // Своё имя этого существа. У легендарных оно берётся из списка расы
   // ([[Monster.legendaryNames]]) при генерации, у сюжетных его задаёт сцена.
   // Пусто — имя считается по паре «раса × редкость», как и прежде.
-  customName: Option[String] = None
+  customName: Option[String] = None,
+  /** Поднятый некромантом: тот же, кем был при жизни, только мёртвый. Раса и
+    * имя остаются своими, а природа становится могильной — миазмы его лечат, и
+    * ни отравить, ни обескровить его уже нельзя (см. Nature.of). */
+  undead: Boolean = false
 ) {
   def name: String = {
     val base = customName.getOrElse(
@@ -20,8 +24,12 @@ case class Monster(
         (race, rarity),
         s"$rarity $race"
       )) // fallback на случай новой расы без записи
-    if (marked) s"${Monster.MarkedPrefix} $base" else base
+    val marked0 = if (marked) s"${Monster.MarkedPrefix} $base" else base
+    if (undead) s"${Monster.UndeadPrefix}-$marked0" else marked0
   }
+
+  /** Как называется его природа игроку: «Нежить-Орк» вместо просто «Орк». */
+  def raceName: String = if (undead) s"${Monster.UndeadPrefix}-$race" else race.toString
 
   /** Имя для кнопки: у отмеченного тьмой полное имя с меткой не влезает в
     * кнопку (лимит [[pangea.engine.Choice.MaxLabelLength]]), поэтому вместо
@@ -31,6 +39,9 @@ case class Monster(
 
 object Monster {
   val MarkedPrefix: String = "Отмеченный тьмой"
+
+  /** Приставка поднятого: «Нежить-Орк раб». */
+  val UndeadPrefix: String = "Нежить"
 
   /** Имена мобов «раса × редкость» — пафосные названия для встреч в подземелье.
     * Если пара отсутствует в таблице — fallback на «<Редкость> <Раса>».

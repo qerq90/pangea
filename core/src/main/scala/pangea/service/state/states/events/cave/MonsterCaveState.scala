@@ -141,6 +141,8 @@ case class MonsterCaveState(
       val inside = scene.copy(inside = true, at = 0)
       writeScene(user, inside) *>
         renderer.show(user, Screen(txt(scene, "entered"), Nil)) *>
+        // Пещера Некроманта выдаёт себя с порога: живым здесь не пахнет.
+        ZIO.when(scene.undeadMobs)(renderer.show(user, Screen(content.text("cave.deadAir"), Nil))) *>
         showRoom(user, inside, renderer)
     }
 
@@ -377,7 +379,7 @@ case class MonsterCaveState(
         case Some(idx) =>
           val moved = scene.copy(at = idx)
           if (moved.room.monsters > 0 && moved.room.kind == RoomKind.Lair)
-            getHero(user).flatMap(fightKing(user, _, moved, idx, renderer))
+            getHero(user).flatMap(fightLord(user, _, moved, idx, renderer))
           else if (moved.room.monsters > 0) getHero(user).flatMap(fight(user, _, moved, idx, renderer))
           else writeScene(user, moved) *>
             renderer.show(user, Screen(content.text("cave.moved"), Nil)) *>
@@ -430,7 +432,9 @@ case class MonsterCaveState(
       case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
       case RoomKind.Treasure => content.text(if (room.done) "cave.room.treasureDug" else "cave.room.treasure")
       case RoomKind.Stairs   => content.text("sewer.room.stairs")
-      case RoomKind.Lair     => content.text(if (room.monsters > 0) "sewer.room.lair" else "sewer.room.lairEmpty")
+      case RoomKind.Lair     =>
+        val lair = if (scene.sewer) "sewer" else if (scene.undeadMobs) "cave.necro" else "cave.king"
+        content.text(if (room.monsters > 0) s"$lair.room.lair" else s"$lair.room.lairEmpty")
       case RoomKind.Empty => emptyRoom(scene)
     }
   }
@@ -497,7 +501,9 @@ case class MonsterCaveState(
                    val (rarity, _) =
                      if (scene.sewer) CaveGenerator.rollRatRarity(Rng(seed))
                      else CaveGenerator.rollRarity(Rng(seed))
-                   weaken(MonsterGenerator.generateOfRaceAndRarity(lvl, race, rarity), scene.weakened)
+                   val m = weaken(MonsterGenerator.generateOfRaceAndRarity(lvl, race, rarity), scene.weakened)
+                   // В пещере Некроманта вся родня поднята: раса своя, природа могильная.
+                   if (scene.undeadMobs) m.copy(undead = true) else m
                  }
       energies <- ZIO.foreach(monsters)(m =>
                     Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
@@ -512,30 +518,71 @@ case class MonsterCaveState(
     } yield StateType.Battle
   }
 
-  /** Логово: та самая большая крыса, из-за которой всё и затевалось. Бой с ним
-    * идёт по правилам минибосса, а не кучки: он зовёт себе подмогу уровнем в
-    * задание и поглощает её, когда прижмёт. Комнату помечаем выбитой заранее —
-    * вернуться из боя можно только победив. */
-  private def fightKing(user: User, hero: Hero, scene: CaveScene, idx: Int, renderer: Renderer): Task[StateType] = {
-    val king  = MiniBoss.RatKing
-    val lvl   = king.bossLvl(hero.lvl)
-    val stats = king.stats(lvl)
-    val boss  = Monster(0L, lvl, Race.Animal, Rarity.Legendary, stats)
-    val base  = SoloPveBattle.from(boss, hero)
-    val battle = base.copy(
-      bossKind  = Some(king.entryName),
-      minionLvl = scene.questLvl.max(1L),
-      // Всякая рана от него гноится: удар, дошедший до HP, травит героя.
-      effects   = base.effects.copy(monsterPoisonsOnHit = king.poisonsOnHit),
-      // Звать со стороны ему некого: кого надо, он позовёт сам.
-      noKin     = true)
-    val next = scene.withRoom(idx, _.copy(monsters = 0, done = true))
+  /** Логово: хозяин, из-за которого всё и затевалось. В канализации это
+    * Крысиный король, в особой пещере — он же или Некромант (см.
+    * `CaveScene.boss`). Бой идёт по правилам минибосса, а не кучки. Комнату
+    * помечаем выбитой заранее — вернуться из боя можно только победив.
+    *
+    * Король стоит один и зовёт подмогу сам; Некромант один не выходит — вокруг
+    * него три-четыре мертвеца той же расы, что пещера. */
+  private def fightLord(user: User, hero: Hero, scene: CaveScene, idx: Int, renderer: Renderer): Task[StateType] = {
+    val lord  = scene.boss.flatMap(MiniBoss.byName).getOrElse(MiniBoss.RatKing)
+    val lvl   = lord.bossLvl(hero.lvl)
+    val stats = lord.stats(lvl)
+    val next    = scene.withRoom(idx, _.copy(monsters = 0, done = true))
     val routing = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
+    val mobLvl  = if (scene.sewer) scene.questLvl.max(1L) else hero.dungeonLevel.toLong.max(1L)
     for {
+      battle <- lord match {
+                  case MiniBoss.Necromancer => necromancerFight(hero, scene, lord, lvl, stats, mobLvl)
+                  case _                    => ZIO.succeed(kingFight(hero, lord, lvl, stats, mobLvl))
+                }
       _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
-      _ <- renderer.show(user, Screen(content.text("sewer.king"), Nil))
+      _ <- renderer.show(user, Screen(content.text(
+             if (scene.sewer) "sewer.king" else if (lord == MiniBoss.Necromancer) "cave.necro.lord" else "cave.king.lord"), Nil))
     } yield StateType.Battle
+  }
+
+  /** Крысиный король: один в полях, подмогу зовёт сам. */
+  private def kingFight(hero: Hero, lord: MiniBoss, lvl: Long, stats: pangea.model.stats.FightStats,
+                        mobLvl: Long): SoloPveBattle = {
+    val boss = Monster(0L, lvl, lord.race, Rarity.Legendary, stats)
+    val base = SoloPveBattle.from(boss, hero)
+    base.copy(
+      bossKind  = Some(lord.entryName),
+      minionLvl = mobLvl,
+      // Всякая рана от него гноится: удар, дошедший до HP, травит героя.
+      effects   = base.effects.copy(monsterPoisonsOnHit = lord.poisonsOnHit),
+      // Звать со стороны ему некого: кого надо, он позовёт сам.
+      noKin     = true)
+  }
+
+  /** Некромант: сам в полях, вокруг — три-четыре поднятых мертвеца той расы,
+    * чья пещера. Своих он потом и воскресит, и прибавит. */
+  private def necromancerFight(hero: Hero, scene: CaveScene, lord: MiniBoss, lvl: Long,
+                               stats: pangea.model.stats.FightStats, mobLvl: Long): Task[SoloPveBattle] = {
+    val race = Race.withNameOption(scene.race).getOrElse(Race.Orc)
+    for {
+      extra  <- Random.nextIntBetween(MiniBoss.Necromancer.GuardMin, MiniBoss.Necromancer.GuardMax + 1)
+      seeds  <- ZIO.foreach(List.fill(extra)(()))(_ => Random.nextLong)
+      guards  = seeds.map { seed =>
+                  val (rarity, _) = CaveGenerator.rollRarity(Rng(seed))
+                  MonsterGenerator.generateOfRaceAndRarity(mobLvl.toInt, race, rarity).copy(undead = true)
+                }
+      boss    = Monster(0L, lvl, lord.race, Rarity.Legendary, stats, customName = Some(lord.monsterName))
+      pcts   <- ZIO.foreach(boss :: guards)(m =>
+                  Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
+                    .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
+      // Сам он выходит с полной силой: аура и воскрешение стоят энергии, и без
+      // неё первый его круг прошёл бы впустую.
+      energies = stats.energy :: pcts.tail
+      base     = SoloPveBattle.fromGroup(boss :: guards, hero, energies)
+      // Раса пещеры едет в бою как расовая метка группы: по ней Некромант и
+      // поднимает новых мертвецов (сам он числится нежитью, и его раса тут не
+      // годится — мобов такой расы не бывает).
+    } yield base.copy(bossKind = Some(lord.entryName), minionLvl = mobLvl, noKin = true,
+      group = base.group.copy(originRace = Some(race.entryName)))
   }
 
   /** Ход вниз: нижний ярус катается в этот самый момент — до спуска его ещё

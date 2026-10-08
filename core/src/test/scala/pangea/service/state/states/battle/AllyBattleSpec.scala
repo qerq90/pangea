@@ -140,7 +140,8 @@ object AllyBattleSpec extends ZIOSpecDefault {
         _       <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
         second  <- state.action(testUser, tap("Attack"), r)
       } yield assertTrue(first == StateType.Battle) &&
-              assertTrue(log.contains("К вам никто не шагает")) &&
+              // Павший замены не подставляет, а сосед занят союзником и к герою не идёт.
+              assertTrue(log.contains("Место перед вами опустело")) &&
               assertTrue(!after.group.paired && after.group.activePos == 2 && after.group.slain.size == 1) &&
               assertTrue(after.group.attackTargets == List(2)) &&
               assertTrue(screens.last.text.contains("Напротив вас никого нет") && screens.last.text.contains("против последней цели")) &&
@@ -148,7 +149,7 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(second == StateType.Loot)
     },
 
-    test("освободившийся моб (союзник напротив ушёл по свитку) в конце раунда шагает к герою") {
+    test("освободившийся моб (союзник напротив ушёл по свитку) стоит где стоял: он и так достаёт героя") {
       val h = hero(heroPos = 2, allies = List(ally(pos = 1, hp = Some(1L), armor = Some(0L))))
       for {
         t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
@@ -158,8 +159,11 @@ object AllyBattleSpec extends ZIOSpecDefault {
         _       <- state.action(testUser, tap("Attack"), r)
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-      } yield assertTrue(screens.contains("воспользовался свитком") && screens.contains("шагает к вам")) &&
-              assertTrue(after.group.paired && after.group.activePos == 2 && after.group.heroPos == 2 && after.group.allies.isEmpty)
+      } yield assertTrue(screens.contains("воспользовался свитком")) &&
+              // Напротив героя пусто, но моб на соседнем месте — они достают друг
+              // друга, и занимать место перед ним он не идёт.
+              assertTrue(!after.group.paired && after.group.activePos == 1 && after.group.heroPos == 2) &&
+              assertTrue(after.group.allies.isEmpty && after.group.attackTargets == List(1))
     },
 
     test("поднятый с алтаря свитков не носит: обнулённый — рассыпается, и в отряд не вернётся") {
@@ -256,8 +260,10 @@ object AllyBattleSpec extends ZIOSpecDefault {
               // за край строя ходить некуда: сосед всего один, и тот пустой
               assertTrue(ask.choices.filter(_.id == "MoveTo").map(_.label) == List("2. — пусто —")) &&
               assertTrue(result == StateType.Battle && says.contains("Вы переходите на позицию 2")) &&
-              // шаг сделан — и моб на месте 1 к концу раунда сам подтянулся к герою
-              assertTrue(after.group.heroPos == 2 && after.group.paired)
+              // шаг сделан: моб на месте 1 теперь достаёт героя сбоку, но
+              // вставать напротив он не идёт — и не обязан
+              assertTrue(after.group.heroPos == 2 && !after.group.paired) &&
+              assertTrue(after.group.attackTargets == List(1))
     },
 
     test("бить некого и союзников уже нет (ушли по свиткам) — «Ждать»: герой пропускает удар, раунд идёт") {
@@ -276,8 +282,9 @@ object AllyBattleSpec extends ZIOSpecDefault {
         after   <- battleOf(dao)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(entry.choices.exists(_.label == "Ждать") && !entry.choices.exists(_.label == "Атака")) &&
-              assertTrue(result == StateType.Battle && screens.contains("Вы выжидаете") && screens.contains("шагает к вам")) &&
-              assertTrue(after.group.paired && after.group.heroPos == 3)
+              // За раунд он проходит одно место: пара соберётся не сейчас
+              assertTrue(result == StateType.Battle && screens.contains("Вы выжидаете")) &&
+              assertTrue(after.group.activePos == 2 && !after.group.paired && after.group.heroPos == 3)
     },
 
     test("союзник бьёт врага напротив и добивает его — павший ждёт добычи, бой идёт") {

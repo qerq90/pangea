@@ -102,7 +102,9 @@ object MonsterSkill extends Enum[MonsterSkill] {
       * ни себе, ни соседу (см. `BattleState.selfAid`/`allyAid`). */
     override val races: Set[Race] = Race.mortals.toSet
 
-    def applicable(battle: SoloPveBattle): Boolean = battle.monsterCurrentHp < battle.monsterStats.hp
+    /** Поднятый её не пьёт: лечить в мертвеце нечего, да и пить ему нечем. */
+    def applicable(battle: SoloPveBattle): Boolean =
+      !battle.monsterUndead && battle.monsterCurrentHp < battle.monsterStats.hp
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
       val maxHp  = battle.monsterStats.hp

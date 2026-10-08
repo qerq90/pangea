@@ -98,10 +98,12 @@ final case class MonsterSlot(
   // нему самому (см. SoloPveBattle.activeSlot/withActive).
   boss:          Option[String] = None,
   // Своё имя этого существа, если оно именное (легендарный из списка расы).
-  customName:    Option[String] = None
+  customName:    Option[String] = None,
+  /** Поднятый некромантом: раса своя, природа могильная (см. [[Nature]]). */
+  undead:        Boolean        = false
 ) {
   def toMonster: Monster =
-    Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked, customName)
+    Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked, customName, undead)
 
   def name: String =
     boss.flatMap(pangea.model.monster.MiniBoss.byName).map(_.monsterName).getOrElse(toMonster.name)
@@ -112,7 +114,7 @@ final case class MonsterSlot(
   def alive: Boolean = currentHp > 0L
 
   /** Слот как запись о павшем — для добычи после боя. */
-  def slain: SlainMonster = SlainMonster(lvl, race, rarity, marked, name)
+  def slain: SlainMonster = SlainMonster(lvl, race, rarity, marked, name, undead)
 
   /** Проценты для строки группового экрана. */
   def hpPct: Long    = if (stats.hp <= 0L) 0L else currentHp * 100L / stats.hp
@@ -135,12 +137,14 @@ object MonsterSlot {
       effects       <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       boss          <- c.getOrElse[Option[String]]("boss")(None)
       customName    <- c.getOrElse[Option[String]]("customName")(None)
+      undead        <- c.getOrElse[Boolean]("undead")(false)
     } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects,
-                        boss, customName)
+                        boss, customName, undead)
 }
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */
-final case class SlainMonster(lvl: Long, race: String, rarity: String, marked: Boolean, name: String)
+final case class SlainMonster(lvl: Long, race: String, rarity: String, marked: Boolean, name: String,
+                              undead: Boolean = false)
 
 object SlainMonster {
   implicit val encoder: Encoder[SlainMonster] = deriveEncoder
@@ -151,7 +155,8 @@ object SlainMonster {
       rarity <- c.get[String]("rarity")
       marked <- c.getOrElse[Boolean]("marked")(false)
       name   <- c.getOrElse[String]("name")("")
-    } yield SlainMonster(lvl, race, rarity, marked, name)
+      undead <- c.getOrElse[Boolean]("undead")(false)
+    } yield SlainMonster(lvl, race, rarity, marked, name, undead)
 }
 
 /** Групповая часть боя. Мобы стоят в строю по местам 1, 2, …; герой стоит на

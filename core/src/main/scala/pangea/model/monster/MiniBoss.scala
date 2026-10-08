@@ -77,6 +77,15 @@ sealed abstract class MiniBoss(
    *  добирает HP: без брони удар целиком приходится на здоровье. */
   def heroHitSplit: Option[(Double, Double)]
 
+  /** Аура, которой он держит всё поле боя (см. [[pangea.model.battle.Aura]]).
+   *  None — поля он не трогает. */
+  def aura: Option[pangea.model.battle.Aura] = None
+
+  /** Стоит там, где встал: строй его к герою не подтягивает и в пару не ставит.
+   *  Так живёт Некромант — он сам выбирает, за чьей спиной стоять, и толку в
+   *  его шаге не было бы, если бы конец раунда возвращал его обратно. */
+  def holdsPosition: Boolean = false
+
   /** Ингредиент, который остаётся после него. */
   def ingredient: MaterialKind
 
@@ -547,6 +556,84 @@ object MiniBoss extends Enum[MiniBoss] {
     def ingredient: MaterialKind = MaterialKind.RatKingBlood
 
     def set: Option[ItemSet] = Some(ItemSet.Rat)
+  }
+
+  // ── Некромант ───────────────────────────────────────────────────────────────
+  /** Хозяин пещеры, где вся родня давно поднята: сам он нежить, дерётся не один
+    * и прячется за своими. Живым его почти не достать — он их переживёт, — зато
+    * поле вокруг держит аурой миазм, и своих она лечит. */
+  case object Necromancer extends MiniBoss("Некромант", "Некроманта", Race.Undead) {
+
+    val HpPerLvl: Long          = 350L
+    val ArmorPerLvl: Long       = 300L
+    val AtkPerLvl: Long         = 150L
+    val EnergyPerLvl: Long      = 150L
+    val AccuracyPerLvl: Long    = 100L
+    val DefencePerLvl: Long     = 150L
+    val EvasionPerLvl: Long     = 150L
+    val EnergyRegenPerLvl: Long = 11L
+
+    /** Платит как волк: двести за уровень босса. */
+    val ExpPerLvl: Long = 200L
+
+    /** Растёт раз в четыре уровня героя. */
+    val LevelDivisor: Long = 4L
+
+    // ── Способности (по кругу) ────────────────────────────────────────────────
+    /** Воскрешение: вся его павшая нежить встаёт целой — и в добычу уже не идёт. */
+    val ReviveCostPerLvl: Long = 10L
+    /** Мистический шаг: уходит за спины своих. Прятаться некуда — пропуск, и
+      * тогда шаг ничего не стоит. */
+    val StepCostPerLvl: Long = 5L
+    /** Созидание: поднимает нового — третьего или четвёртого ранга. */
+    val CreateCostPerLvl: Long = 10L
+    val CreateRarities: List[Rarity] = List(Rarity.Rare, Rarity.Mythical)
+
+    /** Сколько нежити стоит вокруг него в логове. */
+    val GuardMin: Int = 3
+    val GuardMax: Int = 4
+
+    def stats(bossLvl: Long): FightStats = FightStats(
+      atk      = AtkPerLvl * bossLvl,
+      hp       = HpPerLvl * bossLvl,
+      armor    = ArmorPerLvl * bossLvl,
+      defence  = DefencePerLvl * bossLvl,
+      evasion  = EvasionPerLvl * bossLvl,
+      accuracy = AccuracyPerLvl * bossLvl,
+      energy   = EnergyPerLvl * bossLvl
+    )
+
+    def energyRegen(bossLvl: Long): Long = EnergyRegenPerLvl * bossLvl
+    def expReward(bossLvl: Long): Long   = ExpPerLvl * bossLvl
+
+    override def levelDivisor: Long = LevelDivisor
+
+    /** Стихии оружия ему безразличны — как и всякой нежити. */
+    def damageTakenMult(e: Element): Double = 1.0
+    def plainDamageTakenMult: Double        = 1.0
+
+    /** Сухие кости занимаются охотно. */
+    def immuneToBurn: Boolean = false
+
+    /** Воскрешение, шаг, созидание. */
+    def abilities: Int = 3
+
+    override def fightsInGroup: Boolean = true
+
+    /** Бьёт как все: сперва броня, остаток в HP. */
+    def heroHitSplit: Option[(Double, Double)] = None
+
+    def monsterName: String = "Некромант"
+
+    def ingredient: MaterialKind = MaterialKind.CursedBones
+
+    def set: Option[ItemSet] = Some(ItemSet.Necromancer)
+
+    /** Поле вокруг него стелется миазмами — теми же, что у героя с набором. */
+    override def aura: Option[pangea.model.battle.Aura] = Some(pangea.model.battle.Aura.Miasma)
+
+    /** Куда встал, там и стоит: за спины своих он уходит сам. */
+    override def holdsPosition: Boolean = true
   }
 
   /** Минибосс по имени варианта — для восстановления из сохранённого боя. */

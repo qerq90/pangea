@@ -33,6 +33,8 @@ case class SoloPveBattle(
   heroBattleState:     HeroBattleState = HeroBattleState.empty,
   consumableUsedThisRound: Boolean = false, // за раунд можно выпить либо флягу, либо зелье пояса
   monsterMarked:       Boolean = false,
+  /** Активный моб поднят некромантом: раса своя, природа могильная. */
+  monsterUndead:       Boolean = false,
   skillSlots:          List[SkillSlotState] = Nil,
   effects:             BattleEffects = BattleEffects.empty, // тикающие статус-эффекты (яд/реген)
   toughnessUsed:       Boolean = false, // пассивка «Крепкость» срабатывает один раз за бой
@@ -92,7 +94,7 @@ case class SoloPveBattle(
     lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
     currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
     currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, boss = bossKind,
-    customName = customName)
+    customName = customName, undead = monsterUndead)
 
   /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
     * геройская половина эффектов (и разовые флаги героя вроде «Крепкости»)
@@ -104,7 +106,50 @@ case class SoloPveBattle(
     monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
     monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
-    bossKind = slot.boss, customName = slot.customName)
+    bossKind = slot.boss, customName = slot.customName, monsterUndead = slot.undead)
+
+  /** Кто на чужой стороне держит ауру и сколько у него энергии: минибосс со
+    * своей аурой, где бы он ни стоял — в паре или в строю (см. [[Aura]]). Нет
+    * такого — None, и поле дышит свободно. */
+  def auraHolder: Option[(Aura, Long)] =
+    boss.flatMap(_.aura).map(_ -> monsterCurrentEnergy)
+      .orElse(group.entries.collectFirst {
+        case (_, slot) if slot.alive =>
+          slot.boss.flatMap(pangea.model.monster.MiniBoss.byName).flatMap(_.aura)
+            .map(_ -> slot.currentEnergy)
+      }.flatten)
+
+  /** Списать энергию с того, кто держит ауру, — где бы он ни стоял. */
+  def spendAuraEnergy(spent: Long): SoloPveBattle =
+    if (boss.exists(_.aura.isDefined))
+      copy(monsterCurrentEnergy = (monsterCurrentEnergy - spent).max(0L))
+    else
+      group.entries.indexWhere { case (_, slot) =>
+        slot.alive && slot.boss.flatMap(pangea.model.monster.MiniBoss.byName).exists(_.aura.isDefined)
+      } match {
+        case -1  => this
+        case idx => copy(group = group.copy(others = group.others.updated(idx,
+          group.others(idx).copy(currentEnergy = (group.others(idx).currentEnergy - spent).max(0L)))))
+      }
+
+  /** Куда Некроманту прятаться: самое дальнее от героя СВОБОДНОЕ место строя,
+    * если оно дальше того, где он стоит. Занятые места не годятся — вставать
+    * вторым на чужое место нельзя, а поменяться значило бы выставить своего
+    * мертвеца на место, где его никто не достанет. Прятаться некуда — None, и
+    * тогда шаг становится пропуском, бесплатным. */
+  def necromancerHideaway: Option[Int] = {
+    val mine = math.abs(group.activePos - group.heroPos)
+    group.freePlaces.filter(p => math.abs(p - group.heroPos) > mine)
+      .sortBy(p => (-math.abs(p - group.heroPos), -p)).headOption
+  }
+
+  /** Активный уходит на свободное место `pos`. Пара при этом пустеет: напротив
+    * героя никого не остаётся, и достать ушедшего можно только подойдя.
+    *
+    * Этим Некромант и прячется — за спинами своих, в хвосте строя; строй его
+    * оттуда не тянет ([[MiniBoss.holdsPosition]]), а колдовать он продолжает:
+    * круг способностей идёт у того, кто стоит в полях боя, где бы он ни стоял. */
+  def stepActiveTo(pos: Int): SoloPveBattle = copy(group = group.copy(activePos = pos))
 
   /** Пара пуста: активный моб стоит не напротив героя. */
   def unpaired: Boolean = !group.paired
@@ -145,37 +190,52 @@ case class SoloPveBattle(
     }
 
   /** Сооружения с места не сходят: ни к герою, ни в перемешивании. */
-  private def movable(slot: MonsterSlot): Boolean = !Race.immovable(Race.withName(slot.race))
+  private def movable(slot: MonsterSlot): Boolean =
+    !Race.immovable(Race.withName(slot.race)) &&
+      !slot.boss.flatMap(pangea.model.monster.MiniBoss.byName).exists(_.holdsPosition)
 
-  /** Активный моб пал, а в группе есть ещё: записать его в павшие. К герою
-    * шагает ближайший свободный — тот, напротив которого нет союзника (при
-    * равном расстоянии — правее); его прежнее место пустеет. Свободных нет —
-    * никто не шагает: в полях остаётся ближайший занятый, на своём месте, и
-    * напротив героя пусто. Сооружение не шагает никогда. Герой с места не
-    * сходит — у отряда позиции свои. Если мобов больше нет — None, это
-    * победа. Отложенный Таран сгорает. */
+  /** Активный моб пал, а в группе есть ещё: записать его в павшие, а в поля
+    * боя развернуть ближайшего — НА ЕГО СОБСТВЕННОМ месте. Никого к герою не
+    * тянем: место перед ним пустеет, и занять его враги должны сами, шаг за
+    * шагом ([[closeIn]]). Пока оно пусто, герой бьёт соседей, а они его —
+    * сбоку.
+    *
+    * Герой с места не сходит: у отряда позиции свои. Мобов больше нет — None,
+    * это победа. Отложенный Таран сгорает. */
   def promoteNext: Option[SoloPveBattle] =
     if (group.others.isEmpty && group.queue.isEmpty) None
-    else if (group.others.isEmpty) admitQueued._1.promoteNext   // строй пуст, но за ним ждут — входят и шагают
+    else if (group.others.isEmpty) admitQueued._1.promoteNext   // строй пуст, но за ним ждут — входят сами
     else {
-      val all  = group.places.indices.toList
-      val free = all.filter(i => group.freeAt(group.places(i)) && movable(group.others(i)))
-      val idx  = if (free.nonEmpty) nearestOf(free) else nearestOf(all)
-      val pos  = if (free.nonEmpty) group.heroPos else group.places(idx)
+      val idx = nearestOf(group.places.indices.toList)
       Some(withActive(group.others(idx)).copy(group = group.copy(
         others      = group.others.patch(idx, Nil, 1),
         places      = group.places.patch(idx, Nil, 1),
         slain       = group.slain :+ slainActive,
-        activePos   = pos,
+        activePos   = group.places(idx),
         pendingMove = None)))
     }
 
+  /** Кто сам дошёл до места напротив героя, тот и встаёт с ним в пару: это не
+    * подтягивание, а итог собственного шага ([[closeIn]] доводит мобов до
+    * свободного места перед героем). Пара цела или перед героем пусто — None.
+    *
+    * Издалека никого не тянем: павший в паре не подставляет замену, и место
+    * перед героем враги занимают сами. */
+  def engageArrived: Option[SoloPveBattle] =
+    Option.when(!group.paired && group.occupied(group.heroPos))(engage(group.heroPos))
+
   /** Напротив героя пусто, а свободный моб есть — он шагает к герою: сам
     * активный, если его никто не держит, иначе ближайший свободный из строя
-    * (активный возвращается на своё место). Пара цела или шагать некому — None. */
+    * (активный возвращается на своё место). Пара цела или шагать некому — None.
+    *
+    * Осталось для начальной расстановки ([[settle]]): в бою, который только что
+    * собрали, моб встаёт напротив героя сразу, без лишнего раунда ходьбы. */
   def pullFree: Option[SoloPveBattle] =
     if (group.paired) None
-    else if (group.freeAt(group.activePos) && !Race.immovable(Race.withName(monsterRace)))
+    // Спрятавшийся сам решает, где стоять: ни его к герою не тянут, ни вместо
+    // него в пару никого не ставят (см. MiniBoss.holdsPosition).
+    else if (!movable(activeSlot)) None
+    else if (group.freeAt(group.activePos) && movable(activeSlot))
       Some(copy(group = group.copy(activePos = group.heroPos)))
     else {
       val free = group.places.indices.toList
@@ -202,7 +262,7 @@ case class SoloPveBattle(
 
   /** Активный моб как запись о павшем — для добычи после боя. */
   def slainActive: SlainMonster =
-    SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName)
+    SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName, monsterUndead)
 
   /** Куда встанет пришедший: за спины своих, на первое место позади последнего
     * из них. Хвост схемы занят (в караване там башни) — на самое дальнее
@@ -242,13 +302,31 @@ case class SoloPveBattle(
   def closeIn: (SoloPveBattle, List[(MonsterSlot, Int)]) =
     if (effects.heroInSmoke || group.heroDown) (this, Nil)
     else {
+      closeInSlots
+    }
+
+  /** Шаг того, кто стоит в полях боя: он такой же моб и к герою идёт сам — на
+    * одно место за раунд. Раньше его подставлял строй (см. [[promoteNext]]).
+    * Пара цела, идти некуда, держит позицию или занят союзником — None. */
+  def stepActiveTowardsHero: Option[SoloPveBattle] =
+    if (group.paired || !movable(activeSlot) || group.allyAt(group.activePos).exists(_.alive)) None
+    // Кто уже достаёт героя сбоку, тот и бьёт сбоку: вставать напротив ему
+    // незачем, и место павшего он не занимает.
+    else if (math.abs(group.activePos - group.heroPos) <= GroupState.Reach) None
+    else stepTowardsHero(group.activePos).map(next => copy(group = group.copy(activePos = next)))
+
+  /** Та же ходьба, но только для слотов строя: активный шагает отдельно. */
+  private def closeInSlots: (SoloPveBattle, List[(MonsterSlot, Int)]) =
+    {
       val order = group.places.indices.toList.sortBy(i => math.abs(group.places(i) - group.heroPos))
       order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), idx) =>
         val pos  = b.group.places(idx)
         val dist = pos - b.group.heroPos
         val far  = math.abs(dist) > GroupState.Reach
         val busy = b.group.allyAt(pos).exists(_.alive)
-        // Сооружение стоит там, где стоит: подтягивать его к герою нечем.
+        // Сооружение стоит там, где стоит: подтягивать его к герою нечем. Те,
+        // кто уже достаёт героя, тоже стоят: место павшего в паре никто не
+        // занимает по принуждению (см. promoteNext).
         if (!far || busy || !movable(b.group.others(idx))) (b, moved)
         else b.stepTowardsHero(pos) match {
           case None       => (b, moved)
@@ -273,7 +351,10 @@ case class SoloPveBattle(
     @annotation.tailrec
     def walk(at: Int): Option[Int] = {
       val next = at + step
-      if (next < 1 || next == group.heroPos) None
+      // На место перед героем встать можно — и тогда пара собирается сама
+      // (см. engageArrived). Раньше оттуда никого не ждали: замену к герою
+      // подставлял строй.
+      if (next < 1) None
       else if (!group.hasMonster(next)) Some(next)
       else if (monsterAt(next).exists(s => !movable(s))) walk(next)
       else None
@@ -363,7 +444,8 @@ case class SoloPveBattle(
     copy(effects = noBurn)
   }
   def toMonster: Monster =
-    Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats, monsterMarked)
+    Monster(0L, monsterLvl, Race.withName(monsterRace), Rarity.withName(monsterRarity), monsterStats,
+      monsterMarked, undead = monsterUndead)
 
   /** Имя моба для лога и экрана боя. У минибосса оно именное и приходит от вида
    *  («Огненный Элементаль»); у обычных мобов — из таблицы раса × редкость.
@@ -437,6 +519,7 @@ object SoloPveBattle {
     monsterCurrentHp    = monster.fightStats.hp,
     monsterCurrentArmor = monster.fightStats.armor,
     monsterMarked       = monster.marked,
+    monsterUndead       = monster.undead,
     customName          = monster.customName,
     skillSlots          = hero.activeSkillSlots,
     // Зеркальный настой выпит до боя — копии входят в бой вместе с героем.
@@ -470,7 +553,8 @@ object SoloPveBattle {
     val energies = startEnergies.padTo(monsters.size, 0L)
     val slots = monsters.zip(energies).map { case (m, e) =>
       MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats, m.fightStats.hp,
-        m.fightStats.armor, m.marked, e, BattleEffects.empty, customName = m.customName)
+        m.fightStats.armor, m.marked, e, BattleEffects.empty, customName = m.customName,
+        undead = m.undead)
     }
     // Хотя бы один боец в строю нужен: с него начинается бой, и сооружению эта
     // роль не подходит — оно не ходит и не встаёт в пару.
@@ -501,6 +585,7 @@ object SoloPveBattle {
       heroBattleState     <- c.getOrElse[HeroBattleState]("heroBattleState")(HeroBattleState.empty)
       consumableUsed      <- c.getOrElse[Boolean]("consumableUsedThisRound")(false)
       monsterMarked       <- c.getOrElse[Boolean]("monsterMarked")(false)
+      monsterUndead       <- c.getOrElse[Boolean]("monsterUndead")(false)
       skillSlots          <- c.getOrElse[List[SkillSlotState]]("skillSlots")(Nil)
       effects             <- c.getOrElse[BattleEffects]("effects")(BattleEffects.empty)
       toughnessUsed       <- c.getOrElse[Boolean]("toughnessUsed")(false)
@@ -522,6 +607,7 @@ object SoloPveBattle {
       noFlee              <- c.getOrElse[Boolean]("noFlee")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
+                         monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
                          noFlee)
