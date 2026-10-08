@@ -56,6 +56,11 @@ object GroupBattleSpec extends ZIOSpecDefault {
       equipment  = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest))
   }
 
+  /** Башня со стрелком: сооружение, которое с места не сходит. */
+  private def towerMob(hp: Long): Monster =
+    Monster(0L, lvl, Race.Construct, Rarity.Rare,
+      FightStats(atk = 1, hp = hp, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+
   /** Строй: активный и остальные, все с нулевой стартовой энергией (умений нет). */
   private def group(hps: Long*): SoloPveBattle =
     SoloPveBattle.fromGroup(hps.toList.map(monster(_)), hero(), Nil)
@@ -322,13 +327,39 @@ object GroupBattleSpec extends ZIOSpecDefault {
           // удар героя этим ходом получил тот, кто стоял в паре ДО перемешивания
           // (1000 HP); раненый сосед (2000) остался с той же раной, дальний (3000) цел
           byMax    = lineUp.map(m => m.stats.hp -> m).toMap
+          // жребий иногда возвращает строй к тому же виду — тогда и сообщать не о чем
+          moved    = lineUp.map(_.stats.hp) != List(1000L, 2000L, 3000L)
         } yield assertTrue(after.group.round == 4) &&
-                assertTrue(screens.contains("Ряды смешались")) &&
+                assertTrue(screens.contains("Ряды смешались") == moved) &&
                 assertTrue(lineUp.map(_.stats.hp).sorted == List(1000L, 2000L, 3000L)) &&
                 assertTrue(byMax(1000L).currentHp < 1000L) &&
                 assertTrue(byMax(2000L).currentHp == 1940L && byMax(2000L).currentArmor == 18L) &&
                 assertTrue(byMax(3000L).currentHp == 3000L)
       ZIO.foreach((1L to 6L).toList)(run).map(_.reduce(_ && _))
+    },
+
+    test("башня перемешиванию не мешает: охрана тасуется, башня стоит на своём месте") {
+      // Караван: трое охранников и башня в хвосте схемы. Раньше башня в жребии
+      // отменяла перемешивание целиком — в караване ряды не смешивались никогда.
+      val mobs    = List(monster(1000L), monster(2000L), monster(3000L), towerMob(9000L))
+      val caravan = SoloPveBattle.fromGroup(mobs, hero(), Nil, towers = 1)
+      val b       = caravan.copy(noKin = true, group = caravan.group.copy(round = 3))
+      def run(seed: Long) =
+        for {
+          t <- makeState(hero(), b)
+          (state, dao, r) = t
+          _     <- TestRandom.setSeed(seed) *> quietRound(99, 99, 99, 99, 99)
+          _     <- state.action(testUser, aimed("Attack", 1), r)
+          after <- battleOf(dao)
+        } yield (after.placesInOrder.collect { case (p, Some(s)) => p -> s.stats.hp },
+                 after.monsterAt(Formation.MonsterPlaces).map(_.stats.hp))
+      ZIO.foreach((1L to 8L).toList)(run).map { runs =>
+        val lineUps = runs.map(_._1)
+        assertTrue(runs.forall(_._2.contains(9000L))) &&                       // башня со своего места не сходит
+        assertTrue(lineUps.forall(_.map(_._2).sorted == List(1000L, 2000L, 3000L, 9000L))) &&
+        assertTrue(lineUps.forall(_.map(_._1) == List(1, 2, 3, Formation.MonsterPlaces))) &&
+        assertTrue(lineUps.distinct.size > 1)                                  // охрана и правда тасуется
+      }
     },
 
     test("бегство: свободные мобы могут окружить — по 5% за каждого") {
