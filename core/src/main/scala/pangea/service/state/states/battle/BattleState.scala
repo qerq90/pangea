@@ -3863,18 +3863,21 @@ case class BattleState(
         // и так видна по строю
         (b1, _) = b1q.closeIn
         log1 = log1a ++ log1b ++ entered.map(m => content.format("battle.group.fromQueue", "monster" -> m.name)).toVector
-        // перемешивание: каждый четвёртый раунд, если есть кого мешать. Группу
-        // берём у УЖЕ перемешанного боя — иначе новый активный встанет поверх
-        // старого строя, один моб пропадёт, а другой задвоится.
+        // перемешивание: каждый четвёртый раунд, если есть кого мешать. Жребий
+        // тянут только подвижные — сооружения стоят где стояли. Группу берём у
+        // УЖЕ перемешанного боя — иначе новый активный встанет поверх старого
+        // строя, один моб пропадёт, а другой задвоится. Строй не изменился —
+        // молчим: сообщать о перемешивании, которого не было, незачем.
         shuffled <-
           if (!b1.isGroup || b1.group.round % GroupState.ShufflePeriod != 0) ZIO.succeed((b1, Vector.empty[String]))
-          else Random.shuffle(b1.monstersInOrder.indices.toList).map { order =>
-            val mixed = b1.reorderMonsters(order)
+          else Random.shuffle(b1.movableInOrder.indices.toList).map { order =>
+            val mixed = b1.reshuffle(order)
             val b     = mixed.copy(group = mixed.group.copy(pendingMove = None))
             val line  =
-              if (b.group.paired) content.format("battle.group.shuffle", "monster" -> b.monsterName)
-              else content.text("battle.group.shuffleNoPair")
-            (b, Vector(line))
+              if (b.placesInOrder == b1.placesInOrder) Vector.empty[String]
+              else if (b.group.paired) Vector(content.format("battle.group.shuffle", "monster" -> b.monsterName))
+              else Vector(content.text("battle.group.shuffleNoPair"))
+            (b, line)
           }
         (b2, log2) = shuffled
         // Таран: в пару встаёт тот, кого таранили

@@ -20,6 +20,11 @@ object GroupStateSpec extends ZIOSpecDefault {
 
   private val trio = List(monster(Race.Orc, 100L), monster(Race.Orc, 200L), monster(Race.Orc, 300L))
 
+  /** Живой союзник на месте `pos` — чтобы напротив него было кого ставить. */
+  private def fighter(kind: AllyKind, pos: Int): BattleAlly =
+    BattleAlly(kind, pos, hp = 10L, armor = 0L, energy = 0L,
+      FightStats(atk = 1, hp = 10, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0), lvl = 1L)
+
   override def spec = suite("GroupState")(
 
     test("бой из группы: первый в паре, остальные слотами по номерам, раса первого запомнена") {
@@ -186,11 +191,44 @@ object GroupStateSpec extends ZIOSpecDefault {
 
     test("перемешивание: любой моб может оказаться в паре, никто не теряется") {
       val b = SoloPveBattle.fromGroup(trio, hero, Nil)
-      val r = b.reorderMonsters(List(2, 0, 1))
+      val r = b.reshuffle(List(2, 1, 0))
       assertTrue(r.monsterCurrentHp == 300L) &&
-      assertTrue(r.group.others.map(_.currentHp) == List(100L, 200L)) &&
-      // плохой порядок (не перестановка) отвергается
-      assertTrue(b.reorderMonsters(List(0, 0, 1)) == b)
+      assertTrue(r.group.others.map(_.currentHp) == List(200L, 100L)) &&
+      // плохой жребий (не перестановка) отвергается
+      assertTrue(b.reshuffle(List(0, 0, 1)) == b)
+    },
+
+    test("перемешивание: жребий тянут подвижные, башни стоят на своих местах") {
+      val towers = List.fill(2)(monster(Race.Construct, 500L))
+      val b      = SoloPveBattle.fromGroup(trio ++ towers, hero, Nil, towers = towers.size)
+      val r      = b.reshuffle(List(2, 1, 0))                  // охрана наоборот: 300, 200, 100
+      // башни в жребий не идут, и мест своих не отдают
+      val onlyTowers = SoloPveBattle.fromGroup(towers, hero, Nil, towers = 1)
+      assertTrue(b.movableInOrder.map(_.currentHp) == List(100L, 200L, 300L)) &&
+      assertTrue(r.placesInOrder.collect { case (p, Some(s)) => p -> s.currentHp } ==
+                 List(1 -> 300L, 2 -> 200L, 3 -> 100L,
+                      Formation.MonsterPlaces - 1 -> 500L, Formation.MonsterPlaces -> 500L)) &&
+      assertTrue(r.monsterCurrentHp == 300L && r.group.paired) &&
+      // двигать некого — бой не меняется
+      assertTrue(onlyTowers.reshuffle(Nil) == onlyTowers)
+    },
+
+    test("перемешивание смыкает строй: сперва места, где напротив кто-то есть, потом первые свободные") {
+      val quartet = trio :+ monster(Race.Orc, 400L)
+      val b0      = SoloPveBattle.fromGroup(quartet, hero, Nil)
+      // герой на 3, союзники на 1 и 5, мобы стоят врассыпную: 1, 3, 8, 12
+      val b = b0.copy(group = b0.group.copy(
+        heroPos = 3, activePos = 3, places = List(1, 8, 12),
+        allies  = List(fighter(AllyKind.Human, 1), fighter(AllyKind.Gnome, 5))))
+      val r = b.reshuffle(List(0, 1, 2, 3))
+      // 3 — напротив героя, 1 и 5 — напротив союзников, четвёртому досталось
+      // первое свободное место, а дыры в хвосте строя схлопнулись
+      assertTrue(b.placesInOrder.collect { case (p, Some(_)) => p } == List(1, 3, 8, 12)) &&
+      assertTrue(r.placesInOrder.collect { case (p, Some(_)) => p } == List(1, 2, 3, 5)) &&
+      assertTrue(r.group.paired && r.group.size == 5) &&
+      // лежачий герой целью не считается: его место занимают в общем порядке
+      assertTrue(b.copy(group = b.group.copy(heroDown = true)).reshuffle(List(0, 1, 2, 3))
+                  .placesInOrder.collect { case (p, Some(_)) => p } == List(1, 2, 3, 5))
     },
 
     test("моб обычной встречи встаёт на место 1, где бы ни стоял герой: герой на 2 — пара пуста, цель у него одна — сосед") {
