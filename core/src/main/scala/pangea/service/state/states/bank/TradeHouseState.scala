@@ -1,11 +1,14 @@
 package pangea.service.state.states.bank
 
+import io.circe.{Decoder, Encoder, Json}
+import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
+import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.bank.BankVault
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
-import pangea.model.user.User
+import pangea.model.user.{ReceiptEmail, User}
 import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.parcel.Parcels
@@ -41,7 +44,7 @@ case class TradeHouseState(
       "TradeHouse"      -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) },
       "BuyCell"         -> Target.Run { (u, _, r) => confirmCell(u, r).as(StateType.TradeHouse) },
       "BuyCellConfirm"  -> Target.Run { (u, _, r) => buyCell(u, r).as(StateType.TradeHouse) },
-      "BuyDoubloons"    -> Target.Run { (u, _, r) => showPage(u, r, "bank.tradeHouse.doubloons").as(StateType.TradeHouse) },
+      "BuyDoubloons"    -> Target.Run { (u, _, r) => showDoubloons(u, r).as(StateType.TradeHouse) },
       "DepositInterest" -> Target.Run { (u, _, r) => showPage(u, r, "bank.tradeHouse.interest").as(StateType.TradeHouse) },
       "MyVault"         -> Target.Goto(StateType.BankVault),
       "Auction"         -> Target.Goto(StateType.Auction),
@@ -58,7 +61,7 @@ case class TradeHouseState(
       "RakhadimDailyBack" -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) },
       CityExit.route
     ),
-    fallback = Target.Run { (u, _, r) => showMenu(u, r).as(StateType.TradeHouse) }
+    fallback = Target.Run { (u, ua, r) => handleText(u, ua, r) }
   )
 
   override def targetStates: Set[StateType] = branch.gotoTargets
@@ -143,6 +146,8 @@ case class TradeHouseState(
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
     for {
+      // В меню возвращаются и со страницы дублонов — адреса там больше не ждём.
+      _     <- resetScene(user)
       hero  <- getHero(user)
       vault <- bankRepo.get(hero.id).mapError(asThrowable)
       // Почта видна, только если на ней что-то лежит.
@@ -183,12 +188,46 @@ case class TradeHouseState(
     Screen(text, (buy :: vaultBtn.toList) ++ rest)
   }
 
-  /** Страница с одним текстом и «Назад» — заглушки про дублоны и проценты. */
+  /** Страница с одним текстом и «Назад» — заглушка про проценты по вкладу. */
   private def showPage(user: User, renderer: Renderer, key: String): Task[Unit] =
     renderer.show(user, Screen(content.text(key), backRow))
 
   private def backRow: List[Choice] =
     List(Choice("TradeHouse", content.text("bank.tradeHouse.back"), color = ChoiceColor.Negative, row = Some(0)))
+
+  // --- Почта для чека ---
+
+  /** Страница покупки дублонов: показывает записанный адрес для чека и ждёт
+    * новый — свободным сообщением, без кнопок. */
+  private def showDoubloons(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      _     <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
+      email <- heroDao.readReceiptEmail(user.userId)
+      text   = content.format("bank.tradeHouse.doubloons",
+                 "email" -> email.getOrElse(content.text("bank.tradeHouse.doubloonsNoEmail")))
+      _     <- renderer.show(user, Screen(text, backRow))
+    } yield ()
+
+  /** Любой текст у Рахадима: на странице дублонов это адрес для чека, в
+    * остальных случаях — просто возврат в меню. */
+  private def handleText(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    readScene(user).flatMap { scene =>
+      if (!scene.emailPrompt) showMenu(user, renderer)
+      else ReceiptEmail.parse(ua.text) match {
+        case Some(email) =>
+          heroDao.writeReceiptEmail(user.userId, email) *>
+            renderer.show(user, Screen(content.format("bank.tradeHouse.doubloonsSaved", "email" -> email), backRow))
+        case None =>
+          renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsBadEmail"), backRow))
+      }
+    }.as(StateType.TradeHouse)
+
+  private def readScene(user: User): Task[TradeHouseState.TradeScene] =
+    heroDao.readSceneData(user.userId)
+      .map(_.flatMap(_.as[TradeHouseState.TradeScene].toOption).getOrElse(TradeHouseState.TradeScene()))
+
+  private def resetScene(user: User): Task[Unit] =
+    heroDao.writeSceneData(user.userId, Json.Null)
 
   // --- Покупка ячейки ---
 
@@ -253,6 +292,14 @@ object TradeHouseState {
 
   /** Задаток Рахадима — половина первой ячейки. */
   val QuestSilver: Long = BankVault.FirstCellPrice / 2L
+
+  /** Чего банкир ждёт от игрока текстом: на странице дублонов — адрес для
+    * чека. Живёт в `heroes.scene_data`, как и прочие режимы ввода. */
+  case class TradeScene(emailPrompt: Boolean = false)
+  object TradeScene {
+    implicit val encoder: Encoder[TradeScene] = deriveEncoder
+    implicit val decoder: Decoder[TradeScene] = deriveDecoder
+  }
 
   /** Что остаётся от элементалей: железо, которое не остывает, и камень,
     * тянущий к себе другие. Банкир примет любой из двух. */
