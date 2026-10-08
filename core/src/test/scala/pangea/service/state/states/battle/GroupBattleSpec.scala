@@ -41,6 +41,16 @@ object GroupBattleSpec extends ZIOSpecDefault {
       FightStats(atk = atk, hp = hp, armor = 0, defence = 0, evasion = 0, accuracy = 9999,
                  energy = MonsterEnergy.maxEnergy(lvl)))
 
+  /** Герой с пассивкой на амулете — «Целебный» лечит 4% макс.HP за раунд. */
+  private def heroWithPassive(kind: pangea.model.item.PassiveKind, hp: Long): Hero = {
+    val amulet = Item(303L, "Амулет", 1L, ItemRarity.Gray, ItemType.Amulet,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Passive(kind))
+    val h = hero()
+    h.copy(fightStats = h.fightStats.copy(hp = hp),
+           equipment  = TestFixtures.emptyEquipment.copy(amulet = amulet))
+  }
+
   /** Герой с умением на оружии (id 101) и на кирасе (id 202), с запасом энергии. */
   private def heroWithSkills(weaponSkill: Skill, chestSkill: Skill): Hero = {
     val weapon = Item(101L, "Меч", 1L, ItemRarity.Gray, ItemType.Weapon,
@@ -336,6 +346,38 @@ object GroupBattleSpec extends ZIOSpecDefault {
                 assertTrue(byMax(2000L).currentHp == 1940L && byMax(2000L).currentArmor == 18L) &&
                 assertTrue(byMax(3000L).currentHp == 3000L)
       ZIO.foreach((1L to 6L).toList)(run).map(_.reduce(_ && _))
+    },
+
+    test("«Ждать» — тоже раунд: реген пассивок лечит, даже когда герой не бил") {
+      // «Целебный» лечит 4% макс.HP в конце раунда. Раньше реген висел на базовой
+      // атаке героя, и раунд без удара («Ждать», шаг, умение без цели) проходил
+      // впустую: игрок жал «Ждать» и видел, что HP не двинулось.
+      val wounded = heroWithPassive(pangea.model.item.PassiveKind.Healing, hp = 1000L)
+      val b0      = group(1000L, 1000L)
+      // мобы ушли вглубь строя: пара пуста, бить некого — на экране только «Ждать»
+      val far     = b0.copy(noKin = true, group = b0.group.copy(activePos = 6, places = List(8)))
+      for {
+        t <- makeState(wounded, far)
+        (state, dao, r) = t
+        maxHp  = wounded.effectiveMaxHp(0L)
+        _     <- TestRandom.setSeed(3L)
+        _     <- state.action(testUser, tap("Wait"), r)
+        after <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(after.fightStats.hp == 1000L + maxHp * 4 / 100)
+    },
+
+    test("реген конца раунда идёт раз в раунд, а не за каждый удар") {
+      // Герой бьёт моба в паре: реген тот же, что и за раунд ожидания, одной порцией.
+      val wounded = heroWithPassive(pangea.model.item.PassiveKind.Healing, hp = 1000L)
+      for {
+        t <- makeState(wounded, group(100000L, 100000L).copy(noKin = true))
+        (state, dao, r) = t
+        maxHp  = wounded.effectiveMaxHp(0L)
+        // герой попал, моб в паре промахнулся (5), сосед промахнулся, подкрепления нет
+        _     <- TestRandom.feedInts(60, 5, 5, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _     <- state.action(testUser, aimed("Attack", 1), r)
+        after <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(after.fightStats.hp == 1000L + maxHp * 4 / 100)
     },
 
     test("башня перемешиванию не мешает: охрана тасуется, башня стоит на своём месте") {

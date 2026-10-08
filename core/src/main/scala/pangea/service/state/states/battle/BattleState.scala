@@ -888,7 +888,7 @@ case class BattleState(
       val ticked = afterCast.tickBuffs(skip)
       val (tickedHero, tickedBattle, heroEffectLine) = tickHeroEffects(castHero, ticked, nowMs)
       val alive = tickedHero.fightStats.hp > 0
-      val fed   = if (alive) regainEnergy(tickedHero, nowMs) else tickedHero
+      val fed   = if (alive) endOfRoundHero(tickedHero, nowMs) else tickedHero
       val lines = (log ++ Vector(castLine).filter(_.nonEmpty) ++
                     Vector(heroEffectLine).filter(_.nonEmpty)) ++ vampLine(vampHeal)
       TurnResult(fed, tickedBattle, lines, if (alive) Outcome.Continue else Outcome.Death)
@@ -924,11 +924,10 @@ case class BattleState(
     * пробрасывается в `monsterPhase → tickBuffs`, чтобы только что использованный
     * слот не тикался в этом же ходу (см. SoloPveBattle.tickBuffs).
     */
-  /** `isRepeat` — это переигранный промах от «Охотника» (порог 6). Такой заход не
-    * повторяется ещё раз (не чаще раза за раунд) и НЕ прогоняет боевой реген
-    * второй раз: раунд остался тем же, регенерировать герою заново нечего. */
+  /** `isRepeat` — это переигранный промах от «Охотника» (порог 6). Такой заход
+    * не повторяется ещё раз — не чаще раза за раунд. */
   private def playerStrike(
-      hero0: Hero,
+      hero: Hero,
       battle: SoloPveBattle,
       nowMs: Long,
       log: Vector[String],
@@ -937,9 +936,7 @@ case class BattleState(
       // false — только удар, без ответа моба: вызывающий сам решит, кто отвечает
       // (удар по соседу возвращает героя в пару, и отвечает моб оттуда).
       retaliate: Boolean = true
-  ): Task[TurnResult] = {
-    // Реген пассивок «Целебный»/«Самовосстанавливающийся» учитывается перед атакой.
-    val hero = if (isRepeat) hero0 else hero0.withCombatRegen(nowMs)
+  ): Task[TurnResult] =
     for {
       buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
       hitRoll <- Random.nextIntBetween(1, 101)
@@ -1094,7 +1091,6 @@ case class BattleState(
             }
         }
     } yield result
-  }
 
   // ── Стихии оружия ───────────────────────────────────────────────────────────
 
@@ -2390,7 +2386,7 @@ case class BattleState(
 
       // Реген энергии в конце хода: +(Интеллект + 0.5·Ловкость), не меньше 1 и не
       // выше максимума. «Сосредоточенность» множит реген на 1.1. Пока герой жив.
-      finalHeroWithEnergy = if (heroAlive) regainEnergy(heroFedByBleed, nowMs) else heroFedByBleed
+      finalHeroWithEnergy = if (heroAlive) endOfRoundHero(heroFedByBleed, nowMs) else heroFedByBleed
 
       // Сегмент монстра: пустой разделитель, строка атаки, затем (в исходном
       // порядке) каст моба, тики DoT на мобе, тики и реген героя, и последним —
@@ -2414,6 +2410,16 @@ case class BattleState(
     * множат реген, а «Охотник» (порог 4) удваивает вклад именно ловкости. Одна
     * точка на оба конца раунда: после хода моба и на добивании, когда до хода
     * моба не дошло. */
+  /** Конец раунда для героя: энергия ([[regainEnergy]]) и реген пассивок
+    * «Целебный»/«Самовосстанавливающийся» с черепами в снаряжении — то самое
+    * `(+N)` с экрана боя ([[Hero.withCombatRegen]]).
+    *
+    * Одна точка на все ходы. Раньше реген HP висел на базовой атаке героя, и
+    * раунд без удара — «Ждать», шаг к союзнику, умение, после которого бить
+    * некого, — проходил без регена вовсе. */
+  private def endOfRoundHero(hero: Hero, nowMs: Long): Hero =
+    regainEnergy(hero, nowMs).withCombatRegen(nowMs)
+
   private def regainEnergy(hero: Hero, nowMs: Long): Hero = {
     val b       = hero.effectiveBaseStats(nowMs)
     val agiPart = 0.5 * b.agi * hero.sets.agiEnergyRegenMult
@@ -2429,7 +2435,7 @@ case class BattleState(
     * а фляга и умения считают, что раунд не кончился. В бою 1 на 1 тик
     * безобиден — бой всё равно кончился. */
   private def victoryByHero(hero: Hero, battle: SoloPveBattle, log: Vector[String], nowMs: Long, skip: Set[Long]): TurnResult =
-    TurnResult(regainEnergy(hero, nowMs), battle.tickBuffs(skip), log, Outcome.Victory)
+    TurnResult(endOfRoundHero(hero, nowMs), battle.tickBuffs(skip), log, Outcome.Victory)
 
   /** Тик эффектов ГЕРОЯ в конце раунда: реген лечит на `pct`% макс.HP и слабеет.
     * Возвращает обновлённых героя и бой (с ослабленным регеном) плюс строку
@@ -4253,7 +4259,7 @@ case class BattleState(
         val outcome = if (hasted.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
         // Божественное оружие раунд не завершает — энергию за раунд герой возьмёт своим
         // ударом; но если поле ею и закончилось, раунд кончился вместе с боем.
-        val heroAfter = if (outcome == Outcome.Victory && hasted.promoteNext.isEmpty) regainEnergy(heroAfter0, nowMs) else heroAfter0
+        val heroAfter = if (outcome == Outcome.Victory && hasted.promoteNext.isEmpty) endOfRoundHero(heroAfter0, nowMs) else heroAfter0
         ZIO.succeed(TurnResult(heroAfter, hasted.copy(divineUsedThisRound = true), log, outcome, endsRound = false))
     }
 
@@ -4275,7 +4281,7 @@ case class BattleState(
             val blow             = BrewRates.MushroomDamagePerLvl * hero.lvl
             val (swept, _, foes) = sweep(battle, blow, None, poisons = true)
             val outcome = if (swept.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
-            val after   = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) regainEnergy(hero, nowMs) else hero
+            val after   = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) endOfRoundHero(hero, nowMs) else hero
             inventoryRepo.removeItem(mix.id, hero.id).mapError(e => new Throwable(e.toString)) *>
               ZIO.succeed(TurnResult(after, swept.copy(consumableUsedThisRound = true),
                 Vector(content.format("battle.mixThrown", "damage" -> blow.toString, "foes" -> foes.toString)),
@@ -4305,7 +4311,7 @@ case class BattleState(
           (if (crumbles) Vector(content.format("battle.rose.withered", "name" -> kind.itemName)) else Vector.empty)
 
         val outcome   = if (swept.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
-        val heroAfter = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) regainEnergy(heroAfter0, nowMs) else heroAfter0
+        val heroAfter = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) endOfRoundHero(heroAfter0, nowMs) else heroAfter0
         ZIO.succeed(TurnResult(heroAfter, swept.copy(divineUsedThisRound = true), log, outcome, endsRound = false))
     }
 
