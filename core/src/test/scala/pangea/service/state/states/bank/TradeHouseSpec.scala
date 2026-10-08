@@ -4,7 +4,7 @@ import pangea.engine.SceneContent
 import pangea.model.bank.BankVault
 import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.state.StateType
-import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.model.user.{ReceiptEmail, TelegramId, User, UserId, VkId}
 import pangea.service.parcel.Parcels
 import pangea.service.purse.{Purse, Wallet}
 import pangea.service.state.UserAction
@@ -133,7 +133,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
                 assertTrue(screens.last.text.contains("10000"))
       },
 
-      test("дублоны и проценты по вкладу — просто текст с «Назад»") {
+      test("дублоны: адреса ещё нет, проценты по вкладу — просто текст с «Назад»") {
         for {
           t <- house(heroSilver = 0L)
           (state, _, _, renderer) = t
@@ -141,10 +141,60 @@ object TradeHouseSpec extends ZIOSpecDefault {
           doubloon <- renderer.sentScreens
           _        <- state.action(testUser, tap("DepositInterest"), renderer)
           interest <- renderer.sentScreens
-        } yield assertTrue(doubloon.last.text.contains("Пока не работает")) &&
+        } yield assertTrue(doubloon.last.text.contains("для чеков: пока не записан")) &&
+                assertTrue(doubloon.last.text.contains("покупка дублонов пока не работает")) &&
                 assertTrue(doubloon.last.choices.map(_.id) == List("TradeHouse")) &&
                 assertTrue(interest.last.text.contains("проценты по вкладу")) &&
                 assertTrue(interest.last.choices.map(_.id) == List("TradeHouse"))
+      },
+
+      test("адрес для чека приходит сообщением: записан, показан на странице и правится новым") {
+        for {
+          t <- house(heroSilver = 0L)
+          (state, heroDao, _, renderer) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _      <- state.action(testUser, text("  KMMG200@Yandex.RU "), renderer)
+          saved  <- renderer.sentScreens
+          stored <- heroDao.readReceiptEmail(userId)
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          page   <- renderer.sentScreens
+          _      <- state.action(testUser, text("other@mail.ru"), renderer)
+          after  <- heroDao.readReceiptEmail(userId)
+        } yield assertTrue(stored.contains("kmmg200@yandex.ru")) &&
+                assertTrue(saved.last.text.contains("kmmg200@yandex.ru")) &&
+                assertTrue(saved.last.choices.map(_.id) == List("TradeHouse")) &&
+                assertTrue(page.last.text.contains("для чеков: kmmg200@yandex.ru")) &&
+                assertTrue(after.contains("other@mail.ru"))
+      },
+
+      test("не адрес — ничего не пишем; вне страницы дублонов текст просто вернёт в меню") {
+        for {
+          t <- house(heroSilver = 0L)
+          (state, heroDao, _, renderer) = t
+          _     <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _     <- state.action(testUser, text("сколько стоит?"), renderer)
+          bad   <- renderer.sentScreens
+          empty <- heroDao.readReceiptEmail(userId)
+          _     <- state.action(testUser, tap("TradeHouse"), renderer)
+          _     <- state.action(testUser, text("ignored@mail.ru"), renderer)
+          menu  <- renderer.sentScreens
+          still <- heroDao.readReceiptEmail(userId)
+        } yield assertTrue(empty.isEmpty && still.isEmpty) &&
+                assertTrue(bad.last.text.contains("на адрес не похоже")) &&
+                assertTrue(menu.last.choices.map(_.id).contains("BuyDoubloons"))
+      },
+
+      test("адресом считаем только похожее на адрес") {
+        assertTrue(ReceiptEmail.parse(" Kmmg200@Yandex.ru\n").contains("kmmg200@yandex.ru")) &&
+        assertTrue(ReceiptEmail.parse("имя.фамилия@почта.рф").contains("имя.фамилия@почта.рф")) &&
+        assertTrue(ReceiptEmail.parse("ага").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("два слова@mail.ru").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("@mail.ru").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("a@b@mail.ru").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("a@mail").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("a@mail.").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("a@.ru").isEmpty) &&
+        assertTrue(ReceiptEmail.parse("a@" + "x" * 300 + ".ru").isEmpty)
       }
     ),
 
