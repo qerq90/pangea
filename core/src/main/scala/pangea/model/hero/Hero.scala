@@ -162,7 +162,7 @@ case class Hero(
   def effectiveFightStats(nowMs: Long): FightStats =
     withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs)))))
 
-  /** Реген перед атакой игрока от пассивок «Целебный» (4% макс.HP) и
+  /** Реген героя в конце раунда от пассивок «Целебный» (4% макс.HP) и
    *  «Самовосстанавливающийся» (4% макс.брони). Прибавка каппится потолком, но
    *  никогда не опускает текущее значение ниже (если оно уже выше потолка —
    *  `.max(current)`). Величина показывается на экране боя приписками `(+N)`. */

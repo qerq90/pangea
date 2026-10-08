@@ -114,7 +114,7 @@ object PassivesSpec extends ZIOSpecDefault {
       assertTrue(fs.defence == 105L, fs.accuracy == 105L)
     },
 
-    // ── Реген перед атакой ─────────────────────────────────────────────────────
+    // ── Реген в конце раунда ───────────────────────────────────────────────────
     test("withCombatRegen лечит 4% макс.HP и 4% макс.брони") {
       val base = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 1, armor = 0))
