@@ -7,7 +7,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Aura, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
@@ -73,6 +73,7 @@ case class BattleState(
       "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.divine"))(divineTurn)),
       "UseRose"      -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.rose"))(roseTurn)),
       "ThrowMix"     -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.mix"))(mixTurn)),
+      "Miasma"      -> Target.Run((u, _, r) => toggleMiasma(u, r)),
       "Flee"        -> Target.Run((u, _, r) => flee(u, r)),
       "ConfirmFlee" -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.flee"))(fleeTurn)),
       "CancelFlee"  -> Target.Run((u, _, r) => showScreen(u, r).as(StateType.Battle)),
@@ -169,7 +170,9 @@ case class BattleState(
       struck <- turn(hero, battle, now)
       // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
       // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
-      result  = ghoulFeast(battle, struck, now)
+      feasted = ghoulFeast(battle, struck, now)
+      // «Некромант» (порог 12): добитый героем может встать и пойти за ним.
+      result <- necroRise(battle, feasted)
       // «Каменный страж» (порог 12) смотрит на ход целиком: важно не то, какой
       // именно источник добил героя до полоски, а что за этот ход он её перешёл.
       guarded = stoneGuardRescue(hero, result, now)
@@ -189,9 +192,14 @@ case class BattleState(
       sided   <- sideMobsPhase(promoted2, now)
       // Активный вне пары мог истечь ранами на своём ходу — тогда следующий.
       promoted3 = promoteAfterKill(sided)
+      // Аура держит всё поле: нежить крепнет, живые чахнут. Добитых ею разбираем
+      // тем же порядком, что павших от ран.
+      prefs   <- BattleState.prefs(heroDao, user.userId)
+      fogged   = auraTick(promoted3, prefs.miasma)
+      promoted4 = promoteAfterKill(fogged)
       // Охрана вся полегла — стрелкам некого прикрывать: они бросают башни и
       // уходят, бой на этом кончается победой.
-      abandoned = towersAlone(promoted3)
+      abandoned = towersAlone(promoted4)
       ended   <- endRound(battle, abandoned)
       // «Крыса» (порог 6): раз в раунд у героя из-под ног может выскочить своя.
       ratted  <- ratCall(hero, ended)
@@ -1131,6 +1139,48 @@ case class BattleState(
     }
   }
 
+  /** «Некромант» (порог 12): кого герой добил сам, тот может встать и пойти за
+    * ним. Считаем так же, как пир упыря, — по разнице павших до и после хода, и
+    * до хода союзников: их добычу некромант не поднимает.
+    *
+    * Восставший выходит в строй сразу, с [[ItemSet.Necromancer.RiseHpPct]]
+    * процентами HP и без брони (её сбили, пока он был жив), а после боя уходит с
+    * героем на двое суток. Статы — как у поднятого с алтаря, по тому же трофею, и
+    * имя своё: названный врагом остаётся названным.
+    *
+    * Не поднимаются те, в кого поднимать нечего: элементали — чистая стихия,
+    * сооружения — железо, Гнилой Джо и так нежить, а Крысиный король — не тело,
+    * а сборище крыс. Белый волк встаёт как по клыку. */
+  private def necroRise(before: SoloPveBattle, res: TurnResult): Task[TurnResult] =
+    if (res.hero.sets.riseChancePct <= 0L) ZIO.succeed(res)
+    else {
+      val fresh  = res.battle.group.slain.drop(before.group.slain.size)
+      val active = Option.when(res.battle.monsterCurrentHp <= 0L && before.monsterCurrentHp > 0L)(
+        before.slainActive -> before.boss)
+      val fallen = fresh.map(_ -> Option.empty[MiniBoss]) ++ active.toList
+      ZIO.foldLeft(fallen)(res) { case (acc, (slain, boss)) =>
+        BattleState.riseForm(slain, boss) match {
+          case None       => ZIO.succeed(acc)
+          case Some(form) =>
+            chanceRoll(true, acc.hero.sets.riseChancePct).map {
+              case false => acc
+              case true  =>
+                acc.battle.group.nearestFreeAllyPlace.fold(acc) { pos =>
+                  val hp = (form.stats.hp * ItemSet.Necromancer.RiseHpPct / 100L).max(1L)
+                  val ally = BattleAlly(pangea.model.squad.AllyKind.Undead, pos,
+                    hp = hp, armor = 0L, energy = form.stats.energy,
+                    stats = form.stats, lvl = form.lvl, undead = Some(form), home = 0)
+                  acc.copy(
+                    battle = acc.battle.copy(group = acc.battle.group.copy(
+                      allies = acc.battle.group.allies :+ ally)),
+                    log = acc.log :+ content.format("battle.necroRise",
+                      "name" -> form.name, "n" -> pos.toString))
+                }
+            }
+        }
+      }
+    }
+
   /** Насколько урон героя по элементалю ослаблен или усилен его стихией: своя
     * стихия почти не вредит (огонь по огненному — 20%), противоположная бьёт
     * сильнее (холод — 150%). Оружие сразу с двумя стихиями перемножает их
@@ -1151,7 +1201,12 @@ case class BattleState(
     * Моб, посыпавший оружие порошком, бьёт стихией: её грани двигают доли урона
     * по броне и HP так же, как стихии оружия двигают урон героя по мобу.
     * Возвращает новые hp и armor героя. */
-  private def bossHit(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) =
+  private def bossHit(battle: SoloPveBattle, hero: Hero, damage0: Long): (Long, Long) = {
+    // «Некромант» (порог 10): мёртвая плоть занимается охотнее — огненный удар
+    // по ней весомее. Прочие стихии мертвецу всё равно.
+    val damage =
+      if (powderElement(battle).contains(Element.Fire)) (damage0 * hero.sets.fireTakenMult).toLong.max(1L)
+      else damage0
     battle.boss.flatMap(_.heroHitSplit) match {
       // Минибосс с расколом: пара чисел — ДОЛИ удара, каменный бьёт и в броню,
       // и в HP мимо неё одновременно, это его особенность.
@@ -1176,6 +1231,7 @@ case class BattleState(
             ((hero.fightStats.hp - hpDmg).max(0L), curArmor - hero.sets.armorSpent(armorDmg))
         }
     }
+  }
 
   /** Шипы огненного элементаля. Пока у него ЦЕЛА БРОНЯ (проверяется её запас до
     * удара), обычная атака героя возвращается частью урона и поджигает бьющего.
@@ -1712,8 +1768,10 @@ case class BattleState(
       nowMs: Long
   ): (Long, Long, SoloPveBattle, Option[String]) = {
     // Кровотечение лечение снимает целиком — то же правило, что и у моба
-    // (см. Bleed): рана затянута.
-    val battle = battle0.copy(effects = battle0.effects.copy(heroBleed = None))
+    // (см. Bleed): рана затянута. И оно же выводит из миазм тьмы на несколько
+    // раундов — герою-нежити это, наоборот, перерыв в подпитке.
+    val battle = battle0.copy(effects = battle0.effects.copy(heroBleed = None,
+      heroMiasmaCalm = Aura.Miasma.calmRounds))
     battle.effects.heroBurn match {
       case None =>
         val newHp = (hero.fightStats.hp + raw).min(hero.effectiveMaxHp(nowMs))
@@ -1792,10 +1850,16 @@ case class BattleState(
   /** «Каменный страж» (порог 4): стихийный урон по герою слабее на 20%.
     * Стихийным считается ВЕСЬ урон элементаля — он не бьёт «обычной атакой», он
     * и есть огонь: и удар, и всплеск, и смерч, и шипы, и горение. У прочих мобов
-    * стихийного урона нет, поэтому им порог ничего не режет. */
+    * стихийного урона нет, поэтому им порог ничего не режет.
+    *
+    * Огонь по герою-нежити («Некромант», порог 10) наоборот весомее — весь урон
+    * огненного элементаля и есть огонь. */
   private def bossDamageTaken(hero: Hero, battle: SoloPveBattle, damage: Long): Long =
     if (battle.boss.isEmpty || damage <= 0L) damage
-    else (damage * hero.sets.elementalDamageTakenMult).toLong.max(1L)
+    else {
+      val fire = if (battle.boss.contains(MiniBoss.FireElemental)) hero.sets.fireTakenMult else 1.0
+      (damage * hero.sets.elementalDamageTakenMult * fire).toLong.max(1L)
+    }
 
   /** Урон герою от способности минибосса: сперва броня, остаток в HP. Сам по
     * себе НИЧЕГО не поджигает — пламя вешает тот, кто им владеет. Возвращает
@@ -2280,16 +2344,25 @@ case class BattleState(
       battle: SoloPveBattle,
       nowMs: Long
   ): (Hero, SoloPveBattle, String) = {
+    // «Некромант» (порог 10): герой сам мёртв — травить и обескровливать в нём
+    // нечего. Яд и кровь гаснут на нём сразу, одной строкой на оба.
+    val undead  = hero.sets.heroIsUndead
+    val hadRot  = undead && (battle.effects.heroPoison.isDefined || battle.effects.heroBleed.isDefined)
+    val battle0 = if (!hadRot) battle
+                  else battle.copy(effects = battle.effects.copy(heroPoison = None, heroBleed = None))
+    val rotLine = if (hadRot) content.text("battle.undeadImmune") else ""
     // Горение на герое (огненный элементаль) тикает до регена: оно усиливается
-    // каждый раунд, как и горение на мобе.
-    val (burnedHero, burnedBattle, burnLine) = battle.effects.heroBurn match {
+    // каждый раунд, как и горение на мобе. Мёртвая плоть занимается охотнее:
+    // и урон огня по ней выше, и само пламя растёт быстрее.
+    val (burnedHero, burnedBattle, burnLine) = battle0.effects.heroBurn match {
       case Some(burn) =>
         val maxHp = hero.effectiveMaxHp(nowMs)
-        val dmg   = bossDamageTaken(hero, battle, burn.damageOn(maxHp))
+        val dmg   = (bossDamageTaken(hero, battle0, burn.damageOn(maxHp)) * hero.sets.fireTakenMult).toLong
+        val grown = (1L to hero.sets.heroBurnGrowthMult.max(1L)).foldLeft(burn)((b, _) => b.grown)
         (hero.copy(fightStats = hero.fightStats.copy(hp = (hero.fightStats.hp - dmg).max(0L))),
-         battle.copy(effects = battle.effects.copy(heroBurn = Some(burn.grown))),
+         battle0.copy(effects = battle0.effects.copy(heroBurn = Some(grown))),
          heroDotTick(Burn.Icon, Burn.Label, dmg))
-      case None => (hero, battle, "")
+      case None => (hero, battle0, "")
     }
     // Яд на герое: снимает % макс.HP мимо брони и слабеет, как яд на мобе.
     // Гниль Джо тикает той же строкой, что любой другой яд: своё у минибосса —
@@ -2336,7 +2409,8 @@ case class BattleState(
       case None => (bledHero, bledBattle, "")
     }
     // Строки бывают непустыми одновременно (горим, травимся и регенерируем) — склеиваем.
-    (finalHero, finalBattle, List(burnLine, poisonLine, bleedLine, regenLine).filter(_.nonEmpty).mkString("\n"))
+    (finalHero, finalBattle,
+      List(rotLine, burnLine, poisonLine, bleedLine, regenLine).filter(_.nonEmpty).mkString("\n"))
   }
 
   /** Тик DoT-эффектов МОНСТРА в конце раунда (каждый снимает `pct`% макс.HP мимо
@@ -3032,6 +3106,19 @@ case class BattleState(
   // ── Бегство ─────────────────────────────────────────────────────────────────
 
   /** Экран подтверждения бегства (чистая навигация, состояние не меняется). */
+  /** Кнопка миазм: отпустить тьму или свернуть её. Выбор держится до
+    * следующего нажатия, а не до конца боя (см. BattlePrefs). Ход он не тратит —
+    * это не действие, а переключатель. */
+  private def toggleMiasma(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      prefs <- BattleState.prefs(heroDao, user.userId)
+      next   = prefs.withMiasma(!prefs.miasma)
+      _     <- heroDao.writeBattlePrefs(user.userId, next.asJson)
+      _     <- renderer.show(user, Screen(
+                 content.text(if (next.miasma) "battle.miasmaOn" else "battle.miasmaOff"), Nil))
+      _     <- showScreen(user, renderer)
+    } yield StateType.Battle
+
   private def flee(user: User, renderer: Renderer): Task[StateType] =
     getBattle(user).flatMap { battle =>
       // Западня: место и время выбирал не герой, и уйти отсюда некуда.
@@ -3105,6 +3192,100 @@ case class BattleState(
         res.copy(battle = next, outcome = Outcome.Continue, log = res.log :+ line)
     }
 
+  /** Ход ауры в конце раунда (см. [[Aura]]). Аура держит ВСЁ поле боя и
+    * достаётся каждому, кто на нём стоит, — своим и чужим одинаково, по природе
+    * существа ([[Nature]]). Герой держит её силой: доля энергии уходит за раунд
+    * и она же идёт в силу ауры, так что к концу схватки аура слабеет сама.
+    * Энергии меньше порога — держать нечем, аура оседает.
+    *
+    * В логе аура говорит о себе ОДНОЙ строкой на всё поле: перечислять, кому
+    * сколько досталось, бессмысленно — в групповом бою это двадцать строк. Своё
+    * герой видит отдельно: его-то лечение или урон ему и важны. Павший от ауры
+    * союзник тоже сказан — это событие, а не сдача.
+    *
+    * Герой-некромант на пороге 10 сам числится нежитью, поэтому своей же аурой
+    * лечится. */
+  private def auraTick(res: TurnResult, on: Boolean): TurnResult =
+    res.hero.sets.auras.foldLeft(res)((acc, aura) => singleAura(acc, aura, on))
+
+  private def singleAura(res: TurnResult, aura: Aura, on: Boolean): TurnResult = {
+    if (res.outcome != Outcome.Continue || !res.endsRound || !on) res
+    else if (res.hero.fightStats.energy < aura.minEnergy)
+      res.copy(log = res.log :+ content.text(s"battle.aura.${aura.key}.fades"))
+    else {
+      val spent = aura.cost(res.hero.fightStats.energy)
+      def power(maxHp: Long): Long = aura.power(maxHp, spent)
+
+      // ── Герой: платит силой и получает своё по своей природе ─────────────────
+      val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
+      val heroSign   = if (res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
+      val maxHp      = res.hero.effectiveMaxHp(0L)
+      val heroHp     = heroSign match {
+        // Лечение не опускает: текущее HP выше потолка аура не срезает.
+        case s if s > 0 => (res.hero.fightStats.hp + power(maxHp)).min(maxHp).max(res.hero.fightStats.hp)
+        case s if s < 0 => (res.hero.fightStats.hp - power(maxHp)).max(0L)
+        case _          => res.hero.fightStats.hp
+      }
+      val heroDelta = heroHp - res.hero.fightStats.hp
+      val hero1 = res.hero.copy(fightStats = res.hero.fightStats.copy(
+        energy = (res.hero.fightStats.energy - spent).max(0L), hp = heroHp))
+
+      // ── Союзники: та же мера, по их природе ─────────────────────────────────
+      val allies = res.battle.group.allies.map { a =>
+        val next = a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0))
+        val sign = if (a.miasmaCalm > 0 || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
+        sign match {
+          case s if s > 0 => next.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
+          case s if s < 0 => next.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
+          case _          => next
+        }
+      }
+      val fellAllies  = allies.filter(a => !a.alive && res.battle.group.allyAt(a.position).exists(_.alive))
+      val withAllies  = res.battle.copy(group = res.battle.group.copy(allies = allies))
+      val sweptAllies = fellAllies.foldLeft(withAllies)((b, a) => b.copy(group = b.group.withoutAlly(a.position)))
+
+      // ── Чужая сторона ───────────────────────────────────────────────────────
+      val battle2 = auraOnMonsters(sweptAllies, aura, power)
+      val lines =
+        content.format(s"battle.aura.${aura.key}.holds", "energy" -> spent.toString) +:
+          (Option.when(heroDelta > 0L)(
+             content.format(s"battle.aura.${aura.key}.feeds", "hp" -> heroDelta.toString)).toVector ++
+           Option.when(heroDelta < 0L)(
+             content.format(s"battle.aura.${aura.key}.burns", "hp" -> (-heroDelta).toString)).toVector ++
+           fellAllies.map(a => content.format("battle.ally.auraFell", "name" -> a.name)))
+      res.copy(hero = hero1, battle = battle2, log = res.log ++ lines)
+    }
+  }
+
+  /** Аура по чужой стороне: каждому по его природе, павшие уходят в добычу.
+    * Строк не даёт — о себе аура сказала одной на всё поле. */
+  private def auraOnMonsters(battle: SoloPveBattle, aura: Aura, power: Long => Long): SoloPveBattle = {
+    def touched(sign: Int, cur: Long, maxHp: Long): Long = sign match {
+      case s if s > 0 => (cur + power(maxHp)).min(maxHp).max(cur)
+      case s if s < 0 => (cur - power(maxHp)).max(0L)
+      case _          => cur
+    }
+    // Активный: его HP живут в полях боя.
+    val afterActive = {
+      val sign = if (battle.effects.monsterMiasmaCalm > 0 || battle.monsterCurrentHp <= 0L) 0
+                 else aura.sign(Nature.of(battle.monsterRace))
+      battle.copy(
+        monsterCurrentHp = touched(sign, battle.monsterCurrentHp, battle.monsterStats.hp),
+        effects = battle.effects.copy(monsterMiasmaCalm = (battle.effects.monsterMiasmaCalm - 1).max(0)))
+    }
+    // Слоты строя: павших убираем с конца, чтобы индексы не плыли.
+    val slots = afterActive.group.others.zipWithIndex.map { case (slot, idx) =>
+      val sign = if (slot.effects.monsterMiasmaCalm > 0 || !slot.alive) 0
+                 else aura.sign(Nature.of(slot.race))
+      val hp   = touched(sign, slot.currentHp, slot.stats.hp)
+      (slot.copy(currentHp = hp,
+         effects = slot.effects.copy(monsterMiasmaCalm = (slot.effects.monsterMiasmaCalm - 1).max(0))),
+       idx, hp <= 0L && slot.alive)
+    }
+    val withSlots = afterActive.copy(group = afterActive.group.copy(others = slots.map(_._1)))
+    slots.filter(_._3).map(_._2).sorted.reverse.foldLeft(withSlots)((b, idx) => b.sideFallen(idx))
+  }
+
   // ── Союзники ────────────────────────────────────────────────────────────────
 
   /** Союзники ходят после ответа активного моба, по позициям. Каждый бьёт врага
@@ -3166,7 +3347,9 @@ case class BattleState(
             case AllySkill.HealingFlask =>
               val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
               val newHp = (a1.hp + heal).min(a1.stats.hp)
-              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(_.copy(hp = newHp))), None, 0L, slew = false),
+              // Фляга выводит и из миазм — на те же несколько раундов, что у всех.
+              ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(
+                  _.copy(hp = newHp, miasmaCalm = Aura.Miasma.calmRounds))), None, 0L, slew = false),
                 Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
             case AllySkill.EmergencyRepair =>
               val fix = (a1.stats.armor * AllySkill.RepairPct / 100L).max(1L)
@@ -3288,10 +3471,14 @@ case class BattleState(
     val synced0 = fromSquad.foldLeft(hero.squad.copy(heroPos = battle.group.heroPos)) { (s, a) =>
       s.updateAt(a.home)(old => a.toAlly.copy(hiredUntil = old.hiredUntil))
     }
-    // Выжившие крысы — в отряд, на свободные места; павших в бою среди них нет
-    // (их уже унесло в alliesGone), а если мест не хватило — лишняя разбегается.
+    // Выжившие, пришедшие не из отряда, — в отряд: крыса на сутки, восставший
+    // на двое. Крысе мест не нашлось — разбежится, восставший будет ждать
+    // ответа, кем за него пожертвовать (см. Squad.admitRisen).
     val synced = joined.filter(_.alive).foldLeft(synced0) { (s, a) =>
-      a.undead.fold(s)(form => s.summonRat(form, a.lvl, nowMs))
+      a.undead.fold(s) { form =>
+        if (a.kind == pangea.model.squad.AllyKind.Rat) s.summonRat(form, a.lvl, nowMs)
+        else s.admitRisen(form, a.lvl, nowMs)
+      }
     }
     // Павших убираем разом: по одному нельзя — строй смыкается, и вторая
     // позиция указала бы уже не на того.
@@ -4053,10 +4240,11 @@ case class BattleState(
       hero   <- getHero(user)
       battle <- getBattle(user)
       mixes  <- mixCount(hero)
+      prefs  <- BattleState.prefs(heroDao, user.userId)
       _ <- ZIO.when(battle.group.hasFormation)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
       _ <- renderer.show(
         user,
-        buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now, mixes)
+        buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now, mixes, prefs.miasma)
       )
     } yield ()
 
@@ -4065,7 +4253,8 @@ case class BattleState(
       battle0: SoloPveBattle,
       maxHp: Long,
       nowMs: Long,
-      mixes: Int
+      mixes: Int,
+      miasmaOn: Boolean = true
   ): Screen = {
     // Напротив пусто — шансы героя считаем против последней его цели (кто в
     // полях, тот в этот момент дерётся не с ним).
@@ -4212,12 +4401,20 @@ case class BattleState(
             pangea.engine.Choice("Move", content.text("battle.group.moveLabel"), row = Some(1))),
           Some(pangea.engine.Choice("Wait", content.text("battle.group.waitLabel"), row = Some(1)))
         ).flatten
+    // «Некромант» (порог 10): тьму можно отпустить или свернуть. Ход на это не
+    // тратится, поэтому кнопка стоит не среди действий, а рядом с ними.
+    val miasmaButton = Option.when(hero.sets.spreadsMiasma)(
+      pangea.engine.Choice("Miasma",
+        content.text(if (miasmaOn) "battle.miasmaLabelOn" else "battle.miasmaLabelOff"),
+        color = if (miasmaOn) pangea.engine.ChoiceColor.Positive else pangea.engine.ChoiceColor.Secondary,
+        row = Some(3)))
     val mainButtons =
       (actionButtons :+ flaskButton) ++
         beltButton.toList ++
         mixButton.toList ++
         divineButton.toList ++
         roseButton.toList ++
+        miasmaButton.toList ++
         List(
           pangea.engine.Choice(
             "Flee",
@@ -4310,6 +4507,32 @@ object BattleState {
   /** Сколько союзников помещается в ряд клавиатуры: их бывает до десяти, а
     * рядов у ВК всего десять. */
   val AlliesPerRow: Int = 2
+
+  /** Кем встанет павший, если «Некромант» (порог 12) его поднимет. None — в нём
+    * нечего поднимать: элементаль, сооружение, уже нежить или Крысиный король
+    * (он не тело, а сборище крыс). Белый волк встаёт как по клыку, прочие — как
+    * по своему трофею, и с тем именем, под которым пали. */
+  def riseForm(slain: pangea.model.battle.SlainMonster,
+               boss: Option[MiniBoss]): Option[pangea.model.squad.UndeadForm] =
+    boss match {
+      case Some(MiniBoss.WhiteWolf) =>
+        Some(pangea.service.state.states.events.cave.DarkAltar.wolfOf(slain.lvl))
+      case Some(_)                  => None
+      case None =>
+        Race.withNameOption(slain.race).filterNot(r =>
+          r == Race.Elemental || r == Race.Construct || r == Race.Undead
+        ).flatMap { race =>
+          pangea.model.monster.Rarity.withNameOption(slain.rarity).map { rarity =>
+            pangea.service.state.states.events.cave.DarkAltar
+              .fromTrophy(race, rarity, slain.lvl.max(1L)).copy(name = slain.name)
+          }
+        }
+    }
+
+  /** Переключатели боя героя: по умолчанию миазмы включены. */
+  def prefs(heroDao: pangea.dao.hero.HeroDao, userId: pangea.model.user.UserId): Task[pangea.model.battle.BattlePrefs] =
+    heroDao.readBattlePrefs(userId).map(
+      _.flatMap(_.as[pangea.model.battle.BattlePrefs].toOption).getOrElse(pangea.model.battle.BattlePrefs.default))
 
   /** Сооружение ли это — башня со стрелком и всё, что ей подобно. */
   def isTower(battle: SoloPveBattle): Boolean =

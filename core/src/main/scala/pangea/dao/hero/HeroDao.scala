@@ -93,6 +93,11 @@ trait HeroDao {
   def writeVaultStow(userId: UserId, data: Json): Task[Unit]
   def readVaultStow(userId: UserId): Task[Option[Json]]
 
+  /** Переключатели боя ([[pangea.model.battle.BattlePrefs]]) — выбор игрока
+    * держится между боями. Durable, живёт в `heroes.battle_prefs`. */
+  def writeBattlePrefs(userId: UserId, data: Json): Task[Unit]
+  def readBattlePrefs(userId: UserId): Task[Option[Json]]
+
   /** Сюжетные задания горожан ([[pangea.model.quest.NpcQuests]]). Durable,
     * живёт в `heroes.npc_quests`. */
   def writeNpcQuests(userId: UserId, data: Json): Task[Unit]

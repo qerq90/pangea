@@ -191,7 +191,10 @@ case class Hero(
       agi = (b.applyAgi(baseStats.agi + Achievement.agiBonus(this)) * statBoosts.agiFactor(nowMs)).toLong.max(1L),
       vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L),
       str = (b.applyStr(baseStats.str + Achievement.strBonus(this)) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
-      int = (b.applyInt(baseStats.int + Achievement.intBonus(this)) * (1.0 - p.intPct) * statBoosts.intFactor(nowMs)).toLong.max(1L)
+      // «Некромант» (порог 2) поднимает сам интеллект — последним, поверх расы,
+      // травм и зелий: это прибавка к готовому числу.
+      int = (b.applyInt(baseStats.int + Achievement.intBonus(this)) * (1.0 - p.intPct) *
+               statBoosts.intFactor(nowMs) * (100L + sets.intBonusPct) / 100L).toLong.max(1L)
     )
   }
 
@@ -277,7 +280,7 @@ case class Hero(
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
     val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
     import Hero.withNative
-    s"""${race.toString}, Уровень $lvl  ☠ Убито: $kills
+    s"""$raceName, Уровень $lvl  ☠ Убито: $kills
        | $getLvlExp/$getNeededExp опыта$blessingLine$restsLine
        |
        | 💪 СИЛ ${withNative(effB.str, natB.str)}  ТЕЛО ${withNative(effB.vit, natB.vit)}
@@ -290,6 +293,11 @@ case class Hero(
        | Свободных очков: $upgradePoints
        |""".stripMargin
   }
+
+  /** Как зовётся раса героя сейчас. С «Некромантом» (порог 10) он сам мёртв, и
+   *  это видно: «Нежить-Орк». Расовые множители при этом прежние — он остаётся
+   *  тем, кем родился, просто больше не живой. */
+  def raceName: String = if (sets.heroIsUndead) s"Нежить-$race" else race.toString
 
   def getNeededExp: Long = Hero.neededExpForLevel(lvl)
   def getLvlExp: Long    = exp

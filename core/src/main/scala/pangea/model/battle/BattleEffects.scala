@@ -192,6 +192,10 @@ case class BattleEffects(
   // Грань аметистовой божественного оружия: сколько раундов герой бьёт почти без промаха
   // (шанс попасть — DivineRates.TrueStrikePct).
   heroTrueStrikeTurns:  Int                        = 0,
+  // Миазмы тьмы («Некромант», порог 10): сколько раундов вылеченный их ещё не
+  // чувствует. Своё число у каждой стороны — лечат тут и там по-разному.
+  heroMiasmaCalm:       Int                        = 0,
+  monsterMiasmaCalm:    Int                        = 0,
   // Зеркальный настой: столько ударов по герою ещё уйдёт в призрачные копии.
   // Приходит с героя при сборке боя (см. SoloPveBattle.from) и тратится
   // ударами, а не временем.
@@ -210,6 +214,7 @@ case class BattleEffects(
     monsterDefenceDebuff     = monsterDefenceDebuff,
     chilledTurns             = chilledTurns,
     monsterPoisonsOnHit      = monsterPoisonsOnHit,
+    monsterMiasmaCalm        = monsterMiasmaCalm,
     monsterWeakenedTurns     = monsterWeakenedTurns,
     monsterWeakenedPct       = monsterWeakenedPct,
     monsterMaxArmorCut       = monsterMaxArmorCut,
@@ -248,6 +253,7 @@ case class BattleEffects(
       monsterDefenceDebuff     = mp.monsterDefenceDebuff,
       chilledTurns             = mp.chilledTurns,
       monsterPoisonsOnHit      = mp.monsterPoisonsOnHit,
+      monsterMiasmaCalm        = mp.monsterMiasmaCalm,
       monsterWeakenedTurns     = mp.monsterWeakenedTurns,
       monsterWeakenedPct       = mp.monsterWeakenedPct,
       monsterMaxArmorCut       = mp.monsterMaxArmorCut,

@@ -209,6 +209,12 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def readVaultStow(userId: UserId): Task[Option[Json]] =
     Queries.readVaultStow(userId).query[Option[Json]].unique.transact(xa)
 
+  override def writeBattlePrefs(userId: UserId, data: Json): Task[Unit] =
+    Queries.writeBattlePrefs(userId, data).update.run.transact(xa).unit
+
+  override def readBattlePrefs(userId: UserId): Task[Option[Json]] =
+    Queries.readBattlePrefs(userId).query[Option[Json]].unique.transact(xa)
+
   override def writeNpcQuests(userId: UserId, data: Json): Task[Unit] =
     Queries.writeNpcQuests(userId, data).update.run.transact(xa).unit
 

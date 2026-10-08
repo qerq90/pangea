@@ -22,6 +22,8 @@ case class SquadState(heroDao: HeroDao, content: SceneContent) extends State {
       "SquadMove"   -> Target.Run { (u, ua, r) => move(u, ua, r).as(StateType.Squad) },
       "SquadDismiss" -> Target.Run { (u, ua, r) => withAlly(ua)(p => confirmDismiss(u, p, r)).as(StateType.Squad) },
       "SquadDismissDo" -> Target.Run { (u, ua, r) => withAlly(ua)(p => dismiss(u, p, r)).as(StateType.Squad) },
+      "SquadRise"   -> Target.Run { (u, ua, r) => withAlly(ua)(p => takeRisenPlace(u, p, r)).as(StateType.Squad) },
+      "SquadRiseNo" -> Target.Run { (u, _, r) => dismissRisen(u, r).as(StateType.Squad) },
       "BackFromSquad" -> Target.Goto(StateType.HeroStats)
     ),
     fallback = Target.Run { (u, _, r) => showList(u, r).as(StateType.Squad) }
@@ -40,8 +42,48 @@ case class SquadState(heroDao: HeroDao, content: SceneContent) extends State {
       now   <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
       hero0 <- getHero(user)
       hero  <- SquadDuty.settle(heroDao, content, user, hero0, now, renderer)
-      _     <- showLines(user, hero, renderer)
+      // Восставший ждёт у шатра, а мест в строю нет: сперва решим, кем за него
+      // пожертвовать, — как у алтаря в пещере.
+      _     <- hero.squad.pendingRisen.fold(showLines(user, hero, renderer))(_ => askRisen(user, hero, renderer))
     } yield ()
+
+  /** Экран «кем жертвуем» для восставшего: весь отряд кнопками и отказ. */
+  private def askRisen(user: User, hero: Hero, renderer: Renderer): Task[Unit] =
+    hero.squad.pendingRisen.fold(ZIO.unit: Task[Unit]) { form =>
+      val buttons = hero.squad.inOrder.zipWithIndex.map { case (a, i) =>
+        Choice("SquadRise", Choice.fit(a.name), data = Map("pos" -> a.position.toString),
+          row = Some(i / SquadState.PerRow))
+      }
+      val rows = (hero.squad.allies.size + SquadState.PerRow - 1) / SquadState.PerRow
+      val no   = content.choice("SquadRiseNo", "squad.risenNo").copy(color = ChoiceColor.Negative, row = Some(rows))
+      renderer.show(user, Screen(content.format("squad.risenWaits", "name" -> form.name), buttons :+ no))
+    }
+
+  /** Ждущий занимает место названного союзника — тот покидает отряд. */
+  private def takeRisenPlace(user: User, pos: Int, renderer: Renderer): Task[Unit] =
+    for {
+      now  <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+      hero <- getHero(user)
+      _    <- hero.squad.pendingRisen match {
+                case None       => showLines(user, hero, renderer)
+                case Some(form) =>
+                  val gone  = hero.squad.allyAt(pos).map(_.name).getOrElse("")
+                  val squad = hero.squad.takeRisenPlace(pos, hero.lvl, now)
+                  heroDao.updateSquad(user.userId, squad) *>
+                    renderer.show(user, Screen(content.format("squad.risenTook",
+                      "name" -> form.name, "gone" -> gone), Nil)) *>
+                    showLines(user, hero.copy(squad = squad), renderer)
+              }
+    } yield ()
+
+  /** Ждущего отпускают: тело оседает прахом. */
+  private def dismissRisen(user: User, renderer: Renderer): Task[Unit] =
+    getHero(user).flatMap { hero =>
+      val squad = hero.squad.dismissRisen
+      heroDao.updateSquad(user.userId, squad) *>
+        renderer.show(user, Screen(content.text("squad.risenDust"), Nil)) *>
+        showLines(user, hero.copy(squad = squad), renderer)
+    }
 
   private def showLines(user: User, hero: Hero, renderer: Renderer): Task[Unit] = {
       val lines = (1 to AllyRates.Positions).map { pos =>

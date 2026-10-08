@@ -183,6 +183,48 @@ object ItemSet extends Enum[ItemSet] {
     )
   }
 
+  // ── Некромант ───────────────────────────────────────────────────────────────
+  case object Necromancer extends ItemSet("Некромант", "Некроманта") {
+    val IntPct: Long         = 10L
+    val UndeadBoostPct: Long = 20L
+    val EnergyCutPct: Long   = 10L
+
+    /** Во сколько раз дольше держится поднятый с алтаря (порог 6). */
+    val UndeadLastsMult: Long = 2L
+
+    // ── Миазмы тьмы (порог 10) ────────────────────────────────────────────────
+    // Сама механика общая — аура, которая держит всё поле боя. Числа у неё свои
+    // (pangea.model.battle.AuraRates), здесь они нужны только для описания.
+
+    /** Герой сам становится нежитью: кровь и яд его не берут, зато огонь берёт
+      * сильнее на столько процентов, а горение на нём растёт во столько раз. */
+    val UndeadFireTakenPct: Long   = 25L
+    val UndeadBurnGrowthMult: Long = 2L
+
+    // ── Восставшие (порог 12) ─────────────────────────────────────────────────
+    val RiseChancePct: Long = 5L
+    val RiseHpPct: Long     = 25L
+
+    def bonuses: List[SetBonus] = List(
+      SetBonus(2,  s"+$IntPct% к интеллекту."),
+      SetBonus(4,  s"Ожившие союзники на $UndeadBoostPct% сильнее. " +
+                   s"Ваша максимальная энергия на $EnergyCutPct% ниже."),
+      SetBonus(6,  s"Поднятый с алтаря служит в $UndeadLastsMult раза дольше и выходит в бой целым."),
+      SetBonus(8,  SetRates.HpBonusText),
+      SetBonus(10, s"Вы сами становитесь нежитью: кровь и яд вас больше не берут, зато огонь бьёт на " +
+                   s"$UndeadFireTakenPct% сильнее, а горите вы в $UndeadBurnGrowthMult раза жарче.\n" +
+                   s"Вы держите аурой всё поле боя — миазмы тьмы. В конце раунда на них уходит " +
+                   s"${pangea.model.battle.AuraRates.MiasmaEnergyCostPct}% вашей энергии, и на столько же, " +
+                   s"сверх ${pangea.model.battle.AuraRates.MiasmaPct}% максимума HP, вся нежить на поле " +
+                   s"лечится, а всё живое — теряет. Лечение выводит из-под ауры на " +
+                   s"${pangea.model.battle.AuraRates.MiasmaCalmRounds} раунда. Энергии меньше " +
+                   s"${pangea.model.battle.AuraRates.MiasmaMinEnergy} — аура оседает."),
+      SetBonus(12, s"Враг, добитый вами, с шансом $RiseChancePct% восстаёт нежитью и идёт за вами двое " +
+                   s"суток: с $RiseHpPct% HP и той бронёй, что на нём осталась. Элементали, Гнилой Джо " +
+                   "и Крысиный король не восстают — в них некого поднимать.")
+    )
+  }
+
   /** Набор по имени-титулу из названия предмета (третье слово). */
   def byTitle(title: String): Option[ItemSet] = values.find(_.title == title)
 

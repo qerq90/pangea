@@ -55,8 +55,16 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
   /** +% к макс. HP: +10% за каждый набор, добравший до порога 8. */
   def maxHpBonusPct: Long = ItemSet.values.count(has(_, 8)) * ItemSet.HpPctBonus
 
-  /** +% к макс. энергии от «Охотника» (порог 4). */
-  def energyBonusPct: Long = if (has(ItemSet.Hunter, 4)) ItemSet.Hunter.EnergyPct else 0L
+  /** Сдвиг макс. энергии в %: «Охотник» (порог 4) её прибавляет, «Некромант»
+   *  (порог 4) отнимает — силы уходят на поддержание мёртвых. Складываются, как
+   *  и прочие проценты набора. */
+  def energyBonusPct: Long =
+    (if (has(ItemSet.Hunter, 4)) ItemSet.Hunter.EnergyPct else 0L) -
+      (if (has(ItemSet.Necromancer, 4)) ItemSet.Necromancer.EnergyCutPct else 0L)
+
+  /** +% к интеллекту от «Некроманта» (порог 2) — единственная двойка, которая
+   *  поднимает не боевой стат, а базовый. */
+  def intBonusPct: Long = if (has(ItemSet.Necromancer, 2)) ItemSet.Necromancer.IntPct else 0L
 
   /** Множитель вклада ловкости в реген энергии за раунд («Охотник», порог 4). */
   def agiEnergyRegenMult: Long =
@@ -155,6 +163,46 @@ final case class HeroSets(counts: Map[ItemSet, Int]) {
     if (has(ItemSet.Hunter, 12)) ItemSet.Hunter.SkillCritBonusPct else 0L
 
   // ── «Крыса» ─────────────────────────────────────────────────────────────────
+
+  // ── «Некромант» ─────────────────────────────────────────────────────────────
+
+  /** Насколько сильнее ожившие союзники — поднятые с алтаря и восставшие
+   *  (порог 4). Ноль — как были. На крысу из набора «Крыса» не действует: она
+   *  зверь, а не нежить. */
+  def undeadAllyBoostPct: Long =
+    if (has(ItemSet.Necromancer, 4)) ItemSet.Necromancer.UndeadBoostPct else 0L
+
+  /** Во сколько раз дольше держится поднятый с алтаря (порог 6). Срок ставится
+   *  в момент поднятия: снятый потом набор уже поднятого не торопит. */
+  def undeadLastsMult: Long =
+    if (has(ItemSet.Necromancer, 6)) ItemSet.Necromancer.UndeadLastsMult else 1L
+
+  /** Выходит ли поднятый в бой целым, сколько бы ни был побит раньше (порог 6). */
+  def undeadEntersFresh: Boolean = has(ItemSet.Necromancer, 6)
+
+  /** Сам герой — нежить (порог 10): кровь и яд его не берут, огонь берёт сильнее. */
+  def heroIsUndead: Boolean = has(ItemSet.Necromancer, 10)
+
+  /** Множитель урона огнём по герою-нежити. */
+  def fireTakenMult: Double =
+    if (heroIsUndead) (100L + ItemSet.Necromancer.UndeadFireTakenPct) / 100.0 else 1.0
+
+  /** Во сколько раз быстрее растёт горение на герое-нежити. */
+  def heroBurnGrowthMult: Long =
+    if (heroIsUndead) ItemSet.Necromancer.UndeadBurnGrowthMult else 1L
+
+  /** Какие ауры держит герой — эффекты, накрывающие ВСЁ поле боя
+   *  (см. [[pangea.model.battle.Aura]]). Пока одна: миазмы тьмы с порога 10.
+   *  Включить или свернуть их — выбор игрока, кнопкой в бою. */
+  def auras: Set[pangea.model.battle.Aura] =
+    if (has(ItemSet.Necromancer, 10)) Set(pangea.model.battle.Aura.Miasma) else Set.empty
+
+  /** Держит ли герой хоть одну ауру: по этому на экране боя и появляется кнопка. */
+  def spreadsMiasma: Boolean = auras.nonEmpty
+
+  /** Шанс (в %), что добитый героем враг восстанет нежитью (порог 12). */
+  def riseChancePct: Long =
+    if (has(ItemSet.Necromancer, 12)) ItemSet.Necromancer.RiseChancePct else 0L
 
   /** Шанс (в %), что обычная атака, прошедшая в HP, отравит врага (порог 4). */
   def poisonOnHitChancePct: Long =

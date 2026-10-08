@@ -296,7 +296,9 @@ case class MonsterCaveState(
       for {
         now <- nowMs
         _ <- inventoryRepo.removeItem(trophy.id, hero.id).mapError(asThrowable)
-        _ <- heroDao.updateSquad(user.userId, hero.squad.raise(form, hero.lvl, now))
+        // «Некромант» (порог 6) держит поднятого дольше — срок ставится здесь, в
+        // минуту поднятия, и снятый потом набор его уже не торопит.
+        _ <- heroDao.updateSquad(user.userId, hero.squad.raise(form, hero.lvl, now, hero.sets.undeadLastsMult))
         _ <- renderer.show(user, Screen(content.format("cave.altar.risen", "name" -> form.name), Nil))
         res <- burnOut(user, scene, renderer)
       } yield res
@@ -326,7 +328,8 @@ case class MonsterCaveState(
                 for {
                   now <- nowMs
                   _ <- inventoryRepo.removeItem(scene.pendingTrophy, hero.id).mapError(asThrowable).ignore
-                  _ <- heroDao.updateSquad(user.userId, hero.squad.replaceAt(p, form, hero.lvl, now))
+                  _ <- heroDao.updateSquad(user.userId,
+                         hero.squad.replaceAt(p, form, hero.lvl, now, hero.sets.undeadLastsMult))
                   _ <- renderer.show(user, Screen(content.format(key(scene, "altar.swapped"),
                          "old" -> old.name, "name" -> form.name), Nil))
                   out <- burnOut(user, scene.copy(pending = None, pendingTrophy = 0L), renderer)
