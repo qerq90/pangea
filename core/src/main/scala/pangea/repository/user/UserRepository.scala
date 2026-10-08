@@ -11,6 +11,10 @@ trait UserRepository {
   def getUserByVkId(vkId: VkId): Task[Option[User]]
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
   def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean]
+
+  /** Записать почту для кассового чека. Прочитать её отдельно не нужно: она
+    * едет в [[User]], который состояния получают на вход. */
+  def updateReceiptEmail(userId: UserId, email: String): Task[Unit]
 }
 
 object UserRepository {

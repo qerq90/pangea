@@ -235,7 +235,7 @@ object StatesMap {
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
-          TradeHouse -> TradeHouseState(heroDao, bankRepo, parcels, inventoryRepo, content),
+          TradeHouse -> TradeHouseState(heroDao, userRepo, bankRepo, parcels, inventoryRepo, content),
           Transfer   -> TransferState(heroDao, inventoryRepo, transfers, content),
           Mail       -> MailState(heroDao, inventoryRepo, parcels, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content, artifacts),

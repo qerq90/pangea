@@ -8,7 +8,8 @@ import pangea.model.user.{ReceiptEmail, TelegramId, User, UserId, VkId}
 import pangea.service.parcel.Parcels
 import pangea.service.purse.{Purse, Wallet}
 import pangea.service.state.UserAction
-import pangea.test.{TestBankRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestParcelDao, TestRenderer}
+import pangea.test.{TestBankRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestParcelDao,
+  TestRenderer, TestUserRepository}
 import zio.ZIO
 import zio.test._
 
@@ -29,11 +30,13 @@ object TradeHouseSpec extends ZIOSpecDefault {
   private def house(heroSilver: Long, cells: Int = 0, vaultSilver: Long = 0L) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(silver = heroSilver))
+      userRepo <- TestUserRepository.withUser(testUser)
       bankRepo  = TestBankRepository.of(cells, silver = vaultSilver)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
       parcels   = Parcels(TestParcelDao.empty, bankRepo, content)
-    } yield (TradeHouseState(heroDao, bankRepo, parcels, TestInventoryRepository.accepting, content), heroDao, bankRepo, renderer)
+    } yield (TradeHouseState(heroDao, userRepo, bankRepo, parcels, TestInventoryRepository.accepting, content),
+             heroDao, bankRepo, renderer, userRepo)
 
   private def vaultState(
     inventory:   List[Item],
@@ -57,7 +60,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("без ячеек: приветствие, кнопка покупки за 10 000, ни хранилища, ни аукциона") {
         for {
           t <- house(heroSilver = 0L)
-          (state, _, _, renderer) = t
+          (state, _, _, renderer, _) = t
           _       <- state.enter(testUser, renderer)
           screens <- renderer.sentScreens
           menu     = screens.last
@@ -72,7 +75,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("«В город» уводит прямо на площадь — и от Рахадима, и из хранилища за его дверью") {
         for {
           t <- house(heroSilver = 0L, cells = 1)
-          (state, _, _, renderer) = t
+          (state, _, _, renderer, _) = t
           _     <- state.enter(testUser, renderer)
           out   <- state.action(testUser, tap("GoToCity"), renderer)
           v     <- vaultState(inventory = Nil, cells = 1)
@@ -85,7 +88,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("купленная ячейка открывает «Моё хранилище» и аукцион") {
         for {
           t <- house(heroSilver = 0L, cells = 1)
-          (state, _, _, renderer) = t
+          (state, _, _, renderer, _) = t
           _       <- state.enter(testUser, renderer)
           screens <- renderer.sentScreens
           next    <- state.action(testUser, tap("MyVault"), renderer)
@@ -99,7 +102,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("покупка первой ячейки: 10 000 с рук, 100 мест и 100 000 под серебро") {
         for {
           t <- house(heroSilver = 10000L)
-          (state, heroDao, bank, renderer) = t
+          (state, heroDao, bank, renderer, _) = t
           _    <- state.action(testUser, tap("BuyCellConfirm"), renderer)
           hero <- heroDao.getHeroByUserId(userId)
         } yield assertTrue(bank.cellsSnapshot == 1) &&
@@ -111,7 +114,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("вторая ячейка стоит 100 000, третья — 200 000") {
         for {
           t <- house(heroSilver = 100000L, cells = 1)
-          (state, heroDao, bank, renderer) = t
+          (state, heroDao, bank, renderer, _) = t
           _       <- state.action(testUser, tap("BuyCell"), renderer)
           screens <- renderer.sentScreens
           _       <- state.action(testUser, tap("BuyCellConfirm"), renderer)
@@ -126,7 +129,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("не хватает серебра → Рахадим разводит руками, ячейка не выдана") {
         for {
           t <- house(heroSilver = 9999L)
-          (state, _, bank, renderer) = t
+          (state, _, bank, renderer, _) = t
           _       <- state.action(testUser, tap("BuyCellConfirm"), renderer)
           screens <- renderer.sentScreens
         } yield assertTrue(bank.cellsSnapshot == 0) &&
@@ -136,7 +139,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("дублоны: адреса ещё нет, проценты по вкладу — просто текст с «Назад»") {
         for {
           t <- house(heroSilver = 0L)
-          (state, _, _, renderer) = t
+          (state, _, _, renderer, _) = t
           _        <- state.action(testUser, tap("BuyDoubloons"), renderer)
           doubloon <- renderer.sentScreens
           _        <- state.action(testUser, tap("DepositInterest"), renderer)
@@ -151,15 +154,18 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("адрес для чека приходит сообщением: записан, показан на странице и правится новым") {
         for {
           t <- house(heroSilver = 0L)
-          (state, heroDao, _, renderer) = t
+          (state, _, _, renderer, userRepo) = t
           _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
           _      <- state.action(testUser, text("  KMMG200@Yandex.RU "), renderer)
           saved  <- renderer.sentScreens
-          stored <- heroDao.readReceiptEmail(userId)
-          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          stored <- userRepo.getUserById(userId).map(_.flatMap(_.receiptEmail))
+          // Экран читает адрес из переданного `User`, а его StateHandler
+          // перечитывает перед каждым действием — здесь делаем то же.
+          fresh  <- userRepo.getUserById(userId).map(_.get)
+          _      <- state.action(fresh, tap("BuyDoubloons"), renderer)
           page   <- renderer.sentScreens
-          _      <- state.action(testUser, text("other@mail.ru"), renderer)
-          after  <- heroDao.readReceiptEmail(userId)
+          _      <- state.action(fresh, text("other@mail.ru"), renderer)
+          after  <- userRepo.getUserById(userId).map(_.flatMap(_.receiptEmail))
         } yield assertTrue(stored.contains("kmmg200@yandex.ru")) &&
                 assertTrue(saved.last.text.contains("kmmg200@yandex.ru")) &&
                 assertTrue(saved.last.choices.map(_.id) == List("TradeHouse")) &&
@@ -170,15 +176,15 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("не адрес — ничего не пишем; вне страницы дублонов текст просто вернёт в меню") {
         for {
           t <- house(heroSilver = 0L)
-          (state, heroDao, _, renderer) = t
+          (state, _, _, renderer, userRepo) = t
           _     <- state.action(testUser, tap("BuyDoubloons"), renderer)
           _     <- state.action(testUser, text("сколько стоит?"), renderer)
           bad   <- renderer.sentScreens
-          empty <- heroDao.readReceiptEmail(userId)
+          empty <- userRepo.getUserById(userId).map(_.flatMap(_.receiptEmail))
           _     <- state.action(testUser, tap("TradeHouse"), renderer)
           _     <- state.action(testUser, text("ignored@mail.ru"), renderer)
           menu  <- renderer.sentScreens
-          still <- heroDao.readReceiptEmail(userId)
+          still <- userRepo.getUserById(userId).map(_.flatMap(_.receiptEmail))
         } yield assertTrue(empty.isEmpty && still.isEmpty) &&
                 assertTrue(bad.last.text.contains("на адрес не похоже")) &&
                 assertTrue(menu.last.choices.map(_.id).contains("BuyDoubloons"))
@@ -304,7 +310,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
       test("покупка у Рахадима идёт из ячейки, когда своего не хватило") {
         for {
           t <- house(heroSilver = 40000L, cells = 1, vaultSilver = 70000L)
-          (state, heroDao, bank, renderer) = t
+          (state, heroDao, bank, renderer, _) = t
           _    <- state.action(testUser, tap("BuyCellConfirm"), renderer)
           hero <- heroDao.getHeroByUserId(userId)
         } yield assertTrue(bank.cellsSnapshot == 2) &&

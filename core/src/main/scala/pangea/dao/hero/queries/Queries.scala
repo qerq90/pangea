@@ -186,12 +186,6 @@ object Queries {
   def readBattlePrefs(userId: UserId): Fragment =
     sql"select battle_prefs from $tableName where user_id = $userId"
 
-  def writeReceiptEmail(userId: UserId, email: String): Fragment =
-    sql"update $tableName set receipt_email = $email where user_id = $userId"
-
-  def readReceiptEmail(userId: UserId): Fragment =
-    sql"select receipt_email from $tableName where user_id = $userId"
-
   def writeNpcQuests(userId: UserId, data: Json): Fragment =
     sql"update $tableName set npc_quests = $data where user_id = $userId"
 

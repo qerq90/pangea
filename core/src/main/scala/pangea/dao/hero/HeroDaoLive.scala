@@ -215,12 +215,6 @@ class HeroDaoLive(xa: Transactor[Task]) extends HeroDao {
   override def readBattlePrefs(userId: UserId): Task[Option[Json]] =
     Queries.readBattlePrefs(userId).query[Option[Json]].unique.transact(xa)
 
-  override def writeReceiptEmail(userId: UserId, email: String): Task[Unit] =
-    Queries.writeReceiptEmail(userId, email).update.run.transact(xa).unit
-
-  override def readReceiptEmail(userId: UserId): Task[Option[String]] =
-    Queries.readReceiptEmail(userId).query[Option[String]].unique.transact(xa)
-
   override def writeNpcQuests(userId: UserId, data: Json): Task[Unit] =
     Queries.writeNpcQuests(userId, data).update.run.transact(xa).unit
 

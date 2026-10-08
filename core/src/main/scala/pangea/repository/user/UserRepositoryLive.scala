@@ -33,6 +33,9 @@ case class UserRepositoryLive(userDao: UserDao) extends UserRepository {
 
   override def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean] =
     userDao.checkAndRecordEvent(userId, eventId)
+
+  override def updateReceiptEmail(userId: UserId, email: String): Task[Unit] =
+    userDao.updateReceiptEmail(userId, email)
 }
 
 object UserRepositoryLive {

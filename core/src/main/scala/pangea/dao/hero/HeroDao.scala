@@ -98,11 +98,6 @@ trait HeroDao {
   def writeBattlePrefs(userId: UserId, data: Json): Task[Unit]
   def readBattlePrefs(userId: UserId): Task[Option[Json]]
 
-  /** Почта для кассового чека ([[pangea.model.user.ReceiptEmail]]) — игрок
-    * присылает её сообщением у Рахадима. Durable, живёт в `heroes.receipt_email`. */
-  def writeReceiptEmail(userId: UserId, email: String): Task[Unit]
-  def readReceiptEmail(userId: UserId): Task[Option[String]]
-
   /** Сюжетные задания горожан ([[pangea.model.quest.NpcQuests]]). Durable,
     * живёт в `heroes.npc_quests`. */
   def writeNpcQuests(userId: UserId, data: Json): Task[Unit]

@@ -19,6 +19,9 @@ class TestUserRepository(usersRef: Ref[Map[UserId, User]], eventsRef: Ref[Set[(U
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]] =
     usersRef.get.map(_.values.find(_.telegramId == telegramId))
 
+  def updateReceiptEmail(userId: UserId, email: String): Task[Unit] =
+    usersRef.update(m => m.get(userId).fold(m)(u => m.updated(userId, u.copy(receiptEmail = Some(email)))))
+
   /** Как реальный `checkAndRecordEvent`: true, только если этот `eventId` для
    *  этого пользователя ещё не встречался. */
   def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean] =

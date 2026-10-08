@@ -11,6 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.{ReceiptEmail, User}
 import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.user.UserRepository
 import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
 import pangea.model.item.{Item, MaterialKind}
@@ -24,6 +25,7 @@ import zio.{Task, ZIO}
  *  на [[BankVault.CellPriceStep]] дороже предыдущей. */
 case class TradeHouseState(
   heroDao:       HeroDao,
+  userRepo:      UserRepository,
   bankRepo:      BankRepository,
   parcels:       Parcels,
   inventoryRepo: InventoryRepository,
@@ -201,11 +203,12 @@ case class TradeHouseState(
     * новый — свободным сообщением, без кнопок. */
   private def showDoubloons(user: User, renderer: Renderer): Task[Unit] =
     for {
-      _     <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
-      email <- heroDao.readReceiptEmail(user.userId)
-      text   = content.format("bank.tradeHouse.doubloons",
-                 "email" -> email.getOrElse(content.text("bank.tradeHouse.doubloonsNoEmail")))
-      _     <- renderer.show(user, Screen(text, backRow))
+      _   <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
+      // Адрес едет в самом `User`: его StateHandler перечитывает перед каждым
+      // действием, так что отдельный запрос за одной строкой тут не нужен.
+      text = content.format("bank.tradeHouse.doubloons",
+               "email" -> user.receiptEmail.getOrElse(content.text("bank.tradeHouse.doubloonsNoEmail")))
+      _   <- renderer.show(user, Screen(text, backRow))
     } yield ()
 
   /** Любой текст у Рахадима: на странице дублонов это адрес для чека, в
@@ -215,7 +218,7 @@ case class TradeHouseState(
       if (!scene.emailPrompt) showMenu(user, renderer)
       else ReceiptEmail.parse(ua.text) match {
         case Some(email) =>
-          heroDao.writeReceiptEmail(user.userId, email) *>
+          userRepo.updateReceiptEmail(user.userId, email) *>
             renderer.show(user, Screen(content.format("bank.tradeHouse.doubloonsSaved", "email" -> email), backRow))
         case None =>
           renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsBadEmail"), backRow))

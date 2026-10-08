@@ -257,7 +257,8 @@ object TransferSpec extends ZIOSpecDefault {
           bank      = TestBankRepository.withCells(1)
           parcels   = Parcels(parcelDao, bank, content)
           _        <- ZIO.when(withMail)(parcels.send(heroId, "Иван", sword(10L), 0L).unit)
-          state     = TradeHouseState(heroDao, bank, parcels, TestInventoryRepository.accepting, content)
+          userRepo <- TestUserRepository.withUser(testUser)
+          state     = TradeHouseState(heroDao, userRepo, bank, parcels, TestInventoryRepository.accepting, content)
           _        <- state.enter(testUser, renderer)
           screens  <- renderer.sentScreens
         } yield screens.last.choices.map(_.id)

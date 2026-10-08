@@ -10,6 +10,11 @@ trait UserDao {
   def getUserByTelegramId(telegramId: TelegramId): Task[Option[User]]
   def insertUser(user: User): Task[UserId]
   def checkAndRecordEvent(userId: UserId, eventId: Long): Task[Boolean]
+
+  /** Почта для кассового чека (см. [[pangea.model.user.ReceiptEmail]]) — игрок
+    * присылает её сообщением у Рахадима. Живёт на человеке, а не на герое:
+    * рестарт персонажа её не стирает. */
+  def updateReceiptEmail(userId: UserId, email: String): Task[Unit]
 }
 
 object UserDao {

@@ -25,8 +25,7 @@ class TestHeroDao(
   vaultStowRef:  Ref[Map[UserId, Json]],
   dailyRef:      Ref[Map[UserId, Json]],
   npcQuestsRef:  Ref[Map[UserId, Json]],
-  battlePrefsRef: Ref[Map[UserId, Json]],
-  receiptEmailRef: Ref[Map[UserId, String]]
+  battlePrefsRef: Ref[Map[UserId, Json]]
 ) extends HeroDao {
 
   def getHeroByUserId(userId: UserId): Task[Option[Hero]] = heroRef.get.map(_.get(userId))
@@ -53,8 +52,7 @@ class TestHeroDao(
       vaultStowRef.update(_ - userId) *>
       dailyRef.update(_ - userId) *>
       npcQuestsRef.update(_ - userId) *>
-      battlePrefsRef.update(_ - userId) *>
-      receiptEmailRef.update(_ - userId)
+      battlePrefsRef.update(_ - userId)
 
   def updateRace(userId: UserId, race: Race): Task[Unit] =
     raceRef.update(_.updated(userId, race))
@@ -197,12 +195,6 @@ class TestHeroDao(
   def readBattlePrefs(userId: UserId): Task[Option[Json]] =
     battlePrefsRef.get.map(_.get(userId))
 
-  def writeReceiptEmail(userId: UserId, email: String): Task[Unit] =
-    receiptEmailRef.update(_.updated(userId, email))
-
-  def readReceiptEmail(userId: UserId): Task[Option[String]] =
-    receiptEmailRef.get.map(_.get(userId))
-
   def writeNpcQuests(userId: UserId, data: Json): Task[Unit] =
     npcQuestsRef.update(_.updated(userId, data))
 
@@ -231,8 +223,7 @@ object TestHeroDao {
       dailyRef      <- Ref.make(Map.empty[UserId, Json])
       npcQuestsRef  <- Ref.make(Map.empty[UserId, Json])
       prefsRef      <- Ref.make(Map.empty[UserId, Json])
-      emailRef      <- Ref.make(Map.empty[UserId, String])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef, emailRef)
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef)
 
   def withHero(userId: UserId, hero: Hero): Task[TestHeroDao] =
     for {
@@ -252,6 +243,5 @@ object TestHeroDao {
       dailyRef      <- Ref.make(Map.empty[UserId, Json])
       npcQuestsRef  <- Ref.make(Map.empty[UserId, Json])
       prefsRef      <- Ref.make(Map.empty[UserId, Json])
-      emailRef      <- Ref.make(Map.empty[UserId, String])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef, emailRef)
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef)
 }
