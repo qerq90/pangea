@@ -121,6 +121,24 @@ migrations/   — SQL-миграции (goose)
 4. В настройках терминала (или теми же переменными) задать `SuccessURL` и
    `FailURL` — они ведут прямо в диалог с сообществом.
 
+### Сертификат кассы
+
+`securepay.tinkoff.ru` отдаёт сертификат, подписанный корневым CA Минцифры
+(«Russian Trusted Root CA»), которого нет ни в стандартных хранилищах ОС, ни в
+`cacerts` JVM. Без него первый же запрос к кассе падает на PKIX
+(«unable to find valid certification path»), то есть донат не работает вовсе.
+
+Корневой сертификат лежит в `docker/russian_trusted_root_ca.cer` и добавляется
+в хранилище JVM при сборке образа, с проверкой отпечатка. Если запускаешь бота
+не через Docker — добавь его в `cacerts` сам:
+
+```bash
+keytool -importcert -trustcacerts -cacerts -storepass changeit \
+  -alias russian-trusted-root-ca -file docker/russian_trusted_root_ca.cer
+```
+
+### Как идёт выдача
+
 Выдача дублонов идёт **только** по нотификации банка со статусом `CONFIRMED`, и
 ровно один раз: `CONFIRMED` приходит минимум дважды, а кнопка «Проверить оплату»
 и фоновая сверка тянут за ту же ручку. Страницы `SuccessURL`/`FailURL` ничего не
