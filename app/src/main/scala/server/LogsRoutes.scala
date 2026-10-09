@@ -3,8 +3,9 @@ package server
 import cats.effect.kernel.Ref
 import fs2.Stream
 import org.http4s.dsl.Http4sDsl
-import org.http4s.headers.`Content-Type`
-import org.http4s.{Charset, HttpRoutes, MediaType, ServerSentEvent}
+import org.http4s.headers.{Authorization, `Content-Type`}
+import org.http4s.{AuthScheme, Charset, Credentials, HttpRoutes, MediaType, Request, Response, ServerSentEvent}
+import pangea.service.admin.AdminConfig
 import zio.Task
 import zio.interop.catz._
 
@@ -12,8 +13,20 @@ import java.io.{File, RandomAccessFile}
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration._
 
-object LogsRoutes {
-  private val LogFile = "logs/app.log"
+/** Выдача логов наружу — под тем же паролем, что и админ-панель
+  * (`ADMIN_PASSWORD`).
+  *
+  * Раньше роут был открыт всем: в логах лежат peer_id игроков, тексты их
+  * сообщений, а с появлением доната ещё и номера заказов со суммами. То есть
+  * по `/logs/stream` можно было в реальном времени смотреть за чужими
+  * покупками.
+  *
+  * Пароль принимается двумя способами: заголовком `Authorization: Bearer ...`
+  * (так ходит curl) и параметром `?key=...` (так удобнее из браузера). Не
+  * подошёл или не задан вовсе — отвечаем 404, чтобы не подтверждать, что роут
+  * вообще есть. */
+final class LogsRoutes(config: AdminConfig) {
+  import LogsRoutes.LogFile
 
   private val dsl = Http4sDsl[Task]
   import dsl._
@@ -22,21 +35,35 @@ object LogsRoutes {
   private object GrepParam extends OptionalQueryParamDecoderMatcher[String]("grep")
 
   val routes: HttpRoutes[Task] = HttpRoutes.of[Task] {
-    case GET -> Root / "logs" :? TailParam(tail) +& GrepParam(grep) =>
-      val n = tail.getOrElse(200).max(1).min(100000)
-      for {
-        lines <- zio.ZIO.attempt(tailLines(LogFile, n))
-        filtered = grep.fold(lines)(g => lines.filter(_.contains(g)))
-        resp <- Ok(filtered.mkString("\n"), `Content-Type`(MediaType.text.plain, Charset.`UTF-8`))
-      } yield resp
+    case req @ GET -> Root / "logs" :? TailParam(tail) +& GrepParam(grep) =>
+      guard(req) {
+        val n = tail.getOrElse(200).max(1).min(100000)
+        for {
+          lines <- zio.ZIO.attempt(tailLines(LogFile, n))
+          filtered = grep.fold(lines)(g => lines.filter(_.contains(g)))
+          resp <- Ok(filtered.mkString("\n"), `Content-Type`(MediaType.text.plain, Charset.`UTF-8`))
+        } yield resp
+      }
 
-    case GET -> Root / "logs" / "stream" :? GrepParam(grep) =>
-      val stream = tailStream(LogFile)
-        .filter(line => grep.forall(line.contains))
-        .map(line => ServerSentEvent(data = Some(line)))
-      // SSE по умолчанию уходит без charset → латиница ломает кириллицу. Явно UTF-8.
-      Ok(stream).map(_.withContentType(`Content-Type`(MediaType.`text/event-stream`, Charset.`UTF-8`)))
+    case req @ GET -> Root / "logs" / "stream" :? GrepParam(grep) =>
+      guard(req) {
+        val stream = tailStream(LogFile)
+          .filter(line => grep.forall(line.contains))
+          .map(line => ServerSentEvent(data = Some(line)))
+        // SSE по умолчанию уходит без charset → латиница ломает кириллицу. Явно UTF-8.
+        Ok(stream).map(_.withContentType(`Content-Type`(MediaType.`text/event-stream`, Charset.`UTF-8`)))
+      }
   }
+
+  private def guard(req: Request[Task])(allowed: => Task[Response[Task]]): Task[Response[Task]] =
+    if (config.grants(credential(req))) allowed else NotFound()
+
+  /** Пароль из заголовка или из query — что нашлось первым. */
+  private def credential(req: Request[Task]): Option[String] =
+    req.headers
+      .get[Authorization]
+      .collect { case Authorization(Credentials.Token(AuthScheme.Bearer, token)) => token }
+      .orElse(req.params.get("key"))
 
   private def tailLines(path: String, n: Int): List[String] = {
     val file = new File(path)
@@ -97,4 +124,8 @@ object LogsRoutes {
     val f = new File(path)
     if (f.exists()) f.length() else 0L
   }
+}
+
+object LogsRoutes {
+  private val LogFile = "logs/app.log"
 }

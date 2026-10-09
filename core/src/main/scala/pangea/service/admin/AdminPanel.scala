@@ -40,7 +40,28 @@ object AdminScreen {
 
 /** Пароль панели. Берётся из окружения (`ADMIN_PASSWORD`) и в репозитории не
   * хранится: пока переменная не задана, панель не пускает никого. */
-final case class AdminConfig(password: Option[String])
+final case class AdminConfig(password: Option[String]) {
+
+  /** Пускать ли предъявившего такой пароль. Тем же паролем закрыта выдача
+    * логов (`GET /logs`), поэтому правило живёт здесь, рядом с секретом, а не
+    * в каждом месте по-своему.
+    *
+    * Пароль не задан — не пускаем никого: иначе пустая переменная окружения
+    * молча открывала бы доступ всем.
+    *
+    * Сравнение постоянного времени: обычное `==` на строках выходит из цикла
+    * на первом несовпавшем символе, и по времени ответа пароль можно подобрать
+    * посимвольно. */
+  def grants(supplied: Option[String]): Boolean =
+    (password, supplied) match {
+      case (Some(expected), Some(offered)) =>
+        java.security.MessageDigest.isEqual(
+          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          offered.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        )
+      case _ => false
+    }
+}
 
 object AdminConfig {
   val EnvName: String = "ADMIN_PASSWORD"

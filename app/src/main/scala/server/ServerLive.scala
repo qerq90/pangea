@@ -26,6 +26,8 @@ final class ServerLive(
 
   private val payments = new PaymentRoutes(donations)
 
+  private val logs = new LogsRoutes(adminConfig)
+
   private val dsl = Http4sDsl[Task]
 
   import dsl._
@@ -90,7 +92,7 @@ final class ServerLive(
         }
     }
 
-  private val httpApp: HttpApp[Task] = (routes <+> payments.routes <+> LogsRoutes.routes).orNotFound
+  private val httpApp: HttpApp[Task] = (routes <+> payments.routes <+> logs.routes).orNotFound
 
   override def run(): UIO[Unit] = {
     // Явный Network[Task] вместо устаревшего неявного implicitForAsync (http4s 3.7.0).
