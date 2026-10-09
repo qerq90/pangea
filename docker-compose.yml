@@ -25,6 +25,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       VK_TOKEN: ${VK_TOKEN}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TBANK_TERMINAL_KEY: ${TBANK_TERMINAL_KEY:-}
+      TBANK_PASSWORD: ${TBANK_PASSWORD:-}
+      TBANK_NOTIFICATION_URL: ${TBANK_NOTIFICATION_URL:-}
+      TBANK_SUCCESS_URL: ${TBANK_SUCCESS_URL:-}
+      TBANK_FAIL_URL: ${TBANK_FAIL_URL:-}
+      TBANK_OFFER_URL: ${TBANK_OFFER_URL:-}
+      TBANK_TAXATION: ${TBANK_TAXATION:-usn_income}
+      TBANK_TAX: ${TBANK_TAX:-none}
+      TBANK_PAYMENT_OBJECT: ${TBANK_PAYMENT_OBJECT:-service}
     depends_on:
       postgres:
         condition: service_healthy

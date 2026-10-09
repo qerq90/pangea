@@ -10,6 +10,7 @@ import org.http4s.implicits._
 import org.http4s.{HttpApp, HttpRoutes}
 import pangea.model.user.VkId
 import pangea.service.admin.{AdminConfig, AdminPanel}
+import pangea.service.donation.Donations
 import pangea.service.state.{StateHandler, UserAction}
 import pangea.service.chat.ChatCommand
 import server.model.{ServerConfig, VkEvent}
@@ -19,8 +20,11 @@ import zio.{Task, UIO, ZIO}
 final class ServerLive(
   config: ServerConfig,
   stateHandler: StateHandler,
-  adminConfig: AdminConfig
+  adminConfig: AdminConfig,
+  donations: Donations
 ) extends Server {
+
+  private val payments = new PaymentRoutes(donations)
 
   private val dsl = Http4sDsl[Task]
 
@@ -86,7 +90,7 @@ final class ServerLive(
         }
     }
 
-  private val httpApp: HttpApp[Task] = (routes <+> LogsRoutes.routes).orNotFound
+  private val httpApp: HttpApp[Task] = (routes <+> payments.routes <+> LogsRoutes.routes).orNotFound
 
   override def run(): UIO[Unit] = {
     // Явный Network[Task] вместо устаревшего неявного implicitForAsync (http4s 3.7.0).

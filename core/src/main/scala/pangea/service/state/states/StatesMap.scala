@@ -89,6 +89,7 @@ import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
 import pangea.service.parcel.{Parcels, Transfers}
 import pangea.service.payout.Payouts
+import pangea.service.donation.Donations
 import pangea.service.schedule.Scheduler
 import pangea.service.state.State
 import pangea.model.artifact.ArtifactKind
@@ -159,6 +160,7 @@ object StatesMap {
       with Transfers
       with ItemRepository
       with UserRepository
+      with Donations
       with Journal
       with SceneContent
       with Scheduler,
@@ -179,6 +181,7 @@ object StatesMap {
         transfers     <- ZIO.service[Transfers]
         itemRepo      <- ZIO.service[ItemRepository]
         userRepo      <- ZIO.service[UserRepository]
+        donations     <- ZIO.service[Donations]
         journal       <- ZIO.service[Journal]
         content       <- ZIO.service[SceneContent]
         scheduler     <- ZIO.service[Scheduler]
@@ -235,7 +238,7 @@ object StatesMap {
           ElementalSearch -> ElementalSearchState(heroDao, inventoryRepo, itemRepo, scheduler, content, artifacts),
           Socketing -> SocketingState(heroDao, inventoryRepo, content),
           CityCenter -> CityCenterState(content),
-          TradeHouse -> TradeHouseState(heroDao, userRepo, bankRepo, parcels, inventoryRepo, content),
+          TradeHouse -> TradeHouseState(heroDao, userRepo, bankRepo, parcels, inventoryRepo, donations, content),
           Transfer   -> TransferState(heroDao, inventoryRepo, transfers, content),
           Mail       -> MailState(heroDao, inventoryRepo, parcels, content),
           BankVault  -> BankVaultState(heroDao, inventoryRepo, bankRepo, content, artifacts),

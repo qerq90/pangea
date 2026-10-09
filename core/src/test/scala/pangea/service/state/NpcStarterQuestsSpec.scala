@@ -114,7 +114,7 @@ object NpcStarterQuestsSpec extends ZIOSpecDefault {
         parcels   = Parcels(TestParcelDao.empty, bankRepo, content)
         inv       = TestInventoryRepository.withItems(Nil)
         userRepo <- TestUserRepository.withUser(testUser)
-        state     = TradeHouseState(heroDao, userRepo, bankRepo, parcels, inv, content)
+        state     = TradeHouseState(heroDao, userRepo, bankRepo, parcels, inv, TestDonations.off, content)
         t        <- circle(state, "RakhQuest", heroDao, inv,
                       material(2L, MaterialKind.MagicStone))
         (menu, intro, empty, halfway, said, after, closed, left) = t

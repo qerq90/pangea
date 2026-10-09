@@ -3,14 +3,16 @@ package pangea.service.state.states.bank
 import pangea.engine.SceneContent
 import pangea.model.bank.BankVault
 import pangea.model.item.{Item, ItemType, Rarity}
+import pangea.model.payment.{OrderId, Payment, PaymentStatus}
 import pangea.model.state.StateType
 import pangea.model.user.{ReceiptEmail, TelegramId, User, UserId, VkId}
+import pangea.service.donation.Donations
 import pangea.service.parcel.Parcels
 import pangea.service.purse.{Purse, Wallet}
 import pangea.service.state.UserAction
-import pangea.test.{TestBankRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestParcelDao,
-  TestRenderer, TestUserRepository}
-import zio.ZIO
+import pangea.test.{TestBankRepository, TestDonations, TestFixtures, TestHeroDao, TestInventoryRepository,
+  TestParcelDao, TestRenderer, TestUserRepository}
+import zio.{ZIO, durationInt}
 import zio.test._
 
 /** Торговый дом: ячейки у Рахадима, хранилище как бочка и общий кошель —
@@ -21,13 +23,28 @@ object TradeHouseSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
 
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+
+  /** Кнопка пакета: выбранный sku едет в payload рядом с action. */
+  private def pick(key: String, sku: String): UserAction =
+    UserAction("", Some(s"""{"action":"$key","sku":"$sku"}"""))
+
+  /** Заказ в полёте — ровно то, что отдаёт `Donations.active`. */
+  private def order(user: UserId, kopecks: Long, doubloons: Long): Payment =
+    Payment(
+      id = 1L, orderId = OrderId("d-test"), userId = user, sku = "d-test",
+      amountKopecks = kopecks, doubloons = doubloons, receiptEmail = "player@mail.ru",
+      paymentId = Some("pay-1"), paymentUrl = Some("https://pay.test/1"),
+      status = PaymentStatus.New, bankStatus = None, granted = false,
+      createdAt = 0L, updatedAt = 0L
+    )
   private def text(t: String):  UserAction = UserAction(t, None)
 
   private def gear(id: Long, name: String = "Меч"): Item =
     Item(id, name, lvl = 1L, Rarity.Gray, ItemType.Weapon,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
 
-  private def house(heroSilver: Long, cells: Int = 0, vaultSilver: Long = 0L) =
+  private def house(heroSilver: Long, cells: Int = 0, vaultSilver: Long = 0L,
+                    donations: Donations = TestDonations.off) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(silver = heroSilver))
       userRepo <- TestUserRepository.withUser(testUser)
@@ -35,7 +52,8 @@ object TradeHouseSpec extends ZIOSpecDefault {
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
       parcels   = Parcels(TestParcelDao.empty, bankRepo, content)
-    } yield (TradeHouseState(heroDao, userRepo, bankRepo, parcels, TestInventoryRepository.accepting, content),
+    } yield (TradeHouseState(heroDao, userRepo, bankRepo, parcels, TestInventoryRepository.accepting,
+               donations, content),
              heroDao, bankRepo, renderer, userRepo)
 
   private def vaultState(
@@ -188,6 +206,142 @@ object TradeHouseSpec extends ZIOSpecDefault {
         } yield assertTrue(empty.isEmpty && still.isEmpty) &&
                 assertTrue(bad.last.text.contains("на адрес не похоже")) &&
                 assertTrue(menu.last.choices.map(_.id).contains("BuyDoubloons"))
+      },
+
+      test("донат включён, но адреса нет: пакетов не показываем — чек отправить некуда") {
+        for {
+          dons <- TestDonations.on()
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, _) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          screen <- renderer.sentScreens
+        } yield assertTrue(screen.last.text.contains("Без адреса бумаги не оформить")) &&
+                assertTrue(screen.last.choices.map(_.id) == List("TradeHouse"))
+      },
+
+      test("адрес записан: показываем пакеты с ценой в рублях") {
+        for {
+          dons <- TestDonations.on()
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, userRepo) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _      <- state.action(testUser, text("player@mail.ru"), renderer)
+          fresh  <- userRepo.getUserById(userId).map(_.get)
+          _      <- state.action(fresh, tap("BuyDoubloons"), renderer)
+          screen <- renderer.sentScreens
+        } yield assertTrue(screen.last.choices.map(_.id).count(_ == "DonPick") == 2) &&
+                assertTrue(screen.last.choices.exists(_.label.contains("99"))) &&
+                assertTrue(screen.last.choices.exists(_.data.get("sku").contains("d550")))
+      },
+
+      test("выбор пакета ведёт на подтверждение с ценой, почтой и офертой") {
+        for {
+          dons <- TestDonations.on()
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, userRepo) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _      <- state.action(testUser, text("player@mail.ru"), renderer)
+          fresh  <- userRepo.getUserById(userId).map(_.get)
+          _      <- state.action(fresh, pick("DonPick", "d100"), renderer)
+          screen <- renderer.sentScreens
+          // Подтверждение само ничего не заказывает — касса пока не тронута.
+          started <- dons.started
+        } yield assertTrue(screen.last.text.contains("player@mail.ru")) &&
+                assertTrue(screen.last.text.contains("99")) &&
+                assertTrue(screen.last.text.contains("https://example.test/offer")) &&
+                assertTrue(screen.last.choices.map(_.id) == List("DonPay", "BuyDoubloons")) &&
+                assertTrue(started.isEmpty)
+      },
+
+      test("«Оплатить» отдаёт ссылку текстом и кнопку проверки") {
+        for {
+          payment <- ZIO.succeed(order(userId, 9900L, 100L))
+          dons    <- TestDonations.on(start = Donations.Start.Link(payment, "https://pay.test/1"))
+          t       <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, userRepo) = t
+          _       <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _       <- state.action(testUser, text("player@mail.ru"), renderer)
+          fresh   <- userRepo.getUserById(userId).map(_.get)
+          _       <- state.action(fresh, pick("DonPay", "d100"), renderer)
+          screen  <- renderer.sentScreens
+          started <- dons.started
+        } yield assertTrue(screen.last.text.contains("https://pay.test/1")) &&
+                assertTrue(screen.last.choices.map(_.id) == List("DonCheck", "TradeHouse")) &&
+                assertTrue(started.map(_.id) == List("d100"))
+      },
+
+      test("лимит и недоступная касса объясняются игроку, а не падают ошибкой") {
+        for {
+          limited <- TestDonations.on(start = Donations.Start.LimitReached)
+          t1      <- house(heroSilver = 0L, donations = limited)
+          (state1, _, _, renderer1, repo1) = t1
+          _       <- state1.action(testUser, tap("BuyDoubloons"), renderer1)
+          _       <- state1.action(testUser, text("player@mail.ru"), renderer1)
+          fresh1  <- repo1.getUserById(userId).map(_.get)
+          _       <- state1.action(fresh1, pick("DonPay", "d100"), renderer1)
+          limit   <- renderer1.sentScreens
+
+          closed  <- TestDonations.on(start = Donations.Start.Unavailable)
+          t2      <- house(heroSilver = 0L, donations = closed)
+          (state2, _, _, renderer2, repo2) = t2
+          _       <- state2.action(testUser, tap("BuyDoubloons"), renderer2)
+          _       <- state2.action(testUser, text("player@mail.ru"), renderer2)
+          fresh2  <- repo2.getUserById(userId).map(_.get)
+          _       <- state2.action(fresh2, pick("DonPay", "d100"), renderer2)
+          down    <- renderer2.sentScreens
+        } yield assertTrue(limit.last.text.contains("На сегодня с тебя хватит")) &&
+                assertTrue(down.last.text.contains("Касса сейчас закрыта"))
+      },
+
+      test("«Проверить оплату»: зачислено, ещё ждём, не частить") {
+        val payment = order(userId, 9900L, 100L)
+        for {
+          // Тестовые часы стартуют с нуля, а кулдаун считается от метки заказа:
+          // отводим их вперёд, иначе любой опрос выглядит слишком частым.
+          _    <- TestClock.adjust(10.seconds)
+          dons <- TestDonations.on(active = Some(payment), settle = Donations.Settle.Granted(100L))
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, _) = t
+          _      <- state.action(testUser, tap("DonCheck"), renderer)
+          paid   <- renderer.sentScreens
+          _      <- dons.setSettle(Donations.Settle.Pending)
+          _      <- state.action(testUser, tap("DonCheck"), renderer)
+          waited <- renderer.sentScreens
+          // Заказ, который только что опрашивали, второй раз банк не трогает.
+          _      <- dons.setActive(Some(payment.copy(updatedAt = 10000L)))
+          _      <- state.action(testUser, tap("DonCheck"), renderer)
+          often  <- renderer.sentScreens
+        } yield assertTrue(paid.last.text.contains("Зачислено")) &&
+                assertTrue(waited.last.text.contains("Оплата ещё не прошла")) &&
+                assertTrue(often.last.text.contains("Не части"))
+      },
+
+      test("нотификация успела первой — кнопка говорит «уже зачислено», а не «платежей нет»") {
+        val payment = order(userId, 9900L, 100L)
+        for {
+          _    <- TestClock.adjust(10.seconds)
+          dons <- TestDonations.on(active = Some(payment.copy(granted = true)),
+                    settle = Donations.Settle.AlreadyGranted)
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, _) = t
+          _      <- state.action(testUser, tap("DonCheck"), renderer)
+          screen <- renderer.sentScreens
+        } yield assertTrue(screen.last.text.contains("уже зачислены"))
+      },
+
+      test("незавершённый платёж виден на экране покупки вместе с кнопкой проверки") {
+        val payment = order(userId, 49900L, 550L)
+        for {
+          dons <- TestDonations.on(active = Some(payment))
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, userRepo) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _      <- state.action(testUser, text("player@mail.ru"), renderer)
+          fresh  <- userRepo.getUserById(userId).map(_.get)
+          _      <- state.action(fresh, tap("BuyDoubloons"), renderer)
+          screen <- renderer.sentScreens
+        } yield assertTrue(screen.last.text.contains("начатый платёж на 499 ₽")) &&
+                assertTrue(screen.last.choices.map(_.id).contains("DonCheck"))
       },
 
       test("адресом считаем только похожее на адрес") {

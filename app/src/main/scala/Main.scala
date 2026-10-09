@@ -7,6 +7,7 @@ import pangea.dao.admin.AdminDao
 import pangea.dao.artifact.ArtifactDao
 import pangea.dao.parcel.ParcelDao
 import pangea.dao.auction.AuctionDao
+import pangea.dao.payment.PaymentDao
 import pangea.dao.payout.PayoutDao
 import pangea.dao.bank.BankVaultDao
 import pangea.dao.barrel.BarrelDao
@@ -26,7 +27,9 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
+import pangea.client.tbank.{TBankClient, TBankConfig}
 import pangea.service.admin.{AdminConfig, AdminPanel}
+import pangea.service.donation.Donations
 import pangea.service.parcel.{Parcels, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.schedule.{Scheduler, SchedulerPoller}
@@ -40,12 +43,14 @@ import server.model.ServerConfig
 import zio._
 import zio.logging.backend.SLF4J
 
+import java.util.concurrent.TimeUnit
+
 object Main extends ZIOAppDefault {
 
   override val bootstrap: ZLayer[ZIOAppArgs, Nothing, Unit] =
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j
 
-  private type Env = Server with SchedulerPoller
+  private type Env = Server with SchedulerPoller with Donations
 
   private val env =
     ZLayer.make[Env](
@@ -63,6 +68,7 @@ object Main extends ZIOAppDefault {
       AuctionDao.live,
       ArtifactDao.live,
       PayoutDao.live,
+      PaymentDao.live,
       ParcelDao.live,
       ItemDao.live,
       AdminDao.live,
@@ -82,6 +88,9 @@ object Main extends ZIOAppDefault {
       AuctionRepository.live,
       ArtifactRepository.live,
       Payouts.live,
+      TBankConfig.live,
+      TBankClient.live,
+      Donations.live,
       Parcels.live,
       Transfers.live,
       StateHandler.live,
@@ -91,10 +100,23 @@ object Main extends ZIOAppDefault {
       Server.live
     )
 
+  /** Сверка платежей: добирает потерянные нотификации и застрявшие выдачи.
+    * Нотификация обычно приходит за секунды, так что это страховка, а не
+    * основной путь — раз в минуту более чем достаточно. */
+  private val reconcileLoop =
+    ZIO.serviceWithZIO[Donations] { donations =>
+      (ZIO
+        .clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+        .flatMap(donations.reconcile)
+        .catchAllCause(cause => ZIO.logErrorCause("Сверка платежей упала", cause)) *>
+        ZIO.sleep(1.minute)).forever
+    }
+
   private val program =
     for {
       poller <- ZIO.service[SchedulerPoller]
       _      <- poller.start.forkDaemon
+      _      <- reconcileLoop.forkDaemon
       _      <- ZIO.serviceWithZIO[Server](_.run())
     } yield ()
 

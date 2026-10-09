@@ -16,6 +16,8 @@ import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
 import pangea.model.item.{Item, MaterialKind}
 import pangea.model.quest.{DailyNpc, NpcQuest}
+import pangea.model.payment.{DonationSku, Payment}
+import pangea.service.donation.Donations
 import pangea.service.state.{CityExit, DailyDialog, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
 
@@ -29,6 +31,7 @@ case class TradeHouseState(
   bankRepo:      BankRepository,
   parcels:       Parcels,
   inventoryRepo: InventoryRepository,
+  donations:     Donations,
   content:       SceneContent
 ) extends State {
 
@@ -47,6 +50,9 @@ case class TradeHouseState(
       "BuyCell"         -> Target.Run { (u, _, r) => confirmCell(u, r).as(StateType.TradeHouse) },
       "BuyCellConfirm"  -> Target.Run { (u, _, r) => buyCell(u, r).as(StateType.TradeHouse) },
       "BuyDoubloons"    -> Target.Run { (u, _, r) => showDoubloons(u, r).as(StateType.TradeHouse) },
+      "DonPick"         -> Target.Run { (u, ua, r) => confirmDoubloons(u, ua, r).as(StateType.TradeHouse) },
+      "DonPay"          -> Target.Run { (u, ua, r) => payDoubloons(u, ua, r).as(StateType.TradeHouse) },
+      "DonCheck"        -> Target.Run { (u, _, r) => checkPayment(u, r).as(StateType.TradeHouse) },
       "DepositInterest" -> Target.Run { (u, _, r) => showPage(u, r, "bank.tradeHouse.interest").as(StateType.TradeHouse) },
       "MyVault"         -> Target.Goto(StateType.BankVault),
       "Auction"         -> Target.Goto(StateType.Auction),
@@ -197,19 +203,146 @@ case class TradeHouseState(
   private def backRow: List[Choice] =
     List(Choice("TradeHouse", content.text("bank.tradeHouse.back"), color = ChoiceColor.Negative, row = Some(0)))
 
-  // --- Почта для чека ---
+  // --- Покупка дублонов ---
 
-  /** Страница покупки дублонов: показывает записанный адрес для чека и ждёт
-    * новый — свободным сообщением, без кнопок. */
+  /** Страница покупки дублонов: лор, адрес для чека и пакеты. Адрес ждём
+    * свободным сообщением, без кнопок.
+    *
+    * Пакеты показываем только когда адрес записан: без него чек отправить
+    * некуда, а значит и заказ создавать нельзя. */
   private def showDoubloons(user: User, renderer: Renderer): Task[Unit] =
     for {
-      _   <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
-      // Адрес едет в самом `User`: его StateHandler перечитывает перед каждым
-      // действием, так что отдельный запрос за одной строкой тут не нужен.
-      text = content.format("bank.tradeHouse.doubloons",
-               "email" -> user.receiptEmail.getOrElse(content.text("bank.tradeHouse.doubloonsNoEmail")))
-      _   <- renderer.show(user, Screen(text, backRow))
+      _       <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
+      now     <- nowMs
+      pending <- if (donations.enabled) donations.active(user.userId) else ZIO.succeed(None)
+      _       <- renderer.show(user, doubloonsScreen(user, pending, now))
     } yield ()
+
+  private def doubloonsScreen(user: User, pending: Option[Payment], now: Long): Screen = {
+    // Адрес едет в самом `User`: его StateHandler перечитывает перед каждым
+    // действием, так что отдельный запрос за одной строкой тут не нужен.
+    val email = user.receiptEmail
+    val head = content.format("bank.tradeHouse.doubloons",
+      "email" -> email.getOrElse(content.text("bank.tradeHouse.doubloonsNoEmail")))
+
+    val body =
+      if (!donations.enabled) content.text("bank.tradeHouse.doubloonsOff")
+      else if (email.isEmpty) content.text("bank.tradeHouse.doubloonsNeedEmail")
+      else content.text("bank.tradeHouse.doubloonsPacks")
+
+    // Незавершённый платёж с живой ссылкой — чтобы ушедший с экрана игрок не
+    // потерял её и не завёл второй заказ на те же деньги.
+    val waiting = pending.filter(_.linkAlive(now, donations.linkMinutes))
+    val tail    = waiting.map(p => content.format("bank.tradeHouse.doubloonsPending", "price" -> p.rubles))
+
+    val packs =
+      if (!donations.enabled || email.isEmpty) Nil
+      else donations.packs.zipWithIndex.map { case (pack, idx) =>
+        Choice("DonPick",
+          Choice.fit(content.format("bank.tradeHouse.doubloonsPackLabel",
+            "doubloons" -> pack.doubloons.toString, "price" -> pack.rubles)),
+          data = Map("sku" -> pack.id), color = ChoiceColor.Positive, row = Some(idx))
+      }
+
+    Screen(
+      (List(head, body) ++ tail).mkString("\n\n"),
+      packs ++ waiting.map(_ => checkButton) :+ backButton
+    )
+  }
+
+  /** Экран подтверждения. Между кнопкой пакета и платёжной формой он стоит
+    * нарочно: это настоящие деньги, и промах пальцем не должен открывать
+    * кассу. Здесь же последний раз виден адрес, на который уйдёт чек. */
+  private def confirmDoubloons(user: User, ua: UserAction, renderer: Renderer): Task[Unit] =
+    (pickedPack(ua), user.receiptEmail) match {
+      case (Some(pack), Some(email)) =>
+        renderer.show(user, Screen(
+          content.format("bank.tradeHouse.doubloonsConfirm",
+            "doubloons" -> pack.doubloons.toString,
+            "price"     -> pack.rubles,
+            "email"     -> email,
+            "offer"     -> donations.offerUrl),
+          List(
+            Choice("DonPay", content.text("bank.tradeHouse.doubloonsConfirmYes"),
+              data = Map("sku" -> pack.id), color = ChoiceColor.Positive, row = Some(0)),
+            Choice("BuyDoubloons", content.text("bank.tradeHouse.doubloonsConfirmNo"),
+              color = ChoiceColor.Negative, row = Some(0))
+          )))
+      // Пакет пропал из прайса или адрес стёрли — возвращаем на страницу покупки.
+      case _ => showDoubloons(user, renderer)
+    }
+
+  /** Создание заказа и ссылка на оплату.
+    *
+    * Ссылку отдаём текстом, а не кнопкой `open_link`: в мобильном приложении ВК
+    * такая кнопка уводит во встроенный браузер, из которого переход в
+    * банковское приложение по СБП или T-Pay часто не срабатывает. Текстовую
+    * ссылку игрок может открыть в обычном браузере. */
+  private def payDoubloons(user: User, ua: UserAction, renderer: Renderer): Task[Unit] =
+    (pickedPack(ua), user.receiptEmail) match {
+      case (Some(pack), Some(email)) =>
+        for {
+          now   <- nowMs
+          start <- donations.start(user, pack, email, now)
+          _ <- start match {
+            case Donations.Start.Link(payment, url) =>
+              renderer.show(user, Screen(content.format("bank.tradeHouse.doubloonsLink",
+                "url"     -> url,
+                "minutes" -> donations.linkMinutes.toString,
+                "price"   -> payment.rubles), linkRow))
+            case Donations.Start.LimitReached =>
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsLimit"), backRow))
+            case Donations.Start.Unavailable | Donations.Start.Disabled =>
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsUnavailable"), backRow))
+          }
+        } yield ()
+      case _ => showDoubloons(user, renderer)
+    }
+
+  /** «Проверить оплату»: тот же идемпотентный путь выдачи, что у вебхука.
+    * Нужна, потому что игрок нетерпелив, а нотификация может задержаться —
+    * без этой кнопки каждая задержка идёт в поддержку. */
+  private def checkPayment(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      now     <- nowMs
+      pending <- donations.latest(user.userId)
+      _ <- pending match {
+        case None =>
+          renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsNoOrder"), backRow))
+
+        // Частые нажатия не превращаем в запросы к банку: метка последнего
+        // опроса и так лежит в заказе.
+        case Some(payment) if now - payment.updatedAt < TradeHouseState.CheckCooldownMs =>
+          renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsTooOften"), linkRow))
+
+        case Some(payment) =>
+          donations.refresh(payment, now).flatMap {
+            case Donations.Settle.Granted(doubloons) =>
+              renderer.show(user, Screen(content.format("bank.tradeHouse.doubloonsPaid",
+                "doubloons" -> doubloons.toString, "email" -> payment.receiptEmail), backRow))
+            case Donations.Settle.AlreadyGranted =>
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsAlready"), backRow))
+            case Donations.Settle.Pending =>
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsWaiting"), linkRow))
+            case Donations.Settle.Failed =>
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsFailed"), backRow))
+          }
+      }
+    } yield ()
+
+  private def pickedPack(ua: UserAction): Option[DonationSku] =
+    payload(ua, "sku").flatMap(id => donations.packs.find(_.id == id))
+
+  private def payload(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
+
+  private def checkButton: Choice =
+    Choice("DonCheck", content.text("bank.tradeHouse.doubloonsCheckLabel"), row = Some(98))
+
+  private def backButton: Choice =
+    Choice("TradeHouse", content.text("bank.tradeHouse.back"), color = ChoiceColor.Negative, row = Some(99))
+
+  private def linkRow: List[Choice] = List(checkButton, backButton)
 
   /** Любой текст у Рахадима: на странице дублонов это адрес для чека, в
     * остальных случаях — просто возврат в меню. */
@@ -295,6 +428,10 @@ object TradeHouseState {
 
   /** Задаток Рахадима — половина первой ячейки. */
   val QuestSilver: Long = BankVault.FirstCellPrice / 2L
+
+  /** Как часто «Проверить оплату» действительно спрашивает банк. Чаще — только
+    * текст «подождите»: кнопку будут долбить, а `GetState` того не стоит. */
+  val CheckCooldownMs: Long = 5000L
 
   /** Чего банкир ждёт от игрока текстом: на странице дублонов — адрес для
     * чека. Живёт в `heroes.scene_data`, как и прочие режимы ввода. */
