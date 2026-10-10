@@ -16,7 +16,7 @@ import pangea.service.parcel.Parcels
 import pangea.service.purse.Purse
 import pangea.model.item.{Item, MaterialKind}
 import pangea.model.quest.{DailyNpc, NpcQuest}
-import pangea.model.payment.{DonationSku, Payment}
+import pangea.model.payment.{DonationSku, OrderId, Payment}
 import pangea.service.donation.Donations
 import pangea.service.state.{CityExit, DailyDialog, NpcQuestDialog, State, UserAction}
 import zio.{Task, ZIO}
@@ -52,7 +52,7 @@ case class TradeHouseState(
       "BuyDoubloons"    -> Target.Run { (u, _, r) => showDoubloons(u, r).as(StateType.TradeHouse) },
       "DonPick"         -> Target.Run { (u, ua, r) => confirmDoubloons(u, ua, r).as(StateType.TradeHouse) },
       "DonPay"          -> Target.Run { (u, ua, r) => payDoubloons(u, ua, r).as(StateType.TradeHouse) },
-      "DonCheck"        -> Target.Run { (u, _, r) => checkPayment(u, r).as(StateType.TradeHouse) },
+      "DonCheck"        -> Target.Run { (u, ua, r) => checkPayment(u, ua, r).as(StateType.TradeHouse) },
       "DepositInterest" -> Target.Run { (u, _, r) => showPage(u, r, "bank.tradeHouse.interest").as(StateType.TradeHouse) },
       "MyVault"         -> Target.Goto(StateType.BankVault),
       "Auction"         -> Target.Goto(StateType.Auction),
@@ -214,11 +214,11 @@ case class TradeHouseState(
     for {
       _       <- heroDao.writeSceneData(user.userId, TradeHouseState.TradeScene(emailPrompt = true).asJson)
       now     <- nowMs
-      pending <- if (donations.enabled) donations.active(user.userId) else ZIO.succeed(None)
+      pending <- if (donations.enabled) donations.pending(user.userId) else ZIO.succeed(Nil)
       _       <- renderer.show(user, doubloonsScreen(user, pending, now))
     } yield ()
 
-  private def doubloonsScreen(user: User, pending: Option[Payment], now: Long): Screen = {
+  private def doubloonsScreen(user: User, pending: List[Payment], now: Long): Screen = {
     // Адрес едет в самом `User`: его StateHandler перечитывает перед каждым
     // действием, так что отдельный запрос за одной строкой тут не нужен.
     val email = user.receiptEmail
@@ -230,10 +230,15 @@ case class TradeHouseState(
       else if (email.isEmpty) content.text("bank.tradeHouse.doubloonsNeedEmail")
       else content.text("bank.tradeHouse.doubloonsPacks")
 
-    // Незавершённый платёж с живой ссылкой — чтобы ушедший с экрана игрок не
-    // потерял её и не завёл второй заказ на те же деньги.
-    val waiting = pending.filter(_.linkAlive(now, donations.linkMinutes))
-    val tail    = waiting.map(p => content.format("bank.tradeHouse.doubloonsPending", "price" -> p.rubles))
+    // Все живые заказы, а не только последний: игрок мог начать покупку,
+    // передумать и выбрать другой пакет — первая ссылка живёт свой час и
+    // остаётся оплачиваемой. Показать надо обе, иначе одна из них становится
+    // невидимой, но рабочей.
+    val live = pending.filter(_.linkAlive(now, donations.linkMinutes)).take(TradeHouseState.MaxPendingShown)
+    val tail =
+      if (live.isEmpty) Nil
+      else List(content.format("bank.tradeHouse.doubloonsPending",
+        "list" -> live.map(p => s"${p.rubles} ₽").mkString(", ")))
 
     val packs =
       if (!donations.enabled || email.isEmpty) Nil
@@ -246,7 +251,7 @@ case class TradeHouseState(
 
     Screen(
       (List(head, body) ++ tail).mkString("\n\n"),
-      packs ++ waiting.map(_ => checkButton) :+ backButton
+      packs ++ live.map(checkButton) :+ backButton
     )
   }
 
@@ -289,7 +294,7 @@ case class TradeHouseState(
               renderer.show(user, Screen(content.format("bank.tradeHouse.doubloonsLink",
                 "url"     -> url,
                 "minutes" -> donations.linkMinutes.toString,
-                "price"   -> payment.rubles), linkRow))
+                "price"   -> payment.rubles), linkRow(payment)))
             case Donations.Start.LimitReached =>
               renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsLimit"), backRow))
             case Donations.Start.Unavailable | Donations.Start.Disabled =>
@@ -302,18 +307,23 @@ case class TradeHouseState(
   /** «Проверить оплату»: тот же идемпотентный путь выдачи, что у вебхука.
     * Нужна, потому что игрок нетерпелив, а нотификация может задержаться —
     * без этой кнопки каждая задержка идёт в поддержку. */
-  private def checkPayment(user: User, renderer: Renderer): Task[Unit] =
+  private def checkPayment(user: User, ua: UserAction, renderer: Renderer): Task[Unit] =
     for {
-      now     <- nowMs
-      pending <- donations.latest(user.userId)
-      _ <- pending match {
+      now <- nowMs
+      // Номер заказа приезжает в кнопке: на экране их может быть несколько.
+      // Кнопка со старого экрана приходит без номера — тогда берём последний.
+      found <- payload(ua, "order") match {
+        case Some(id) => donations.find(user.userId, OrderId(id))
+        case None     => donations.latest(user.userId)
+      }
+      _ <- found match {
         case None =>
           renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsNoOrder"), backRow))
 
         // Частые нажатия не превращаем в запросы к банку: метка последнего
         // опроса и так лежит в заказе.
         case Some(payment) if now - payment.updatedAt < TradeHouseState.CheckCooldownMs =>
-          renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsTooOften"), linkRow))
+          renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsTooOften"), linkRow(payment)))
 
         case Some(payment) =>
           donations.refresh(payment, now).flatMap {
@@ -323,7 +333,7 @@ case class TradeHouseState(
             case Donations.Settle.AlreadyGranted =>
               renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsAlready"), backRow))
             case Donations.Settle.Pending =>
-              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsWaiting"), linkRow))
+              renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsWaiting"), linkRow(payment)))
             case Donations.Settle.Failed =>
               renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsFailed"), backRow))
           }
@@ -336,13 +346,17 @@ case class TradeHouseState(
   private def payload(ua: UserAction, key: String): Option[String] =
     ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
 
-  private def checkButton: Choice =
-    Choice("DonCheck", content.text("bank.tradeHouse.doubloonsCheckLabel"), row = Some(98))
+  /** Кнопка проверки несёт номер своего заказа: заказов на экране может быть
+    * несколько, и проверять надо именно тот, рядом с которым нажали. */
+  private def checkButton(payment: Payment): Choice =
+    Choice("DonCheck",
+      Choice.fit(content.format("bank.tradeHouse.doubloonsCheckLabel", "price" -> payment.rubles)),
+      data = Map("order" -> payment.orderId.value), row = Some(98))
 
   private def backButton: Choice =
     Choice("TradeHouse", content.text("bank.tradeHouse.back"), color = ChoiceColor.Negative, row = Some(99))
 
-  private def linkRow: List[Choice] = List(checkButton, backButton)
+  private def linkRow(payment: Payment): List[Choice] = List(checkButton(payment), backButton)
 
   /** Любой текст у Рахадима: на странице дублонов это адрес для чека, в
     * остальных случаях — просто возврат в меню. */
@@ -432,6 +446,10 @@ object TradeHouseState {
   /** Как часто «Проверить оплату» действительно спрашивает банк. Чаще — только
     * текст «подождите»: кнопку будут долбить, а `GetState` того не стоит. */
   val CheckCooldownMs: Long = 5000L
+
+  /** Сколько незавершённых заказов показываем кнопками. Больше четырёх в один
+    * ряд клавиатура ВК не возьмёт, а столько их на практике и не бывает. */
+  val MaxPendingShown: Int = 4
 
   /** Чего банкир ждёт от игрока текстом: на странице дублонов — адрес для
     * чека. Живёт в `heroes.scene_data`, как и прочие режимы ввода. */

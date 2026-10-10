@@ -4,7 +4,7 @@ import io.circe.Json
 import pangea.client.tbank.{TBankClient, TBankConfig}
 import pangea.dao.payment.PaymentDao
 import pangea.engine.Journal
-import pangea.model.payment.{DonationSku, Payment}
+import pangea.model.payment.{DonationSku, OrderId, Payment}
 import pangea.model.user.{User, UserId}
 import pangea.repository.user.UserRepository
 import pangea.service.sender.Api
@@ -28,8 +28,14 @@ trait Donations {
 
   def linkMinutes: Int
 
-  /** Незакрытый заказ игрока, если есть. */
-  def active(userId: UserId): Task[Option[Payment]]
+  /** Все незакрытые заказы игрока, новые первыми. Их бывает несколько: начал
+    * покупку, передумал и выбрал другой пакет — первая ссылка живёт свой час и
+    * остаётся оплачиваемой. */
+  def pending(userId: UserId): Task[List[Payment]]
+
+  /** Заказ игрока по номеру. Владелец проверяется здесь: номер приезжает из
+    * payload кнопки, и чужой заказ по нему открываться не должен. */
+  def find(userId: UserId, orderId: OrderId): Task[Option[Payment]]
 
   /** Заказ, о котором стоит ответить на «Проверить оплату»: незакрытый или
     * только что оплаченный. Отличается от [[active]] тем, что уже выданный

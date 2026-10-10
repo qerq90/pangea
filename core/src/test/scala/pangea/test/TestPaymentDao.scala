@@ -29,13 +29,12 @@ class TestPaymentDao(
   override def byOrderId(orderId: OrderId): Task[Option[Payment]] =
     rowsRef.get.map(_.get(orderId.value))
 
-  override def activeOf(userId: UserId): Task[Option[Payment]] =
+  override def pendingOf(userId: UserId): Task[List[Payment]] =
     rowsRef.get.map(
       _.values
         .filter(p => p.userId == userId && !p.status.settled)
         .toList
         .sortBy(-_.createdAt)
-        .headOption
     )
 
   override def lastOf(userId: UserId): Task[Option[Payment]] =

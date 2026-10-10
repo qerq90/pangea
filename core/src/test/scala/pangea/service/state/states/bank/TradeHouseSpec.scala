@@ -28,6 +28,10 @@ object TradeHouseSpec extends ZIOSpecDefault {
   private def pick(key: String, sku: String): UserAction =
     UserAction("", Some(s"""{"action":"$key","sku":"$sku"}"""))
 
+  /** Кнопка проверки конкретного заказа. */
+  private def pickOrder(orderId: String): UserAction =
+    UserAction("", Some(s"""{"action":"DonCheck","order":"$orderId"}"""))
+
   /** Заказ в полёте — ровно то, что отдаёт `Donations.active`. */
   private def order(user: UserId, kopecks: Long, doubloons: Long): Payment =
     Payment(
@@ -299,7 +303,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
           // Тестовые часы стартуют с нуля, а кулдаун считается от метки заказа:
           // отводим их вперёд, иначе любой опрос выглядит слишком частым.
           _    <- TestClock.adjust(10.seconds)
-          dons <- TestDonations.on(active = Some(payment), settle = Donations.Settle.Granted(100L))
+          dons <- TestDonations.on(pending = List(payment), settle = Donations.Settle.Granted(100L))
           t    <- house(heroSilver = 0L, donations = dons)
           (state, _, _, renderer, _) = t
           _      <- state.action(testUser, tap("DonCheck"), renderer)
@@ -308,7 +312,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
           _      <- state.action(testUser, tap("DonCheck"), renderer)
           waited <- renderer.sentScreens
           // Заказ, который только что опрашивали, второй раз банк не трогает.
-          _      <- dons.setActive(Some(payment.copy(updatedAt = 10000L)))
+          _      <- dons.setPending(List(payment.copy(updatedAt = 10000L)))
           _      <- state.action(testUser, tap("DonCheck"), renderer)
           often  <- renderer.sentScreens
         } yield assertTrue(paid.last.text.contains("Зачислено")) &&
@@ -320,7 +324,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
         val payment = order(userId, 9900L, 100L)
         for {
           _    <- TestClock.adjust(10.seconds)
-          dons <- TestDonations.on(active = Some(payment.copy(granted = true)),
+          dons <- TestDonations.on(pending = List(payment.copy(granted = true)),
                     settle = Donations.Settle.AlreadyGranted)
           t    <- house(heroSilver = 0L, donations = dons)
           (state, _, _, renderer, _) = t
@@ -329,10 +333,12 @@ object TradeHouseSpec extends ZIOSpecDefault {
         } yield assertTrue(screen.last.text.contains("уже зачислены"))
       },
 
-      test("незавершённый платёж виден на экране покупки вместе с кнопкой проверки") {
-        val payment = order(userId, 49900L, 550L)
+      test("два незавершённых платежа видны оба, у каждого своя кнопка") {
+        val big   = order(userId, 49900L, 550L).copy(orderId = OrderId("d-big"))
+        val small = order(userId, 9900L, 100L).copy(orderId = OrderId("d-small"))
         for {
-          dons <- TestDonations.on(active = Some(payment))
+          _    <- TestClock.adjust(10.seconds)
+          dons <- TestDonations.on(pending = List(small, big))
           t    <- house(heroSilver = 0L, donations = dons)
           (state, _, _, renderer, userRepo) = t
           _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
@@ -340,8 +346,42 @@ object TradeHouseSpec extends ZIOSpecDefault {
           fresh  <- userRepo.getUserById(userId).map(_.get)
           _      <- state.action(fresh, tap("BuyDoubloons"), renderer)
           screen <- renderer.sentScreens
-        } yield assertTrue(screen.last.text.contains("начатый платёж на 499 ₽")) &&
-                assertTrue(screen.last.choices.map(_.id).contains("DonCheck"))
+          orders  = screen.last.choices.flatMap(_.data.get("order")).toSet
+        } yield assertTrue(screen.last.text.contains("99 ₽, 499 ₽")) &&
+                assertTrue(screen.last.choices.count(_.id == "DonCheck") == 2) &&
+                assertTrue(orders == Set("d-small", "d-big"))
+      },
+
+      test("проверяется тот заказ, кнопку которого нажали, а не последний") {
+        val big   = order(userId, 49900L, 550L).copy(orderId = OrderId("d-big"))
+        val small = order(userId, 9900L, 100L).copy(orderId = OrderId("d-small"))
+        for {
+          _    <- TestClock.adjust(10.seconds)
+          dons <- TestDonations.on(pending = List(small, big))
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, _) = t
+          // Нажимаем кнопку старого, не последнего заказа.
+          _      <- state.action(testUser, pickOrder("d-big"), renderer)
+          asked  <- dons.refreshed
+        } yield assertTrue(asked.map(_.orderId.value) == List("d-big"))
+      },
+
+      test("незавершённый платёж виден на экране покупки вместе с кнопкой проверки") {
+        val payment = order(userId, 49900L, 550L)
+        for {
+          dons <- TestDonations.on(pending = List(payment))
+          t    <- house(heroSilver = 0L, donations = dons)
+          (state, _, _, renderer, userRepo) = t
+          _      <- state.action(testUser, tap("BuyDoubloons"), renderer)
+          _      <- state.action(testUser, text("player@mail.ru"), renderer)
+          fresh  <- userRepo.getUserById(userId).map(_.get)
+          _      <- state.action(fresh, tap("BuyDoubloons"), renderer)
+          screen <- renderer.sentScreens
+        } yield assertTrue(screen.last.text.contains("Незавершённые платежи: 499 ₽")) &&
+                assertTrue(screen.last.choices.map(_.id).contains("DonCheck")) &&
+                // Кнопка несёт номер своего заказа — иначе при двух платежах
+                // проверялся бы не тот.
+                assertTrue(screen.last.choices.exists(_.data.get("order").contains("d-test")))
       },
 
       test("адресом считаем только похожее на адрес") {

@@ -25,7 +25,10 @@ final case class DonationsLive(
   override def offerUrl: String      = config.offerUrl
   override def linkMinutes: Int      = config.linkMinutes
 
-  override def active(userId: UserId): Task[Option[Payment]] = payments.activeOf(userId)
+  override def pending(userId: UserId): Task[List[Payment]] = payments.pendingOf(userId)
+
+  override def find(userId: UserId, orderId: OrderId): Task[Option[Payment]] =
+    payments.byOrderId(orderId).map(_.filter(_.userId == userId))
 
   override def latest(userId: UserId): Task[Option[Payment]] = payments.lastOf(userId)
 
@@ -54,11 +57,13 @@ final case class DonationsLive(
         .map(spent => spent + sku.price <= config.dailyLimit)
 
   /** Начатый и ещё живой заказ на тот же пакет — чтобы вернувшийся на экран
-    * игрок получил свою прежнюю ссылку. */
+    * игрок получил свою прежнюю ссылку. Ищем среди всех незакрытых, а не
+    * только среди последнего: игрок мог начать второй заказ на другой пакет,
+    * а потом вернуться к первому. */
   private def reusable(userId: UserId, sku: DonationSku, now: Long): Task[Option[Payment]] =
     payments
-      .activeOf(userId)
-      .map(_.filter(p => p.sku == sku.id && p.linkAlive(now, config.linkMinutes)))
+      .pendingOf(userId)
+      .map(_.find(p => p.sku == sku.id && p.linkAlive(now, config.linkMinutes)))
 
   private def create(user: User, sku: DonationSku, email: String, now: Long): Task[Donations.Start] =
     for {
