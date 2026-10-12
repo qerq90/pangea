@@ -1,7 +1,7 @@
 package pangea.service.donation
 
 import io.circe.Json
-import pangea.client.tbank.{InitRequest, TBankClient, TBankConfig}
+import pangea.client.robokassa.{OpState, PaymentRequest, RobokassaApi, RobokassaClient, RobokassaConfig}
 import pangea.dao.payment.{GrantResult, PaymentDao}
 import pangea.engine.Journal
 import pangea.model.GameEvent
@@ -12,8 +12,8 @@ import pangea.service.sender.Api
 import zio.{Random, Task, ZIO}
 
 final case class DonationsLive(
-  config:   TBankConfig,
-  bank:     TBankClient,
+  config:   RobokassaConfig,
+  kassa:    RobokassaClient,
   payments: PaymentDao,
   api:      Api,
   users:    UserRepository,
@@ -65,6 +65,9 @@ final case class DonationsLive(
       .pendingOf(userId)
       .map(_.find(p => p.sku == sku.id && p.linkAlive(now, config.linkMinutes)))
 
+  /** Новый заказ. Строка вставляется первой: её `id` и есть `InvId` для
+    * кассы, а ссылка собирается у нас же, без запроса наружу — поэтому
+    * «касса не ответила» на этом шаге не бывает. */
   private def create(user: User, sku: DonationSku, email: String, now: Long): Task[Donations.Start] =
     for {
       orderId <- newOrderId(user.userId, now)
@@ -85,63 +88,54 @@ final case class DonationsLive(
                 updatedAt     = now
               )
       id <- payments.insert(draft)
-      request = InitRequest(
-                  amount       = sku.price,
-                  orderId      = orderId.value,
-                  description  = sku.receipt,
-                  customerKey  = user.userId.value.toString,
-                  receiptEmail = email,
-                  receiptName  = sku.receipt
-                )
-      result <- bank
-                  .init(request, now + config.linkMinutes.toLong * 60000L)
-                  .either
-      start <- result match {
-        case Right(response) if response.success && response.paymentUrl.exists(_.nonEmpty) =>
-          val paymentId = response.paymentId.getOrElse("")
-          val url       = response.paymentUrl.get
-          payments.setStarted(orderId, paymentId, url, now) *>
-            ZIO.logInfo(s"donation: заказ ${orderId.value} создан, ${sku.rubles} ₽, ${sku.doubloons} дублонов") *>
-            ZIO.succeed(Donations.Start.Link(
-              draft.copy(id = id, paymentId = Some(paymentId), paymentUrl = Some(url)), url))
+      url = kassa.paymentUrl(PaymentRequest(
+              invId       = id,
+              amount      = sku.price,
+              description = sku.receipt,
+              email       = email,
+              receiptName = sku.receipt,
+              dueAtMs     = now + config.linkMinutes.toLong * 60000L
+            ))
+      _ <- payments.setStarted(orderId, id.toString, url, now)
+      _ <- ZIO.logInfo(s"donation: заказ ${orderId.value} (InvId $id) создан, ${sku.rubles} ₽, ${sku.doubloons} дублонов")
+    } yield Donations.Start.Link(draft.copy(id = id, paymentId = Some(id.toString), paymentUrl = Some(url)), url)
 
-        case Right(response) =>
-          // Касса ответила отказом: заказ закрываем, денег с игрока не брали.
-          payments.setStatus(orderId, PaymentStatus.Rejected, response.status.getOrElse("INIT_FAILED"), now) *>
-            ZIO.logError(s"donation: Init отказал по заказу ${orderId.value}: ${response.problem}") *>
-            ZIO.succeed(Donations.Start.Unavailable)
-
-        case Left(error) =>
-          payments.setStatus(orderId, PaymentStatus.Rejected, "INIT_ERROR", now) *>
-            ZIO.logError(s"donation: Init упал по заказу ${orderId.value}: ${error.getMessage}") *>
-            ZIO.succeed(Donations.Start.Unavailable)
-      }
-    } yield start
-
-  /** Номер заказа: читаемый, уникальный и короче 50 символов, как требует
-    * банк. Случайный хвост — на случай двух заказов в одну миллисекунду. */
+  /** Номер заказа: читаемый и уникальный. Случайный хвост — на случай двух
+    * заказов в одну миллисекунду. */
   private def newOrderId(userId: UserId, now: Long): Task[OrderId] =
     Random.nextIntBetween(1000, 10000).map(salt => OrderId(s"d-${userId.value}-$now-$salt"))
 
   // ── Опрос и выдача ────────────────────────────────────────────────────────
 
   override def refresh(payment: Payment, now: Long): Task[Donations.Settle] =
-    payment.paymentId match {
-      // Заказ не доехал до банка — спрашивать не о чем.
+    payment.paymentId.flatMap(_.toLongOption) match {
+      // Заказ не дошёл до ссылки — спрашивать не о чем.
       case None => ZIO.succeed(Donations.Settle.Pending)
-      case Some(paymentId) =>
-        bank.getState(paymentId).either.flatMap {
+      case Some(invId) =>
+        kassa.opState(invId).either.flatMap {
           case Left(error) =>
-            ZIO.logWarning(s"donation: GetState по ${payment.orderId.value} не ответил: ${error.getMessage}")
+            ZIO.logWarning(s"donation: OpStateExt по ${payment.orderId.value} не ответил: ${error.getMessage}")
               .as(Donations.Settle.Pending)
-          case Right(response) =>
-            val raw    = response.status.getOrElse("UNKNOWN")
-            val status = PaymentStatus.fromBank(raw)
-            payments.setStatus(payment.orderId, status, raw, now) *> settle(payment, status, now)
+
+          case Right(OpState.Found(code)) =>
+            val status = PaymentStatus.fromRobokassa(code)
+            payments.setStatus(payment.orderId, status, s"STATE_$code", now) *> settle(payment, status, now)
+
+          // Операции нет: игрок ещё не ввёл реквизиты или бросил ссылку. Пока
+          // она жива — ждём; потом закрываем, иначе сверка гоняла бы брошенный
+          // заказ вечно. Если касса всё же примет оплату по «пережившей»
+          // ссылке, уведомление выдаст её и по закрытому заказу.
+          case Right(OpState.NotFound) =>
+            val status = if (payment.linkAlive(now, config.linkMinutes)) PaymentStatus.New else PaymentStatus.Rejected
+            payments.setStatus(payment.orderId, status, "NOT_FOUND", now) *> settle(payment, status, now)
+
+          case Right(OpState.Failed(code, description)) =>
+            ZIO.logError(s"donation: OpStateExt по ${payment.orderId.value} отказал: $code $description")
+              .as(Donations.Settle.Pending)
         }
     }
 
-  /** Выдача по статусу — одна для всех трёх путей: нотификация, кнопка, сверка. */
+  /** Выдача по статусу — одна для всех трёх путей: уведомление, кнопка, сверка. */
   private def settle(payment: Payment, status: PaymentStatus, now: Long): Task[Donations.Settle] =
     if (!status.paid) ZIO.succeed(if (status.settled) Donations.Settle.Failed else Donations.Settle.Pending)
     else
@@ -163,43 +157,39 @@ final case class DonationsLive(
             ZIO.succeed(Donations.Settle.Granted(payment.doubloons))
       }
 
-  // ── Нотификация банка ─────────────────────────────────────────────────────
+  // ── Уведомление ResultURL ─────────────────────────────────────────────────
 
-  override def notified(body: Json, now: Long): Task[Donations.Notified] =
-    body.asObject match {
-      case None => ZIO.succeed(Donations.Notified.Ignored("тело не объект"))
-      case Some(obj) if !bank.verify(obj) =>
-        ZIO.logError("donation: нотификация с неверной подписью").as(Donations.Notified.BadSignature)
-      case Some(obj) =>
-        val orderId = obj("OrderId").flatMap(_.asString).map(OrderId.apply)
-        val raw     = obj("Status").flatMap(_.asString).getOrElse("UNKNOWN")
-        val amount  = obj("Amount").flatMap(_.asNumber).flatMap(_.toLong)
-        orderId match {
-          case None => ZIO.succeed(Donations.Notified.Ignored("нет OrderId"))
-          case Some(id) =>
-            payments.byOrderId(id).flatMap {
-              case None =>
-                // Чужой или уже вычищенный заказ. Повтор не поможет — закрываем.
-                ZIO.logError(s"donation: нотификация по неизвестному заказу ${id.value}")
-                  .as(Donations.Notified.Ignored("заказ не найден"))
+  /** ResultURL касса шлёт только по успешной оплате, так что само уведомление с
+    * верной подписью и есть «оплачено». Сумму всё равно сверяем: подпись
+    * подтверждает, что прислала касса, но не то, что заплачено обещанное. */
+  override def notified(params: Map[String, String], now: Long): Task[Donations.Notified] =
+    if (!kassa.verify(params))
+      ZIO.logError("donation: уведомление с неверной подписью").as(Donations.Notified.BadSignature)
+    else
+      params.get("InvId") match {
+        case None => ZIO.succeed(Donations.Notified.Ignored("нет InvId"))
+        case Some(invId) =>
+          payments.byPaymentId(invId).flatMap {
+            case None =>
+              // Чужой или уже вычищенный заказ. Повтор не поможет — закрываем.
+              ZIO.logError(s"donation: уведомление по неизвестному счёту $invId")
+                .as(Donations.Notified.Ignored("заказ не найден"))
 
-              case Some(payment) if amount.exists(_ != payment.amountKopecks) =>
-                // Подпись верна, а сумма не та: выдавать нельзя, повторять
-                // бессмысленно — только разбор руками.
-                ZIO.logError(s"donation: по заказу ${id.value} пришло ${amount.getOrElse(0L)} копеек " +
-                  s"вместо ${payment.amountKopecks} — выдача остановлена")
-                  .as(Donations.Notified.Ignored("сумма не совпала"))
+            case Some(payment) if !params.get("OutSum").flatMap(RobokassaApi.kopecks).contains(payment.amountKopecks) =>
+              // Подпись верна, а сумма не та: выдавать нельзя, повторять
+              // бессмысленно — только разбор руками.
+              ZIO.logError(s"donation: по заказу ${payment.orderId.value} пришло OutSum=" +
+                s"${params.getOrElse("OutSum", "")} вместо ${payment.amountKopecks} копеек — выдача остановлена")
+                .as(Donations.Notified.Ignored("сумма не совпала"))
 
-              case Some(payment) =>
-                val status = PaymentStatus.fromBank(raw)
-                payments.setStatus(id, status, raw, now) *>
-                  settle(payment, status, now).map {
-                    case Donations.Settle.Granted(_) => Donations.Notified.Granted(payment)
-                    case _                           => Donations.Notified.Accepted
-                  }
-            }
-        }
-    }
+            case Some(payment) =>
+              payments.setStatus(payment.orderId, PaymentStatus.Confirmed, "RESULT_URL", now) *>
+                settle(payment, PaymentStatus.Confirmed, now).map {
+                  case Donations.Settle.Granted(_) => Donations.Notified.Granted(payment)
+                  case _                           => Donations.Notified.Accepted
+                }
+          }
+      }
 
   // ── Письмо игроку ─────────────────────────────────────────────────────────
 
@@ -214,16 +204,17 @@ final case class DonationsLive(
           .sendMessage(user, DonationsLive.granted(payment), List.empty, None)
           .catchAll(err =>
             // Дублоны уже на руках; недоставленное письмо само попадёт в
-            // `send_failures`, и терять из-за него ответ банку нельзя.
+            // `send_failures`, и терять из-за него ответ кассе нельзя.
             ZIO.logWarning(s"donation: письмо о ${payment.orderId.value} не ушло: ${err.getMessage}")
           )
     }
 
   // ── Сверка ────────────────────────────────────────────────────────────────
 
-  /** Что чинит сверка: потерянную нотификацию (деньги взяты, мы не знаем) и
-    * застрявшую выдачу (знаем, но героя не было). Первое добирает `GetState`,
-    * второе — повторный `settle` по уже известному статусу. */
+  /** Что чинит сверка: потерянное уведомление (деньги взяты, мы не знаем),
+    * застрявшую выдачу (знаем, но героя не было) и брошенный заказ (ссылка
+    * истекла, а касса так ничего и не увидела). Первое и третье добирает
+    * `OpStateExt`, второе — повторный `settle` по уже известному статусу. */
   override def reconcile(now: Long): Task[Unit] =
     payments.unsettled(now - Donations.ReconcileAfterMs, Donations.ReconcileBatch).flatMap { stuck =>
       ZIO.foreachDiscard(stuck) { payment =>

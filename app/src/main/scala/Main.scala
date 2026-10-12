@@ -27,7 +27,7 @@ import pangea.repository.hero.HeroRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
-import pangea.client.tbank.{TBankClient, TBankConfig}
+import pangea.client.robokassa.{RobokassaClient, RobokassaConfig}
 import pangea.service.admin.{AdminConfig, AdminPanel}
 import pangea.service.donation.Donations
 import pangea.service.parcel.{Parcels, Transfers}
@@ -88,8 +88,8 @@ object Main extends ZIOAppDefault {
       AuctionRepository.live,
       ArtifactRepository.live,
       Payouts.live,
-      TBankConfig.live,
-      TBankClient.live,
+      RobokassaConfig.live,
+      RobokassaClient.live,
       Donations.live,
       Parcels.live,
       Transfers.live,
@@ -100,8 +100,8 @@ object Main extends ZIOAppDefault {
       Server.live
     )
 
-  /** Сверка платежей: добирает потерянные нотификации и застрявшие выдачи.
-    * Нотификация обычно приходит за секунды, так что это страховка, а не
+  /** Сверка платежей: добирает потерянные уведомления и застрявшие выдачи.
+    * Уведомление обычно приходит за секунды, так что это страховка, а не
     * основной путь — раз в минуту более чем достаточно. */
   private val reconcileLoop =
     ZIO.serviceWithZIO[Donations] { donations =>

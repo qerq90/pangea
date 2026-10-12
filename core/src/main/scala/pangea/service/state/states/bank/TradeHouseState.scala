@@ -281,7 +281,7 @@ case class TradeHouseState(
     *
     * Ссылку отдаём текстом, а не кнопкой `open_link`: в мобильном приложении ВК
     * такая кнопка уводит во встроенный браузер, из которого переход в
-    * банковское приложение по СБП или T-Pay часто не срабатывает. Текстовую
+    * банковское приложение (СБП, SberPay) часто не срабатывает. Текстовую
     * ссылку игрок может открыть в обычном браузере. */
   private def payDoubloons(user: User, ua: UserAction, renderer: Renderer): Task[Unit] =
     (pickedPack(ua), user.receiptEmail) match {
@@ -297,7 +297,7 @@ case class TradeHouseState(
                 "price"   -> payment.rubles), linkRow(payment)))
             case Donations.Start.LimitReached =>
               renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsLimit"), backRow))
-            case Donations.Start.Unavailable | Donations.Start.Disabled =>
+            case Donations.Start.Disabled =>
               renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsUnavailable"), backRow))
           }
         } yield ()
@@ -305,7 +305,7 @@ case class TradeHouseState(
     }
 
   /** «Проверить оплату»: тот же идемпотентный путь выдачи, что у вебхука.
-    * Нужна, потому что игрок нетерпелив, а нотификация может задержаться —
+    * Нужна, потому что игрок нетерпелив, а уведомление может задержаться —
     * без этой кнопки каждая задержка идёт в поддержку. */
   private def checkPayment(user: User, ua: UserAction, renderer: Renderer): Task[Unit] =
     for {
@@ -320,7 +320,7 @@ case class TradeHouseState(
         case None =>
           renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsNoOrder"), backRow))
 
-        // Частые нажатия не превращаем в запросы к банку: метка последнего
+        // Частые нажатия не превращаем в запросы к кассе: метка последнего
         // опроса и так лежит в заказе.
         case Some(payment) if now - payment.updatedAt < TradeHouseState.CheckCooldownMs =>
           renderer.show(user, Screen(content.text("bank.tradeHouse.doubloonsTooOften"), linkRow(payment)))
@@ -443,8 +443,8 @@ object TradeHouseState {
   /** Задаток Рахадима — половина первой ячейки. */
   val QuestSilver: Long = BankVault.FirstCellPrice / 2L
 
-  /** Как часто «Проверить оплату» действительно спрашивает банк. Чаще — только
-    * текст «подождите»: кнопку будут долбить, а `GetState` того не стоит. */
+  /** Как часто «Проверить оплату» действительно спрашивает кассу. Чаще — только
+    * текст «подождите»: кнопку будут долбить, а `OpStateExt` того не стоит. */
   val CheckCooldownMs: Long = 5000L
 
   /** Сколько незавершённых заказов показываем кнопками. Больше четырёх в один

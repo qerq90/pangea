@@ -39,10 +39,14 @@ class PaymentDaoLive(xa: Transactor[Task]) extends PaymentDao {
     (fr"select" ++ columns ++ fr"from payments where order_id = ${orderId.value}")
       .query[Payment].option.transact(xa)
 
+  override def byPaymentId(paymentId: String): Task[Option[Payment]] =
+    (fr"select" ++ columns ++ fr"from payments where payment_id = $paymentId")
+      .query[Payment].option.transact(xa)
+
   override def pendingOf(userId: UserId): Task[List[Payment]] =
     (fr"select" ++ columns ++
       fr"""from payments
-           where user_id = ${userId.value} and status in ('New', 'FormShowed', 'Authorized')
+           where user_id = ${userId.value} and status in ('New', 'Authorized')
            order by created_at desc""")
       .query[Payment].to[List].transact(xa)
 
@@ -55,7 +59,7 @@ class PaymentDaoLive(xa: Transactor[Task]) extends PaymentDao {
     (fr"select" ++ columns ++
       fr"""from payments
            where not granted and updated_at <= $olderThan
-             and status in ('New', 'FormShowed', 'Authorized', 'Confirmed')
+             and status in ('New', 'Authorized', 'Confirmed')
            order by updated_at limit $limit""")
       .query[Payment].to[List].transact(xa)
 

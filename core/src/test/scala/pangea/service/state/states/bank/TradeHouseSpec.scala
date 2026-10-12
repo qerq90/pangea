@@ -274,7 +274,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
                 assertTrue(started.map(_.id) == List("d100"))
       },
 
-      test("лимит и недоступная касса объясняются игроку, а не падают ошибкой") {
+      test("лимит и закрытая касса объясняются игроку, а не падают ошибкой") {
         for {
           limited <- TestDonations.on(start = Donations.Start.LimitReached)
           t1      <- house(heroSilver = 0L, donations = limited)
@@ -285,7 +285,7 @@ object TradeHouseSpec extends ZIOSpecDefault {
           _       <- state1.action(fresh1, pick("DonPay", "d100"), renderer1)
           limit   <- renderer1.sentScreens
 
-          closed  <- TestDonations.on(start = Donations.Start.Unavailable)
+          closed  <- TestDonations.on(start = Donations.Start.Disabled)
           t2      <- house(heroSilver = 0L, donations = closed)
           (state2, _, _, renderer2, repo2) = t2
           _       <- state2.action(testUser, tap("BuyDoubloons"), renderer2)

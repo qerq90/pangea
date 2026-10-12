@@ -1,7 +1,6 @@
 package pangea.service.donation
 
-import io.circe.Json
-import pangea.client.tbank.{TBankClient, TBankConfig}
+import pangea.client.robokassa.{RobokassaClient, RobokassaConfig}
 import pangea.dao.payment.PaymentDao
 import pangea.engine.Journal
 import pangea.model.payment.{DonationSku, OrderId, Payment}
@@ -10,16 +9,16 @@ import pangea.repository.user.UserRepository
 import pangea.service.sender.Api
 import zio.{Task, ZLayer}
 
-/** Донат: продажа дублонов за рубли через кассу Т-Банка.
+/** Донат: продажа дублонов за рубли через Робокассу.
   *
   * Единственная точка, где дублоны начисляются за деньги, и единственная, где
-  * этот путь идемпотентен. Выдача идёт только по статусу `CONFIRMED` и только
+  * этот путь идемпотентен. Выдача идёт только по оплаченному заказу и только
   * через [[PaymentDao.grantOnce]], потому что приходит она отовсюду сразу:
-  * нотификация банка (минимум дважды), кнопка «Проверить оплату» и фоновая
-  * сверка могут сработать одновременно. */
+  * уведомление ResultURL, кнопка «Проверить оплату» и фоновая сверка могут
+  * сработать одновременно. */
 trait Donations {
 
-  /** Включён ли донат: есть ключи терминала и непустой прайс-лист. */
+  /** Включён ли донат: есть логин и пароли магазина и непустой прайс-лист. */
   def enabled: Boolean
 
   def packs: List[DonationSku]
@@ -46,18 +45,20 @@ trait Donations {
   /** Начать покупку: вернуть ссылку на оплату. */
   def start(user: User, sku: DonationSku, email: String, now: Long): Task[Donations.Start]
 
-  /** Спросить банк о судьбе заказа и, если оплачен, выдать. За этим стоит
+  /** Спросить кассу о судьбе заказа и, если оплачен, выдать. За этим стоит
     * кнопка «Проверить оплату». */
   def refresh(payment: Payment, now: Long): Task[Donations.Settle]
 
-  /** Нотификация банка: проверить подпись, обновить статус, выдать. */
-  def notified(body: Json, now: Long): Task[Donations.Notified]
+  /** Уведомление ResultURL: проверить подпись и сумму, выдать. Параметры —
+    * поля формы, как их прислала касса. */
+  def notified(params: Map[String, String], now: Long): Task[Donations.Notified]
 
   /** Сообщить игроку о зачислении. Отдельно от выдачи: кнопка «Проверить
     * оплату» рисует свой экран, а вебхуку и сверке нужно именно письмо. */
   def announce(payment: Payment): Task[Unit]
 
-  /** Один проход сверки: добрать потерянные нотификации и застрявшие выдачи. */
+  /** Один проход сверки: добрать потерянные уведомления, застрявшие выдачи и
+    * закрыть брошенные заказы. */
   def reconcile(now: Long): Task[Unit]
 }
 
@@ -72,9 +73,6 @@ object Donations {
 
     /** Суточный лимит исчерпан. */
     case object LimitReached extends Start
-
-    /** Касса не ответила. Заказ закрыт, деньги не тронуты. */
-    case object Unavailable extends Start
 
     /** Донат выключен конфигом. */
     case object Disabled extends Start
@@ -93,13 +91,12 @@ object Donations {
     /** Деньги ещё в пути. */
     case object Pending extends Settle
 
-    /** Заказ умер: отказ, отмена, просрочка. */
+    /** Заказ умер: отмена, отказ, просрочка ссылки. */
     case object Failed extends Settle
   }
 
-  /** Чем кончилась обработка нотификации. На всё, кроме испорченной подписи,
-    * банку надо ответить `OK`: повтор такие случаи не вылечит, а слать их он
-    * будет месяц. */
+  /** Чем кончилась обработка уведомления. На всё, кроме испорченной подписи,
+    * кассе надо ответить `OK{InvId}`: повтор такие случаи не вылечит. */
   sealed trait Notified
   object Notified {
     final case class Granted(payment: Payment) extends Notified
@@ -112,14 +109,14 @@ object Donations {
   val DayMs: Long = 24L * 60L * 60L * 1000L
 
   /** Насколько заказ должен «отстояться», прежде чем его трогает сверка:
-    * нотификация обычно приходит за секунды, и гоняться за ней наперегонки
+    * уведомление обычно приходит за секунды, и гоняться за ним наперегонки
     * незачем. */
   val ReconcileAfterMs: Long = 5L * 60L * 1000L
 
   val ReconcileBatch: Int = 32
 
   val live: ZLayer[
-    TBankConfig with TBankClient with PaymentDao with Api with UserRepository with Journal,
+    RobokassaConfig with RobokassaClient with PaymentDao with Api with UserRepository with Journal,
     Nothing,
     Donations
   ] =
