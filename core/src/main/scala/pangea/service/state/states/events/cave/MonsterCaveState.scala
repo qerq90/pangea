@@ -405,8 +405,9 @@ case class MonsterCaveState(
     // Пока в комнате есть кому драться, до находки дело не доходит.
     // Алтарь «обысканным» не становится: он гаснет, отдав силу (`altarSpent`).
     val spent  = room.kind == RoomKind.Altar && scene.altarSpent
-    val action = Option.when(room.monsters <= 0 && !room.done && !spent && actionKey(room.kind).isDefined)(
-      content.choice(actionId(room.kind), actionKey(room.kind).get).copy(row = Some(3)))
+    val action = actionKey(room.kind)
+      .filter(_ => room.monsters <= 0 && !room.done && !spent)
+      .map(key => content.choice(actionId(room.kind), key).copy(row = Some(3)))
     val choices = List(
       dirChoice("CaveForward", "cave.dir.forward", CaveDir.Forward, 0),
       dirChoice("CaveLeft",    "cave.dir.left",    CaveDir.Left,    1),

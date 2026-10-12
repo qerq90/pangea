@@ -87,13 +87,15 @@ case class Item(
   def dustKind: Option[MaterialKind] = material.filter(_.gem.isDefined)
 
   /** Малая руна: как и пыль, места не занимает и копится до предела. */
-  def isSmallRune: Boolean = runeStone.exists(_.size == pangea.model.rune.RuneStoneSize.Small)
+  def smallRune: Option[ItemDetails.RuneStone] = runeStone.filter(_.size == pangea.model.rune.RuneStoneSize.Small)
+
+  def isSmallRune: Boolean = smallRune.isDefined
 
   /** Ключ «этого же добра» у вещей, которые не занимают места: по нему считается
     * предел [[Item.HoardLimit]]. None — обычная вещь, она занимает слот. */
   def hoardKey: Option[String] =
     dustKind.map(k => s"dust:${k.entryName}")
-      .orElse(Option.when(isSmallRune)(s"rune:${runeStone.get.runeKey}"))
+      .orElse(smallRune.map(r => s"rune:${r.runeKey}"))
 
   /** Вещь, которая не занимает места ни в сумке, ни в бочке. */
   def weightless: Boolean = hoardKey.isDefined

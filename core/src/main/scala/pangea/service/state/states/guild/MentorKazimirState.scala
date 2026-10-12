@@ -283,8 +283,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
     * сгорело и прибавку по рунам. */
   private def burnPlan(hero: Hero, items: List[Item]): (RuneData, List[Item], List[(Rune, Long)]) = {
     val cap = Rune.cap(hero.lvl)
-    val candidates = items.filter(i => Rune.of(i).isDefined && hero.runes.burnsItem(i))
-    candidates.groupBy(i => Rune.of(i).get).toList.sortBy(_._1.label).foldLeft((hero.runes, List.empty[Item], List.empty[(Rune, Long)])) {
+    val candidates = items.filter(hero.runes.burnsItem).flatMap(i => Rune.of(i).map(_ -> i))
+    candidates.groupMap(_._1)(_._2).toList.sortBy(_._1.label).foldLeft((hero.runes, List.empty[Item], List.empty[(Rune, Long)])) {
       case ((data, burnt, gains), (rune, its)) =>
         val (data2, burnt2, gain) = its.sortBy(i => Rune.pointsOf(i)).foldLeft((data, burnt, 0L)) { case ((d, b, g), item) =>
           val (d2, got) = d.deepen(rune, Rune.pointsOf(item), cap)

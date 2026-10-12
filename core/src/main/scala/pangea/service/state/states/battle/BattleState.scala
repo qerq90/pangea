@@ -2907,6 +2907,14 @@ case class BattleState(
         }
       }
     }
+    // Лечение и броня, наведённые на живого союзника, достаются ему, а не герою.
+    object OnAlly {
+      def unapply(effect: Skill.Effect): Option[BattleAlly] = effect match {
+        case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) if target != aimed.group.heroPos =>
+          aimed.group.allyAt(target).filter(_.alive)
+        case _ => None
+      }
+    }
     for {
       spread <- Random.nextLongBetween(80L, 121L)
       // Понимание руны множит число умения — и с вещи, и с клейма (см. Hero.runeMult).
@@ -3015,9 +3023,7 @@ case class BattleState(
 
         // Лечение и броня по союзнику: то же число, но в его потолки; «Заслон»
         // союзнику даёт только броню — бафа защиты у него нет.
-        case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _)
-            if target != aimed.group.heroPos && aimed.group.allyAt(target).exists(_.alive) =>
-          val ally  = aimed.group.allyAt(target).get
+        case OnAlly(ally) =>
           val heals = slot.skill.effect == Skill.Effect.Heal
           val full  = if (heals) (raw * hero.passives.healMult).toLong.max(1L) else raw
           val (updated, gained) =
@@ -3682,26 +3688,24 @@ case class BattleState(
       a1 = b1.group.allies.find(_.kind == a.kind).getOrElse(a)
       target2 = allyTarget(a1, b1)
       // Крыса умений не знает — только кусает (см. AllyKind.usesSkills).
-      options = if (!a1.kind.usesSkills) Nil else AllySkill.values.toList.filter { s =>
-        s.cost(a1.lvl) <= a1.energy && (s match {
-          case AllySkill.QuickStrike | AllySkill.CrushingStrike => target2.isDefined
-          case AllySkill.HealingFlask    => a1.hp < a1.stats.hp
-          case AllySkill.EmergencyRepair => a1.armor < a1.stats.armor
-        })
-      }
+      // Удар попадает в выбор только вместе с целью — без неё его и нет.
+      options = if (!a1.kind.usesSkills) Nil else AllySkill.values.toList.flatMap {
+        case AllySkill.QuickStrike     => target2.map(BattleState.AllyCast.Strike(_, crushing = false))
+        case AllySkill.CrushingStrike  => target2.map(BattleState.AllyCast.Strike(_, crushing = true))
+        case AllySkill.HealingFlask    => Option.when(a1.hp < a1.stats.hp)(BattleState.AllyCast.Flask)
+        case AllySkill.EmergencyRepair => Option.when(a1.armor < a1.stats.armor)(BattleState.AllyCast.Repair)
+      }.filter(_.skill.cost(a1.lvl) <= a1.energy)
       casted <-
         if (options.isEmpty) ZIO.succeed((AllyBlow(b1, None, 0L, slew = false), Vector.empty[String]))
         else Random.nextIntBetween(0, options.size).flatMap { i =>
-          val skill = options(i)
-          val paid  = b1.copy(group = b1.group.updateAlly(a1.position)(x => x.copy(energy = x.energy - skill.cost(a1.lvl))))
-          skill match {
-            case AllySkill.QuickStrike =>
-              allyHits(a1, paid, target2.get, (a1.stats.atk * AllySkill.QuickStrikeFactor).toLong.max(1L),
-                crushing = false, sure = true).map(_ -> Vector.empty[String])
-            case AllySkill.CrushingStrike =>
-              allyHits(a1, paid, target2.get, (a1.stats.atk * AllySkill.CrushingStrikeFactor).toLong.max(1L),
-                crushing = true, sure = true).map(_ -> Vector.empty[String])
-            case AllySkill.HealingFlask =>
+          val cast = options(i)
+          val paid = b1.copy(group = b1.group.updateAlly(a1.position)(x => x.copy(energy = x.energy - cast.skill.cost(a1.lvl))))
+          cast match {
+            case BattleState.AllyCast.Strike(target, crushing) =>
+              val factor = if (crushing) AllySkill.CrushingStrikeFactor else AllySkill.QuickStrikeFactor
+              allyHits(a1, paid, target, (a1.stats.atk * factor).toLong.max(1L),
+                crushing = crushing, sure = true).map(_ -> Vector.empty[String])
+            case BattleState.AllyCast.Flask =>
               val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
               val newHp = (a1.hp + heal).min(a1.stats.hp)
               // Фляга выводит и из миазм — на те же несколько раундов, что у всех,
@@ -3711,7 +3715,7 @@ case class BattleState(
                               poison = x.poison.flatMap(_.weakenedByHeal), bleed = None, burn = None))),
                   None, 0L, slew = false),
                 Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
-            case AllySkill.EmergencyRepair =>
+            case BattleState.AllyCast.Repair =>
               val fix = (a1.stats.armor * AllySkill.RepairPct / 100L).max(1L)
               val newArmor = (a1.armor + fix).min(a1.stats.armor)
               ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(_.copy(armor = newArmor))), None, 0L, slew = false),
@@ -3725,15 +3729,15 @@ case class BattleState(
              x.copy(energy = (x.energy + x.kind.energyRegen(x.lvl)).min(x.stats.energy))))
       // Лог — одной строкой на цель, с суммарным уроном удара и умения; проки и
       // раны считаются, но экран не засоряют. Промах — только если не попало ничем.
-      blows   = List(struck, blow2).filter(_.target.isDefined)
-      byName  = blows.groupBy(_.target.get).view.mapValues(_.map(_.damage).sum).toMap
-      order   = blows.map(_.target.get).distinct
-      hitLog  = order.flatMap { m =>
+      blows   = List(struck, blow2).flatMap(b => b.target.map(name => (name, b.damage, b.slew)))
+      byName  = blows.groupMapReduce(_._1)(_._2)(_ + _)
+      order   = blows.map(_._1).distinct
+      hitLog  = order.map { m =>
         val dmg = byName(m)
-        if (dmg > 0L) Some(content.format("battle.ally.hit", "name" -> a.name, "monster" -> m, "damage" -> dmg.toString))
-        else Some(content.format("battle.ally.miss", "name" -> a.name, "monster" -> m))
+        if (dmg > 0L) content.format("battle.ally.hit", "name" -> a.name, "monster" -> m, "damage" -> dmg.toString)
+        else content.format("battle.ally.miss", "name" -> a.name, "monster" -> m)
       }.toVector
-      slewLog = blows.filter(_.slew).map(b => content.format("battle.ally.slew", "name" -> a.name, "monster" -> b.target.get)).toVector
+      slewLog = blows.collect { case (m, _, true) => content.format("battle.ally.slew", "name" -> a.name, "monster" -> m) }.toVector
     } yield (b3, hitLog ++ aidLog ++ slewLog)
 
   /** Удар союзника по мобу на месте `pos`: бросок на попадание против уклонения
@@ -3943,21 +3947,24 @@ case class BattleState(
     for {
       // 1) удар сбоку — только если достаёт; союзника напротив — вместо героя
       struck <-
-        if (facing.isDefined) mobStrikesAlly(facing.get, tmp).map { case (t2, lines) => (hero, t2, lines) }
-        else if (!reachesHero) ZIO.succeed((hero, tmp, Vector.empty[String]))
-        else for {
-          hitRoll <- Random.nextIntBetween(1, 101)
-          dodge    = playerDodgeChance(hero, tmp, nowMs)
-          out <-
-            if (hitRoll > dodge)
-              mobStrike(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs).map { st =>
-                val line = content.format("battle.group.sideHit", "monster" -> tmp.monsterName, "damage" -> st.damage.toString)
-                val head = if (st.mirrored) Vector.empty[String] else Vector(line)
-                (hero.copy(fightStats = hero.fightStats.copy(hp = st.newHp, armor = st.newArmor)), st.battle,
-                  head ++ st.extraLines)
-              }
-            else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
-        } yield out
+        facing match {
+          case Some(ally) => mobStrikesAlly(ally, tmp).map { case (t2, lines) => (hero, t2, lines) }
+          case None =>
+            if (!reachesHero) ZIO.succeed((hero, tmp, Vector.empty[String]))
+            else for {
+              hitRoll <- Random.nextIntBetween(1, 101)
+              dodge    = playerDodgeChance(hero, tmp, nowMs)
+              out <-
+                if (hitRoll > dodge)
+                  mobStrike(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs).map { st =>
+                    val line = content.format("battle.group.sideHit", "monster" -> tmp.monsterName, "damage" -> st.damage.toString)
+                    val head = if (st.mirrored) Vector.empty[String] else Vector(line)
+                    (hero.copy(fightStats = hero.fightStats.copy(hp = st.newHp, armor = st.newArmor)), st.battle,
+                      head ++ st.extraLines)
+                  }
+                else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
+            } yield out
+        }
       (h0, t1, log0) = struck
       sideTrauma <- hitTrauma(hero, h0, nowMs)
       (h1, sideTraumaLine) = sideTrauma
@@ -4885,6 +4892,16 @@ case class BattleState(
 }
 
 object BattleState {
+
+  /** Умение союзника, выбранное на ход. Удар несёт свою цель: без цели его
+    * в выборе просто нет, и доставать её потом неоткуда. */
+  private[battle] sealed abstract class AllyCast(val skill: AllySkill)
+  private[battle] object AllyCast {
+    final case class Strike(target: Int, crushing: Boolean)
+      extends AllyCast(if (crushing) AllySkill.CrushingStrike else AllySkill.QuickStrike)
+    case object Flask  extends AllyCast(AllySkill.HealingFlask)
+    case object Repair extends AllyCast(AllySkill.EmergencyRepair)
+  }
 
   /** Сколько союзников помещается в ряд клавиатуры: их бывает до десяти, а
     * рядов у ВК всего десять. */

@@ -109,11 +109,10 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
-      idx   = payloadIdx(ua)
-      _ <- data.items.lift(idx.getOrElse(-1)) match {
-             case Some(mi) if !mi.bought =>
+      _ <- payloadIdx(ua).flatMap(idx => data.items.lift(idx).map(idx -> _)) match {
+             case Some((idx, mi)) if !mi.bought =>
                val choices = List(
-                 content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = Map("idx" -> idx.get.toString)),
+                 content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = Map("idx" -> idx.toString)),
                  content.choice("CancelBuy", "merchant.confirmNo")
                )
                renderer.show(user, Screen(

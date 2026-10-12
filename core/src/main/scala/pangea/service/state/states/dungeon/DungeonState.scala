@@ -129,14 +129,17 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
-      result <- if (gang.isDefined) gangTrap(user, hero, gang.get, killLog, renderer)
-                else if (avengers.isDefined) revenge(user, avengers.get, killLog)
-                else if (doomed.isDefined) sentencedPrey(user, hero, doomed.get, renderer)
-                else if (called) wolfOnCall(user, hero, renderer)
-                else event match {
-                  case StateType.Battle => startBattle(user, hero)
-                  case StateType.Spring => healAtSpring(user, hero, now, renderer)
-                  case other            => ZIO.succeed(other)
+      result <- (gang, avengers, doomed) match {
+                  case (Some(g), _, _)    => gangTrap(user, hero, g, killLog, renderer)
+                  case (_, Some(race), _) => revenge(user, race, killLog)
+                  case (_, _, Some(prey)) => sentencedPrey(user, hero, prey, renderer)
+                  case _ if called        => wolfOnCall(user, hero, renderer)
+                  case _ =>
+                    event match {
+                      case StateType.Battle => startBattle(user, hero)
+                      case StateType.Spring => healAtSpring(user, hero, now, renderer)
+                      case other            => ZIO.succeed(other)
+                    }
                 }
     } yield result
 

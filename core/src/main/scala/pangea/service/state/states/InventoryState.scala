@@ -2,7 +2,7 @@ package pangea.service.state.states
 
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe.syntax.EncoderOps
-import pangea.model.item.{BrewEffect, BrewRates}
+import pangea.model.item.{BrewEffect, BrewKind, BrewRates}
 import pangea.model.stats.{ParamsBuff, StatBoost}
 import pangea.model.trauma.Trauma
 import pangea.service.state.AzatData
@@ -141,8 +141,8 @@ case class InventoryState(
         case None => showList(user, renderer)
         case Some(item) if item.isQuestItem =>
           writeScene(user, scene.copy(selectedId = Some(itemId))) *> showQuestItem(user, item, renderer)
-        case Some(item) if item.brew.isDefined =>
-          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showBrew(user, item, inv.items.data, renderer)
+        case Some(item @ InventoryState.Brewed(kind)) =>
+          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showBrew(user, item, kind, inv.items.data, renderer)
         case Some(item) =>
           // Сколько таких же лежит в сумке — счётчик над описанием; кнопки при
           // этом трогают ровно один предмет из стопки.
@@ -185,9 +185,8 @@ case class InventoryState(
   /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
     * «Выпить» у того, что пьётся; «Заправить флягу», если надетая фляга такого
     * толка; «Смазать оружие» у смазок. Шнапс уходит Трактирщику, кнопок у него нет. */
-  private def showBrew(user: User, item: Item, all: List[Item], renderer: Renderer): Task[StateType] =
+  private def showBrew(user: User, item: Item, kind: BrewKind, all: List[Item], renderer: Renderer): Task[StateType] =
     getHero(user).flatMap { hero =>
-      val kind    = item.brew.get
       val count   = ItemStack.countOf(all, item)
       val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + stackLine(count)
       val flaskFits = hero.equipment.flask.details match {
@@ -414,10 +413,14 @@ case class InventoryState(
       hero  <- getHero(user)
       scene <- readScene(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      book   = scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)).flatMap(i => i.questItem.map(i -> _))
+      // Трактат — та книга, по которой есть чему научиться.
+      book   = for {
+                 item      <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id))
+                 kind      <- item.questItem
+                 knowledge <- HerbLore.knowledgeOf(kind)
+               } yield (item, kind, knowledge)
       res <- book match {
-        case Some((item, kind)) if HerbLore.isTreatise(kind) =>
-          val knowledge = HerbLore.knowledgeOf(kind).get
+        case Some((item, kind, knowledge)) =>
           for {
             lore <- HerbLore.readLore(heroDao, user.userId)
             until = lore.bookCooldowns.getOrElse(kind.entryName, 0L)
@@ -910,7 +913,7 @@ case class InventoryState(
       scene <- readScene(user)
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      res <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)).flatMap(_.gem.map(_ => scene.selectedId.get)) match {
+      res <- scene.selectedId.filter(id => inv.items.data.exists(i => i.id == id && i.gem.isDefined)) match {
         case None => showList(user, renderer)
         case Some(gemId) =>
           UiScene.write(heroDao, user.userId, UiScene.Socketing, SocketingState.Scene(gemId))
@@ -974,6 +977,12 @@ case class InventoryState(
 }
 
 object InventoryState {
+
+  /** Отвар — со своим видом: экран отвара получает вид из сопоставления, а не
+    * достаёт его заново из предмета. */
+  private object Brewed {
+    def unapply(item: Item): Option[BrewKind] = item.brew
+  }
 
   /** Краденый кошелёк, если его развязать: от горсти серебра до увесистой.
     * Один из двухсот оказывается набит редкой монетой — воры и сами этого не

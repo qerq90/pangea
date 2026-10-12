@@ -46,7 +46,10 @@ object HerbLore {
   def price(kind: MaterialKind): Long =
     if (kind == MaterialKind.StrangeFlower) StrangeFlowerPrice else kind.herbModifier * HerbPriceUnit
 
-  def herbs(items: List[Item]): List[Item] = items.filter(_.material.exists(_.isHerb))
+  /** Травы из вещей — каждая вместе со своим видом: цена и прочее считаются по
+    * виду, и доставать его из вещи второй раз не нужно. */
+  def herbs(items: List[Item]): List[(Item, MaterialKind)] =
+    items.flatMap(i => i.material.filter(_.isHerb).map(i -> _))
 
   def readLore(heroDao: HeroDao, userId: UserId): Task[LoreData] =
     heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))

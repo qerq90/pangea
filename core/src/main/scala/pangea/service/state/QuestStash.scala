@@ -51,11 +51,12 @@ object QuestStash {
       hero:          Hero,
       taken:         List[Found]
   ): Task[Unit] = {
-    val (fromBag, fromArtifacts) = taken.partition(_.where.isEmpty)
-    val bagIds = fromBag.map(_.item.id).toSet
+    val bagIds        = taken.collect { case Found(item, None) => item.id }.toSet
+    val fromArtifacts = taken.collect { case Found(item, Some(kind)) => kind -> item.id }
     ZIO.when(bagIds.nonEmpty)(
       inventoryRepo.removeItems(bagIds, hero.id).mapError(e => new Throwable(e.toString))) *>
-      ZIO.foreachDiscard(fromArtifacts)(f =>
-        artifactRepo.take(hero.id, f.where.get, f.item.id).mapError(e => new Throwable(e.toString)))
+      ZIO.foreachDiscard(fromArtifacts) { case (kind, itemId) =>
+        artifactRepo.take(hero.id, kind, itemId).mapError(e => new Throwable(e.toString))
+      }
   }
 }

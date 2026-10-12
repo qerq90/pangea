@@ -81,7 +81,7 @@ case class RegistrationState(
     * сцена сейчас сотрётся, а выбор ещё пригодится сюжету. */
   private def confirmRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
-      race   <- ZIO.fromEither(decode[Race](ua.payload.get))
+      race   <- ZIO.fromEither(ua.payload.toRight(new Throwable("ConfirmRace без payload")).flatMap(decode[Race]))
       branch <- readBranch(user)
       _      <- heroDao.updateRace(user.userId, race)
       lore   <- heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))

@@ -136,16 +136,16 @@ object CubeCraft {
   private final case class LegendaryReforge(mithril: Int, levelDelta: Long, keepName: Boolean) extends Recipe {
     val size = 1 + mithril
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
-      val legendary = pool.find(isLegendaryGear)
-      val mithrils  = pool.filter(isMithril)
-      if (legendary.isDefined && mithrils.size >= mithril) {
-        val leg           = legendary.get
-        val consumed      = leg :: mithrils.take(mithril)
-        val newLvl        = (leg.lvl + levelDelta).max(1L).min(150L)
-        val (rebuilt, r2) = ItemGenerator.createItemOfType(leg.itemType, newLvl, Rarity.Orange, rng)
-        val result        = if (keepName) rebuilt.withName(leg.name) else rebuilt
-        Some((consumed, result, r2))
-      } else None
+      val mithrils = pool.filter(isMithril)
+      pool.find(isLegendaryGear) match {
+        case Some(leg) if mithrils.size >= mithril =>
+          val consumed      = leg :: mithrils.take(mithril)
+          val newLvl        = (leg.lvl + levelDelta).max(1L).min(150L)
+          val (rebuilt, r2) = ItemGenerator.createItemOfType(leg.itemType, newLvl, Rarity.Orange, rng)
+          val result        = if (keepName) rebuilt.withName(leg.name) else rebuilt
+          Some((consumed, result, r2))
+        case _ => None
+      }
     }
   }
 
@@ -244,11 +244,14 @@ object CubeCraft {
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
       val herbs  = pool.flatMap(i => i.material.filter(_.isHerb))
       val counts = herbs.groupBy(identity).view.mapValues(_.size).toMap
-      bestPlan(counts).headOption.map { kind =>
-        val consumed = kind.recipe.foldLeft(List.empty[Item]) { (acc, herb) =>
-          acc :+ pool.find(i => i.material.contains(herb) && !acc.contains(i)).get
-        }
-        (consumed, BrewKind.item(kind), rng)
+      // Каждой траве рецепта — своя вещь из пула. План строится по тем же
+      // счётчикам, так что вещи найдутся; а если нет — рецепт просто не сошёлся.
+      bestPlan(counts).headOption.flatMap { kind =>
+        kind.recipe
+          .foldLeft(Option(List.empty[Item])) { (acc, herb) =>
+            acc.flatMap(taken => pool.find(i => i.material.contains(herb) && !taken.contains(i)).map(taken :+ _))
+          }
+          .map(consumed => (consumed, BrewKind.item(kind), rng))
       }
     }
 

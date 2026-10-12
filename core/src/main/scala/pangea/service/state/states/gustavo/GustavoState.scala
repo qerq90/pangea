@@ -3,7 +3,7 @@ package pangea.service.state.states.gustavo
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{BrewKind, Item, ItemDetails}
+import pangea.model.item.{BrewKind, Item, ItemDetails, MaterialKind}
 import pangea.model.quest.{DailyNpc, DailyRates, NpcQuest}
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -136,11 +136,11 @@ case class GustavoState(
       _ <- if (herbs.isEmpty)
              renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil)) *> renderMenu(user, renderer)
            else {
-             val lines = herbs.groupBy(_.name).toList.sortBy(_._1).map { case (name, same) =>
+             val lines = herbs.groupBy(_._1.name).toList.sortBy(_._1).map { case (name, same) =>
                content.format("gustavo.herbs.line", "name" -> name, "count" -> same.size.toString,
-                 "price" -> same.map(i => HerbLore.price(i.material.get)).sum.toString)
+                 "price" -> same.map { case (_, kind) => HerbLore.price(kind) }.sum.toString)
              }
-             val total = herbs.map(i => HerbLore.price(i.material.get)).sum
+             val total = herbs.map { case (_, kind) => HerbLore.price(kind) }.sum
              renderer.show(user, Screen(
                content.text("gustavo.herbs.header") + "\n\n" + lines.mkString("\n"),
                List(
@@ -153,18 +153,18 @@ case class GustavoState(
     for {
       hero  <- getHero(user)
       herbs <- herbsOf(hero)
-      total  = herbs.map(i => HerbLore.price(i.material.get)).sum
+      total  = herbs.map { case (_, kind) => HerbLore.price(kind) }.sum
       _ <- if (herbs.isEmpty)
              renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil))
            else
-             inventoryRepo.removeItems(herbs.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
+             inventoryRepo.removeItems(herbs.map(_._1.id).toSet, hero.id).mapError(e => new Throwable(e.toString)) *>
                heroDao.updateSilver(user.userId, hero.silver + total) *>
                renderer.show(user, Screen(content.format("gustavo.herbs.sold",
                  "count" -> herbs.size.toString, "silver" -> total.toString), Nil))
       _ <- renderMenu(user, renderer)
     } yield StateType.Gustavo
 
-  private def herbsOf(hero: Hero): Task[List[Item]] =
+  private def herbsOf(hero: Hero): Task[List[(Item, MaterialKind)]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(inv => HerbLore.herbs(inv.items.data))
 
   /** Кнопка задания: завязка, пока не взято; дальше — по шагу: напомнить про
