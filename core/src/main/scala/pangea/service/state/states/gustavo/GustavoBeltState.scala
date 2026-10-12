@@ -3,7 +3,7 @@ package pangea.service.state.states.gustavo
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails}
+import pangea.model.item.{BeltSlot, Item, ItemDetails}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.bank.BankRepository
@@ -79,14 +79,29 @@ case class GustavoBeltState(
              refill(user, hero, belt, price, renderer)
     } yield StateType.GustavoSupplies
 
-  private def refill(user: User, hero: Hero, belt: Item, price: Long, renderer: Renderer): Task[Unit] =
+  /** Густаво наливает фляги прямо на поясе — те, что ему по силам (кровь он не
+    * разливает, см. [[pangea.model.item.FlaskEffect.refillsAtGustavo]]). */
+  private def refill(user: User, hero: Hero, belt: Item, price: Long, renderer: Renderer): Task[Unit] = {
+    val filled = beltDetails(belt).map(b => b.copy(slots = b.slots.map {
+      case f: BeltSlot.Flask if f.kind.effect.refillsAtGustavo => f.refilled
+      case other                                               => other
+    }))
+    val poured = beltDetails(belt).map(b => thirsty(b).size).getOrElse(0)
     purse.charge(user.userId, hero, price) *>
-      heroDao.updateEquipment(user.userId, hero.equipment.copy(belt = belt.copy(details = beltDetails(belt).map(_.refilled).getOrElse(belt.details)))) *>
+      heroDao.updateEquipment(user.userId, hero.equipment.copy(
+        belt = belt.copy(details = filled.getOrElse(belt.details)))) *>
       renderer.show(user, Screen(content.format("gustavo.supplies.beltRefilled",
-        "charges" -> beltDetails(belt).map(_.maxCharges).getOrElse(0).toString), back))
+        "charges" -> poured.toString), back))
+  }
 
   private def hasBelt(belt: Item): Boolean = beltDetails(belt).isDefined
 
+  /** Фляги на поясе, которые Густаво может долить. */
+  private def thirsty(b: ItemDetails.Belt): List[BeltSlot.Flask] = b.slots.collect {
+    case f: BeltSlot.Flask if f.kind.effect.refillsAtGustavo && f.charges < f.maxCharges => f
+  }
+
+  /** Доливать нечего: пояса нет, он пуст или все фляги полны. */
   private def isFull(belt: Item): Boolean =
-    beltDetails(belt).exists(b => b.charges == b.maxCharges)
+    beltDetails(belt).exists(b => thirsty(b).isEmpty)
 }

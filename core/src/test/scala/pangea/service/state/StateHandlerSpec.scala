@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.FightStats
@@ -139,17 +139,17 @@ object StateHandlerSpec extends ZIOSpecDefault {
       } yield assertTrue(updated.state == StateType.Battle)
     },
 
-    test("зелье уклонения из пояса + /home → бафф не остаётся на герое и не попадёт в следующий бой") {
-      val potionBelt = Item(9L, "Пояс", 1L, ItemRarity.Green, ItemType.Belt,
+    test("вампирская фляга с пояса + /home → эффект не остаётся на герое и не попадёт в следующий бой") {
+      val flaskBelt = Item(9L, "Пояс", 1L, ItemRarity.Green, ItemType.Belt,
         attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-        details = ItemDetails.Belt(PotionKind.Evasion, charges = 1, maxCharges = 1))
+        details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Vampiric, ItemRarity.Gray, 1))))
       for {
-        t <- makeHandler(StateType.Battle, h => h.copy(equipment = TestFixtures.emptyEquipment.copy(belt = potionBelt)))
+        t <- makeHandler(StateType.Battle, h => h.copy(equipment = TestFixtures.emptyEquipment.copy(belt = flaskBelt)))
         (handler, heroDao, heroRepo, _) = t
 
-        // 1) Пьём зелье уклонения из пояса. BattleState читает/пишет героя через
-        // heroDao (не heroRepo) — сверяем состояние оттуда же, откуда его видит сам бой.
-        _              <- handler.makeActionVK(vkId, eventId = 1L, UserAction("", Some("""{"action":"UseBelt"}""")))
+        // 1) Достаём флягу с пояса. BattleState читает/пишет героя через heroDao
+        // (не heroRepo) — сверяем состояние оттуда же, откуда его видит сам бой.
+        _              <- handler.makeActionVK(vkId, eventId = 1L, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")))
         duringBattle   <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         heroAfterDrink <- heroDao.getHeroByUserId(userId).map(_.get)
         beltAfterDrink  = heroAfterDrink.equipment.belt.details.asInstanceOf[ItemDetails.Belt]
@@ -159,14 +159,14 @@ object StateHandlerSpec extends ZIOSpecDefault {
         activeBattleAfter <- heroDao.readActiveBattle(userId)
         finalHero         <- heroDao.getHeroByUserId(userId).map(_.get)
       } yield
-        // бафф реально применился и был виден только внутри active_battle текущего боя
-        assertTrue(duringBattle.heroBattleState.dodgeBonus == 10L) &&
-        // заряд зелья списался по-настоящему (это нормальный итог выпитого зелья, не /home)
-        assertTrue(beltAfterDrink.charges == 0) &&
+        // эффект реально применился и был виден только внутри active_battle текущего боя
+        assertTrue(duringBattle.effects.heroVampiricHits > 0) &&
+        // заряд списался по-настоящему, и пустая ячейка ушла с пояса
+        assertTrue(beltAfterDrink.slots.isEmpty) &&
         // /home полностью стирает бой вместе с баффом — раз объекта с баффом больше
         // не существует, ему неоткуда «остаться навсегда» или перейти в следующий бой
         assertTrue(activeBattleAfter.isEmpty) &&
-        // и герой (fightStats/evasion) не получил постоянного изменения от зелья
+        // и герой (fightStats) не получил постоянного изменения от фляги
         assertTrue(finalHero.fightStats.evasion == hero.fightStats.evasion) &&
         // на всякий случай: любой новый бой в принципе стартует с пустым heroBattleState
         // независимо от того, что было раньше (SoloPveBattle.from не наследует бафы)

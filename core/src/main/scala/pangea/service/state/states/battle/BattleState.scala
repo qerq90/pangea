@@ -7,14 +7,14 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{Aura, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Aura, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.{BoardKind, NpcQuest}
-import pangea.model.item.{BrewKind, BrewRates, FlaskEffect, FlaskRates, Item, ItemDetails, PassiveKind, PotionKind, DivineKind, DivineRates}
+import pangea.model.item.{BeltSlot, BrewKind, BrewRates, FlaskEffect, FlaskRates, Item, ItemDetails, ItemType, PassiveKind, DivineKind, DivineRates}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.trauma.TraumaRoll
@@ -69,7 +69,10 @@ case class BattleState(
       "MoveTo"      -> Target.Run((u, ua, r) => resolve(u, r, content.text("arena.turn.move"))(moveTurn(BattleState.parseTarget(ua)))),
       "SquadTick"   -> Target.Run((u, _, r) => squadTick(u, r)),
       "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.flask"))(flaskTurn)),
-      "UseBelt"     -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.belt"))(beltTurn)),
+      // Пояс ход не тратит: он присылает список расходников, а применяет уже
+      // кнопка внутри того сообщения.
+      "Belt"        -> Target.Run((u, _,  r) => showBelt(u, r)),
+      "BeltUse"     -> Target.Run((u, ua, r) => beltUse(u, ua, r)),
       "UseDivine"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.divine"))(divineTurn)),
       "UseRose"      -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.rose"))(roseTurn)),
       "ThrowMix"     -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.mix"))(mixTurn)),
@@ -359,6 +362,11 @@ case class BattleState(
     val (res, bubbled) = bubbleRescue(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
+        // Пыль, насыпанную прямо в бою горстью с пояса, тоже надо записать:
+        // покрытие живёт до конца боя, и до его конца о нём должен знать не
+        // только текущий ход.
+        ZIO.when(res.outcome == Outcome.Continue)(
+          heroDao.updateWeaponDust(user.userId, res.hero.weaponDust)) *>
         ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
     // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
     // Крыса, выскочившая из-под ног (`home = 0`), после боя остаётся при герое —
@@ -368,8 +376,11 @@ case class BattleState(
                res.battle.group.allies.exists(_.home <= 0))(
         heroDao.updateSquad(user.userId, squadAfterBattle(res.hero, res.battle, nowMs)))
     // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
+    // А высыпанные ячейки пояса, наоборот, добирают из сумки такую же горсть —
+    // чтобы в следующий бой идти с полным поясом, не разбирая его вручную.
     val clearDust =
-      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
+      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty)) *>
+        ZIO.when(res.outcome != Outcome.Continue)(refillBeltDust(user, res.hero, renderer)).unit
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
@@ -3181,6 +3192,114 @@ case class BattleState(
       else (true, Vector.empty)
     }
 
+  /** Эффект выпитой фляги. Герой приходит уже с потраченным зарядом, а бой —
+    * с отметкой о расходнике: откуда фляга, из пояса или из доживающего
+    * слота, здесь уже неважно. */
+  private def flaskEffect(
+      hero: Hero,
+      battle: SoloPveBattle,
+      effect: FlaskEffect,
+      flaskName: String,
+      nowMs: Long,
+      qhLog: Vector[String]
+  ): TurnResult =
+    effect match {
+        case FlaskEffect.HealPercent(pct) =>
+          val maxHp    = hero.effectiveMaxHp(nowMs)
+          // «Целитель» множит лечение фляги на 1.1, дальше — общий расчёт.
+          val fullHeal = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
+          val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, battle, fullHeal, nowMs)
+          // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
+          val maxEn      = hero.maxEnergy(nowMs)
+          val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
+          val energyBack = newEnergy - hero.fightStats.energy
+          val newStats   = hero.fightStats.copy(hp = newHp, energy = newEnergy)
+          val msg = content.format(
+            "battle.flaskUsed",
+            "healed" -> healed.toString,
+            "hp"     -> newHp.toString,
+            "max"    -> maxHp.toString,
+            "energy" -> energyBack.toString
+          )
+          val lines = (Vector(msg) ++ cutLine) ++ qhLog
+          // Бой берём из расчёта лечения — в нём уже потраченное горение.
+          TurnResult(hero.copy(fightStats = newStats),
+            healedBattle, lines, Outcome.Continue, endsRound = false)
+        case FlaskEffect.AddBuff(buff, rounds) =>
+          val timedBuff = buff.copy(turnsLeft = Some(rounds))
+          val newBattle = battle.copy(heroBattleState = battle.heroBattleState.add(timedBuff))
+          TurnResult(hero, newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog,
+            Outcome.Continue, endsRound = false)
+
+        // Фляга кузнеца: чинит броню до потолка.
+        case FlaskEffect.ArmorPercent(pct) =>
+          val maxArmor = hero.effectiveMaxArmor(nowMs)
+          val newArmor = (hero.fightStats.armor + (maxArmor * pct / 100L).max(1L)).min(maxArmor).max(hero.fightStats.armor)
+          val msg = content.format("battle.flaskArmor",
+            "armor" -> (newArmor - hero.fightStats.armor).toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString)
+          TurnResult(hero.copy(fightStats = hero.fightStats.copy(armor = newArmor)),
+            battle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
+
+        // Фляга бодрости: энергия до потолка.
+        case FlaskEffect.EnergyPercent(pct) =>
+          val maxEn = hero.maxEnergy(nowMs)
+          val newEn = (hero.fightStats.energy + (maxEn * pct / 100L).max(1L)).min(maxEn).max(hero.fightStats.energy)
+          val msg = content.format("battle.flaskEnergy",
+            "energy" -> (newEn - hero.fightStats.energy).toString, "cur" -> newEn.toString, "max" -> maxEn.toString)
+          TurnResult(hero.copy(fightStats = hero.fightStats.copy(energy = newEn)),
+            battle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
+
+        // Стихийная фляга: урона нет, прок стихии — гарантирован. Иммунитеты
+        // цели в силе: огненного элементаля пламя не берёт, элементалю и
+        // нежити прок ложится как обычный (см. withEffects).
+        case FlaskEffect.Splash(element) =>
+          val (procced, procLog) = applyProcs(battle, Set(element))
+          val guarded = procced.withEffects(procced.effects)
+          val head = content.format("battle.flaskSplash", "flask" -> flaskName)
+          val lines =
+            if (element == Element.Fire && guarded.boss.exists(_.immuneToBurn))
+              Vector(head, content.text("battle.flaskSplashImmune"))
+            else Vector(head) ++ procLog
+          TurnResult(hero, guarded, lines ++ qhLog, Outcome.Continue, endsRound = false)
+
+        // Фляга очищения: всё вредное с героя долой — раны, дебафы, срез защиты.
+        case FlaskEffect.Cleanse =>
+          val cleaned = battle.effects.copy(
+            heroBurn = None, heroPoison = None, heroBleed = None,
+            heroStunnedTurns = 0, heroGroundedTurns = 0, heroColdDefenceCut = 0)
+          TurnResult(hero, battle.copy(effects = cleaned),
+            Vector(content.text("battle.flaskCleanse")) ++ qhLog, Outcome.Continue, endsRound = false)
+
+        // Дымная фляга: мобы вне пары на несколько раундов теряют из виду и
+        // героя, и друг друга. Запас в один тик — см. BattleEffects.heroSmokeTurns.
+        case FlaskEffect.Smoke(rounds) =>
+          TurnResult(hero,
+            battle.copy(effects = battle.effects.copy(heroSmokeTurns = rounds + 1)),
+            Vector(content.format("battle.flaskSmoke", "rounds" -> rounds.toString)) ++ qhLog,
+            Outcome.Continue, endsRound = false)
+
+        // Вампирская фляга: следующие удары по HP лечат (см. playerStrike).
+        case FlaskEffect.Vampiric(hits, pct) =>
+          TurnResult(hero,
+            battle.copy(effects = battle.effects.copy(heroVampiricHits = hits)),
+            Vector(content.format("battle.flaskVampiric", "hits" -> hits.toString, "pct" -> pct.toString)) ++ qhLog,
+            Outcome.Continue, endsRound = false)
+
+        // Фляги яда и крови: оружие смазано на несколько раундов (см. playerStrike).
+        case FlaskEffect.PoisonCoat(rounds) =>
+          TurnResult(hero,
+            battle.copy(effects = battle.effects.copy(heroPoisonCoatTurns = rounds)),
+            Vector(content.format("battle.flaskPoisonCoat", "rounds" -> rounds.toString)) ++ qhLog,
+            Outcome.Continue, endsRound = false)
+        case FlaskEffect.BleedCoat(rounds) =>
+          TurnResult(hero,
+            battle.copy(effects = battle.effects.copy(heroBleedCoatTurns = rounds)),
+            Vector(content.format("battle.flaskBleedCoat", "rounds" -> rounds.toString)) ++ qhLog,
+            Outcome.Continue, endsRound = false)
+    }
+
+  /** Фляга из доживающего слота: кнопки в бою у неё больше нет, но ход
+    * остаётся рабочим — старое сообщение в диалоге не должно ронять бой. */
   private def flaskTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
     val flask = hero.equipment.flask
     flask.details match {
@@ -3190,198 +3309,133 @@ case class BattleState(
         cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
       case f: ItemDetails.Flask =>
         quickHandsRoll(hero).map { case (consumed, qhLog) =>
-          val newEquipment  = hero.equipment.copy(flask = flask.copy(details = f.spent))
-          val usedBattle    = battle.copy(consumableUsedThisRound = consumed)
-          f.effect match {
-            case FlaskEffect.HealPercent(pct) =>
-              val maxHp    = hero.effectiveMaxHp(nowMs)
-              // «Целитель» множит лечение фляги на 1.1, дальше — общий расчёт.
-              val fullHeal = (maxHp * pct / 100L * hero.passives.healMult).toLong.max(1L)
-              val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, battle, fullHeal, nowMs)
-              // Глоток фляги дополнительно восстанавливает 5% максимума Энергии.
-              val maxEn      = hero.maxEnergy(nowMs)
-              val newEnergy  = (hero.fightStats.energy + (maxEn * 5 / 100L).max(1L)).min(maxEn)
-              val energyBack = newEnergy - hero.fightStats.energy
-              val newStats   = hero.fightStats.copy(hp = newHp, energy = newEnergy)
-              val msg = content.format(
-                "battle.flaskUsed",
-                "healed" -> healed.toString,
-                "hp"     -> newHp.toString,
-                "max"    -> maxHp.toString,
-                "energy" -> energyBack.toString
-              )
-              val lines = (Vector(msg) ++ cutLine) ++ qhLog
-              // Бой берём из расчёта лечения — в нём уже потраченное горение.
-              TurnResult(hero.copy(equipment = newEquipment, fightStats = newStats),
-                healedBattle.copy(consumableUsedThisRound = consumed), lines, Outcome.Continue, endsRound = false)
-            case FlaskEffect.AddBuff(buff, rounds) =>
-              val timedBuff = buff.copy(turnsLeft = Some(rounds))
-              val newBattle = usedBattle.copy(heroBattleState = usedBattle.heroBattleState.add(timedBuff))
-              TurnResult(hero.copy(equipment = newEquipment), newBattle, Vector(content.text("battle.flaskBuff")) ++ qhLog,
-                Outcome.Continue, endsRound = false)
-
-            // Фляга кузнеца: чинит броню до потолка.
-            case FlaskEffect.ArmorPercent(pct) =>
-              val maxArmor = hero.effectiveMaxArmor(nowMs)
-              val newArmor = (hero.fightStats.armor + (maxArmor * pct / 100L).max(1L)).min(maxArmor).max(hero.fightStats.armor)
-              val msg = content.format("battle.flaskArmor",
-                "armor" -> (newArmor - hero.fightStats.armor).toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString)
-              TurnResult(hero.copy(equipment = newEquipment, fightStats = hero.fightStats.copy(armor = newArmor)),
-                usedBattle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
-
-            // Фляга бодрости: энергия до потолка.
-            case FlaskEffect.EnergyPercent(pct) =>
-              val maxEn = hero.maxEnergy(nowMs)
-              val newEn = (hero.fightStats.energy + (maxEn * pct / 100L).max(1L)).min(maxEn).max(hero.fightStats.energy)
-              val msg = content.format("battle.flaskEnergy",
-                "energy" -> (newEn - hero.fightStats.energy).toString, "cur" -> newEn.toString, "max" -> maxEn.toString)
-              TurnResult(hero.copy(equipment = newEquipment, fightStats = hero.fightStats.copy(energy = newEn)),
-                usedBattle, Vector(msg) ++ qhLog, Outcome.Continue, endsRound = false)
-
-            // Стихийная фляга: урона нет, прок стихии — гарантирован. Иммунитеты
-            // цели в силе: огненного элементаля пламя не берёт, элементалю и
-            // нежити прок ложится как обычный (см. withEffects).
-            case FlaskEffect.Splash(element) =>
-              val (procced, procLog) = applyProcs(usedBattle, Set(element))
-              val guarded = procced.withEffects(procced.effects)
-              val head = content.format("battle.flaskSplash", "flask" -> flask.name)
-              val lines =
-                if (element == Element.Fire && guarded.boss.exists(_.immuneToBurn))
-                  Vector(head, content.text("battle.flaskSplashImmune"))
-                else Vector(head) ++ procLog
-              TurnResult(hero.copy(equipment = newEquipment), guarded, lines ++ qhLog, Outcome.Continue, endsRound = false)
-
-            // Фляга очищения: всё вредное с героя долой — раны, дебафы, срез защиты.
-            case FlaskEffect.Cleanse =>
-              val cleaned = usedBattle.effects.copy(
-                heroBurn = None, heroPoison = None, heroBleed = None,
-                heroStunnedTurns = 0, heroGroundedTurns = 0, heroColdDefenceCut = 0)
-              TurnResult(hero.copy(equipment = newEquipment), usedBattle.copy(effects = cleaned),
-                Vector(content.text("battle.flaskCleanse")) ++ qhLog, Outcome.Continue, endsRound = false)
-
-            // Дымная фляга: мобы вне пары на несколько раундов теряют из виду и
-            // героя, и друг друга. Запас в один тик — см. BattleEffects.heroSmokeTurns.
-            case FlaskEffect.Smoke(rounds) =>
-              TurnResult(hero.copy(equipment = newEquipment),
-                usedBattle.copy(effects = usedBattle.effects.copy(heroSmokeTurns = rounds + 1)),
-                Vector(content.format("battle.flaskSmoke", "rounds" -> rounds.toString)) ++ qhLog,
-                Outcome.Continue, endsRound = false)
-
-            // Вампирская фляга: следующие удары по HP лечат (см. playerStrike).
-            case FlaskEffect.Vampiric(hits, pct) =>
-              TurnResult(hero.copy(equipment = newEquipment),
-                usedBattle.copy(effects = usedBattle.effects.copy(heroVampiricHits = hits)),
-                Vector(content.format("battle.flaskVampiric", "hits" -> hits.toString, "pct" -> pct.toString)) ++ qhLog,
-                Outcome.Continue, endsRound = false)
-
-            // Фляги яда и крови: оружие смазано на несколько раундов (см. playerStrike).
-            case FlaskEffect.PoisonCoat(rounds) =>
-              TurnResult(hero.copy(equipment = newEquipment),
-                usedBattle.copy(effects = usedBattle.effects.copy(heroPoisonCoatTurns = rounds)),
-                Vector(content.format("battle.flaskPoisonCoat", "rounds" -> rounds.toString)) ++ qhLog,
-                Outcome.Continue, endsRound = false)
-            case FlaskEffect.BleedCoat(rounds) =>
-              TurnResult(hero.copy(equipment = newEquipment),
-                usedBattle.copy(effects = usedBattle.effects.copy(heroBleedCoatTurns = rounds)),
-                Vector(content.format("battle.flaskBleedCoat", "rounds" -> rounds.toString)) ++ qhLog,
-                Outcome.Continue, endsRound = false)
-          }
+          val drunk = hero.copy(equipment = hero.equipment.copy(flask = flask.copy(details = f.spent)))
+          flaskEffect(drunk, battle.copy(consumableUsedThisRound = consumed), f.effect, flask.name, nowMs, qhLog)
         }
       case _ =>
         cont(hero, battle, content.text("battle.noFlask"))
     }
   }
 
-  /** Применение зелья пояса. Зеркалит [[flaskTurn]]: проверки пусто/уже-пили, трата
-    * заряда, затем эффект по типу зелья ([[applyPotion]]). */
-  private def beltTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
-    val belt = hero.equipment.belt
-    belt.details match {
-      case b: ItemDetails.Belt if b.charges <= 0 =>
-        cont(hero, battle, content.text("battle.beltEmpty"))
-      case _: ItemDetails.Belt if battle.consumableUsedThisRound =>
+  /** Пояс в бою: сумка с расходниками. Кнопка «Пояс» ход не тратит — она
+    * присылает отдельное сообщение со списком ячеек, и кнопки живут внутри
+    * него (`inline`), поэтому боевая клавиатура и экран боя остаются как есть.
+    *
+    * Пустые фляги с пояса убираются сразу: держать ячейку им больше нечем. */
+  private def showBelt(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      belt   = hero.equipment.belt
+      slots  = BattleState.beltSlots(hero)
+      cap    = ItemDetails.Belt.capacityFor(belt.rarity)
+      screen =
+        if (belt.itemType != ItemType.Belt) Screen(content.text("battle.belt.none"), Nil, inline = true)
+        else if (slots.isEmpty) Screen(content.text("battle.belt.empty"), Nil, inline = true)
+        else {
+          val lines = slots.zipWithIndex.map { case (slot, i) =>
+            content.format("battle.belt.line", "n" -> (i + 1).toString,
+              "name" -> slot.name, "uses" -> slot.uses.toString)
+          }
+          val buttons = slots.zipWithIndex.map { case (slot, i) =>
+            pangea.engine.Choice("BeltUse", pangea.engine.Choice.fit(
+              content.format("battle.belt.useBtn", "name" -> slot.name)),
+              data = Map("slot" -> i.toString), row = Some(i))
+          }
+          Screen(content.format("battle.belt.head", "used" -> slots.size.toString,
+            "cap" -> cap.toString) + "\n" + lines.mkString("\n"), buttons, inline = true)
+        }
+      _ <- renderer.show(user, screen)
+    } yield StateType.Battle
+
+  /** Применить расходник из ячейки пояса. Фляга пьётся, пыль ложится на
+    * оружие; ход при этом не кончается — как и раньше у расходников. */
+  private def beltUse(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    BattleState.parseSlot(ua) match {
+      case None      => showBelt(user, renderer)
+      case Some(idx) => resolve(user, renderer, content.text("arena.turn.belt"))(beltTurn(idx)) <* showBelt(user, renderer)
+    }
+
+  /** Ход расходником из ячейки `idx`. */
+  private def beltTurn(idx: Int)(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
+    hero.equipment.belt.details match {
+      case b: ItemDetails.Belt if battle.consumableUsedThisRound =>
+        val _ = b
         cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
       case b: ItemDetails.Belt =>
-        quickHandsRoll(hero).map { case (consumed, qhLog) =>
-          val equipment = hero.equipment.copy(belt = belt.copy(details = b.spent))
-          val battle1   = battle.copy(consumableUsedThisRound = consumed)
-          val (newStats, newBattle, msg) = applyPotion(hero, battle1, b.potion, nowMs)
-          TurnResult(hero.copy(equipment = equipment, fightStats = newStats), newBattle, Vector(msg) ++ qhLog,
-            Outcome.Continue, endsRound = false)
+        b.at(idx) match {
+          case None => cont(hero, battle, content.text("battle.belt.gone"))
+          case Some(f: BeltSlot.Flask) if f.empty =>
+            cont(hero, battle, content.text("battle.flaskEmpty"))
+          case Some(f: BeltSlot.Flask) =>
+            quickHandsRoll(hero).map { case (consumed, qhLog) =>
+              // Пустая фляга в ячейке не остаётся: место важнее памяти о ней.
+              val spent = f.spent
+              val next  = if (spent.empty) b.without(idx) else b.updated(idx, spent)
+              val drunk = withBelt(hero, next)
+              flaskEffect(drunk, battle.copy(consumableUsedThisRound = consumed), f.kind.effect,
+                f.name, nowMs, qhLog)
+            }
+          case Some(d: BeltSlot.Dust) if d.spent =>
+            cont(hero, battle, content.text("battle.belt.gone"))
+          case Some(d: BeltSlot.Dust) =>
+            quickHandsRoll(hero).map { case (consumed, qhLog) =>
+              val sprinkled = sprinkleInBattle(hero, d.kind)
+              val (dusted, line) = sprinkled
+              // Ячейка остаётся пустой, но помнит пыль: после боя доберёт такую же.
+              val next  = b.updated(idx, d.poured)
+              TurnResult(withBelt(dusted, next), battle.copy(consumableUsedThisRound = consumed),
+                Vector(line) ++ qhLog, Outcome.Continue, endsRound = false)
+            }
         }
-      case _ =>
-        cont(hero, battle, content.text("battle.noBelt"))
+      case _ => cont(hero, battle, content.text("battle.belt.none"))
     }
+
+  /** Горсть пыли на оружие прямо в бою: правила те же, что у наковальни —
+    * слой ложится, противоположная стихия даёт всполох, четвёртая горсть
+    * сбивает покрытие (см. [[WeaponDust.sprinkle]]). */
+  private def sprinkleInBattle(hero: Hero, dust: pangea.model.item.MaterialKind): (Hero, String) = {
+    val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
+    val line = outcome match {
+      case _: WeaponDust.Outcome.Applied  => content.format("battle.belt.dustApplied", "dust" -> dust.displayName)
+      case _: WeaponDust.Outcome.Clash    => content.format("battle.belt.dustClash", "dust" -> dust.displayName)
+      case _: WeaponDust.Outcome.Overload => content.format("battle.belt.dustOverload", "dust" -> dust.displayName)
+    }
+    (hero.copy(weaponDust = outcome.next), line)
   }
 
-  /** Эффект конкретного зелья пояса. Мгновенные (лечение/металл/энергия) меняют
-    * статы героя; временные (атака/защита/уворот) кладут баф на 5 ходов;
-    * яд/реген ставят соответствующий статус-эффект. Возвращает новые статы героя,
-    * обновлённый бой и строку эффекта — запись выполняет вызывающий (commit). */
-  private def applyPotion(
-      hero: Hero,
-      battle: SoloPveBattle,
-      potion: PotionKind,
-      nowMs: Long
-  ): (FightStats, SoloPveBattle, String) = {
-    val buffed = battle.heroBattleState.applyTo(hero.effectiveFightStats(nowMs))
-    potion match {
-      case PotionKind.Healing =>
-        val maxHp = hero.effectiveMaxHp(nowMs)
-        // «Целитель» множит лечение зелья на 1.1, дальше — общий расчёт.
-        val full  = (maxHp * 25 / 100L * hero.passives.healMult).toLong.max(1L)
-        val (newHp, healed, healedBattle, cutLine) = activeHeal(hero, battle, full, nowMs)
-        val line  = content.format("battle.beltHeal",
-                      "healed" -> healed.toString, "hp" -> newHp.toString, "max" -> maxHp.toString)
-        (hero.fightStats.copy(hp = newHp), healedBattle, (line +: cutLine.toVector).mkString("\n"))
-
-      case PotionKind.Metal =>
-        val maxArmor = hero.effectiveMaxArmor(nowMs)
-        val restore  = (maxArmor * 20 / 100L).max(1L)
-        val newArmor = (hero.fightStats.armor + restore).min(maxArmor)
-        val gained   = newArmor - hero.fightStats.armor
-        (hero.fightStats.copy(armor = newArmor), battle,
-          content.format("battle.beltMetal", "armor" -> gained.toString, "cur" -> newArmor.toString, "max" -> maxArmor.toString))
-
-      case PotionKind.Poison =>
-        (hero.fightStats, battle.copy(effects = battle.effects.copy(heroPoisonousAttacks = true)),
-          content.text("battle.beltPoison"))
-
-      case PotionKind.Regeneration =>
-        (hero.fightStats, battle.copy(effects = battle.effects.copy(heroRegen = Some(Regen.onDrink))),
-          content.format("battle.beltRegen", "pct" -> Regen.OnDrink.toString))
-
-      case PotionKind.Evasion =>
-        (hero.fightStats,
-          battle.copy(heroBattleState = battle.heroBattleState.add(
-            Buff(0L, 0L, 0L, dodgePct = 10L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
-          content.format("battle.beltEvasion", "rounds" -> ItemDetails.Belt.BuffRounds.toString))
-
-      case PotionKind.Energy =>
-        val maxEn     = hero.maxEnergy(nowMs)
-        val restore   = (maxEn * 25 / 100L).max(1L)
-        val newEnergy = (hero.fightStats.energy + restore).min(maxEn)
-        val gained    = newEnergy - hero.fightStats.energy
-        (hero.fightStats.copy(energy = newEnergy), battle,
-          content.format("battle.beltEnergy", "energy" -> gained.toString, "cur" -> newEnergy.toString, "max" -> maxEn.toString))
-
-      case PotionKind.Attack =>
-        val bonus = (buffed.atk * 5 / 100L).max(1L)
-        (hero.fightStats,
-          battle.copy(heroBattleState = battle.heroBattleState.add(
-            Buff(atk = bonus, 0L, 0L, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
-          content.format("battle.beltAttack", "atk" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
-
-      case PotionKind.Defence =>
-        val bonus = (buffed.defence * 10 / 100L).max(1L)
-        (hero.fightStats,
-          battle.copy(heroBattleState = battle.heroBattleState.add(
-            Buff(0L, 0L, defence = bonus, dodgePct = 0L, defencePct = 0L, turnsLeft = Some(ItemDetails.Belt.BuffRounds)))),
-          content.format("battle.beltDefence", "defence" -> bonus.toString, "rounds" -> ItemDetails.Belt.BuffRounds.toString))
+  /** Высыпанные ячейки пояса добирают пыль из сумки: по горсти того же вида,
+    * пока она там есть. Чего не нашлось, остаётся пустым — игрок доложит сам. */
+  private def refillBeltDust(user: User, hero: Hero, renderer: Renderer): Task[Unit] =
+    hero.equipment.belt.details match {
+      case b: ItemDetails.Belt if b.slots.exists { case d: BeltSlot.Dust => d.spent; case _ => false } =>
+        for {
+          inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+          // Идём по ячейкам, забирая из сумки по одной горсти: две пустые ячейки
+          // одного вида не должны разобрать одну и ту же щепоть дважды.
+          taken = b.slots.foldLeft((List.empty[BeltSlot], List.empty[Item], inv.items.data)) {
+                    case ((slots, used, bag), d: BeltSlot.Dust) if d.spent =>
+                      bag.find(_.material.contains(d.kind)) match {
+                        case Some(item) => (slots :+ d.refilled, used :+ item, bag.filterNot(_.id == item.id))
+                        case None       => (slots :+ d, used, bag)
+                      }
+                    case ((slots, used, bag), other) => (slots :+ other, used, bag)
+                  }
+          (slots, used, _) = taken
+          _ <- ZIO.when(used.nonEmpty)(
+                 inventoryRepo.removeItems(used.map(_.id).toSet, hero.id)
+                   .mapError(e => new Throwable(e.toString)) *>
+                   heroDao.updateEquipment(user.userId, hero.equipment.copy(
+                     belt = hero.equipment.belt.copy(details = b.copy(slots = slots)))) *>
+                   renderer.show(user, Screen(content.format("battle.belt.refilled",
+                     "names" -> used.map(_.name).distinct.mkString(", ")), Nil)))
+        } yield ()
+      case _ => ZIO.unit
     }
-  }
 
-  // ── Бегство ─────────────────────────────────────────────────────────────────
+  /** Пояс героя с новым содержимым. */
+  private def withBelt(hero: Hero, belt: ItemDetails.Belt): Hero =
+    hero.copy(equipment = hero.equipment.copy(
+      belt = hero.equipment.belt.copy(details = belt)))
 
   /** Экран подтверждения бегства (чистая навигация, состояние не меняется). */
   /** Кнопка миазм: отпустить тьму или свернуть её. Выбор держится до
@@ -4677,24 +4731,17 @@ case class BattleState(
           row = Some(0)
         )
     }
-    // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Фляга и Пояс
-    // (Пояс — только если несёт зелье); row 3 — Сбежать. Места под заглушки (доп.
-    // слот, стиль атаки, сменить цель) пока скрыты.
-    val flaskCharges = BattleState.flaskCharges(hero)
-    val flaskButton = pangea.engine.Choice(
-      "UseFlask",
-      s"🧪 Фляга ($flaskCharges)",
-      color =
-        if (flaskCharges <= 0) pangea.engine.ChoiceColor.Negative
-        else pangea.engine.ChoiceColor.Primary,
-      row = Some(2)
-    )
-    val beltButton = BattleState.beltPotion(hero).map { belt =>
+    // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Пояс;
+    // row 3 — Сбежать. Отдельной кнопки фляги больше нет: фляги живут в поясе,
+    // и он присылает их списком. Места под заглушки (доп. слот, стиль атаки,
+    // сменить цель) пока скрыты.
+    val beltButton = Option.when(hero.equipment.belt.itemType == ItemType.Belt) {
+      val slots = BattleState.beltSlots(hero)
       pangea.engine.Choice(
-        "UseBelt",
-        s"👝 Пояс (${belt.charges})",
+        "Belt",
+        s"👝 Пояс (${slots.size})",
         color =
-          if (belt.charges <= 0) pangea.engine.ChoiceColor.Negative
+          if (slots.isEmpty) pangea.engine.ChoiceColor.Negative
           else pangea.engine.ChoiceColor.Primary,
         row = Some(2)
       )
@@ -4744,7 +4791,7 @@ case class BattleState(
         color = if (miasmaOn) pangea.engine.ChoiceColor.Positive else pangea.engine.ChoiceColor.Secondary,
         row = Some(3)))
     val mainButtons =
-      (actionButtons :+ flaskButton) ++
+      actionButtons ++
         beltButton.toList ++
         mixButton.toList ++
         divineButton.toList ++
@@ -4984,10 +5031,10 @@ object BattleState {
     case _                    => 0
   }
 
-  /** Зелье надетого пояса (если пояс несёт зелье) — для кнопки «Пояс» и её зарядов. */
-  def beltPotion(hero: Hero): Option[ItemDetails.Belt] = hero.equipment.belt.details match {
-    case b: ItemDetails.Belt => Some(b)
-    case _                   => None
+  /** Что лежит на поясе героя. Пустые фляги не показываем: пить из них нечего. */
+  def beltSlots(hero: Hero): List[BeltSlot] = hero.equipment.belt.details match {
+    case b: ItemDetails.Belt => b.slots.filter(_.uses > 0)
+    case _                   => Nil
   }
 
   /** Бонус благословения Азата (в %): к опыту, серебру и редкости добычи. */
@@ -5011,6 +5058,11 @@ object BattleState {
       case _              => None
     }
   }
+
+  /** Номер ячейки пояса, если кнопка его несла. */
+  def parseSlot(ua: pangea.service.state.UserAction): Option[Int] =
+    ua.payload.flatMap(p =>
+      io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("slot")).flatMap(_.toIntOption))
 
   /** Номер цели умения в строю (с нуля), если кнопка его несла. */
   def parseTarget(ua: pangea.service.state.UserAction): Option[Int] =

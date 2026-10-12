@@ -5,8 +5,8 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
-import pangea.generator.item.MaterialGenerator
-import pangea.model.item.{GemBreaking, Item, ItemType}
+import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
+import pangea.model.item.{BeltSlot, GemBreaking, Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -29,6 +29,7 @@ case class EquipmentState(
       "Unequip"       -> Target.Run { (u, _, r) => unequipSelected(u, r) },
       // Примерка прямо из карточки слота: кнопка несёт id вещи из сумки.
       "EquipWear"     -> Target.Run { (u, ua, r) => wear(u, ua, r) },
+      "BeltTake"      -> Target.Run { (u, ua, r) => takeFromBelt(u, ua, r) },
       "EquipPickPrev" -> Target.Run { (u, _,  r) => pickPage(u, r, -1) },
       "EquipPickNext" -> Target.Run { (u, _,  r) => pickPage(u, r, +1) },
       "BreakWorn"     -> Target.Run { (u, _,  r) => offerBreak(u, r) },
@@ -55,7 +56,12 @@ case class EquipmentState(
       scene <- readScene(user)
       // одна кнопка = один слот. Делаем индексы слотов сразу с предметами, чтобы
       // потом легко мапнуть нажатие на slot index.
-      indexed = slots.zipWithIndex
+      // Слот фляги доживает свой век: фляги теперь носят на поясе, и пустую
+      // ячейку показывать незачем — а занятую оставляем, чтобы игрок снял вещь
+      // и переложил её в пояс сам.
+      indexed = slots.zipWithIndex.filter { case (slot, _) =>
+                  slot.name != FlaskSlotName || slot.get(hero.equipment).itemType != ItemType.NoItem
+                }
       (pageSlots, totalPages, page) = ItemMenu.page(indexed, scene.page.getOrElse(0))
       header = s"🎽 ${content.text("equipment.header")}" + (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
       slotBtns = pageSlots.zipWithIndex.map { case ((slot, slotIdx), rowIdx) =>
@@ -109,10 +115,52 @@ case class EquipmentState(
         // Камни ломаются прямо на надетой вещи — снимать её для этого не нужно.
         Option.when(GemBreaking.hasGems(item))(
           content.choice("BreakWorn", "equipment.breakGem").copy(color = ChoiceColor.Negative, row = Some(0)))
-      ).flatten ++ wearBtns ++ pickNav(page, totalPages)
+      ).flatten ++ beltButtons(item) ++ wearBtns ++ pickNav(page, totalPages)
       _ <- writeScene(user, scene.copy(selectedSlot = Some(slotIdx), pickPage = Some(page)))
       _ <- renderer.show(user, Screen(text, choices))
     } yield StateType.Equipment
+
+  /** Кнопки содержимого пояса: каждую ячейку можно вынуть обратно в сумку.
+    * Что в них лежит, видно в описании самого пояса ([[Item.statsLines]]). */
+  private def beltButtons(item: Item): List[Choice] = item.details match {
+    case b: ItemDetails.Belt =>
+      b.slots.zipWithIndex.map { case (slot, idx) =>
+        Choice("BeltTake", ItemMenu.truncate(content.format("equipment.beltTake", "name" -> slot.name)),
+          data = Map("slot" -> idx.toString), color = ChoiceColor.Negative, row = Some(0))
+      }
+    case _ => Nil
+  }
+
+  /** Вынуть расходник с пояса: фляга собирается обратно со своими зарядами,
+    * пыль — горстью. В сумке нет места — ячейка остаётся как была. */
+  private def takeFromBelt(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    (readScene(user) <*> getHero(user)).flatMap { case (scene, hero) =>
+      val belt = hero.equipment.belt
+      (payloadField(ua, "slot").flatMap(_.toIntOption), belt.details) match {
+        case (Some(idx), b: ItemDetails.Belt) =>
+          b.at(idx) match {
+            case None => showList(user, renderer)
+            case Some(slot) =>
+              val item = slot match {
+                case f: BeltSlot.Flask =>
+                  val fresh = FlaskGenerator.item(f.kind, f.rarity)
+                  fresh.copy(details = fresh.details match {
+                    case d: ItemDetails.Flask => d.copy(charges = f.charges)
+                    case other                => other
+                  })
+                case d: BeltSlot.Dust => MaterialGenerator.item(d.kind)
+              }
+              inventoryRepo.addItem(hero.id, item).foldZIO(
+                _ => renderer.show(user, Screen(content.text("equipment.beltTakeFull"), Nil)),
+                _ => heroDao.updateEquipment(user.userId,
+                       hero.equipment.copy(belt = belt.copy(details = b.without(idx)))) *>
+                     renderer.show(user, Screen(content.format("equipment.beltTaken",
+                       "name" -> slot.name), Nil))
+              ) *> scene.selectedSlot.fold(showList(user, renderer))(showSlot(user, _, renderer))
+          }
+        case _ => showList(user, renderer)
+      }
+    }
 
   /** Что из сумки встанет в этот слот: тип подходит, уровень по плечу. Сверху —
     * старшие по уровню: там обычно и прибавка больше. */
@@ -371,6 +419,9 @@ object EquipmentState {
 
   val SlotPrefix = "EquipSlot_"
 
+  /** Имя доживающего слота фляги: пустым он не показывается. */
+  val FlaskSlotName = "Фляга"
+
   /** Сколько вещей на примерку в карточке: ряд 0 занят «Снять»/«Сломать», а
     * последний — навигацией, так что на кнопки вещей остаётся семь рядов. */
   val PickPerPage: Int = 7
@@ -410,7 +461,9 @@ object EquipmentState {
     Slot("Кольцо 1",    _.firstRing,    _.copy(firstRing    = Item.NoItem), Set(ItemType.Ring), Some(1)),
     Slot("Кольцо 2",    _.secondRing,   _.copy(secondRing   = Item.NoItem), Set(ItemType.Ring), Some(2)),
     Slot("Пояс",        _.belt,         _.copy(belt         = Item.NoItem), Set(ItemType.Belt)),
-    Slot("Фляга",       _.flask,        _.copy(flask        = Item.NoItem), Set(ItemType.Flask)),
+    // Фляги теперь носят на поясе: в слот их больше не надеть, а занятый слот
+    // доживает до того, как игрок сам переложит флягу (см. FlaskSlotName).
+    Slot(FlaskSlotName, _.flask,        _.copy(flask        = Item.NoItem), Set.empty),
     Slot("Оружие",      _.weapon,       _.copy(weapon       = Item.NoItem), Set(ItemType.Weapon)),
     Slot("Доп. оружие", _.additionalWeapon, _.copy(additionalWeapon = Item.NoItem), Set(ItemType.AdditionalWeapon))
   )

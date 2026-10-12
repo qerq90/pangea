@@ -86,14 +86,16 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       assertTrue(FlaskKind.families.size == 9 && FlaskKind.elemental.size == 4)
     },
 
-    test("кнопка боя — просто «Фляга» с зарядами, какой бы вид ни был надет") {
+    test("отдельной кнопки фляги в бою нет: расходники достают с пояса") {
       val h = hero(FlaskKind.Poison)
       for {
         t <- makeState(h, SoloPveBattle.from(monster(), h))
         (state, _, r) = t
         _      <- state.enter(testUser, r)
         screen <- r.sentScreens.map(_.last)
-      } yield assertTrue(screen.choices.exists(_.label == "🧪 Фляга (6)"))
+      } yield assertTrue(!screen.choices.exists(_.id == "UseFlask")) &&
+              // пояса на этом герое нет, значит и кнопки пояса быть не должно
+              assertTrue(!screen.choices.exists(_.id == "Belt"))
     },
 
     test("фляга кузнеца чинит броню на 25% потолка, не выше потолка") {
@@ -326,7 +328,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       for {
         r <- use(h, SoloPveBattle.from(monster(), h), "UseFlask", "UseFlask")
         (u, _, log, _, _) = r
-      } yield assertTrue(charges(u) == 5) && assertTrue(log.contains("уже использовали"))
+      } yield assertTrue(charges(u) == 5) && assertTrue(log.contains("уже брались за пояс"))
     }
   )
 }

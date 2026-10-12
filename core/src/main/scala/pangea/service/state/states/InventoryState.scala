@@ -12,7 +12,7 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, MaterialKind, QuestItemKind, TrophyKind}
+import pangea.model.item.{BeltSlot, Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, MaterialKind, QuestItemKind, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
@@ -53,6 +53,7 @@ case class InventoryState(
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
       "CombineRune"       -> Target.Run { (u, _, r) => combineRuneSelected(u, r) },
       "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) },
+      "BeltPut"           -> Target.Run { (u, _, r) => putOnBelt(u, r) },
       "PurseReturn"       -> Target.Run { (u, _,  r) => returnPurse(u, r) },
       "PurseOpen"         -> Target.Run { (u, _,  r) => openPurse(u, r) },
       "BreakGem"          -> Target.Run { (u, _,  r) => offerBreak(u, r) },
@@ -168,6 +169,9 @@ case class InventoryState(
             // Пыль сыплется на оружие: разовое покрытие на один бой.
             Option.when(item.material.exists(_.gem.isDefined))(
               content.choice("DustWeapon", "inventory.dustWeapon").copy(color = ChoiceColor.Positive, row = Some(0))),
+            // Фляга и пыль ложатся на пояс: оттуда их достают в бою.
+            Option.when(BeltSlot.of(item).isDefined)(
+              content.choice("BeltPut", "inventory.beltPut").copy(color = ChoiceColor.Positive, row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
             Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
           ).flatten
@@ -868,6 +872,34 @@ case class InventoryState(
             heroDao.updateWeaponDust(user.userId, outcome.next) *>
             renderer.show(user, Screen(line, Nil)) *>
             afterStackUse(user, hero, item, renderer)
+      }
+    }
+
+  /** Положить расходник на пояс: фляга — со своими зарядами, пыль — горстью.
+    * Ячеек у пояса столько, сколько раньше вмещалось склянок (см.
+    * [[ItemDetails.Belt.capacityFor]]); нет пояса или нет места — вещь остаётся
+    * в сумке. */
+  private def putOnBelt(user: User, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      val belt = hero.equipment.belt
+      (BeltSlot.of(item), belt.details) match {
+        case (None, _) => showList(user, renderer)
+        case (Some(_), _) if belt.itemType != ItemType.Belt =>
+          renderer.show(user, Screen(content.text("inventory.beltNone"), Nil)) *> showList(user, renderer)
+        case (Some(slot), b: ItemDetails.Belt) =>
+          b.put(slot, ItemDetails.Belt.capacityFor(belt.rarity)) match {
+            case None =>
+              renderer.show(user, Screen(content.text("inventory.beltFull"), Nil)) *> showList(user, renderer)
+            case Some(filled) =>
+              inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+                heroDao.updateEquipment(user.userId,
+                  hero.equipment.copy(belt = belt.copy(details = filled))) *>
+                renderer.show(user, Screen(content.format("inventory.beltPutDone",
+                  "name" -> slot.name, "used" -> filled.slots.size.toString,
+                  "cap" -> ItemDetails.Belt.capacityFor(belt.rarity).toString), Nil)) *>
+                afterStackUse(user, hero, item, renderer)
+          }
+        case _ => showList(user, renderer)
       }
     }
 

@@ -3,7 +3,7 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{Buff, Burn, HeroBattleState, Regen, SoloPveBattle}
-import pangea.model.item.{Gem, GemKind, Item, ItemDetails, ItemType, PotionKind, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Gem, GemKind, Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.skill.MonsterEnergy
 import pangea.model.state.StateType
@@ -22,15 +22,17 @@ object BattleStateSpec extends ZIOSpecDefault {
     case _                    => None
   }
 
-  private def beltCharges(i: Item): Option[Int] = i.details match {
-    case b: ItemDetails.Belt => Some(b.charges)
-    case _                   => None
+  /** Что лежит на поясе героя после хода. */
+  private def beltSlots(i: Item): List[BeltSlot] = i.details match {
+    case b: ItemDetails.Belt => b.slots
+    case _                   => Nil
   }
 
-  private def belt(potion: PotionKind, charges: Int, maxCharges: Int = 5): Item =
-    Item(9L, "Пояс", 1L, ItemRarity.Green, ItemType.Belt,
+  /** Пояс с ячейками: синий держит три — больше в тестах и не нужно. */
+  private def belt(slots: BeltSlot*): Item =
+    Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-      details = ItemDetails.Belt(potion, charges = charges, maxCharges = maxCharges))
+      details = ItemDetails.Belt(slots.toList))
 
   private def healFlask(charges: Int): Item =
     Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
@@ -207,7 +209,8 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.nonEmpty) &&
               assertTrue(screens.head.text.contains("Человек-раб")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Attack")) &&
-              assertTrue(screens.head.choices.map(_.id).contains("UseFlask")) &&
+              // кнопки фляги больше нет: расходники достают с пояса
+              assertTrue(!screens.head.choices.map(_.id).contains("UseFlask")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Flee"))
     },
 
@@ -320,25 +323,6 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(after.effects.heroBurn.isEmpty) // 10% < 50% — сгорело целиком
     },
 
-    test("зелье лечения из пояса горящему герою тоже помогает хуже") {
-      def healedWith(burn: Option[Int]) = {
-        val h = strongHero.copy(
-          fightStats = strongHero.fightStats.copy(hp = 10L),
-          equipment  = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 1, 1)))
-        val b = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = burn.map(Burn(_))))
-        for {
-          t <- makeState(h, b)
-          (state, heroDao, renderer) = t
-          _    <- state.action(testUser, tap("UseBelt"), renderer)
-          hero <- heroDao.getHeroByUserId(userId).map(_.get)
-        } yield hero.fightStats.hp - 10L
-      }
-      for {
-        clean  <- healedWith(None)
-        burned <- healedWith(Some(20)) // 50 + 20 = 70% долой
-      } yield assertTrue(clean > 0L) && assertTrue(burned == clean * 30L / 100L)
-    },
-
     test("регенерация тикает в полную силу: горение режет только активное лечение") {
       def regenTick(burn: Option[Int]) = {
         val h = strongHero.copy(fightStats = strongHero.fightStats.copy(hp = 10L))
@@ -360,6 +344,58 @@ object BattleStateSpec extends ZIOSpecDefault {
         burned <- regenTick(Some(10))
       } yield assertTrue(clean.nonEmpty) &&
               assertTrue(burned == clean) // тик регенерации горение не трогает
+    },
+
+    // ── Пояс: сумка расходников ───────────────────────────────────────────────
+
+    test("кнопка «Пояс» присылает отдельное сообщение со списком, не трогая бой") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(
+        belt = belt(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Gray, 2),
+                    BeltSlot.Dust(pangea.model.item.MaterialKind.RubyDust))))
+      for {
+        t <- makeState(hero, strongBattle)
+        (state, dao, renderer) = t
+        _       <- state.action(testUser, tap("Belt"), renderer)
+        screens <- renderer.sentScreens
+        after   <- dao.getHeroByUserId(userId).map(_.get)
+        list     = screens.last
+      } yield assertTrue(list.inline) &&                                  // кнопки внутри сообщения
+              assertTrue(list.choices.map(_.id).forall(_ == "BeltUse")) &&
+              assertTrue(list.choices.size == 2) &&
+              assertTrue(list.text.contains(FlaskKind.Healer.label)) &&
+              // ход не потрачен и пояс не тронут
+              assertTrue(beltSlots(after.equipment.belt).size == 2)
+    },
+
+    test("фляга из ячейки пояса лечит и тратит заряд, а пустая ячейка уходит") {
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(
+          belt = belt(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Gray, 1))))
+      for {
+        t <- makeState(hero, strongBattle)
+        (state, dao, renderer) = t
+        _     <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
+        after <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(after.fightStats.hp > 10L) &&
+              // заряд был последним: ячейка освободилась
+              assertTrue(beltSlots(after.equipment.belt).isEmpty)
+    },
+
+    test("горсть пыли из пояса ложится на оружие, а ячейка помнит, чем была полна") {
+      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(
+        weapon = strongHero.equipment.weapon,
+        belt   = belt(BeltSlot.Dust(pangea.model.item.MaterialKind.RubyDust))))
+      for {
+        t <- makeState(hero, strongBattle)
+        (state, dao, renderer) = t
+        _       <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
+        after   <- dao.getHeroByUserId(userId).map(_.get)
+        screens <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.weaponDust.layers.contains(pangea.model.item.MaterialKind.RubyDust)) &&
+              assertTrue(screens.contains("лёг на оружие")) &&
+              assertTrue(beltSlots(after.equipment.belt) ==
+                List(BeltSlot.Dust(pangea.model.item.MaterialKind.RubyDust, spent = true)))
     },
 
     test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {
@@ -415,7 +451,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
               assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("уже использовали")))
+              assertTrue(screens.exists(_.text.contains("уже брались за пояс")))
     },
 
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
@@ -436,72 +472,6 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
               assertTrue(screens.exists(_.text.contains("пуста")))
-    },
-
-    test("enter → кнопка «Пояс» показана, если пояс несёт зелье") {
-      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 3)))
-      for {
-        triple              <- makeState(hero, strongBattle)
-        (state, _, renderer) = triple
-        _                   <- state.enter(testUser, renderer)
-        screens             <- renderer.sentScreens
-      } yield assertTrue(screens.head.choices.map(_.id).contains("UseBelt"))
-    },
-
-    test("enter → кнопки «Пояс» нет, если пояс без зелья") {
-      for {
-        triple              <- makeState(strongHero, strongBattle) // emptyEquipment: пояс — NoItem
-        (state, _, renderer) = triple
-        _                   <- state.enter(testUser, renderer)
-        screens             <- renderer.sentScreens
-      } yield assertTrue(!screens.head.choices.map(_.id).contains("UseBelt"))
-    },
-
-    test("UseBelt зелье лечения → HP восстановлен, заряд потрачен") {
-      val hero = strongHero.copy(
-        fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 2))
-      )
-      for {
-        triple                     <- makeState(hero, strongBattle)
-        (state, heroDao, renderer)  = triple
-        result                     <- state.action(testUser, tap("UseBelt"), renderer)
-        updated                    <- heroDao.getHeroByUserId(userId)
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updated.exists(_.fightStats.hp > 10L)) &&
-              assertTrue(updated.exists(h => beltCharges(h.equipment.belt).contains(1)))
-    },
-
-    test("Фляга и пояс делят лимит: после фляги пояс в этом раунде заблокирован") {
-      val hero = strongHero.copy(
-        fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(8), belt = belt(PotionKind.Healing, 2))
-      )
-      for {
-        triple                     <- makeState(hero, strongBattle)
-        (state, heroDao, renderer)  = triple
-        _                          <- state.action(testUser, tap("UseFlask"), renderer)
-        result                     <- state.action(testUser, tap("UseBelt"), renderer)
-        updated                    <- heroDao.getHeroByUserId(userId)
-        screens                    <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updated.exists(h => beltCharges(h.equipment.belt).contains(2))) && // заряд не потрачен
-              assertTrue(screens.exists(_.text.contains("уже использовали")))
-    },
-
-    test("UseBelt зелье яда → баф ядовитых атак; следующая атака травит моба") {
-      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Poison, 1)))
-      for {
-        triple                     <- makeState(hero, strongBattle)
-        (state, heroDao, renderer)  = triple
-        _                          <- state.action(testUser, tap("UseBelt"), renderer)
-        afterDrink                 <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-        _                          <- state.action(testUser, tap("Attack"), renderer)
-        afterAttack                <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-      } yield assertTrue(afterDrink.effects.heroPoisonousAttacks) &&
-              assertTrue(afterDrink.effects.monsterPoison.isEmpty) &&
-              assertTrue(!afterAttack.effects.heroPoisonousAttacks) &&
-              assertTrue(afterAttack.effects.monsterPoison.isDefined)
     },
 
     test("Огонь в оружии: прок (30%) поджигает моба — накладывается горение") {
@@ -983,27 +953,6 @@ object BattleStateSpec extends ZIOSpecDefault {
         said          <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(hero.sets.skillCritBonusPct == 0L) &&
               assertTrue(!said.contains("урон удвоен"))
-    },
-
-    test("UseBelt зелье атаки → добавлен временный баф атаки на 5 ходов") {
-      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Attack, 1)))
-      for {
-        triple                     <- makeState(hero, strongBattle)
-        (state, heroDao, renderer)  = triple
-        _                          <- state.action(testUser, tap("UseBelt"), renderer)
-        after                      <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
-      } yield assertTrue(after.heroBattleState.buffs.exists(b => b.atk >= 1L && b.turnsLeft.contains(5)))
-    },
-
-    test("UseBelt с пустым поясом → сообщение, заряды не тратятся") {
-      val hero = strongHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt(PotionKind.Healing, 0)))
-      for {
-        triple                     <- makeState(hero, strongBattle)
-        (state, heroDao, renderer)  = triple
-        result                     <- state.action(testUser, tap("UseBelt"), renderer)
-        screens                    <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(screens.exists(_.text.contains("закончились")))
     },
 
     test("Flee → показывает экран подтверждения, остаётся в Battle") {
