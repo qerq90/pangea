@@ -3684,7 +3684,15 @@ case class BattleState(
     * остаётся в полях с нулём HP, промоут дальше по цепочке. */
   private def unpairedActiveTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] =
     freeTurnOf(hero, battle, battle, battle.group.activePos, nowMs).map { case (h2, b2, ticked, log3) =>
-      (h2, ticked.copy(group = ticked.group.copy(others = b2.group.others)), log3)
+      // Лечение соседа правит `battle`-копию, и вылеченного надо забрать оттуда.
+      // Но ход минибосса мог изменить и сам строй — зов крыс, поглощение своего;
+      // тогда главный он: иначе места остались бы от нового строя, а слоты — от
+      // старого, и бой падал бы на первом же обращении к месту.
+      val group =
+        if (b2.group.others.sizeCompare(ticked.group.others) == 0)
+          ticked.group.copy(others = b2.group.others)
+        else ticked.group
+      (h2, ticked.copy(group = group), log3)
     }
 
   /** Ход моба вне пары, развёрнутого в поля `tmp` на месте `pos`: удар по
@@ -3739,9 +3747,18 @@ case class BattleState(
         else allyAid(h1, t1, battle, pos, nowMs).flatMap {
           case Some((t2, b2, line)) => ZIO.succeed((h1, t2, b2, Vector(line)))
           case None =>
-            if (reachesHero) (if (t1.boss.isDefined) bossTurnCast(h1, t1, nowMs) else mobSkillCast(h1, t1, nowMs)).map {
-              case (t2, h2, line) => (h2, t2, battle, if (line.isEmpty) Vector.empty else Vector(line))
-            }
+            // Кто держит позицию (Некромант), колдует в `quietPhase`, где бы ни
+            // стоял: здесь ему ход не достаётся, иначе за раунд вышло бы два.
+            val holdsOwn = t1.boss.exists(_.holdsPosition)
+            // Минибосс, который дерётся в строю, идёт по своему кругу и не
+            // доставая героя: зов крыс и объединение — про строй, а не про
+            // героя, и ждать свободного места напротив ему незачем. Прикрыли его
+            // союзником — круг всё равно идёт.
+            val inFormation = t1.boss.exists(_.fightsInGroup)
+            if (!holdsOwn && (reachesHero || inFormation))
+              (if (t1.boss.isDefined) bossTurnCast(h1, t1, nowMs) else mobSkillCast(h1, t1, nowMs)).map {
+                case (t2, h2, line) => (h2, t2, battle, if (line.isEmpty) Vector.empty else Vector(line))
+              }
             else selfAid(h1, t1, nowMs).map { case (t2, line) => (h1, t2, battle, if (line.isEmpty) Vector.empty else Vector(line)) }
         }
       (h2raw, t2, b2, log2raw) = casted
