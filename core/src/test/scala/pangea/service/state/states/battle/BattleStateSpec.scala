@@ -367,6 +367,46 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(beltSlots(after.equipment.belt).size == 2)
     },
 
+    test("один расходник за раунд, но «Быстрые руки» дают взяться за пояс снова") {
+      // Пассивка живёт на перчатках (группа Arms) и с шансом 25% не тратит
+      // раунд: бросок 1 — прокнуло, 99 — нет.
+      val gloves = Item(77L, "Перчатки ловкача", 1L, ItemRarity.Blue, ItemType.Gloves,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Passive(pangea.model.item.PassiveKind.QuickHands))
+      val hero = strongHero.copy(
+        fightStats = strongHero.fightStats.copy(hp = 10L),
+        equipment  = TestFixtures.emptyEquipment.copy(
+          gloves = gloves,
+          belt   = belt(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Blue, 3))))
+      for {
+        t <- makeState(hero, strongBattle)
+        (state, dao, renderer) = t
+        // первый глоток: «Быстрые руки» прокнули — раунд не потрачен
+        _      <- TestRandom.feedInts(1)
+        _      <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
+        first  <- dao.getHeroByUserId(userId).map(_.get)
+        // второй глоток в том же раунде проходит, но на этот раз не прокнуло
+        _      <- TestRandom.feedInts(99)
+        _      <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
+        second <- dao.getHeroByUserId(userId).map(_.get)
+        // третий — отказ: расходник на раунд уже потрачен
+        seen   <- renderer.sentScreens.map(_.size)
+        _      <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
+        third  <- dao.getHeroByUserId(userId).map(_.get)
+        log    <- renderer.sentScreens.map(_.drop(seen).map(_.text).mkString(" "))
+        charges = (h: pangea.model.hero.Hero) =>
+                    h.equipment.belt.details match {
+                      case b: ItemDetails.Belt => b.slots.collectFirst { case f: BeltSlot.Flask => f.charges }
+                      case _                   => None
+                    }
+      } yield assertTrue(charges(first).contains(2)) &&      // выпит один заряд
+              assertTrue(charges(second).contains(1)) &&     // и ещё один в том же раунде
+              assertTrue(charges(third).contains(1)) &&      // третий не прошёл
+              assertTrue(log.contains("уже брались за пояс")) &&
+              // лечили каждый раз по-настоящему
+              assertTrue(second.fightStats.hp > first.fightStats.hp)
+    },
+
     test("фляга из ячейки пояса лечит и тратит заряд, а пустая ячейка уходит") {
       val hero = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
