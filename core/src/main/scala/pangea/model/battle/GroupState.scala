@@ -23,7 +23,13 @@ final case class BattleAlly(
   home:     Int                = 0,
   /** Сколько раундов он ещё не чувствует миазм тьмы: лечение выводит из них
     * на несколько раундов (см. ItemSet.Necromancer.MiasmaHealBlockRounds). */
-  miasmaCalm: Int              = 0
+  miasmaCalm: Int              = 0,
+  /** Раны, которые тикают на союзнике в конце раунда, — те же, что на герое и
+    * на мобах: яд слабеет, кровь держится, пламя растёт. Их оставляют те, кто
+    * стоит напротив него: приёмы мобов и минибоссов бьют того, кто перед ними. */
+  poison:     Option[Poison]   = None,
+  bleed:      Option[Bleed]    = None,
+  burn:       Option[Burn]     = None
 ) {
   /** Нежить ли он: миазмы её лечат, а живых — травят. */
   def isUndead: Boolean = kind.race == Race.Undead
@@ -76,7 +82,10 @@ object BattleAlly {
       undead   <- c.getOrElse[Option[UndeadForm]]("undead")(None)
       home     <- c.getOrElse[Int]("home")(position)
       calm     <- c.getOrElse[Int]("miasmaCalm")(0)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm)
+      poison   <- c.getOrElse[Option[Poison]]("poison")(None)
+      bleed    <- c.getOrElse[Option[Bleed]]("bleed")(None)
+      burn     <- c.getOrElse[Option[Burn]]("burn")(None)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn)
 }
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее
