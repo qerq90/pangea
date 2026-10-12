@@ -39,16 +39,33 @@ object ItemDetails {
     def withCharges(n: Int): Flask = copy(charges = n)
   }
 
-  case class Belt(potion: PotionKind, charges: Int, maxCharges: Int) extends Charged {
-    def withCharges(n: Int): Belt = copy(charges = n)
+  /** Пояс — сумка для расходников: в ячейках лежат фляги и горсти пыли
+    * ([[BeltSlot]]), а сколько ячеек, решает редкость самого пояса. Склянки,
+    * которые пояс носил раньше, спрятаны до лучших времён: старая запись
+    * читается как пустой пояс (см. декодер ниже). */
+  case class Belt(slots: List[BeltSlot] = Nil) extends ItemDetails {
+    def isEmpty: Boolean = slots.isEmpty
+
+    /** Положить, если есть куда. */
+    def put(slot: BeltSlot, capacity: Int): Option[Belt] =
+      Option.when(slots.sizeIs < capacity)(copy(slots = slots :+ slot))
+
+    /** Достать ячейку по номеру. */
+    def at(idx: Int): Option[BeltSlot] = slots.lift(idx)
+
+    def without(idx: Int): Belt = copy(slots = slots.patch(idx, Nil, 1))
+
+    def updated(idx: Int, slot: BeltSlot): Belt = copy(slots = slots.updated(idx, slot))
+
+    /** Пустые фляги с пояса долой: пить из них нечего, а место они держат. */
+    def withoutEmpty: Belt = copy(slots = slots.filter(_.uses > 0))
   }
 
   object Belt {
-    /** Длительность (в ходах) временных бафов от зелий пояса — атака/защита/уворот. */
-    val BuffRounds: Int = 5
-
-    /** Вместимость зелий пояса (число зарядов) по редкости: чёрный/белый — 1,
-     *  зелёный — 2, синий — 3, фиол./пурпур — 4, легендарный (оранжевый) — 5. */
+    /** Сколько ячеек на поясе по его редкости: чёрный/белый — 1, зелёный — 2,
+     *  синий — 3, фиол./пурпур — 4, легендарный (оранжевый) — 5. Числа те же,
+     *  что были у зелий: сколько склянок пояс носил, столько держит и
+     *  расходников. */
     def capacityFor(rarity: Rarity): Int = rarity match {
       case Rarity.Gray | Rarity.White    => 1
       case Rarity.Green                  => 2
@@ -110,7 +127,10 @@ object ItemDetails {
   private val flaskEnc:  Encoder[Flask]            = deriveEncoder
   private val flaskDec:  Decoder[Flask]            = deriveDecoder
   private val beltEnc:   Encoder[Belt]             = deriveEncoder
-  private val beltDec:   Decoder[Belt]             = deriveDecoder
+  /** Пояс со склянкой — запись прежних времён: читаем её как пустой пояс.
+    * Склянки спрятаны, и возвращать их в чужую ячейку незачем. */
+  private val beltDec:   Decoder[Belt]             = (c: HCursor) =>
+    c.getOrElse[List[BeltSlot]]("slots")(Nil).map(Belt(_))
   private val passiveEnc: Encoder[Passive]         = deriveEncoder
   private val passiveDec: Decoder[Passive]         = deriveDecoder
   private val trophyEnc: Encoder[Trophy]           = deriveEncoder

@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Gem, Item, ItemDetails, ItemType, PassiveKind, PotionKind, Rarity}
+import pangea.model.item.{Gem, Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -244,8 +244,8 @@ object ItemGenerator {
   // Спец-данные типа при генерации:
   //  - оружию — активный навык (один из weaponSkills) → ItemDetails.Weapon;
   //  - нагруднику — активный навык (один из armorSkills) → ItemDetails.Armor;
-  //  - поясу — случайное зелье (равновероятно из PotionKind) с зарядами по
-  //    редкости → ItemDetails.Belt;
+  //  - поясу — пустые ячейки под расходники, числом по редкости
+  //    (ItemDetails.Belt): фляги и пыль игрок укладывает сам;
   //  - прочим носимым слотам — пассивка по шансу редкости (см. applyPassive).
   private def applyTypeDetails(item: Item, rng: Rng): (Item, Rng) =
     item.itemType match {
@@ -256,9 +256,8 @@ object ItemGenerator {
         val (skill, next) = rng.pick(Skill.armorSkills)
         (item.copy(details = ItemDetails.Armor(skill)), next)
       case ItemType.Belt =>
-        val (potion, next) = rng.pick(PotionKind.values.toList)
-        val cap            = ItemDetails.Belt.capacityFor(item.rarity)
-        (item.copy(details = ItemDetails.Belt(potion, cap, cap)), next)
+        // Пояс выходит пустым: что в него положить, решает игрок.
+        (item.copy(details = ItemDetails.Belt()), rng)
       // Фляга в обычной генерации не участвует (см. FlaskGenerator), но по типу
       // её могут собрать заново — вид тогда случайный, заряды по редкости.
       case ItemType.Flask => FlaskGenerator.reroll(item, rng)

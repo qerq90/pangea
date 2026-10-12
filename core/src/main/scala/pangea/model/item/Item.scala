@@ -192,7 +192,15 @@ case class Item(
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
-      case ItemDetails.Belt(potion, _, m) => List(s"${potion.label} (вместимость $m)")
+      // Пояс — сумка для расходников: сколько ячеек и что в них лежит.
+      case ItemDetails.Belt(slots) =>
+        val cap  = ItemDetails.Belt.capacityFor(rarity)
+        val head = s"🎽 Ячеек: ${slots.size}/$cap"
+        val body = slots.map {
+          case f: BeltSlot.Flask => s"• ${f.name} — ${f.charges}/${f.maxCharges}"
+          case d: BeltSlot.Dust  => s"• ${d.name}"
+        }
+        head :: body
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
       // Фляга: что делает глоток и сколько его осталось. Уровня у неё нет.
       case ItemDetails.Flask(effect, c, m) => List(effect.describe, s"🧪 Заряды: $c/$m")
