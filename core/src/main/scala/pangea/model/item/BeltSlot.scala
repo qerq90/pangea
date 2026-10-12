@@ -32,10 +32,14 @@ object BeltSlot {
     def empty: Boolean    = charges <= 0
   }
 
-  /** Горсть пыли: одна ячейка — одна горсть. */
-  final case class Dust(kind: MaterialKind) extends BeltSlot {
-    def name: String = kind.displayName
-    def uses: Int    = 1
+  /** Горсть пыли: одна ячейка — одна горсть. Высыпанная ячейка помнит, чем
+    * была полна: после боя она сама доберёт такую же горсть из сумки, если
+    * там есть. */
+  final case class Dust(kind: MaterialKind, spent: Boolean = false) extends BeltSlot {
+    def name: String  = kind.displayName
+    def uses: Int     = if (spent) 0 else 1
+    def poured: Dust  = copy(spent = true)
+    def refilled: Dust = copy(spent = false)
   }
 
   /** Что из сумки вообще можно положить на пояс: фляга или пыль. */
@@ -51,7 +55,8 @@ object BeltSlot {
       "rarity" -> f.rarity.asJson, "charges" -> f.charges.asJson)
 
   private val dustEnc: Encoder[Dust] = (d: Dust) =>
-    Json.obj("type" -> "Dust".asJson, "kind" -> d.kind.entryName.asJson)
+    Json.obj("type" -> "Dust".asJson, "kind" -> d.kind.entryName.asJson,
+      "spent" -> d.spent.asJson)
 
   implicit val encoder: Encoder[BeltSlot] = Encoder.instance {
     case f: Flask => flaskEnc(f)
@@ -66,7 +71,11 @@ object BeltSlot {
           rarity  <- c.get[Rarity]("rarity")
           charges <- c.getOrElse[Int]("charges")(0)
         } yield Flask(kind, rarity, charges)
-      case "Dust" => c.get[String]("kind").map(k => Dust(MaterialKind.withName(k)))
+      case "Dust" =>
+        for {
+          kind  <- c.get[String]("kind").map(MaterialKind.withName)
+          spent <- c.getOrElse[Boolean]("spent")(false)
+        } yield Dust(kind, spent)
       case other  => Left(io.circe.DecodingFailure(s"Неизвестное содержимое пояса: $other", c.history))
     }
 }

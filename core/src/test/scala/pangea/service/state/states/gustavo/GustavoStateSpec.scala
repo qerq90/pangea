@@ -2,7 +2,7 @@ package pangea.service.state.states.gustavo
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType, PotionKind}
+import pangea.model.item.{BeltSlot, FlaskEffect, FlaskKind, Item, ItemDetails, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.{ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.trauma.Trauma
@@ -40,13 +40,17 @@ object GustavoStateSpec extends ZIOSpecDefault {
   private def heroWithFlask(f: Item, silver: Long = 5000L) =
     hero(silver = silver).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
 
-  // пояс с charges/maxCharges для тестов пополнения
-  private def belt(charges: Int, maxCharges: Int): Item =
-    Item.NoItem.copy(name = "Пояс", itemType = ItemType.Belt,
-      details = ItemDetails.Belt(PotionKind.Healing, charges = charges, maxCharges = maxCharges))
+  /** Пояс с одной флягой в ячейке: столько зарядов в ней и осталось. Серый
+    * запас фляги целителя — три глотка, как раз для тестов пополнения. */
+  private def belt(charges: Int, maxCharges: Int): Item = {
+    val rarity = Rarity.values.find(r => FlaskKind.chargesFor(r) == maxCharges).getOrElse(Rarity.Gray)
+    Item.NoItem.copy(name = "Пояс", itemType = ItemType.Belt, rarity = Rarity.Blue,
+      details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Healer, rarity, charges))))
+  }
 
+  /** Сколько зарядов у фляги в первой ячейке пояса. */
   private def beltCharges(i: Item): Option[Int] = i.details match {
-    case b: ItemDetails.Belt => Some(b.charges)
+    case b: ItemDetails.Belt => b.slots.collectFirst { case f: BeltSlot.Flask => f.charges }
     case _                   => None
   }
   private def heroWithBelt(b: Item, silver: Long = 5000L) =

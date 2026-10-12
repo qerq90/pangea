@@ -2,7 +2,7 @@ package pangea.service.state.states.gustavo
 
 import pangea.dao.hero.HeroDao
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails}
+import pangea.model.item.{BeltSlot, Item, ItemDetails}
 import pangea.model.user.User
 import zio.{Task, ZIO}
 
@@ -40,11 +40,17 @@ trait GustavoScene {
       .map(c => (c.maxCharges - c.charges).toLong * GustavoData.FlaskRefillCostPerCharge)
       .getOrElse(0L)
 
-  /** Цена пополнения пояса: 100 серебра за каждую недостающую бутыль. */
+  /** Цена пополнения пояса: 100 серебра за каждый недостающий заряд фляг,
+    * что лежат в его ячейках. Кровь Густаво не разливает, такие фляги в счёт
+    * не идут (см. [[pangea.model.item.FlaskEffect.refillsAtGustavo]]). */
   protected def beltRefillCost(hero: Hero): Long =
-    charged(hero.equipment.belt)
-      .map(c => (c.maxCharges - c.charges).toLong * GustavoData.BeltRefillCostPerBottle)
-      .getOrElse(0L)
+    hero.equipment.belt.details match {
+      case b: ItemDetails.Belt =>
+        b.slots.collect {
+          case f: BeltSlot.Flask if f.kind.effect.refillsAtGustavo => (f.maxCharges - f.charges).max(0)
+        }.sum.toLong * GustavoData.BeltRefillCostPerBottle
+      case _ => 0L
+    }
 
   /** Оставшиеся миллисекунды → строка с минутами, округление вверх, минимум 1. */
   protected def minsOf(ms: Long): String = ((ms + 59999L) / 60000L).max(1L).toString

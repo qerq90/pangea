@@ -371,8 +371,11 @@ case class BattleState(
                res.battle.group.allies.exists(_.home <= 0))(
         heroDao.updateSquad(user.userId, squadAfterBattle(res.hero, res.battle, nowMs)))
     // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
+    // А высыпанные ячейки пояса, наоборот, добирают из сумки такую же горсть —
+    // чтобы в следующий бой идти с полным поясом, не разбирая его вручную.
     val clearDust =
-      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty))
+      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty)) *>
+        ZIO.when(res.outcome != Outcome.Continue)(refillBeltDust(user, res.hero, renderer)).unit
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
@@ -3367,11 +3370,14 @@ case class BattleState(
               flaskEffect(drunk, battle.copy(consumableUsedThisRound = consumed), f.kind.effect,
                 f.name, nowMs, qhLog)
             }
+          case Some(d: BeltSlot.Dust) if d.spent =>
+            cont(hero, battle, content.text("battle.belt.gone"))
           case Some(d: BeltSlot.Dust) =>
             quickHandsRoll(hero).map { case (consumed, qhLog) =>
               val sprinkled = sprinkleInBattle(hero, d.kind)
               val (dusted, line) = sprinkled
-              val next  = b.without(idx)
+              // Ячейка остаётся пустой, но помнит пыль: после боя доберёт такую же.
+              val next  = b.updated(idx, d.poured)
               TurnResult(withBelt(dusted, next), battle.copy(consumableUsedThisRound = consumed),
                 Vector(line) ++ qhLog, Outcome.Continue, endsRound = false)
             }
@@ -3391,6 +3397,35 @@ case class BattleState(
     }
     (hero.copy(weaponDust = outcome.next), line)
   }
+
+  /** Высыпанные ячейки пояса добирают пыль из сумки: по горсти того же вида,
+    * пока она там есть. Чего не нашлось, остаётся пустым — игрок доложит сам. */
+  private def refillBeltDust(user: User, hero: Hero, renderer: Renderer): Task[Unit] =
+    hero.equipment.belt.details match {
+      case b: ItemDetails.Belt if b.slots.exists { case d: BeltSlot.Dust => d.spent; case _ => false } =>
+        for {
+          inv <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
+          // Идём по ячейкам, забирая из сумки по одной горсти: две пустые ячейки
+          // одного вида не должны разобрать одну и ту же щепоть дважды.
+          taken = b.slots.foldLeft((List.empty[BeltSlot], List.empty[Item], inv.items.data)) {
+                    case ((slots, used, bag), d: BeltSlot.Dust) if d.spent =>
+                      bag.find(_.material.contains(d.kind)) match {
+                        case Some(item) => (slots :+ d.refilled, used :+ item, bag.filterNot(_.id == item.id))
+                        case None       => (slots :+ d, used, bag)
+                      }
+                    case ((slots, used, bag), other) => (slots :+ other, used, bag)
+                  }
+          (slots, used, _) = taken
+          _ <- ZIO.when(used.nonEmpty)(
+                 inventoryRepo.removeItems(used.map(_.id).toSet, hero.id)
+                   .mapError(e => new Throwable(e.toString)) *>
+                   heroDao.updateEquipment(user.userId, hero.equipment.copy(
+                     belt = hero.equipment.belt.copy(details = b.copy(slots = slots)))) *>
+                   renderer.show(user, Screen(content.format("battle.belt.refilled",
+                     "names" -> used.map(_.name).distinct.mkString(", ")), Nil)))
+        } yield ()
+      case _ => ZIO.unit
+    }
 
   /** Пояс героя с новым содержимым. */
   private def withBelt(hero: Hero, belt: ItemDetails.Belt): Hero =
