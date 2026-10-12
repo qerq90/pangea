@@ -1,8 +1,9 @@
 package pangea.client.robokassa
 
 import pangea.model.payment.DonationSku
-import pureconfig.ConfigSource
-import pureconfig.generic.auto._
+import pureconfig.error.CannotConvert
+import pureconfig.generic.semiauto.deriveReader
+import pureconfig.{ConfigReader, ConfigSource}
 import zio.{ZIO, ZLayer}
 
 /** Касса Робокассы и прайс-лист доната.
@@ -53,6 +54,24 @@ case class RobokassaConfig(
 }
 
 object RobokassaConfig {
+
+  /** Пакет, как его пишут в конфиг: цена в РУБЛЯХ (`99`, `99.50`) — так её
+    * удобно править руками. Внутри всё в копейках, без дробей. */
+  private case class PackEntry(id: String, doubloons: Long, price: BigDecimal, label: String, receipt: String)
+
+  /** Дробь меньше копейки (`99.999`) роняет запуск, а не округляется молча:
+    * продать по цене, которой нет в конфиге, хуже, чем не подняться. */
+  private implicit val packReader: ConfigReader[DonationSku] =
+    deriveReader[PackEntry].emap { entry =>
+      val kopecks = entry.price * 100
+      Either.cond(
+        kopecks.isWhole,
+        DonationSku(entry.id, entry.doubloons, kopecks.toLong, entry.label, entry.receipt),
+        CannotConvert(entry.price.toString, "DonationSku", s"пакет '${entry.id}': цена в рублях точнее копейки")
+      )
+    }
+
+  implicit val reader: ConfigReader[RobokassaConfig] = deriveReader[RobokassaConfig]
 
   private val load = ZIO.attempt(ConfigSource.default.at("robokassa").loadOrThrow[RobokassaConfig])
 
