@@ -209,7 +209,8 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(screens.nonEmpty) &&
               assertTrue(screens.head.text.contains("Человек-раб")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Attack")) &&
-              assertTrue(screens.head.choices.map(_.id).contains("UseFlask")) &&
+              // кнопки фляги больше нет: расходники достают с пояса
+              assertTrue(!screens.head.choices.map(_.id).contains("UseFlask")) &&
               assertTrue(screens.head.choices.map(_.id).contains("Flee"))
     },
 
@@ -450,7 +451,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
               assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("уже использовали")))
+              assertTrue(screens.exists(_.text.contains("уже брались за пояс")))
     },
 
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {

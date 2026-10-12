@@ -362,6 +362,11 @@ case class BattleState(
     val (res, bubbled) = bubbleRescue(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
+        // Пыль, насыпанную прямо в бою горстью с пояса, тоже надо записать:
+        // покрытие живёт до конца боя, и до его конца о нём должен знать не
+        // только текущий ход.
+        ZIO.when(res.outcome == Outcome.Continue)(
+          heroDao.updateWeaponDust(user.userId, res.hero.weaponDust)) *>
         ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
     // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
     // Крыса, выскочившая из-под ног (`home = 0`), после боя остаётся при герое —
