@@ -2044,7 +2044,7 @@ battle:
     cancelTarget: "↩ Назад"
     lineRow: "{n}. {left} VS {right}"
     sideHero: "🟢 Вы"
-    sideAlly: "🔵 {name} ❤ {hp}% 🧥 {armor}%"
+    sideAlly: "🔵 {name} ❤ {hp}% 🧥 {armor}%{dots}"
     sideMonster: "🔴 {monster} ❤ {hp}% 🧥 {armor}%"
     sideNone: "⚪"
   squad:
@@ -2088,6 +2088,11 @@ battle:
     # последним ударом её не остаётся.
     crumbled: "💀 Последний удар выбивает из костей {name} остатки тёмной силы — они осыпаются грудой на песок."
     auraFell: "🟣 {name} не выдерживает ауры и падает: живым в такой тьме не место."
+    # Раны на союзнике: те же три, что на герое и на мобах.
+    dotTick: "{icon} {dot} снимает {damage} HP с {name}."
+    undeadImmune: "🕯 {name} мёртв: ни яд, ни кровь его не берут."
+    mobSkill: "👹 {monster} применяет «{skill}» по {name} — {damage} урона."
+    mobSkillPoison: "👹 {monster} применяет «{skill}» по {name} — {damage} урона, и в ране остаётся яд."
   mobColdBite: "❄️ Морозный удар сковывает вас: ваша защита держит хуже."
   mobAirBoost: "💨 Ветер подхватывает врага — он бьёт точнее и уворачивается лучше."
   mobPoisons: "🟢 Отравленное оружие оставило яд в вашей ране."

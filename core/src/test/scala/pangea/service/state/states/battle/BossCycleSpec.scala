@@ -3,7 +3,7 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.SoloPveBattle
+import pangea.model.battle.{Bleed, Burn, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.squad.{Ally, AllyKind, Squad}
@@ -15,12 +15,8 @@ import zio.ZIO
 import zio.test.TestRandom
 import zio.test._
 
-/** Круг способностей минибосса, когда он стоит не напротив героя: за союзником
-  * или просто дальше вытянутой руки.
-  *
-  * Тот, кто дерётся в строю, идёт по своему кругу всегда — его приёмы про строй,
-  * а не про героя. Тот, кто дерётся один на один, без героя напротив не
-  * колдует: все его приёмы бьют героя. */
+/** Приёмы достаются тому, кто стоит перед мобом: героя прикрыли союзником —
+  * значит бьют союзника. Круг минибосса при этом идёт своим чередом. */
 object BossCycleSpec extends ZIOSpecDefault {
 
   private val userId   = UserId(1L)
@@ -40,11 +36,11 @@ object BossCycleSpec extends ZIOSpecDefault {
       baseStats  = base.baseStats.copy(str = 1, int = 10, agi = 10, vit = 1000000L))
   }
 
-  private def bossOne(boss: MiniBoss, h: Hero): SoloPveBattle = {
+  private def bossOne(boss: MiniBoss, h: Hero, turn: Int = 0): SoloPveBattle = {
     val lvl  = boss.bossLvl(h.lvl)
     val mob  = Monster(0L, lvl, boss.race, MobRarity.Legendary, boss.stats(lvl))
     val base = SoloPveBattle.from(mob, h)
-    base.copy(bossKind = Some(boss.entryName), minionLvl = 20L, noKin = true,
+    base.copy(bossKind = Some(boss.entryName), bossTurn = turn, minionLvl = 20L, noKin = true,
       effects = base.effects.copy(monsterPoisonsOnHit = boss.poisonsOnHit))
   }
 
@@ -54,7 +50,7 @@ object BossCycleSpec extends ZIOSpecDefault {
     val lvl    = boss.bossLvl(h.lvl)
     val stats  = boss.stats(lvl)
     val necro  = Monster(0L, lvl, boss.race, MobRarity.Legendary, stats, customName = Some(boss.monsterName))
-    val guards = List("раб", "воин", "командир").map(_ =>
+    val guards = List.fill(3)(
       MonsterGenerator.generateOfRaceAndRarity(lvl.toInt, Race.Orc, MobRarity.Common).copy(undead = true))
     val base   = SoloPveBattle.fromGroup(necro :: guards, h, stats.energy :: List.fill(guards.size)(0L))
     base.copy(bossKind = Some(boss.entryName), minionLvl = 20L, noKin = true,
@@ -71,20 +67,28 @@ object BossCycleSpec extends ZIOSpecDefault {
       _        <- TestRandom.setSeed(seed)
       _        <- state.action(testUser, attack(at), renderer)
       after    <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+      hurt     <- dao.getHeroByUserId(userId).map(_.get)
       log      <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
-    } yield (after.get, log)
+    } yield (after.get, hurt, log)
 
-  override def spec = suite("Круг минибосса вне пары")(
+  private def allyOf(b: SoloPveBattle) = b.group.allies.headOption
+
+  /** Союзник, который переживёт удар минибосса: статы наёмника для этого малы. */
+  private def tough(b: SoloPveBattle): SoloPveBattle =
+    b.copy(group = b.group.copy(allies = b.group.allies.map(a =>
+      a.copy(hp = 10000000L, armor = 0L,
+             stats = a.stats.copy(hp = 10000000L, armor = 0L, defence = 0L, evasion = 0L)))))
+
+  override def spec = suite("Приёмы бьют того, кто впереди")(
 
     test("прикрытый союзником Крысиный король всё равно зовёт крыс") {
       val h = hero(behindAlly)
       for {
         t <- round(h, bossOne(MiniBoss.RatKing, h), at = 1, seed = 13L)
-        (after, log) = t
+        (after, _, log) = t
       } yield assertTrue(!bossOne(MiniBoss.RatKing, h).group.paired) &&   // напротив короля — союзник
               assertTrue(log.contains("Крысиный писк разносится по окрестностям")) &&
               assertTrue(after.group.others.nonEmpty) &&
-              // круг сдвинулся на один шаг, энергия списана
               assertTrue(after.bossTurn == 1) &&
               assertTrue(after.monsterCurrentEnergy < bossOne(MiniBoss.RatKing, h).monsterCurrentEnergy)
     },
@@ -96,21 +100,63 @@ object BossCycleSpec extends ZIOSpecDefault {
       val h = hero(behindAlly)
       for {
         t <- round(h, bossOne(MiniBoss.RatKing, h), at = 1, seed = 13L)
-        (after, _) = t
+        (after, _, _) = t
       } yield assertTrue(after.group.places.size == after.group.others.size) &&
               assertTrue(after.group.places.distinct.size == after.group.places.size) &&
               assertTrue(after.placesInOrder.count(_._2.isDefined) == after.group.others.size + 1)
     },
 
-    test("одиночный минибосс за союзником по герою не колдует") {
-      // Приёмы Гнилого Джо бьют героя: пока напротив него союзник, круг стоит.
+    test("смрад Гнилого Джо травит союзника, а не героя за его спиной") {
       val h = hero(behindAlly)
       for {
-        t <- round(h, bossOne(MiniBoss.RottenJoe, h), at = 1, seed = 13L)
-        (after, log) = t
-      } yield assertTrue(after.bossTurn == 0) &&
-              assertTrue(!log.contains("Ядовитые зловония")) &&
-              assertTrue(after.monsterCurrentEnergy == bossOne(MiniBoss.RottenJoe, h).monsterCurrentEnergy)
+        t <- round(h, bossOne(MiniBoss.RottenJoe, h, turn = 0), at = 1, seed = 13L)
+        (after, hurt, log) = t
+      } yield assertTrue(log.contains("Ядовитые зловония")) &&
+              assertTrue(allyOf(after).flatMap(_.poison).exists(_.pct > 0)) &&
+              assertTrue(after.effects.heroPoison.isEmpty) &&
+              assertTrue(hurt.fightStats.hp == h.fightStats.hp) &&
+              // круг сдвинулся и энергия списана — приём состоялся
+              assertTrue(after.bossTurn == 1) &&
+              assertTrue(after.monsterCurrentEnergy < bossOne(MiniBoss.RottenJoe, h).monsterCurrentEnergy)
+    },
+
+    test("пасть волка рвёт союзника: урон ему, кровь на нём") {
+      val h = hero(behindAlly)
+      for {
+        t <- round(h, tough(bossOne(MiniBoss.WhiteWolf, h, turn = 0)), at = 1, seed = 13L)
+        (after, hurt, _) = t
+      } yield assertTrue(allyOf(after).exists(_.hp < 10000000L)) &&
+              assertTrue(allyOf(after).flatMap(_.bleed).exists(_.pct > 0)) &&
+              assertTrue(after.effects.heroBleed.isEmpty) &&
+              assertTrue(hurt.fightStats.hp == h.fightStats.hp)
+    },
+
+    test("всплеск огненного поджигает союзника") {
+      val h = hero(behindAlly)
+      for {
+        t <- round(h, tough(bossOne(MiniBoss.FireElemental, h, turn = 0)), at = 1, seed = 13L)
+        (after, _, _) = t
+        // Раскалённая броня элементаля жжёт того, кто его бьёт, — героя она
+        // достаёт и через союзника, так что смотрим только на союзника.
+      } yield assertTrue(allyOf(after).flatMap(_.burn).exists(_.pct > 0)) &&
+              assertTrue(allyOf(after).exists(_.hp < 10000000L))
+    },
+
+    test("раны союзника тикают в конце раунда и видны в строю") {
+      val h    = hero(behindAlly)
+      val base = bossOne(MiniBoss.RottenJoe, h, turn = 3) // пропуск хода: мешать не будет
+      val sick = tough(base).copy(group = tough(base).group.copy(allies = tough(base).group.allies.map(
+        _.copy(poison = Some(Poison(10)), bleed = Some(Bleed(10)), burn = Some(Burn(10))))))
+      for {
+        t <- round(h, sick, at = 1, seed = 13L)
+        (after, _, log) = t
+        ally = allyOf(after)
+      } yield assertTrue(ally.exists(_.hp < 10000000L)) &&
+              // яд слабеет, кровь держится, пламя растёт — как у всех
+              assertTrue(ally.flatMap(_.poison).exists(_.pct < 10)) &&
+              assertTrue(ally.flatMap(_.bleed).exists(_.pct == 10)) &&
+              assertTrue(ally.flatMap(_.burn).exists(_.pct > 10)) &&
+              assertTrue(log.contains(Poison.Icon) && log.contains(Burn.Icon))
     },
 
     test("Некромант за союзником берёт свой ход один раз за раунд") {
@@ -119,7 +165,7 @@ object BossCycleSpec extends ZIOSpecDefault {
       val h = hero(behindAlly)
       for {
         t <- round(h, necroWithGuards(h), at = 1, seed = 13L)
-        (after, _) = t
+        (after, _, _) = t
       } yield assertTrue(after.bossTurn == 1) &&
               assertTrue(after.group.places.size == after.group.others.size)
     }

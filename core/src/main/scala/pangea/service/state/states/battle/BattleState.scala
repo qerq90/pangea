@@ -30,7 +30,7 @@ import pangea.repository.item.ItemRepository
 import pangea.dao.arena.ArenaDao
 import pangea.model.arena.ArenaRates
 import pangea.service.state.states.arena.ArenaBattle
-import pangea.service.state.states.battle.BattleState.ArenaOwnActions
+import pangea.service.state.states.battle.BattleState.{ArenaOwnActions, Victim}
 import pangea.service.schedule.Scheduler
 import pangea.service.state.{AzatData, BoardProgress, MarisaQuest, NpcQuestLog, State, UserAction, KillLogData}
 import zio.{Random, Task, ZIO}
@@ -194,8 +194,10 @@ case class BattleState(
       promoted3 = promoteAfterKill(sided)
       // Аура держит всё поле: нежить крепнет, живые чахнут. Добитых ею разбираем
       // тем же порядком, что павших от ран.
+      // Раны союзников тикают там же, где и прочие: после всех ходов раунда.
+      allyTicked = tickAllyEffects(promoted3)
       prefs   <- BattleState.prefs(heroDao, user.userId)
-      fogged   = auraTick(promoted3, prefs.miasma)
+      fogged   = auraTick(allyTicked, prefs.miasma)
       promoted4 = promoteAfterKill(fogged)
       // Охрана вся полегла — стрелкам некого прикрывать: они бросают башни и
       // уходят, бой на этом кончается победой.
@@ -882,7 +884,7 @@ case class BattleState(
     // же шагом, этот ход не достаётся — он уже сходил в фазе пары.
     val casted =
       if (battle.boss.exists(_.holdsPosition) && battle.monsterCurrentHp > 0L)
-        bossTurnCast(hero, battle, nowMs)
+        bossTurnCast(hero, battle, nowMs, Victim.Hero)
       else ZIO.succeed((battle, hero, ""))
     casted.map { case (afterCast, castHero, castLine) =>
       val ticked = afterCast.tickBuffs(skip)
@@ -1278,16 +1280,30 @@ case class BattleState(
   private def bossTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
-      nowMs: Long
+      nowMs: Long,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] =
     battle.boss match {
-      case Some(MiniBoss.StoneElemental) => stoneTurnCast(hero, battle, nowMs)
-      case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs)
-      case Some(MiniBoss.WhiteWolf)      => wolfTurnCast(hero, battle, nowMs)
+      case Some(MiniBoss.StoneElemental) => stoneTurnCast(hero, battle, nowMs, victim)
+      case Some(MiniBoss.RottenJoe)      => joeTurnCast(hero, battle, nowMs, victim)
+      case Some(MiniBoss.WhiteWolf)      => wolfTurnCast(hero, battle, nowMs, victim)
       case Some(MiniBoss.RatKing)        => ratKingTurnCast(hero, battle)
       case Some(MiniBoss.Necromancer)    => necromancerTurnCast(hero, battle)
-      case _                             => fireTurnCast(hero, battle, nowMs)
+      case _                             => fireTurnCast(hero, battle, nowMs, victim)
     }
+
+  /** Сколько сейчас HP у того, по кому бьёт приём, — чтобы понять, дошло ли до
+    * тела (кровь и травмы вешают только тогда). */
+  private def victimHp(v: Victim, hero: Hero, battle: SoloPveBattle): Long = v match {
+    case Victim.Hero      => hero.fightStats.hp
+    case Victim.Ally(pos) => battle.group.allyAt(pos).map(_.hp).getOrElse(0L)
+  }
+
+  /** Сколько тому, по кому бьёт приём, не хватает до полного здоровья. */
+  private def victimMissingHp(v: Victim, hero: Hero, battle: SoloPveBattle, nowMs: Long): Long = v match {
+    case Victim.Hero      => (hero.effectiveMaxHp(nowMs) - hero.fightStats.hp).max(0L)
+    case Victim.Ally(pos) => battle.group.allyAt(pos).map(a => (a.stats.hp - a.hp).max(0L)).getOrElse(0L)
+  }
 
   /** Круг Некроманта: воскрешение → мистический шаг → созидание.
     *
@@ -1455,7 +1471,8 @@ case class BattleState(
   private def fireTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
-      nowMs: Long
+      nowMs: Long,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] = {
     val lvl      = battle.monsterLvl
     val atk      = battle.monsterStats.atk
@@ -1470,11 +1487,12 @@ case class BattleState(
         val cost = MiniBoss.FireElemental.SplashCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg     = bossDamageTaken(hero, battle, (atk * MiniBoss.FireElemental.SplashDamageFactor).toLong.max(1L))
-          val (h, l)  = hurtHero(hero, dmg)
-          val effects = next.effects.copy(heroBurn = Some(
-            next.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.SplashBurnPct))))
-          ZIO.succeed((spend(cost, next).copy(effects = effects), h,
+          val raw        = (atk * MiniBoss.FireElemental.SplashDamageFactor).toLong.max(1L)
+          val (h, b1, l) = hurtVictim(victim, hero, spend(cost, next), raw)
+          // Пламя не складывается, а разгорается заново — и на герое, и на том,
+          // кто стоит перед элементалем вместо него.
+          val burned     = reigniteVictim(victim, b1, MiniBoss.FireElemental.SplashBurnPct)
+          ZIO.succeed((burned, h,
             content.format("battle.elemental.fireSplash", "damage" -> l.toString)))
         }
 
@@ -1487,7 +1505,7 @@ case class BattleState(
           if (orbs < MiniBoss.FireElemental.OrbsToBurst)
             ZIO.succeed((spend(cost, next).copy(bossCharges = orbs), hero,
               content.text("battle.elemental.orbCreated")))
-          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.FireElemental)
+          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.FireElemental, victim)
         }
 
       // 3) Огненный щит: чинит броню и HP, но только если есть что чинить.
@@ -1524,33 +1542,35 @@ case class BattleState(
       battle: SoloPveBattle,
       atk: Long,
       nowMs: Long,
-      kind: MiniBoss
+      kind: MiniBoss,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] = {
     val stone    = kind == MiniBoss.StoneElemental
     val statPct  = if (stone) MiniBoss.StoneElemental.BurstHeroStatPct else MiniBoss.FireElemental.BurstHeroStatPct
     val traumaAt = if (stone) MiniBoss.StoneElemental.BurstTraumaChancePct else MiniBoss.FireElemental.BurstTraumaChancePct
     val textKey  = if (stone) "battle.elemental.boulderBurst" else "battle.elemental.orbBurst"
-    val maxHp    = hero.effectiveMaxHp(nowMs)
-    val maxArmor = hero.effectiveMaxArmor(nowMs)
+    // Залп считается от запаса того, в кого летит: у союзника свои потолки.
+    val (maxHp, maxArmor) = victim match {
+      case Victim.Hero      => (hero.effectiveMaxHp(nowMs), hero.effectiveMaxArmor(nowMs))
+      case Victim.Ally(pos) => battle.group.allyAt(pos).fold((0L, 0L))(a => (a.stats.hp, a.stats.armor))
+    }
     val raw      = atk * 2L + (maxHp * statPct / 100L) + (maxArmor * statPct / 100L)
-    val damage   = bossDamageTaken(hero, battle, raw)
-    // Залп бьёт как обычная атака: сперва броня, остаток — в HP.
-    val toArmor  = damage.min(hero.fightStats.armor)
-    val toHp     = damage - toArmor
-    val hit = hero.copy(fightStats = hero.fightStats.copy(
-      armor = hero.fightStats.armor - hero.sets.armorSpent(toArmor),
-      hp    = (hero.fightStats.hp - toHp).max(0L)))
+    val hpBefore = victimHp(victim, hero, battle)
+    val (hit, struck, damage) = hurtVictim(victim, hero, battle, raw)
+    val toHp     = (hpBefore - victimHp(victim, hit, struck)).max(0L)
     // Каменная россыпь сбивает с ног: защита и уклонение героя срезаны на 3 хода.
+    // Союзника сбивать нечем — у него таких счётчиков нет, ему достаётся только удар.
     val after =
-      if (!stone) battle
-      else battle.copy(effects = battle.effects.copy(heroStunnedTurns = MiniBoss.StoneElemental.BurstDebuffTurns))
+      if (!stone || victim != Victim.Hero) struck
+      else struck.copy(effects = struck.effects.copy(heroStunnedTurns = MiniBoss.StoneElemental.BurstDebuffTurns))
     val burstLine = content.format(textKey, "damage" -> damage.toString)
     val line =
-      if (!stone) burstLine
+      if (!stone || victim != Victim.Hero) burstLine
       else burstLine + "\n" + content.format("battle.elemental.boulderStun",
              "pct" -> MiniBoss.StoneElemental.BurstDebuffPct.toString,
              "turns" -> MiniBoss.StoneElemental.BurstDebuffTurns.toString)
-    if (toHp <= 0 || hit.fightStats.hp <= 0) ZIO.succeed((after, hit, line))
+    // Травма — геройская беда: союзник её не получает.
+    if (toHp <= 0 || victim != Victim.Hero || hit.fightStats.hp <= 0) ZIO.succeed((after, hit, line))
     else
       for {
         roll   <- Random.nextIntBetween(1, 101)
@@ -1584,7 +1604,8 @@ case class BattleState(
   private def joeTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
-      nowMs: Long
+      nowMs: Long,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] = {
     val joe    = MiniBoss.RottenJoe
     val lvl    = battle.monsterLvl
@@ -1599,10 +1620,7 @@ case class BattleState(
         val cost = joe.StenchCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val poison = next.effects.heroPoison
-            .map(p => Poison(p.pct + joe.StenchPoisonPct))
-            .getOrElse(Poison(joe.StenchPoisonPct))
-          ZIO.succeed((spend(cost, next).copy(effects = next.effects.copy(heroPoison = Some(poison))),
+          ZIO.succeed((poisonVictim(victim, spend(cost, next), joe.StenchPoisonPct),
             hero, content.text("battle.joe.stench")))
         }
 
@@ -1611,12 +1629,12 @@ case class BattleState(
         val cost = joe.SweepCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg      = bossDamageTaken(hero, battle, (monsterAttack(battle) * joe.SweepDamageFactor).toLong.max(1L))
-          val hpBefore = hero.fightStats.hp
-          val (hurt, dealt) = hurtHero(hero, dmg)
+          val raw      = (monsterAttack(battle) * joe.SweepDamageFactor).toLong.max(1L)
+          val hpBefore = victimHp(victim, hero, battle)
+          val (hurt, spent, dealt) = hurtVictim(victim, hero, spend(cost, next), raw)
           val line     = content.format("battle.joe.sweep", "damage" -> dealt.toString)
-          val spent    = spend(cost, next)
-          if (hurt.fightStats.hp >= hpBefore || hurt.fightStats.hp <= 0)
+          // Травму оставляет только удар по герою: союзник ран не копит.
+          if (victim != Victim.Hero || victimHp(victim, hurt, spent) >= hpBefore || hurt.fightStats.hp <= 0)
             ZIO.succeed((spent, hurt, line))
           else
             for {
@@ -1652,7 +1670,8 @@ case class BattleState(
   private def wolfTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
-      nowMs: Long
+      nowMs: Long,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] = {
     val wolf   = MiniBoss.WhiteWolf
     val lvl    = battle.monsterLvl
@@ -1672,14 +1691,17 @@ case class BattleState(
     /** Удар умением: крит, урон холодом по броне и HP, кровотечение при уроне по HP. */
     def bite(b: SoloPveBattle, raw: Long, bleedPct: Int, textKey: String): Task[(SoloPveBattle, Hero, String)] =
       critMult(b).map { case (mult, critted, b1) =>
-        val damage            = bossDamageTaken(hero, battle, (raw * mult).max(1L))
-        val (newHp, newArmor) = bossHit(battle, hero, damage)
-        val hurt              = hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor))
-        val bleeds            = bleedPct > 0 && newHp < hero.fightStats.hp
-        val b2 =
-          if (!bleeds) b1
-          else b1.copy(effects = b1.effects.copy(heroBleed = Some(
-            b1.effects.heroBleed.map(_.stackedWith(bleedPct)).getOrElse(Bleed(bleedPct)))))
+        val hpBefore = victimHp(victim, hero, b1)
+        val (hurt, bitten, damage) = victim match {
+          case Victim.Hero =>
+            // По герою волк бьёт холодом: грани стихии считает `bossHit`.
+            val dealt             = bossDamageTaken(hero, battle, (raw * mult).max(1L))
+            val (newHp, newArmor) = bossHit(battle, hero, dealt)
+            (hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor)), b1, dealt)
+          case ally => hurtVictim(ally, hero, b1, (raw * mult).max(1L))
+        }
+        val bleeds = bleedPct > 0 && victimHp(victim, hurt, bitten) < hpBefore
+        val b2     = if (!bleeds) bitten else bleedVictim(victim, bitten, bleedPct)
         val line = List(
           Some(content.format(textKey, "damage" -> damage.toString)),
           Option.when(critted)(content.text("battle.wolf.crit")),
@@ -1715,7 +1737,7 @@ case class BattleState(
 
       // 5) Смыкание пасти: четверть недостающего герою HP плюс пятая часть атаки. Бесплатно.
       case _ =>
-        val missing = (hero.effectiveMaxHp(nowMs) - hero.fightStats.hp).max(0L)
+        val missing = victimMissingHp(victim, hero, battle, nowMs)
         val raw     = missing * wolf.JawsMissingHpPct / 100L + (atk * wolf.JawsDamageFactor).toLong
         bite(next, raw.max(1L), 0, "battle.wolf.jaws")
     }
@@ -1725,7 +1747,8 @@ case class BattleState(
   private def stoneTurnCast(
       hero: Hero,
       battle: SoloPveBattle,
-      nowMs: Long
+      nowMs: Long,
+      victim: Victim
   ): Task[(SoloPveBattle, Hero, String)] = {
     val lvl    = battle.monsterLvl
     val atk    = monsterAttack(battle)
@@ -1740,9 +1763,9 @@ case class BattleState(
         val cost = MiniBoss.StoneElemental.SplashCostPerLvl * lvl
         if (energy < cost) ZIO.succeed((next, hero, ""))
         else {
-          val dmg    = bossDamageTaken(hero, battle, (atk * MiniBoss.StoneElemental.SplashDamageFactor).toLong.max(1L))
-          val (h, l) = hurtHero(hero, dmg)
-          ZIO.succeed((spend(cost, next), h,
+          val raw        = (atk * MiniBoss.StoneElemental.SplashDamageFactor).toLong.max(1L)
+          val (h, b1, l) = hurtVictim(victim, hero, spend(cost, next), raw)
+          ZIO.succeed((b1, h,
             content.format("battle.elemental.stoneSplash", "damage" -> l.toString)))
         }
 
@@ -1755,7 +1778,7 @@ case class BattleState(
           if (boulders < MiniBoss.StoneElemental.BouldersToBurst)
             ZIO.succeed((spend(cost, next).copy(bossCharges = boulders), hero,
               content.text("battle.elemental.boulderCreated")))
-          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.StoneElemental)
+          else chargeBurst(hero, spend(cost, next).copy(bossCharges = 0), atk, nowMs, MiniBoss.StoneElemental, victim)
         }
 
       // 3) Восстановление камня: чинит броню и HP, но только если есть что чинить.
@@ -1951,6 +1974,117 @@ case class BattleState(
       val fire = if (battle.boss.contains(MiniBoss.FireElemental)) hero.sets.fireTakenMult else 1.0
       (damage * hero.sets.elementalDamageTakenMult * fire).toLong.max(1L)
     }
+
+  /** Кого бьёт приём того, кто сейчас ходит: героя или союзника, стоящего
+    * напротив. Моб, занятый союзником, до героя не тянется — и приёмы его
+    * достаются тому, кто перед ним. */
+  private def victimAt(battle: SoloPveBattle, pos: Int): Victim =
+    battle.group.allyAt(pos).filter(_.alive).fold[Victim](Victim.Hero)(a => Victim.Ally(a.position))
+
+  /** Урон по цели приёма. Герою — привычным путём ([[hurtHero]]) с поправкой на
+    * его наборы; союзнику — по его защите и броне, как при обычном ударе моба.
+    * Возвращает героя, бой и сколько урона прошло (для строки лога). */
+  private def hurtVictim(v: Victim, hero: Hero, battle: SoloPveBattle, damage: Long): (Hero, SoloPveBattle, Long) =
+    v match {
+      case Victim.Hero =>
+        val (hurt, dealt) = hurtHero(hero, bossDamageTaken(hero, battle, damage))
+        (hurt, battle, dealt)
+      case Victim.Ally(pos) =>
+        battle.group.allyAt(pos).filter(_.alive) match {
+          case None => (hero, battle, 0L)
+          case Some(a) =>
+            val reduced  = (damage * (1.0 - BattleState.damageReduction(a.stats.defence, 0L, battle.monsterStats.atk, 0L)))
+                             .toLong.max(1L)
+            val toArmor  = reduced.min(a.armor)
+            val toHp     = reduced - toArmor
+            val hurt     = a.copy(armor = a.armor - toArmor, hp = (a.hp - toHp).max(0L))
+            (hero, battle.copy(group = battle.group.updateAlly(pos)(_ => hurt)), reduced)
+        }
+    }
+
+  /** Повесить рану на цель приёма: герою — в эффекты боя, союзнику — на него
+    * самого. Яд копится, как и у героя: повторный приём складывает проценты. */
+  private def poisonVictim(v: Victim, battle: SoloPveBattle, pct: Int): SoloPveBattle =
+    v match {
+      case Victim.Hero =>
+        val grown = battle.effects.heroPoison.map(p => Poison(p.pct + pct)).getOrElse(Poison(pct))
+        battle.copy(effects = battle.effects.copy(heroPoison = Some(grown)))
+      case Victim.Ally(pos) =>
+        battle.copy(group = battle.group.updateAlly(pos)(a =>
+          a.copy(poison = Some(a.poison.map(p => Poison(p.pct + pct)).getOrElse(Poison(pct))))))
+    }
+
+  private def bleedVictim(v: Victim, battle: SoloPveBattle, pct: Int): SoloPveBattle =
+    v match {
+      case Victim.Hero =>
+        val grown = battle.effects.heroBleed.map(b => Bleed(b.pct + pct)).getOrElse(Bleed(pct))
+        battle.copy(effects = battle.effects.copy(heroBleed = Some(grown)))
+      case Victim.Ally(pos) =>
+        battle.copy(group = battle.group.updateAlly(pos)(a =>
+          a.copy(bleed = Some(a.bleed.map(b => Bleed(b.pct + pct)).getOrElse(Bleed(pct))))))
+    }
+
+  /** Поджечь цель: уже горящее пламя разгорается заново, непогашенное — зажигается. */
+  private def reigniteVictim(v: Victim, battle: SoloPveBattle, pct: Int): SoloPveBattle =
+    v match {
+      case Victim.Hero =>
+        val fire = battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(pct))
+        battle.copy(effects = battle.effects.copy(heroBurn = Some(fire)))
+      case Victim.Ally(pos) =>
+        battle.copy(group = battle.group.updateAlly(pos)(a =>
+          a.copy(burn = Some(a.burn.map(_.reignited).getOrElse(Burn(pct))))))
+    }
+
+  /** Тик ран союзников в конце раунда — те же три, что у героя и у мобов: яд
+    * слабеет, кровь держится, пламя растёт, и бьют они мимо брони. Поднятого с
+    * алтаря ни яд, ни кровь не берут, зато горит он жарче живого. Павшего от
+    * ран уносит свиток, а поднятый рассыпается там же, где стоял. */
+  private def tickAllyEffects(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound) res
+    else {
+      val (ticked, lines) = res.battle.group.allies.foldLeft((List.empty[BattleAlly], Vector.empty[String])) {
+        case ((acc, log), a) if !a.alive || (a.poison.isEmpty && a.bleed.isEmpty && a.burn.isEmpty) =>
+          (acc :+ a, log)
+        case ((acc, log), a0) =>
+          var ally  = a0
+          var out   = log
+          val maxHp = a0.stats.hp
+          if (a0.isUndead && (a0.poison.isDefined || a0.bleed.isDefined)) {
+            ally = ally.copy(poison = None, bleed = None)
+            out  = out :+ content.format("battle.ally.undeadImmune", "name" -> a0.name)
+          }
+          ally.poison.foreach { p =>
+            val dmg = p.damageOn(maxHp)
+            ally = ally.copy(hp = (ally.hp - dmg).max(0L), poison = p.decayed)
+            out   = out :+ allyDotTick(Poison.Icon, Poison.Label, dmg, a0.name)
+          }
+          ally.bleed.foreach { b =>
+            val dmg = b.damageOn(maxHp)
+            ally = ally.copy(hp = (ally.hp - dmg).max(0L))
+            out   = out :+ allyDotTick(Bleed.Icon, Bleed.Label, dmg, a0.name)
+          }
+          ally.burn.foreach { bn =>
+            val fire  = if (a0.isUndead) ItemSet.Necromancer.UndeadFireTakenPct else 0L
+            val dmg   = bn.damageOn(maxHp) * (100L + fire) / 100L
+            val steps = if (a0.isUndead) ItemSet.Necromancer.UndeadBurnGrowthMult else 1L
+            ally = ally.copy(hp = (ally.hp - dmg).max(0L),
+                             burn = Some((1L to steps).foldLeft(bn)((b, _) => b.grown)))
+            out   = out :+ allyDotTick(Burn.Icon, Burn.Label, dmg, a0.name)
+          }
+          (acc :+ ally, out)
+      }
+      val fallen  = ticked.filter(a => !a.alive && res.battle.group.allyAt(a.position).exists(_.alive))
+      val updated = res.battle.copy(group = res.battle.group.copy(allies = ticked))
+      val swept   = fallen.foldLeft(updated)((b, a) => b.copy(group = b.group.withoutAlly(a.position)))
+      val gone    = fallen.map(a => content.format(
+        if (a.undead.isDefined) "battle.ally.crumbled" else "battle.ally.scroll", "name" -> a.name))
+      res.copy(battle = swept, log = res.log ++ lines ++ gone)
+    }
+
+  /** Строка тика раны на союзнике — та же, что для мобов, только имя его. */
+  private def allyDotTick(icon: String, label: String, damage: Long, name: String): String =
+    content.format("battle.ally.dotTick", "icon" -> icon, "dot" -> label,
+      "damage" -> damage.toString, "name" -> name)
 
   /** Урон герою от способности минибосса: сперва броня, остаток в HP. Сам по
     * себе НИЧЕГО не поджигает — пламя вешает тот, кто им владеет. Возвращает
@@ -2260,7 +2394,7 @@ case class BattleState(
   /** Умение моба поверх обычной атаки: самое дорогое по карману, оплачивается
     * энергией. «Охотник» может погасить первую вредную способность. Возвращает
     * бой моба, героя и строку лога (пустую, если кастовать нечего). */
-  private def mobSkillCast(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[(SoloPveBattle, Hero, String)] =
+  private def mobSkillCast(hero: Hero, battle: SoloPveBattle, nowMs: Long, victim: Victim): Task[(SoloPveBattle, Hero, String)] =
     for {
       affordable <- ZIO.succeed(affordableSkills(battle).toVector)
       out <-
@@ -2274,15 +2408,47 @@ case class BattleState(
             ms   = best(idx)
             paid = battle.copy(monsterCurrentEnergy = (battle.monsterCurrentEnergy - ms.cost(battle.monsterLvl)).max(0L))
             cast = ms.cast(paid, hero, nowMs)
+            onAlly = (victim, ms.againstOther) match {
+                       case (Victim.Ally(pos), Some(hit)) => Some((pos, hit))
+                       case _                             => None
+                     }
             hurts = cast.heroHp < hero.fightStats.hp || cast.heroArmor < hero.fightStats.armor
             // «Охотник» (порог 10): приём, который должен был навредить, с шансом
             // срывается целиком — и так каждый раз, а не единожды за бой.
             blocked <- chanceRoll(hurts && hero.sets.blockSkillChancePct > 0L, hero.sets.blockSkillChancePct)
-          } yield
-            if (blocked) (cast.battle, hero, content.text("battle.hunterBlockSkill"))
-            else (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
+          } yield onAlly match {
+            // Перед мобом стоит не герой: бьющее умение достаётся союзнику, а
+            // лечение и починка доспеха (у них нет доли урона) идут себе, как
+            // шли.
+            case Some((pos, hit)) => strikeAllyWithSkill(hero, paid, pos, hit, ms)
+            case None =>
+              if (blocked) (cast.battle, hero, content.text("battle.hunterBlockSkill"))
+              else (cast.battle, hero.copy(fightStats = hero.fightStats.copy(hp = cast.heroHp, armor = cast.heroArmor)), cast.line)
+          }
         else ZIO.succeed((battle, hero, ""))
     } yield out
+
+  /** Умение моба по союзнику: та же доля его атаки, его же броня и защита (у
+    * дробящего — мимо брони), и яд, если умение его оставляет. */
+  private def strikeAllyWithSkill(
+      hero: Hero, battle: SoloPveBattle, pos: Int, hit: MonsterSkill.OtherHit, skill: MonsterSkill
+  ): (SoloPveBattle, Hero, String) =
+    battle.group.allyAt(pos).filter(_.alive) match {
+      case None => (battle, hero, "")
+      case Some(a) =>
+        val raw = (battle.monsterStats.atk * hit.factor).toLong.max(1L)
+        val (struck, dealt) =
+          if (hit.ignoresArmor)
+            (battle.copy(group = battle.group.updateAlly(pos)(x => x.copy(hp = (x.hp - raw).max(0L)))), raw)
+          else {
+            val (_, b, d) = hurtVictim(Victim.Ally(pos), hero, battle, raw)
+            (b, d)
+          }
+        val poisoned = if (hit.poisonPct > 0) poisonVictim(Victim.Ally(pos), struck, hit.poisonPct) else struck
+        val key      = if (hit.poisonPct > 0) "battle.ally.mobSkillPoison" else "battle.ally.mobSkill"
+        (poisoned, hero, content.format(key, "monster" -> battle.monsterName, "name" -> a.name,
+          "skill" -> skill.label, "damage" -> dealt.toString))
+    }
 
   private def monsterPhase(
       hero: Hero,
@@ -2341,8 +2507,8 @@ case class BattleState(
           ZIO.succeed((battleAfterAtk, heroAfterAtk, content.text("battle.skillBlocked")))
         // Минибосс не выбирает умение: он идёт строго по своему кругу.
         else if (battleAfterAtk.boss.isDefined)
-          bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs)
-        else mobSkillCast(heroAfterAtk, battleAfterAtk, nowMs)
+          bossTurnCast(heroAfterAtk, battleAfterAtk, nowMs, Victim.Hero)
+        else mobSkillCast(heroAfterAtk, battleAfterAtk, nowMs, Victim.Hero)
       (finalBattle, finalHero0, castLine0) = castResult
       // Приём по HP — тоже может оставить травму.
       castTrauma <- hitTrauma(heroAfterAtk, finalHero0, nowMs)
@@ -3484,9 +3650,12 @@ case class BattleState(
             case AllySkill.HealingFlask =>
               val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
               val newHp = (a1.hp + heal).min(a1.stats.hp)
-              // Фляга выводит и из миазм — на те же несколько раундов, что у всех.
+              // Фляга выводит и из миазм — на те же несколько раундов, что у всех,
+              // а кровь и пламя снимает целиком, яд ослабляет: лечение лечит одинаково.
               ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(
-                  _.copy(hp = newHp, miasmaCalm = Aura.Miasma.calmRounds))), None, 0L, slew = false),
+                  x => x.copy(hp = newHp, miasmaCalm = Aura.Miasma.calmRounds,
+                              poison = x.poison.flatMap(_.weakenedByHeal), bleed = None, burn = None))),
+                  None, 0L, slew = false),
                 Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
             case AllySkill.EmergencyRepair =>
               val fix = (a1.stats.armor * AllySkill.RepairPct / 100L).max(1L)
@@ -3755,8 +3924,10 @@ case class BattleState(
             // героя, и ждать свободного места напротив ему незачем. Прикрыли его
             // союзником — круг всё равно идёт.
             val inFormation = t1.boss.exists(_.fightsInGroup)
-            if (!holdsOwn && (reachesHero || inFormation))
-              (if (t1.boss.isDefined) bossTurnCast(h1, t1, nowMs) else mobSkillCast(h1, t1, nowMs)).map {
+            // Бьёт он того, кто перед ним: союзника напротив, иначе героя.
+            val prey = victimAt(battle, pos)
+            if (!holdsOwn && (reachesHero || inFormation || facing.isDefined))
+              (if (t1.boss.isDefined) bossTurnCast(h1, t1, nowMs, prey) else mobSkillCast(h1, t1, nowMs, prey)).map {
                 case (t2, h2, line) => (h2, t2, battle, if (line.isEmpty) Vector.empty else Vector(line))
               }
             else selfAid(h1, t1, nowMs).map { case (t2, line) => (h1, t2, battle, if (line.isEmpty) Vector.empty else Vector(line)) }
@@ -3943,6 +4114,12 @@ case class BattleState(
 
   /** Строки группового экрана: кто с кем в паре, у кого сколько осталось. С
     * отрядом строй двухрядный: слева герой и союзники по позициям, справа мобы. */
+  /** Значки ран союзника для строки строя: пусто, если на нём ничего нет. */
+  private def allyDots(a: BattleAlly): String = {
+    val marks = List(a.poison.map(_ => Poison.Icon), a.bleed.map(_ => Bleed.Icon), a.burn.map(_ => Burn.Icon)).flatten
+    if (marks.isEmpty) "" else " " + marks.mkString
+  }
+
   private def groupLines(battle: SoloPveBattle): Vector[String] = {
     val queued = if (battle.group.queue.isEmpty) Vector.empty
                  else Vector(content.format("battle.group.queueLine", "n" -> battle.group.queue.size.toString))
@@ -3963,7 +4140,8 @@ case class BattleState(
         val left =
           if (pos == battle.group.heroPos) content.text("battle.group.sideHero")
           else battle.group.allyAt(pos).map(a => content.format("battle.group.sideAlly",
-                 "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString))
+                 "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString,
+                 "dots" -> allyDots(a)))
             .getOrElse(content.text("battle.group.sideNone"))
         val right = battle.monsterAt(pos).map(m => content.format("battle.group.sideMonster",
             "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString))
@@ -4776,6 +4954,15 @@ object BattleState {
 
   /** С каким HP остаётся тот, кого вытащил пузырьковый нектар. */
   val BubbleHp: Long = 1L
+
+  /** Кого достаёт приём того, кто ходит: героя или союзника напротив него.
+    * Приёмы мобов и минибоссов бьют того, кто перед ними, а не того, кто им
+    * интереснее. */
+  sealed trait Victim
+  object Victim {
+    case object Hero                     extends Victim
+    final case class Ally(position: Int) extends Victim
+  }
 
   final case class TurnResult(
       hero: Hero,

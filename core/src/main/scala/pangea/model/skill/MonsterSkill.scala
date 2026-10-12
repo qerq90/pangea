@@ -43,10 +43,20 @@ sealed abstract class MonsterSkill(val label: String, val template: String) exte
    *  готовую текстовую строку. Реализации не делают никаких рандомов — рандом
    *  только при выборе скилла снаружи. */
   def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): MonsterSkill.Cast
+
+  /** Что умение делает тому, кто перед мобом, если это не герой: доля атаки в
+   *  урон, проходит ли он мимо брони и сколько яда остаётся в ране. Лечение и
+   *  починка доспеха цели не касаются — у них `None`, и применяются они к себе
+   *  как обычно. */
+  def againstOther: Option[MonsterSkill.OtherHit] = None
 }
 
 object MonsterSkill extends Enum[MonsterSkill] {
   val values: IndexedSeq[MonsterSkill] = findValues
+
+  /** Удар умением по тому, кто не герой: союзнику достаётся та же доля атаки
+   *  моба, а тонкости геройских наборов и баффов к нему не применяются. */
+  final case class OtherHit(factor: Double, ignoresArmor: Boolean = false, poisonPct: Int = 0)
 
   /** Результат применения навыка моба: обновлённый бой, новые hp/armor героя и текст. */
   final case class Cast(
@@ -61,6 +71,8 @@ object MonsterSkill extends Enum[MonsterSkill] {
     template = "{name} делает быстрые атаки на {} урона!"
   ) {
     def applicable(battle: SoloPveBattle): Boolean = true
+
+    override def againstOther: Option[OtherHit] = Some(OtherHit(0.5))
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
       val effHero  = hero.effectiveFightStats(nowMs)
@@ -84,6 +96,9 @@ object MonsterSkill extends Enum[MonsterSkill] {
     template = "{name} бьёт плашмя прямо по голове, нанеся {} урона!"
   ) {
     def applicable(battle: SoloPveBattle): Boolean = true
+
+    // Бьёт мимо брони — что герою, что тому, кто его прикрыл.
+    override def againstOther: Option[OtherHit] = Some(OtherHit(0.3, ignoresArmor = true))
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
       // Игнорирует и damageReduction игрока, и его физическую броню — урон уходит сразу в HP.
@@ -160,6 +175,8 @@ object MonsterSkill extends Enum[MonsterSkill] {
 
     override val races: Set[Race]   = Set(Race.Murloc)
     override val costFactor: Double = MonsterEnergy.RacialCostFactor
+
+    override def againstOther: Option[OtherHit] = Some(OtherHit(DamageFactor, poisonPct = PoisonPct))
 
     def applicable(battle: SoloPveBattle): Boolean = true
 
