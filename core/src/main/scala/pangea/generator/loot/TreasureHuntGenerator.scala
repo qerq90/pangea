@@ -43,10 +43,11 @@ object TreasureHuntGenerator {
   // Редкость снаряжения (в %, сумма = 100). Ниже синей не бывает.
   private val gearRarityWeights: List[(ItemRarity, Int)] =
     List(
-      ItemRarity.Blue   -> 20,
+      ItemRarity.Blue   -> 27,
       ItemRarity.Purple -> 35, // фиолетовая
       ItemRarity.Violet -> 31, // пурпурная
-      ItemRarity.Orange -> 14
+      // Оранжевых стало вдвое меньше, их половина ушла синим.
+      ItemRarity.Orange -> 7
     )
 
   /** `knowsRareHerbs` — знает ли герой цветы 2 ранга: без знания редкие травы
