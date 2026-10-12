@@ -92,7 +92,10 @@ object NecromancerCaveSpec extends ZIOSpecDefault {
       val coins = drops.collect { case LootDrop.Doubloons(n) => n }
       assertTrue(mats.toSet == Set[MaterialKind](MaterialKind.CursedBones)) &&
       assertTrue(gear.nonEmpty && gear.forall(_.set.contains(ItemSet.Necromancer))) &&
-      assertTrue(gear.map(_.rarity).toSet == Set[ItemRarity](ItemRarity.Purple, ItemRarity.Blue)) &&
+      // синяя и фиолетовая — основа, оранжевая попадается на полпроцента роллов
+      assertTrue(gear.map(_.rarity).toSet.subsetOf(
+        Set[ItemRarity](ItemRarity.Purple, ItemRarity.Blue, ItemRarity.Orange))) &&
+      assertTrue(gear.exists(_.rarity == ItemRarity.Purple) && gear.exists(_.rarity == ItemRarity.Blue)) &&
       // череп всегда с парой дублонов, и это всегда череп, а не случайный камень
       assertTrue(gems.nonEmpty && gems.forall(_.gem.exists(_.kind == pangea.model.item.GemKind.Skull))) &&
       assertTrue(coins.nonEmpty && coins.forall(_ == LootGenerator.NecroSkullDoubloons)) &&

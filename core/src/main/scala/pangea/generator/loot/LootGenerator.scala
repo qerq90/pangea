@@ -106,6 +106,10 @@ object LootGenerator {
 
   // Редкость выпавшей экипировки, веса в долях 1/1_000_000 (сумма = 1_000_000).
   // Числа из §20 с исправленными суммами до 100% (Green добирает остаток).
+  /** Веса редкостей вещи по тиру моба. Оранжевая вещь падает только с
+    * ИМЕННЫХ — легендарных мобов, у которых есть собственное имя (см.
+    * [[pangea.generator.monster.MonsterGenerator.legendaryName]]). У прочих её
+    * билеты отданы синей: безымянный моб легендарной вещи не носит. */
   private def gearRarityWeights(tier: MobRarity): List[(ItemRarity, Long)] =
     tier match {
       case MobRarity.Common =>
@@ -113,30 +117,27 @@ object LootGenerator {
           ItemRarity.Gray   -> 450000L,
           ItemRarity.White  -> 350000L,
           ItemRarity.Green  -> 164995L,
-          ItemRarity.Blue   -> 20000L,
+          ItemRarity.Blue   -> 20005L,
           ItemRarity.Purple -> 10000L,
-          ItemRarity.Violet -> 5000L,
-          ItemRarity.Orange -> 5L
+          ItemRarity.Violet -> 5000L
         )
       case MobRarity.Uncommon =>
         List(
           ItemRarity.Gray   -> 300000L,
           ItemRarity.White  -> 450000L,
           ItemRarity.Green  -> 194995L,
-          ItemRarity.Blue   -> 30000L,
+          ItemRarity.Blue   -> 30005L,
           ItemRarity.Purple -> 20000L,
-          ItemRarity.Violet -> 5000L,
-          ItemRarity.Orange -> 5L
+          ItemRarity.Violet -> 5000L
         )
       case MobRarity.Rare | MobRarity.Mythical =>
         List(
           ItemRarity.Gray   -> 190000L,
           ItemRarity.White  -> 400000L,
           ItemRarity.Green  -> 310000L,
-          ItemRarity.Blue   -> 50000L,
+          ItemRarity.Blue   -> 65000L,
           ItemRarity.Purple -> 30000L,
-          ItemRarity.Violet -> 5000L,
-          ItemRarity.Orange -> 15000L
+          ItemRarity.Violet -> 5000L
         )
       case MobRarity.Legendary =>
         List(
@@ -329,10 +330,11 @@ object LootGenerator {
   def isHide(drop: LootDrop): Boolean =
     drop.itemOpt.exists(_.material.contains(MaterialKind.WhiteWolfHide))
 
-  /** С Белого волка: клык (20%), фиолетовая и синяя вещи «Охотника» (по 25%),
-    * большая руна (5% — забраны у клыка) и шкура (25%). Если шкура с этого
-    * волка уже выпала, её четверть делится между остальными — бросок идёт по
-    * укороченной шкале, поэтому шкура стоит в конце. */
+  /** С Белого волка: клык (20%), вещь «Охотника» (50%), большая руна (5% —
+    * забраны у клыка) и шкура (25%). Редкость вещи — общая для минибоссов
+    * (см. [[setRarity]]). Если шкура с этого волка уже выпала, её четверть
+    * делится между остальными — бросок идёт по укороченной шкале, поэтому
+    * шкура стоит в конце. */
   private def wolfDrop(
       boss: MiniBoss,
       bossLvl: Long,
@@ -341,10 +343,10 @@ object LootGenerator {
       hideAvailable: Boolean,
       rng: Rng
   ): (LootDrop, Rng) = {
-    val (roll, r1) = rng.between(0L, if (hideAvailable) 100L else WolfHideFrom)
+    val total      = if (hideAvailable) 100L else WolfHideFrom
+    val (roll, r1) = rng.between(0L, total)
     if (roll < WolfFangUntil) (LootDrop.Trophy(wolfFang(bossLvl, floorLvl)), r1)
-    else if (roll < WolfPurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, r1)
-    else if (roll < WolfBlueUntil) setGear(boss, heroLvl, ItemRarity.Blue, r1)
+    else if (roll < WolfGearUntil) setDrop(boss, heroLvl, WolfGearUntil - WolfFangUntil, total, r1)
     else if (roll < WolfHideFrom) bigRune(r1)
     else (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
   }
@@ -362,27 +364,24 @@ object LootGenerator {
       Some(MiniBoss.WhiteWolf.FangCoefPerLvl * bossLvl))
   )
 
-  /** Границы роллов волка (0..99): до 20 — клык, до 45 — фиолетовая вещь, до 70 —
-    * синяя, до 75 — большая руна, дальше — шкура. */
+  /** Границы роллов волка (0..99): до 20 — клык, до 70 — вещь набора, до 75 —
+    * большая руна, дальше — шкура. */
   val WolfFangUntil: Long   = 20L
-  val WolfPurpleUntil: Long = 45L
-  val WolfBlueUntil: Long   = 70L
+  val WolfGearUntil: Long   = 70L
   val WolfHideFrom: Long    = 75L
 
   /** С элементаля 40% роллов забирает ингредиент, 10% — большая руна (взяты у
-    * ингредиента), а оставшуюся половину делят пополам фиолетовая и синяя вещи
-    * его набора. */
+    * ингредиента), а оставшуюся половину — вещь его набора, редкость которой
+    * решается общим для минибоссов порядком (см. [[setRarity]]). */
   private def elementalDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < ElementalIngredientChancePct) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
     else if (roll < ElementalIngredientChancePct + ElementalRuneChancePct) bigRune(rng)
-    else if (roll < ElementalIngredientChancePct + ElementalRuneChancePct + ElementalPurpleChancePct)
-      setGear(boss, heroLvl, ItemRarity.Purple, rng)
-    else setGear(boss, heroLvl, ItemRarity.Blue, rng)
+    else setDrop(boss, heroLvl, ElementalGearChancePct, 100L, rng)
 
   /** С Гнилого Джо: кожа упыря (25%), расколотый усилитель (20%), горсть
     * дублонов (20%), большая руна (10% — по пять забраны у усилителя и у
-    * дублонов) и вещь «Упыря» — последнюю четверть делят фиолетовая и синяя,
-    * как и у элементалей. */
+    * дублонов) и вещь «Упыря» на последнюю четверть роллов; редкость её — та
+    * же, что у всех минибоссов (см. [[setRarity]]). */
   private def joeDrop(boss: MiniBoss, roll: Long, bossLvl: Long, heroLvl: Long, rng: Rng): (LootDrop, Rng) =
     if (roll < JoeSkinUntil) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), rng)
     else if (roll < JoeGemUntil) {
@@ -396,63 +395,81 @@ object LootGenerator {
       val (pct, r1)  = rng.between(100L - JoeDoubloonSpreadPct, 100L + JoeDoubloonSpreadPct + 1L)
       (LootDrop.Doubloons((base * pct / 100L).max(1L)), r1)
     } else if (roll < JoeRuneUntil) bigRune(rng)
-    else if (roll < JoePurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng)
-    else setGear(boss, heroLvl, ItemRarity.Blue, rng)
+    else setDrop(boss, heroLvl, 100L - JoeRuneUntil, 100L, rng)
 
   /** С Крысиного короля: кровь и большая руна идут по два билета, чумные черви —
-    * по одному, и столько же по одному на вещь набора «Крыса» каждой из двух
-    * редкостей. Доли крови, руны и червей между собой прежние — вещи им билетов
-    * не отнимали, а добавили своих. */
+    * по одному, и два билета на вещь набора «Крыса». Доли крови, руны и червей
+    * между собой прежние — вещи им билетов не отнимали, а добавили своих;
+    * редкость вещи решается общим порядком (см. [[setRarity]]). */
   private def ratKingDrop(boss: MiniBoss, heroLvl: Long, rng: Rng): (LootDrop, Rng) = {
     val (roll, r1) = rng.between(0L, RatKingTickets)
     if (roll < RatKingBloodTickets) (LootDrop.Gear(MaterialGenerator.item(boss.ingredient)), r1)
     else if (roll < RatKingBloodTickets + RatKingRuneTickets) bigRune(r1)
     else if (roll < RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets)
       (LootDrop.Gear(MaterialGenerator.item(MaterialKind.PlagueWorms)), r1)
-    else if (roll < RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets + RatKingPurpleTickets)
-      setGear(boss, heroLvl, ItemRarity.Purple, r1)
-    else setGear(boss, heroLvl, ItemRarity.Blue, r1)
+    else setDrop(boss, heroLvl, RatKingGearTickets, RatKingTickets, r1)
   }
 
-  /** С Некроманта: четверть — проклятые кости, половину делят фиолетовая и
-    * синяя вещи его набора, последнюю четверть — расколотый череп с парой
-    * дублонов. Череп здесь не случайный камень, а именно череп: ему и место в
-    * оружии некроманта. */
+  /** С Некроманта: четверть — проклятые кости, половина роллов — вещь его
+    * набора (редкость по общему порядку, см. [[setRarity]]), последняя четверть
+    * — расколотый череп с парой дублонов. Череп здесь не случайный камень, а
+    * именно череп: ему и место в оружии некроманта. */
   private def necromancerDrop(boss: MiniBoss, roll: Long, heroLvl: Long, rng: Rng): (List[LootDrop], Rng) =
     if (roll < NecroBonesUntil) (List(LootDrop.Gear(MaterialGenerator.item(boss.ingredient))), rng)
-    else if (roll < NecroPurpleUntil) setGear(boss, heroLvl, ItemRarity.Purple, rng) match {
-      case (drop, r) => (List(drop), r)
-    }
-    else if (roll < NecroBlueUntil) setGear(boss, heroLvl, ItemRarity.Blue, rng) match {
-      case (drop, r) => (List(drop), r)
-    }
+    else if (roll < NecroGearUntil)
+      setDrop(boss, heroLvl, NecroGearUntil - NecroBonesUntil, 100L, rng) match {
+        case (drop, r) => (List(drop), r)
+      }
     // Череп идёт с парой дублонов: это один ролл, но две записи в добыче.
     else (List(
       LootDrop.Gem(GemGenerator.item(pangea.model.item.GemKind.Skull, GemModel.MinGrade)),
       LootDrop.Doubloons(NecroSkullDoubloons)), rng)
 
-  /** Границы роллов Некроманта: кости 25%, фиолетовая 25%, синяя 25%, череп с
-    * дублонами — остаток. */
-  val NecroBonesUntil:  Long = 25L
-  val NecroPurpleUntil: Long = 50L
-  val NecroBlueUntil:   Long = 75L
+  /** Границы роллов Некроманта: кости 25%, вещь набора 50%, череп с дублонами —
+    * остаток. */
+  val NecroBonesUntil: Long = 25L
+  val NecroGearUntil:  Long = 75L
   /** Сколько дублонов идёт вместе с черепом. */
   val NecroSkullDoubloons: Long = 2L
 
-  /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25, вещь
-    * набора 25 фиолетовая и 25 синяя. */
-  val RatKingBloodTickets:  Long = 50L
-  val RatKingRuneTickets:   Long = 50L
-  val RatKingWormTickets:   Long = 25L
-  val RatKingPurpleTickets: Long = 25L
-  val RatKingBlueTickets:   Long = 25L
-  val RatKingTickets:       Long = RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets +
-    RatKingPurpleTickets + RatKingBlueTickets
+  /** Билеты добычи Крысиного короля: кровь 50, большая руна 50, черви 25 и
+    * вещь набора 50. */
+  val RatKingBloodTickets: Long = 50L
+  val RatKingRuneTickets:  Long = 50L
+  val RatKingWormTickets:  Long = 25L
+  val RatKingGearTickets:  Long = 50L
+  val RatKingTickets:      Long = RatKingBloodTickets + RatKingRuneTickets + RatKingWormTickets +
+    RatKingGearTickets
 
   /** Большая руна с минибосса: вид равновероятен среди всех, как и в добыче. */
   private def bigRune(rng: Rng): (LootDrop, Rng) = {
     val (rune, r1) = rng.pick(RuneStone.all)
     (LootDrop.Rune(RuneStone.item(rune, RuneStoneSize.Big)), r1)
+  }
+
+  /** Сколько добычи минибосса приходится на фиолетовую и легендарную вещь его
+    * набора — в промилле, иначе полпроцента не выразить. Остальная вещевая доля
+    * синяя. */
+  val BossPurplePerMille: Long = 50L
+  val BossOrangePerMille: Long = 5L
+
+  /** Редкость вещи набора с минибосса. Бросок берётся в промилле от ВЕСА
+    * вещевой доли, поэтому доли считаются от всей добычи босса, какой бы ни
+    * была его шкала: проценты у элементалей, билеты у короля. Вещей у одного
+    * босса половина добычи, у другого четверть — на фиолетовую всё равно
+    * выпадает 5% роллов, на легендарную полпроцента. */
+  private def setRarity(gearWeight: Long, totalWeight: Long, rng: Rng): (ItemRarity, Rng) = {
+    val (roll, next) = rng.between(0L, (gearWeight * 1000L).max(1L))
+    if (roll < BossPurplePerMille * totalWeight) (ItemRarity.Purple, next)
+    else if (roll < (BossPurplePerMille + BossOrangePerMille) * totalWeight) (ItemRarity.Orange, next)
+    else (ItemRarity.Blue, next)
+  }
+
+  /** Вещь набора босса со своей редкостью — один ролл на то и другое. */
+  private def setDrop(boss: MiniBoss, heroLvl: Long, gearWeight: Long, totalWeight: Long,
+                      rng: Rng): (LootDrop, Rng) = {
+    val (rarity, r1) = setRarity(gearWeight, totalWeight, rng)
+    setGear(boss, heroLvl, rarity, r1)
   }
 
   /** Вещь набора этого босса заданной редкости: уровень героя ±1, но строго в
@@ -478,19 +495,17 @@ object LootGenerator {
   /** Большая руна с элементаля — забраны у его ингредиента. */
   val ElementalRuneChancePct: Long = 10L
 
-  /** Из оставшейся половины столько процентов приходится на фиолетовую вещь; всё,
-    * что не выпало ингредиентом и не фиолетовым, — синяя вещь того же набора. */
-  val ElementalPurpleChancePct: Long = 25L
+  /** Остальная половина роллов — вещь его набора; какой она редкости, решает
+    * общий для минибоссов порядок (см. [[setRarity]]). */
+  val ElementalGearChancePct: Long = 50L
 
   /** Границы роллов Джо (0..99): до 25 — кожа упыря, до 45 — усилитель, до 65 —
     * дублоны, до 75 — большая руна (по пять процентов забраны у усилителя и у
-    * дублонов), дальше — вещь набора: до 88 фиолетовая, после — синяя.
-    * Нечётный остаток достаётся фиолетовой. */
+    * дублонов), дальше — вещь набора. */
   val JoeSkinUntil: Long      = 25L
   val JoeGemUntil: Long       = 45L
   val JoeDoubloonsUntil: Long = 65L
   val JoeRuneUntil: Long      = 75L
-  val JoePurpleUntil: Long    = 88L
 
   /** Сколько дублонов за уровень босса роняет Джо и с каким разбросом (в %). */
   val JoeDoubloonsPerLvl: Long   = 2L
@@ -573,8 +588,9 @@ object LootGenerator {
     cat match {
       case Category.Gear =>
         val (rarity0, r1) = pickGearRarity(gearRarityWeights(tier), rng)
-        // Благословение Азата: с шансом rarityBumpPct поднять редкость на тир.
-        val (rarity, r1b) = bumpRarity(rarity0, rarityBumpPct, r1)
+        // Благословение Азата: с шансом rarityBumpPct поднять редкость на тир,
+        // но не выше потолка этого моба — у безымянного это фиолетовая.
+        val (rarity, r1b) = bumpRarity(rarity0, rarityBumpPct, rarityCap(tier), r1)
         val (item, r2)    = ItemGenerator.createItem(killLevel, rarity, r1b)
         (LootDrop.Gear(item), r2)
 
@@ -650,14 +666,21 @@ object LootGenerator {
     List(ItemRarity.Gray, ItemRarity.White, ItemRarity.Green, ItemRarity.Blue,
       ItemRarity.Purple, ItemRarity.Violet, ItemRarity.Orange)
 
-  // С шансом `pct`% поднимает редкость на один тир (RNG тратится только если pct>0).
-  private def bumpRarity(r: ItemRarity, pct: Long, rng: Rng): (ItemRarity, Rng) =
+  /** Выше какой редкости вещь с этого моба не поднимается: оранжевую носят
+    * только ИМЕННЫЕ — легендарные мобы со своим именем. */
+  def rarityCap(tier: MobRarity): ItemRarity =
+    if (tier == MobRarity.Legendary) ItemRarity.Orange else ItemRarity.Violet
+
+  // С шансом `pct`% поднимает редкость на один тир, но не выше `cap`
+  // (RNG тратится только если pct>0).
+  private def bumpRarity(r: ItemRarity, pct: Long, cap: ItemRarity, rng: Rng): (ItemRarity, Rng) =
     if (pct <= 0L) (r, rng)
     else {
       val (roll, next) = rng.between(0L, 100L)
       if (roll < pct) {
         val i = rarityLadder.indexOf(r)
-        (if (i >= 0 && i < rarityLadder.size - 1) rarityLadder(i + 1) else r, next)
+        val up = if (i >= 0 && i < rarityLadder.size - 1) rarityLadder(i + 1) else r
+        (if (ItemRarity.atMost(up, cap)) up else r, next)
       } else (r, next)
     }
 
