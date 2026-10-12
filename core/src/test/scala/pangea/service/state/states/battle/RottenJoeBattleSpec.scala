@@ -265,7 +265,8 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
       assertTrue(gold.forall(a => a >= 3L && a <= 4L)) &&
       // вещь набора приходит фиолетовой или синей — четверть роллов делится пополам
       assertTrue(gear.forall(g => g.rarity == pangea.model.item.Rarity.Purple ||
-                                  g.rarity == pangea.model.item.Rarity.Blue)) &&
+                                  g.rarity == pangea.model.item.Rarity.Blue ||
+                                  g.rarity == pangea.model.item.Rarity.Orange)) &&
       assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Purple)) &&
       assertTrue(gear.exists(_.rarity == pangea.model.item.Rarity.Blue))
     },

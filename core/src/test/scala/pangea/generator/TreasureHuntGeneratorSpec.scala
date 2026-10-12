@@ -29,6 +29,17 @@ object TreasureHuntGeneratorSpec extends ZIOSpecDefault {
       assertTrue(rewards.forall(_.items.forall(i => allowedRarities.contains(i.rarity))))
     },
 
+    test("оранжевых вещей в кладе 7%, синих 27% — половина оранжевых ушла синим") {
+      val items = (1 to 4000).toList.flatMap(s => TreasureHuntGenerator.roll(zone, Rng(s.toLong))._1.items)
+      def pct(r: Rarity): Double = items.count(_.rarity == r).toDouble * 100.0 / items.size
+      assertTrue(items.size > 10000) &&
+      assertTrue(pct(Rarity.Orange) > 6.0 && pct(Rarity.Orange) < 8.0) &&
+      assertTrue(pct(Rarity.Blue) > 25.5 && pct(Rarity.Blue) < 28.5) &&
+      // фиолетовая и пурпурная остались как были
+      assertTrue(pct(Rarity.Purple) > 33.5 && pct(Rarity.Purple) < 36.5) &&
+      assertTrue(pct(Rarity.Violet) > 29.5 && pct(Rarity.Violet) < 32.5)
+    },
+
     test("уровень снаряжения — в диапазоне зоны (51..75 для Ущелья мертвецов)") {
       val lvls = rewards.flatMap(_.items).map(_.lvl)
       assertTrue(lvls.nonEmpty) &&
