@@ -287,10 +287,45 @@ object NecroQuestSpec extends ZIOSpecDefault {
                  eventData = Some(smallNecro().asJson)).asJson)
         state = pangea.service.state.states.battle.BattleState(
                   dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
-        _     <- state.action(testUser, tap("ConfirmFlee"), r)
+        out   <- state.action(testUser, tap("ConfirmFlee"), r)
         board <- boardOf(dao)
         said  <- texts(r)
-      } yield assertTrue(board.slots.map(_.kind) == List(BoardKind.SewerRats, BoardKind.CaveClear)) &&
+        scene <- dao.readSceneData(userId)
+      } yield assertTrue(out == StateType.Dungeon) &&
+              assertTrue(board.slots.map(_.kind) == List(BoardKind.SewerRats, BoardKind.CaveClear)) &&
+              assertTrue(said.contains("задание провалено")) &&
+              assertTrue(scene.contains(io.circe.Json.Null))
+    },
+
+    test("гибель в пещере некроманта тоже проваливает её объявление") {
+      val brute = Monster(0L, 7L, Race.Orc, Rarity.Common,
+        FightStats(atk = 99999, hp = 100000, armor = 0, defence = 0, evasion = 0, accuracy = 99999, energy = 0))
+        .copy(undead = true)
+      val frail = hero().copy(
+        baseStats  = hero().baseStats.copy(agi = 0),
+        fightStats = FightStats(atk = 10, hp = 1, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      for {
+        dao <- TestHeroDao.withHero(userId, frail)
+        r   <- TestRenderer.make
+        c   <- content
+        _   <- dao.writeActiveBattle(userId, SoloPveBattle.from(brute, frail).asJson)
+        _   <- dao.writeQuestData(userId, allTaken.asJson)
+        _   <- dao.writeSceneData(userId, LootData(Nil, Nil, returnState = Some(StateType.MonsterCave),
+                 eventData = Some(smallNecro().asJson)).asJson)
+        state = pangea.service.state.states.battle.BattleState(
+                  dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
+        // Уклонение не бывает ниже 5%: бьём, пока бой не кончится.
+        out <- {
+                 def attack(left: Int): Task[StateType] =
+                   state.action(testUser, tap("Attack"), r).flatMap { st =>
+                     if (st == StateType.Battle && left > 1) attack(left - 1) else ZIO.succeed(st)
+                   }
+                 attack(10)
+               }
+        board <- boardOf(dao)
+        said  <- texts(r)
+      } yield assertTrue(out == StateType.Death) &&
+              assertTrue(board.slots.map(_.kind) == List(BoardKind.SewerRats, BoardKind.CaveClear)) &&
               assertTrue(said.contains("задание провалено"))
     },
 

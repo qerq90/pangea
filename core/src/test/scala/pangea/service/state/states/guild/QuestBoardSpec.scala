@@ -110,14 +110,20 @@ object QuestBoardSpec extends ZIOSpecDefault {
       assertTrue(BoardRates.trophiesFor(BoardTier.Seasoned) == 0 && BoardRates.trophiesFor(BoardTier.Novice) == 3)
     },
 
-    test("выездные: уровень задания 1–25 и он же сложность объявления") {
+    test("выездные: уровень задания — в пределах доски, и он же сложность объявления") {
       val away   = (1L to 300L).toList.flatMap(s => QuestBoardState.roll(BoardTier.Seasoned, Rng(s)))
                      .filter(s => s.kind == BoardKind.SewerRats || s.kind == BoardKind.NecromancerHunt)
       val sewers = away.filter(_.kind == BoardKind.SewerRats)
       val necros = away.filter(_.kind == BoardKind.NecromancerHunt)
       val lvls   = away.map(_.lvl)
+      // на каждой доске — свой разброс: у новичков 1–25, у последней 126–150
+      val inRange = BoardTier.values.toList.forall { tier =>
+        (1L to 40L).toList.flatMap(s => QuestBoardState.roll(tier, Rng(s))).filter(_.kind.rolledLvl)
+          .forall(s => s.lvl >= tier.from && s.lvl <= tier.to)
+      }
       assertTrue(sewers.size == 300 && necros.size == 300) &&
-      assertTrue(lvls.forall(l => l >= SewerRates.MinLvl && l <= SewerRates.MaxLvl)) &&
+      assertTrue(lvls.forall(l => l >= BoardTier.Seasoned.from && l <= BoardTier.Seasoned.to)) &&
+      assertTrue(inRange && SewerRates.MinLvl == 1L) &&
       // уровень катается, а не стоит на месте, и всю шкалу задевает
       assertTrue(sewers.map(_.lvl).distinct.size > 15 && necros.map(_.lvl).distinct.size > 15) &&
       // сложность объявления — его собственный уровень, а не ставка вида

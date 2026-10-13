@@ -355,15 +355,16 @@ object QuestBoardState {
   /** Свежая доска раздела `tier`: у новичков сперва три трофейных, остальные
     * места — из пула ([[BoardRates.Pool]]), каждый вид не больше раза; какие
     * виды попадут, решает бросок, а стоят они в порядке пула. Трофейным — своя
-    * раса, выездным — свой уровень, гномам — свой отвар. Расы в пределах доски
-    * не повторяются, пока их хватает. */
+    * раса, выездным — свой уровень в пределах доски (на доске 26–50 и задания
+    * 26–50), гномам — свой отвар. Расы в пределах доски не повторяются, пока их
+    * хватает. */
   def roll(tier: BoardTier, rng: Rng): List[BoardSlot] = {
     val trophies          = BoardRates.trophiesFor(tier)
     val (picked, rngPool) = pickKinds(BoardRates.Pool, BoardRates.Slots - trophies, rng)
     val kinds = List.fill(trophies)(BoardKind.Trophy) ++ BoardRates.Pool.filter(picked.contains)
     kinds.foldLeft((List.empty[BoardSlot], List.empty[String], rngPool)) { case ((acc, used, r), kind) =>
       if (kind.rolledLvl) {
-        val (lvl, r1) = r.between(SewerRates.MinLvl, SewerRates.MaxLvl + 1L)
+        val (lvl, r1) = r.between(tier.from, tier.to + 1L)
         (acc :+ BoardSlot(kind, lvl = lvl), used, r1)
       } else if (kind.needsBrew) {
         val (brew, r1) = r.pick(BrewKind.rank1.toList)

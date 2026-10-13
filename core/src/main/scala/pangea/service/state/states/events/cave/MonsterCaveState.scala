@@ -529,7 +529,7 @@ case class MonsterCaveState(
     val race  = Race.withName(scene.race)
     val count = scene.rooms(idx).monsters
     // В выездных уровень берётся от задания, а не от этажа лабиринта:
-    // объявление обещало обитателей именно такой силы (см. SewerRates.MinLvl..MaxLvl).
+    // объявление обещало обитателей именно такой силы (см. SewerRates.MinLvl).
     val lvl   = if (scene.away) scene.questLvl.toInt.max(1) else hero.dungeonLevel
     for {
       seeds   <- ZIO.foreach(List.fill(count)(()))(_ => Random.nextLong)
