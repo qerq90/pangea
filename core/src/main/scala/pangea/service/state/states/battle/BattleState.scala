@@ -4578,10 +4578,12 @@ case class BattleState(
       }
       // Сюжетный бой: ни опыта, ни добычи по таблицам — только то, что положил
       // сюжет. Налёт на деревню мурлоков — исключение: награда как за обычный
-      // бой, только этаж для неё — уровень героя (мурлоки его уровня).
+      // бой, только этаж для неё — уровень героя (мурлоки его уровня). Задание
+      // с доски называет свой уровень само (см. SoloPveBattle.lootLevel):
+      // разбойники третьего уровня и падают как третьего.
       raid       = battle.story.contains(MurlocQuest.RaidStory)
       storyFight = battle.story.isDefined && !raid
-      killLevel  = if (raid) hero.lvl else hero.dungeonLevel.toLong
+      killLevel  = battle.lootLevel.getOrElse(if (raid) hero.lvl else hero.dungeonLevel.toLong)
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
       // Группа — опыт одной суммой за всех.
       baseExp = if (storyFight) 0L

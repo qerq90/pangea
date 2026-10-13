@@ -193,6 +193,23 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(scene.exists(_.at == 0))
     },
 
+    test("добыча и опыт: в канализации — по уровню задания, в пещере — по этажу") {
+      for {
+        t <- cave(hero().copy(dungeonLevel = 40))
+        (state, dao, _, _, r) = t
+        _      <- put(dao, smallCave(monsters = 2).copy(sewer = true, questLvl = 7L, race = Race.Animal.entryName))
+        _      <- state.action(testUser, tap("CaveForward"), r)
+        sewer  <- battleOf(dao)
+        u <- cave(hero().copy(dungeonLevel = 40))
+        (state2, dao2, _, _, r2) = u
+        _      <- put(dao2, smallCave(monsters = 2))
+        _      <- state2.action(testUser, tap("CaveForward"), r2)
+        caveB  <- battleOf(dao2)
+      } yield assertTrue(sewer.exists(b => b.monsterLvl == 7L && b.lootLevel.contains(7L))) &&
+              // в пещере мобы этажа — и награда по этажу, как прежде
+              assertTrue(caveB.exists(_.lootLevel.isEmpty))
+    },
+
     test("комната с мобами: групповой бой на всю кучку, добыча вернёт в пещеру") {
       for {
         t <- cave()
