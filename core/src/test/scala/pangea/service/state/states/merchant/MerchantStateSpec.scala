@@ -352,6 +352,20 @@ object MerchantStateSpec extends ZIOSpecDefault {
       assertTrue(MerchantState.isJunk(gear(3L, Rarity.Orange), s)) // обычное снаряжение — да
     },
 
+    test("isJunk: цветок и пояс с чем-то в ячейках хламом не бывают, пустой пояс — бывает") {
+      import pangea.model.item.{BeltSlot, RoseKind}
+      val all  = JunkSaleSettings(rarities = JunkRarityGroups.flatMap(_.rarities).toSet)
+      def belt(slots: BeltSlot*): Item =
+        Item(4L, "Пояс", 1L, Rarity.Gray, ItemType.Belt,
+          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+          details = ItemDetails.Belt(slots.toList))
+      assertTrue(!MerchantState.isJunk(RoseKind.item(RoseKind.Red), all)) &&
+      assertTrue(!MerchantState.isJunk(belt(BeltSlot.Rose(RoseKind.Red, 3)), all)) &&
+      // опустевшая ячейка только помнит розу — такой пояс уже хлам
+      assertTrue(MerchantState.isJunk(belt(BeltSlot.Rose(RoseKind.Red, 0)), all)) &&
+      assertTrue(MerchantState.isJunk(belt(), all))
+    },
+
     test("трофеи: переключатель по умолчанию выключен, после нажатия трофеи уходят в продажу") {
       for {
         t <- makeState(richHero, items = List(gear(1L, Rarity.Gray), trophyItem(2L)))

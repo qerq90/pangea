@@ -173,6 +173,23 @@ object BeltBrewSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("откройте пояс заново"))
     },
 
+    test("часовой баф и быстрые отдыхи с пояса записываются вместе с ходом") {
+      val h = hero(BeltSlot.Brew(BrewKind.ClearEye), BeltSlot.Brew(BrewKind.Invigorating))
+      for {
+        t <- makeState(h, battle(h, 1000L))
+        (state, dao, r) = t
+        _     <- state.action(testUser, useSlot(0), r)
+        // второй отвар — уже следующий раунд: бьём, чтобы раунд закрылся
+        _     <- state.action(testUser, tap("Attack"), r)
+        _     <- state.action(testUser, useSlot(1), r)
+        after <- dao.getHeroByUserId(userId).map(_.get)
+        azat  <- dao.readAzatData(userId).map(_.flatMap(_.as[pangea.model.hero.AzatState].toOption))
+      } yield assertTrue(after.statBoosts.hasActive("herb:agi", 0L)) &&
+              assertTrue(azat.exists(_.instantRests == BrewRates.InstantRests)) &&
+              assertTrue(slots(after) == List(BeltSlot.Brew(BrewKind.ClearEye, spent = true),
+                                             BeltSlot.Brew(BrewKind.Invigorating, spent = true)))
+    },
+
     test("грибная смесь из ячейки достаётся всем, кто стоит в поле") {
       val h = hero(BeltSlot.Brew(BrewKind.MushroomMix))
       for {

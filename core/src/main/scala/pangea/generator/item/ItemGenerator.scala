@@ -245,7 +245,7 @@ object ItemGenerator {
   //  - оружию — активный навык (один из weaponSkills) → ItemDetails.Weapon;
   //  - нагруднику — активный навык (один из armorSkills) → ItemDetails.Armor;
   //  - поясу — пустые ячейки под расходники, числом по редкости
-  //    (ItemDetails.Belt): фляги и пыль игрок укладывает сам;
+  //    (ItemDetails.Belt): фляги, пыль, отвары и цветки игрок укладывает сам;
   //  - прочим носимым слотам — пассивка по шансу редкости (см. applyPassive).
   private def applyTypeDetails(item: Item, rng: Rng): (Item, Rng) =
     item.itemType match {

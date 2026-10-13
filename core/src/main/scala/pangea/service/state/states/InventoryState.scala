@@ -171,7 +171,8 @@ case class InventoryState(
             // Пыль сыплется на оружие: разовое покрытие на один бой.
             Option.when(item.material.exists(_.gem.isDefined))(
               content.choice("DustWeapon", "inventory.dustWeapon").copy(color = ChoiceColor.Positive, row = Some(0))),
-            // Фляга и пыль ложатся на пояс: оттуда их достают в бою.
+            // Фляга, пыль и цветок ложатся на пояс: оттуда их достают в бою.
+            // У отвара своя карточка и своя такая же кнопка (см. showBrew).
             Option.when(BeltSlot.of(item).isDefined)(
               content.choice("BeltPut", "inventory.beltPut").copy(color = ChoiceColor.Positive, row = Some(0))),
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),

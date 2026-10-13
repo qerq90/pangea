@@ -322,20 +322,23 @@ case class GirlState(
   private def askWhatSheDid(user: User, renderer: Renderer): Task[StateType] =
     for {
       scene <- requireScene(user)
-      kind  <- Random.nextIntBounded(BrewKind.rank1.size).map(BrewKind.rank1(_))
-      herb  <- Random.nextIntBounded(kind.recipe.size).map(kind.recipe(_))
-      next   = scene.copy(step = Step.Asked, brew = Some(kind.entryName), herb = Some(herb.entryName))
+      kinds  = BrewKind.rank1.toList
+      kind  <- Random.nextIntBounded(kinds.size.max(1)).map(kinds.lift)
+      herb  <- kind.fold(ZIO.succeed(Option.empty[MaterialKind]))(k =>
+                 Random.nextIntBounded(k.recipe.size.max(1)).map(k.recipe.lift))
+      next   = scene.copy(step = Step.Asked, brew = kind.map(_.entryName), herb = herb.map(_.entryName))
       _     <- writeScene(user, next)
       _     <- renderer.show(user, screenFor(next))
     } yield StateType.Girl
 
-  /** Что она ответила: отвар и трава из сцены. Старая запись их не несёт —
-    * тогда берём первый отвар набора: говорить ей всё равно надо. */
+  /** Что она ответила: отвар и трава из сцены. Запись, начатая до этой правки,
+    * их не несёт — тогда она говорит общими словами. */
   private def askedScreen(scene: GirlScene): Screen = {
-    val kind = scene.brew.flatMap(BrewKind.withNameOption).getOrElse(BrewKind.rank1.head)
-    val herb = scene.herb.flatMap(MaterialKind.withNameOption).getOrElse(kind.recipe.head)
-    Screen(content.format("girl.asked.text", "brew" -> kind.label, "herb" -> herb.displayName),
-      content.screen("girl.asked").choices)
+    val said = for {
+      kind <- scene.brew.flatMap(BrewKind.withNameOption)
+      herb <- scene.herb.flatMap(MaterialKind.withNameOption)
+    } yield content.format("girl.asked.text", "brew" -> kind.label, "herb" -> herb.displayName)
+    Screen(said.getOrElse(content.text("girl.askedPlain")), content.screen("girl.asked").choices)
   }
 
   private def resume(user: User, renderer: Renderer): Task[StateType] =

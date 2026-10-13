@@ -349,26 +349,51 @@ case class BattleState(
   ): Task[StateType] =
     raw.battle.arena match {
       case Some(ref) => arenaCommit(user, ref, raw, nowMs, renderer, before, note)
-      case None      => dungeonCommit(user, raw, nowMs, renderer)
+      case None      => dungeonCommit(user, raw, nowMs, renderer, before)
     }
+
+  /** Остальное, что ход поменял в герое, — и что тоже пишется только здесь:
+    * бафы (отвар с пояса, лопнувший пузырь), травмы (снятые костоправным),
+    * быстрые отдыхи от бодрящего сбора и, пока бой идёт, пыль со смазкой на
+    * оружии — покрытие живёт до конца боя, и о нём должен знать не только
+    * текущий ход. Пишем лишь то, что изменилось против героя до хода. */
+  private def persistExtras(user: User, res: TurnResult, before: Hero, nowMs: Long): Task[Unit] =
+    ZIO.when(res.hero.statBoosts != before.statBoosts)(
+      heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)) *>
+      ZIO.when(res.hero.traumaNames != before.traumaNames || res.hero.traumaUntil != before.traumaUntil)(
+        heroDao.updateTrauma(user.userId, res.hero.traumaUntil, res.hero.traumaNames)) *>
+      ZIO.when(res.instantRests > 0)(
+        AzatData.load(heroDao, user.userId, nowMs).flatMap(azat =>
+          heroDao.writeAzatData(user.userId,
+            azat.copy(instantRests = azat.instantRests + res.instantRests).asJson))) *>
+      ZIO.when(res.outcome == Outcome.Continue && res.hero.weaponDust != before.weaponDust)(
+        heroDao.updateWeaponDust(user.userId, res.hero.weaponDust)).unit
+
+  /** Бой кончился: пыль на оружии осыпается — покрытие на один бой, чем бы он
+    * ни кончился, — а опустевшие ячейки пояса добирают из сумки то же, чем
+    * были полны. Здесь только запись; что легло на пояс, говорит
+    * [[showRefilled]] — показы идут после всех записей хода. */
+  private def afterBattle(user: User, hero: Hero): Task[List[String]] =
+    ZIO.when(!hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty)) *>
+      refillBelt(user, hero)
+
+  private def showRefilled(user: User, names: List[String], renderer: Renderer): Task[Unit] =
+    ZIO.when(names.nonEmpty)(renderer.show(user, Screen(content.format("battle.belt.refilled",
+      "names" -> names.distinct.mkString(", ")), Nil))).unit
 
   private def dungeonCommit(
       user: User,
       raw: TurnResult,
       nowMs: Long,
-      renderer: Renderer
+      renderer: Renderer,
+      before: Hero
   ): Task[StateType] = {
     // Пузырьковый нектар: смерть, которой не будет. Считаем до persistHero,
     // чтобы спасённый герой сохранился вместе с остальным исходом.
-    val (res, bubbled) = bubbleRescue(raw, nowMs)
+    val res = bubbleRescue(raw, nowMs)
     val persistHero =
       heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
-        // Пыль, насыпанную прямо в бою горстью с пояса, тоже надо записать:
-        // покрытие живёт до конца боя, и до его конца о нём должен знать не
-        // только текущий ход.
-        ZIO.when(res.outcome == Outcome.Continue)(
-          heroDao.updateWeaponDust(user.userId, res.hero.weaponDust)) *>
-        ZIO.when(bubbled)(heroDao.updateStatBoosts(user.userId, res.hero.statBoosts)).unit
+        persistExtras(user, res, before, nowMs)
     // Отряд: что с союзниками стало и кто ушёл по свитку — по концу боя.
     // Крыса, выскочившая из-под ног (`home = 0`), после боя остаётся при герое —
     // даже если до этого отряда у него не было вовсе.
@@ -376,12 +401,6 @@ case class BattleState(
       ZIO.when(res.hero.squad.nonEmpty || res.battle.group.alliesGone.nonEmpty ||
                res.battle.group.allies.exists(_.home <= 0))(
         heroDao.updateSquad(user.userId, squadAfterBattle(res.hero, res.battle, nowMs)))
-    // Пыль на оружии — покрытие на один бой: чем бы бой ни кончился, она осыпается.
-    // А высыпанные ячейки пояса, наоборот, добирают из сумки такую же горсть —
-    // чтобы в следующий бой идти с полным поясом, не разбирая его вручную.
-    val clearDust =
-      ZIO.when(!res.hero.weaponDust.isEmpty)(heroDao.updateWeaponDust(user.userId, WeaponDust.empty)) *>
-        ZIO.when(res.outcome != Outcome.Continue)(refillBeltDust(user, res.hero, renderer)).unit
     val msg     = res.log.mkString("\n")
     val showLog = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     // Групповая сводка: что делали мобы вне пары и кто где стоит. Строй
@@ -395,9 +414,11 @@ case class BattleState(
       // Приговорённый дотерпел свои раунды и ушёл: добычи с него нет, но и
       // герой цел — событие просто кончилось.
       case Outcome.Continue if res.battle.escapesAfter > 0 && res.battle.group.round >= res.battle.escapesAfter =>
-        (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
-          showLog *> showGroup *>
-          renderer.show(user, Screen(content.format("battle.preyEscaped", "monster" -> res.battle.monsterName), Nil))
+        (persistHero *> persistSquad *> afterBattle(user, res.hero) <* heroDao.clearActiveBattle(user.userId))
+          .uninterruptible.flatMap { refilled =>
+            showLog *> showGroup *> showRefilled(user, refilled, renderer) *>
+              renderer.show(user, Screen(content.format("battle.preyEscaped", "monster" -> res.battle.monsterName), Nil))
+          }
             .as(StateType.Dungeon)
       case Outcome.Continue =>
         (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
@@ -407,11 +428,14 @@ case class BattleState(
             .as(StateType.Battle)
       case Outcome.Victory =>
         for {
-          outcome <- (persistHero *> persistSquad *> clearDust *> applyVictory(user, res.hero, res.battle)).uninterruptible
+          written <- (persistHero *> persistSquad *> afterBattle(user, res.hero) <*>
+                       applyVictory(user, res.hero, res.battle)).uninterruptible
+          (refilled, outcome) = written
           _       <- showLog
           // Что случилось сбоку в этот же ход — до итогов победы: иначе
           // союзник, которого унесло свитком, пропал бы молча.
           _       <- showGroup
+          _       <- showRefilled(user, refilled, renderer)
           _       <- showVictory(user, outcome, renderer)
         } yield StateType.Loot
       case Outcome.Death if res.battle.group.allies.exists(_.alive) && !res.battle.group.heroDown =>
@@ -425,16 +449,20 @@ case class BattleState(
           renderer.show(user, Screen(content.text("battle.squad.heroDown") + turnsAwayLine(down, turned), Nil)) *>
           showDown(user, down, renderer)
       case Outcome.Death =>
-        (persistHero *> persistSquad *> clearDust).uninterruptible *> showLog *> showGroup *>
-          renderer.show(user, Screen(content.text("battle.death"), Nil)) *>
-          failQuestBehind(user, renderer).as(StateType.Death)
+        (persistHero *> persistSquad *> afterBattle(user, res.hero)).uninterruptible.flatMap { refilled =>
+          showLog *> showGroup *> showRefilled(user, refilled, renderer) *>
+            renderer.show(user, Screen(content.text("battle.death"), Nil)) *>
+            failQuestBehind(user, renderer).as(StateType.Death)
+        }
       case Outcome.Fled =>
         // Сюжетный бой идёт не в лабиринте — бежать из него в город.
         val to = if (res.battle.story.isDefined) StateType.GlobalMap else StateType.Dungeon
-        (persistHero *> persistSquad *> clearDust *> heroDao.clearActiveBattle(user.userId)).uninterruptible *>
-          showLog *> showGroup *>
-          renderer.show(user, Screen(content.text("battle.fled"), Nil)) *>
-          failQuestBehind(user, renderer).as(to)
+        (persistHero *> persistSquad *> afterBattle(user, res.hero) <* heroDao.clearActiveBattle(user.userId))
+          .uninterruptible.flatMap { refilled =>
+            showLog *> showGroup *> showRefilled(user, refilled, renderer) *>
+              renderer.show(user, Screen(content.text("battle.fled"), Nil)) *>
+              failQuestBehind(user, renderer).as(to)
+          }
     }
   }
 
@@ -494,14 +522,18 @@ case class BattleState(
       note: String
   ): Task[StateType] = {
     val res         = raw
-    val persistHero = heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats)
+    val persistHero =
+      heroDao.updateEquipmentAndFightStats(user.userId, res.hero.equipment, res.hero.fightStats) *>
+        persistExtras(user, res, before, nowMs)
     val msg         = res.log.mkString("\n")
     val showLog     = ZIO.when(msg.nonEmpty)(renderer.show(user, Screen(msg, Nil)))
     res.outcome match {
-      // Ход не состоялся — арена об этом не знает, просто перерисовываем экран.
+      // Ход раунда не кончил — сопернику он не уходит, но бой всё равно пишем:
+      // расходник с пояса мог оставить в нём баф, копии или отметку «за пояс
+      // в этом раунде уже брались».
       case Outcome.Continue if !res.endsRound =>
-        persistHero.uninterruptible *> showLog *> showArenaScreen(user, res.hero, res.battle, nowMs, renderer)
-          .as(StateType.Battle)
+        (persistHero *> heroDao.writeActiveBattle(user.userId, res.battle.asJson)).uninterruptible *>
+          showLog *> showArenaScreen(user, res.hero, res.battle, nowMs, renderer).as(StateType.Battle)
 
       case Outcome.Continue =>
         for {
@@ -511,15 +543,21 @@ case class BattleState(
         } yield StateType.Battle
 
       // Соперник обнулён — он проиграл, а герой уходит с песка своим ходом.
+      // Пыль и пояс — как после любого боя (см. afterBattle).
       case Outcome.Victory =>
-        persistHero.uninterruptible *> showLog *>
-          endArena(user, ref, winner = true, arenaSummary(note, before, res, None), nowMs, renderer)
+        (persistHero *> afterBattle(user, res.hero)).uninterruptible.flatMap { refilled =>
+          showLog *> showRefilled(user, refilled, renderer) *>
+            endArena(user, ref, winner = true, arenaSummary(note, before, res, None), nowMs, renderer)
+        }
 
       // Обнулили героя или он сбежал — поражение. Смерти арена не знает.
       case Outcome.Death | Outcome.Fled =>
         val beaten = if (res.outcome == Outcome.Death) ArenaBattle.beaten(res.hero) else res.hero
-        heroDao.updateEquipmentAndFightStats(user.userId, beaten.equipment, beaten.fightStats).uninterruptible *>
-          showLog *> endArena(user, ref, winner = false, arenaSummary(note, before, res, None), nowMs, renderer)
+        (heroDao.updateEquipmentAndFightStats(user.userId, beaten.equipment, beaten.fightStats) *>
+          persistExtras(user, res, before, nowMs) *> afterBattle(user, beaten)).uninterruptible.flatMap { refilled =>
+          showLog *> showRefilled(user, refilled, renderer) *>
+            endArena(user, ref, winner = false, arenaSummary(note, before, res, None), nowMs, renderer)
+        }
     }
   }
 
@@ -3328,7 +3366,7 @@ case class BattleState(
     * присылает отдельное сообщение со списком ячеек, и кнопки живут внутри
     * него (`inline`), поэтому боевая клавиатура и экран боя остаются как есть.
     *
-    * Пустые фляги с пояса убираются сразу: держать ячейку им больше нечем. */
+    * Опустевшие ячейки в список не попадают: брать из них нечего. */
   private def showBelt(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero  <- getHero(user)
@@ -3450,7 +3488,7 @@ case class BattleState(
               // Лечить нечего, мазать нечем — склянка цела, и раунд тоже.
               case Some(why) => cont(hero, battle, why)
               case None =>
-                quickHandsRoll(hero).flatMap { case (consumed, qhLog) =>
+                quickHandsRoll(hero).map { case (consumed, qhLog) =>
                   // Выпитая ячейка остаётся пустой, но помнит отвар: после боя
                   // доберёт такой же из сумки.
                   val drunk = withBelt(hero, b.updated(idx, br.drunk))
@@ -3522,8 +3560,9 @@ case class BattleState(
 
   /** Отвар из ячейки пояса. Герой приходит уже с пустой ячейкой, а бой — с
     * отметкой о расходнике. Делает то же, что сделал бы глоток с карточки, —
-    * только посреди боя. Записи, которых commit не делает (бафы, травмы,
-    * быстрые отдыхи), идут здесь же; снаряжение и статы он запишет сам. */
+    * только посреди боя. Чистый расчёт, как и всякий боевой ход: бафы, травмы и
+    * быстрые отдыхи едут в результате хода, а пишет их commit (см.
+    * [[persistExtras]]). */
   private def brewEffect(
       hero: Hero,
       battle: SoloPveBattle,
@@ -3531,29 +3570,26 @@ case class BattleState(
       nowMs: Long,
       qhLog: Vector[String],
       pick: Option[String]
-  ): Task[TurnResult] = {
+  ): TurnResult = {
     def done(h: Hero, b: SoloPveBattle, lines: Vector[String]): TurnResult = {
       val outcome = if (b.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
       val after   = if (outcome == Outcome.Victory && b.promoteNext.isEmpty) endOfRoundHero(h, nowMs) else h
       TurnResult(after, b, lines ++ qhLog, outcome, endsRound = false)
     }
-    def boosted(name: String, buff: ParamsBuff, until: Long, line: String): Task[TurnResult] = {
-      val next = hero.statBoosts.add(StatBoost(name, buff, until), nowMs)
-      heroDao.updateStatBoosts(hero.userId, next)
-        .as(done(hero.copy(statBoosts = next), battle, Vector(line)))
-    }
+    def boosted(name: String, buff: ParamsBuff, until: Long, line: String): TurnResult =
+      done(hero.copy(statBoosts = hero.statBoosts.add(StatBoost(name, buff, until), nowMs)), battle, Vector(line))
     kind.effect match {
       // Боевой отвар: ровно то, что делала склянка того же толка.
       case BrewEffect.Potion(potion) =>
         val (stats, next, msg) = applyPotion(hero, battle, potion, kind.label, nowMs)
-        ZIO.succeed(done(hero.copy(fightStats = stats), next, Vector(msg)))
+        done(hero.copy(fightStats = stats), next, Vector(msg))
 
       // Грибная смесь: лопается под ногами, достаётся всем, кто стоит в поле.
       case BrewEffect.Bomb =>
         val blow             = BrewRates.MushroomDamagePerLvl * hero.lvl
         val (swept, _, foes) = sweep(battle, blow, None, poisons = true)
-        ZIO.succeed(done(hero, swept, Vector(content.format("battle.mixThrown",
-          "damage" -> blow.toString, "foes" -> foes.toString))))
+        done(hero, swept, Vector(content.format("battle.mixThrown",
+          "damage" -> blow.toString, "foes" -> foes.toString)))
 
       // Смазка на клинок: держится до конца боя, как и наложенная до него.
       case BrewEffect.Coat(coat, _) =>
@@ -3561,39 +3597,34 @@ case class BattleState(
           case WeaponCoat.Poison => "battle.belt.coatPoison"
           case WeaponCoat.Bleed  => "battle.belt.coatBleed"
         }
-        ZIO.succeed(done(hero.copy(weaponDust = hero.weaponDust.copy(coat = Some(coat))), battle,
-          Vector(content.format(key, "weapon" -> hero.equipment.weapon.name))))
+        done(hero.copy(weaponDust = hero.weaponDust.copy(coat = Some(coat))), battle,
+          Vector(content.format(key, "weapon" -> hero.equipment.weapon.name)))
 
       // Костоправный отвар: названную травму снимает прямо в сече.
       case BrewEffect.CureTrauma =>
         pick.flatMap(Trauma.byName)
           .filter(t => t.severity != Trauma.Heavy && hero.activeTraumas(nowMs).contains(t)) match {
-          case None    => ZIO.succeed(done(hero, battle, Vector(content.text("battle.belt.noTrauma"))))
+          case None    => done(hero, battle, Vector(content.text("battle.belt.noTrauma")))
           case Some(t) =>
             val names = BattleState.withoutFirst(hero.traumaNames, t.name)
             val until = if (names.isEmpty) None else hero.traumaUntil
-            heroDao.updateTrauma(hero.userId, until, names).as(
-              done(hero.copy(traumaUntil = until, traumaNames = names), battle,
-                Vector(content.format("battle.belt.cured", "trauma" -> t.name))))
+            done(hero.copy(traumaUntil = until, traumaNames = names), battle,
+              Vector(content.format("battle.belt.cured", "trauma" -> t.name)))
         }
 
       // Заправка: отвар уходит во флягу своего толка, что лежит рядом в ячейке.
       case BrewEffect.RefillFlask(sources) =>
         (refillableFlask(hero, sources), hero.equipment.belt.details) match {
           case (Some((i, f)), b: ItemDetails.Belt) =>
-            ZIO.succeed(done(withBelt(hero, b.updated(i, f.refilled)), battle,
-              Vector(content.format("battle.belt.flaskRefilled", "flask" -> f.name))))
-          case _ => ZIO.succeed(done(hero, battle, Vector(content.text("battle.belt.noFlask"))))
+            done(withBelt(hero, b.updated(i, f.refilled)), battle,
+              Vector(content.format("battle.belt.flaskRefilled", "flask" -> f.name)))
+          case _ => done(hero, battle, Vector(content.text("battle.belt.noFlask")))
         }
 
       // Бодрящий сбор: быстрые отдыхи ложатся в запас, как и выпитый у костра.
       case BrewEffect.InstantRest =>
-        for {
-          azat <- AzatData.load(heroDao, hero.userId, nowMs)
-          next  = azat.copy(instantRests = azat.instantRests + BrewRates.InstantRests)
-          _    <- heroDao.writeAzatData(hero.userId, next.asJson)
-        } yield done(hero, battle, Vector(content.format("battle.belt.rests",
-          "count" -> BrewRates.InstantRests.toString, "total" -> next.instantRests.toString)))
+        done(hero, battle, Vector(content.format("battle.belt.rests",
+          "count" -> BrewRates.InstantRests.toString))).copy(instantRests = BrewRates.InstantRests)
 
       // Часовой баф: складывается с зельями Густаво, как и выпитый до боя.
       case BrewEffect.Boost(name, buff, label) =>
@@ -3603,8 +3634,8 @@ case class BattleState(
 
       // Зеркальный настой: копии встают тут же, в этом бою.
       case BrewEffect.Mirror(copies) =>
-        ZIO.succeed(done(hero, battle.copy(effects = battle.effects.copy(heroMirrors = copies)),
-          Vector(content.format("battle.belt.mirrors", "count" -> copies.toString))))
+        done(hero, battle.copy(effects = battle.effects.copy(heroMirrors = copies)),
+          Vector(content.format("battle.belt.mirrors", "count" -> copies.toString)))
 
       // Волчий зов: запах держится час и сгорит на ближайшей встрече.
       case BrewEffect.WolfCall =>
@@ -3619,7 +3650,7 @@ case class BattleState(
       // носят Трактирщику, а приговор пьют до боя — с кем встретиться, решают
       // не посреди сечи. На Inert же не сидит ни один отвар.
       case BrewEffect.Sellable(_) | BrewEffect.Sentence | BrewEffect.Inert =>
-        ZIO.succeed(done(hero, battle, Vector(content.text("battle.belt.notInBattle"))))
+        done(hero, battle, Vector(content.text("battle.belt.notInBattle")))
     }
   }
 
@@ -3714,7 +3745,7 @@ case class BattleState(
   /** Опустевшие ячейки пояса добирают из сумки то же, чем были полны: горсть
     * пыли, склянку отвара, такой же цветок. Чего не нашлось, остаётся пустым —
     * игрок доложит сам. */
-  private def refillBeltDust(user: User, hero: Hero, renderer: Renderer): Task[Unit] =
+  private def refillBelt(user: User, hero: Hero): Task[List[String]] =
     hero.equipment.belt.details match {
       case b: ItemDetails.Belt if b.slots.exists(BattleState.refillable) =>
         for {
@@ -3744,11 +3775,9 @@ case class BattleState(
                  inventoryRepo.removeItems(used.map(_.id).toSet, hero.id)
                    .mapError(e => new Throwable(e.toString)) *>
                    heroDao.updateEquipment(user.userId, hero.equipment.copy(
-                     belt = hero.equipment.belt.copy(details = b.copy(slots = slots)))) *>
-                   renderer.show(user, Screen(content.format("battle.belt.refilled",
-                     "names" -> used.map(_.name).distinct.mkString(", ")), Nil)))
-        } yield ()
-      case _ => ZIO.unit
+                     belt = hero.equipment.belt.copy(details = b.copy(slots = slots)))))
+        } yield used.map(_.name)
+      case _ => ZIO.succeed(Nil)
     }
 
   /** Пояс героя с новым содержимым. */
@@ -5094,16 +5123,16 @@ case class BattleState(
 
   /** Пузырьковый нектар: если герой обнулился, а плёнка на нём ещё цела —
     * смерть не состоится, останется один HP, и нектар на этом кончится.
-    * Возвращает исход и то, сработал ли нектар (тогда надо сохранить бафы). */
-  private def bubbleRescue(res: TurnResult, nowMs: Long): (TurnResult, Boolean) =
-    if (res.outcome != Outcome.Death || !res.hero.statBoosts.hasActive(BrewRates.BubbleBoost, nowMs))
-      (res, false)
+    * Лопнувшую плёнку запишет commit вместе с прочими бафами (см.
+    * [[persistExtras]]). */
+  private def bubbleRescue(res: TurnResult, nowMs: Long): TurnResult =
+    if (res.outcome != Outcome.Death || !res.hero.statBoosts.hasActive(BrewRates.BubbleBoost, nowMs)) res
     else {
       val saved = res.hero.copy(
         fightStats = res.hero.fightStats.copy(hp = BattleState.BubbleHp),
         statBoosts = res.hero.statBoosts.without(BrewRates.BubbleBoost))
-      (res.copy(hero = saved, outcome = Outcome.Continue,
-        log = res.log :+ content.text("battle.bubbleSaved")), true)
+      res.copy(hero = saved, outcome = Outcome.Continue,
+        log = res.log :+ content.text("battle.bubbleSaved"))
     }
 
   /** Сколько склянок грибной смеси в сумке героя. Сумка может быть недоступна
@@ -5316,7 +5345,10 @@ object BattleState {
       // Был ли это ход, за которым идёт конец раунда: атака, умение, бегство.
       // Глоток фляги или зелья и «ничего не случилось» (умение не готово, фляга
       // пуста) раунд не завершают — мобы вне пары не ходят, подкрепление не идёт.
-      endsRound: Boolean = true
+      endsRound: Boolean = true,
+      // Быстрые отдыхи, которые ход положил в запас (бодрящий сбор с пояса).
+      // Запас лежит у Азата, а не в герое, — его допишет commit.
+      instantRests: Int = 0
   )
 
   /** Текущее число зарядов надетой фляги (0, если фляга не надета). */
