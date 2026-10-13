@@ -184,6 +184,47 @@ object InnkeeperStateSpec extends ZIOSpecDefault {
               assertTrue(!after.contains("WolfLore"))
     },
 
+    // ── Крысиный король и Некромант ───────────────────────────────────────────
+    test("встретил Крысиного короля → рассказ за 1000 серебра: ком из крыс и кровь, что «считает тебя своим»") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metRatKing = true), 5000L)
+        (state, dao, _, renderer) = t
+        _      <- state.enter(testUser, renderer)
+        before <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        _      <- state.action(testUser, tap("RatKingLore"), renderer)
+        offer  <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("PayRatKingLore"), renderer)
+        lore   <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+        told   <- renderer.sentScreens.map(_.last)
+        _      <- state.enter(testUser, renderer)
+        after  <- renderer.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(before.contains("RatKingLore") && offer.text.contains("1000 серебра")) &&
+              assertTrue(lore.ratKingLore && silver == 4000L) &&
+              assertTrue(told.text.contains("Крысиный король") && told.text.contains("и считать тебя своим")) &&
+              assertTrue(!after.contains("RatKingLore"))
+    },
+
+    test("про Некроманта трактирщик бесплатно отправляет к жрецу, и кнопка уходит") {
+      for {
+        t <- makeStateWith(Nil, None, LoreData(metNecro = true), 5000L)
+        (state, dao, _, renderer) = t
+        _      <- state.enter(testUser, renderer)
+        before <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        _      <- state.action(testUser, tap("NecroLore"), renderer)
+        told   <- renderer.sentScreens.map(_.last)
+        lore   <- dao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption).get)
+        silver <- dao.getHeroByUserId(userId).map(_.get.silver)
+        _      <- state.enter(testUser, renderer)
+        after  <- renderer.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(before.contains("NecroLore") && !before.contains("RatKingLore")) &&
+              assertTrue(told.text.contains("Злая это сила и нечистая") && told.text.contains("к жрецу в храм Азата")) &&
+              assertTrue(told.choices.map(_.label).contains("Схожу к жрецу")) &&
+              // денег не взял, а к Жрецу отправил
+              assertTrue(silver == 5000L && lore.necroSent) &&
+              assertTrue(!after.contains("NecroLore"))
+    },
+
     test("кнопки про волка нет, пока герой его не встречал") {
       for {
         t <- makeStateWith(Nil, None, LoreData.empty, 5000L)

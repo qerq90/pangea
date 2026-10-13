@@ -87,7 +87,10 @@ case class SoloPveBattle(
   // обещает противников своего уровня — разбойников, крыс канализации, — и
   // награда за них идёт по нему, а не по этажу лабиринта героя. None — по
   // этажу, как в самом лабиринте.
-  lootLevel:      Option[Long] = None
+  lootLevel:      Option[Long] = None,
+  // Святая вода разлита по полю: до конца боя жжёт мёртвых, если её не гасят
+  // миазмы (см. Aura.HolyWater).
+  holyWater:      Boolean = false
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -639,10 +642,11 @@ object SoloPveBattle {
       bossTaken           <- c.getOrElse[Long]("bossTaken")(0L)
       noFlee              <- c.getOrElse[Boolean]("noFlee")(false)
       lootLevel           <- c.getOrElse[Option[Long]]("lootLevel")(None)
+      holyWater           <- c.getOrElse[Boolean]("holyWater")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
-                         noFlee, lootLevel)
+                         noFlee, lootLevel, holyWater)
 }

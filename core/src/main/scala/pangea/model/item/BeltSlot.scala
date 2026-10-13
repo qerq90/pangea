@@ -5,8 +5,9 @@ import io.circe.{Decoder, Encoder, HCursor, Json}
 
 /** Что лежит в ячейке пояса. Пояс — не предмет с зарядами, а сумка на поясе:
   * сколько в ней ячеек, решает редкость самого пояса ([[ItemDetails.Belt]]), а
-  * в ячейке лежит фляга со своими зарядами, горсть пыли, склянка отвара или
-  * раскрывшаяся роза со своими раскрытиями. Одна ячейка — один предмет.
+  * в ячейке лежит фляга со своими зарядами, горсть пыли, склянка отвара,
+  * раскрывшаяся роза со своими раскрытиями или склянка святой воды. Одна
+  * ячейка — один предмет.
   *
   * Внутрь кладутся не целые предметы, а их суть: вид и редкость. По ним вещь
   * собирается заново, когда игрок достаёт её обратно, — у фляг, пыли, отваров
@@ -71,11 +72,21 @@ object BeltSlot {
     case _        => false
   }
 
+  /** Склянка святой воды: одна ячейка — одна склянка. Пустая помнит, чем была
+    * полна, и после боя доберёт такую же из сумки, если там есть. */
+  final case class HolyWater(spent: Boolean = false) extends BeltSlot {
+    def name: String        = MaterialKind.HolyWater.displayName
+    def uses: Int           = if (spent) 0 else 1
+    def poured: HolyWater   = copy(spent = true)
+    def refilled: HolyWater = copy(spent = false)
+  }
+
   /** Что из сумки вообще можно положить на пояс: фляга, пыль, отвар (кроме
     * того, что в бою ни к чему — см. [[BrewKind.beltable]]) или цветок. */
   def of(item: Item): Option[BeltSlot] = item.details match {
     case f: ItemDetails.Flask =>
       FlaskKind.values.find(_.effect == f.effect).map(kind => Flask(kind, item.rarity, f.charges))
+    case ItemDetails.Material(MaterialKind.HolyWater)     => Some(HolyWater())
     case ItemDetails.Material(kind) if kind.gem.isDefined => Some(Dust(kind))
     case ItemDetails.Brew(kind) if kind.beltable          => Some(Brew(kind))
     case r: ItemDetails.Rose                              => Some(Rose(r.kind, r.charges))
@@ -94,6 +105,9 @@ object BeltSlot {
     Json.obj("type" -> "Brew".asJson, "kind" -> b.kind.entryName.asJson,
       "spent" -> b.spent.asJson)
 
+  private val holyEnc: Encoder[HolyWater] = (h: HolyWater) =>
+    Json.obj("type" -> "Holy".asJson, "spent" -> h.spent.asJson)
+
   private val roseEnc: Encoder[Rose] = (r: Rose) =>
     Json.obj("type" -> "Rose".asJson, "kind" -> r.kind.entryName.asJson,
       "charges" -> r.charges.asJson)
@@ -103,6 +117,7 @@ object BeltSlot {
     case d: Dust  => dustEnc(d)
     case b: Brew  => brewEnc(b)
     case r: Rose  => roseEnc(r)
+    case h: HolyWater => holyEnc(h)
   }
 
   implicit val decoder: Decoder[BeltSlot] = (c: HCursor) =>
@@ -128,6 +143,7 @@ object BeltSlot {
           kind    <- c.get[String]("kind").map(RoseKind.withName)
           charges <- c.getOrElse[Int]("charges")(0)
         } yield Rose(kind, charges)
+      case "Holy" => c.getOrElse[Boolean]("spent")(false).map(HolyWater(_))
       case other  => Left(io.circe.DecodingFailure(s"Неизвестное содержимое пояса: $other", c.history))
     }
 }

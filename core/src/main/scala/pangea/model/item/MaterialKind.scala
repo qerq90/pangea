@@ -217,6 +217,16 @@ object MaterialKind extends Enum[MaterialKind] {
     override val doubloonPrice: Long = 5L
   }
 
+  /** Святая вода из купели храма Азата: её продаёт Жрец, а льют её в бою из
+    * ячейки пояса — до конца боя она жжёт всё мёртвое на поле (см.
+    * `Aura.HolyWater`). Ришелье святыней не торгует. */
+  case object HolyWater extends MaterialKind("Святая вода") {
+    override val description: String =
+      "Вода из купели храма Азата, освящённая жрецом. Где её разольёшь, тьма теряет силу, " +
+      "а мёртвое жжёт, как огнём."
+    override val worthless: Boolean = true
+  }
+
   /** Всё, что выносят из канализации. Кровь короля среди них одна чего-то
     * стоит, прочее не берёт никто. */
   val sewerSpoils: List[MaterialKind] = List(RatPelt, RatTail, PlagueWorms, RatKingBlood)

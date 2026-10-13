@@ -13,6 +13,10 @@ import io.circe.{Decoder, Encoder, HCursor}
  *  кнопка больше не предлагает платить).
  *  `metJoe`/`joeLore` — то же самое про Гнилого Джо.
  *  `metWolf`/`wolfLore` — то же про Белого волка.
+ *  `metRatKing`/`ratKingLore` — то же про Крысиного короля.
+ *  `metNecro` — встречал ли Некроманта: тогда трактирщик признаётся, что тут
+ *  он не помощник; `necroSent` — трактирщик уже отправил героя к Жрецу, и у
+ *  того появляется рассказ о некромантах.
  *  `prologueBranch` — какой смертью герой прошёл пролог («Gnome», «Orc»,
  *  «Elf», «Human»); пишется в финале, когда раса подтверждена, — сюжет потом
  *  сможет на это опереться.
@@ -30,6 +34,10 @@ final case class LoreData(
   joeLore:        Boolean           = false,
   metWolf:        Boolean           = false,
   wolfLore:       Boolean           = false,
+  metRatKing:     Boolean           = false,
+  ratKingLore:    Boolean           = false,
+  metNecro:       Boolean           = false,
+  necroSent:      Boolean           = false,
   prologueBranch: Option[String]    = None,
   knowledge:      List[String]      = Nil,
   selfTaught:     List[String]      = Nil,
@@ -85,6 +93,10 @@ object LoreData {
       joeLore       <- c.getOrElse[Boolean]("joeLore")(false)
       metWolf       <- c.getOrElse[Boolean]("metWolf")(false)
       wolfLore      <- c.getOrElse[Boolean]("wolfLore")(false)
+      metRatKing    <- c.getOrElse[Boolean]("metRatKing")(false)
+      ratKingLore   <- c.getOrElse[Boolean]("ratKingLore")(false)
+      metNecro      <- c.getOrElse[Boolean]("metNecro")(false)
+      necroSent     <- c.getOrElse[Boolean]("necroSent")(false)
       branch        <- c.getOrElse[Option[String]]("prologueBranch")(None)
       knowledge     <- c.getOrElse[List[String]]("knowledge")(Nil)
       selfTaught    <- c.getOrElse[List[String]]("selfTaught")(Nil)
@@ -93,5 +105,6 @@ object LoreData {
       bought        <- c.getOrElse[List[String]]("boughtBooks")(Nil)
       brewed        <- c.getOrElse[List[String]]("brewed")(Nil)
     } yield LoreData(metElemental, elementalLore, metJoe, joeLore, metWolf, wolfLore,
+                     metRatKing, ratKingLore, metNecro, necroSent,
                      branch, knowledge, selfTaught, cooldowns, failures, bought, brewed)
 }

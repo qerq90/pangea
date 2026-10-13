@@ -288,8 +288,8 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           _   <- seed(dao, NpcQuest.Priest, NpcQuestProgress(step = 1, done = true))
           _   <- state.action(testUser, tap("Priest"), r)
           after <- r.sentScreens.map(_.last.choices.map(_.id))
-        } yield assertTrue(before == List("WhoIsAzat", "AskBlessing", "PriestQuest", "BackToTemple")) &&
-                assertTrue(after == List("WhoIsAzat", "AskBlessing", "BackToTemple"))
+        } yield assertTrue(before == List("WhoIsAzat", "AskBlessing", "HolyWater", "PriestQuest", "BackToTemple")) &&
+                assertTrue(after == List("WhoIsAzat", "AskBlessing", "HolyWater", "BackToTemple"))
       }
     ),
 

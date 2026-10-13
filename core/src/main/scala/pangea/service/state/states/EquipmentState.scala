@@ -155,6 +155,8 @@ case class EquipmentState(
                   }))
                 case d: BeltSlot.Dust => Option.unless(d.spent)(MaterialGenerator.item(d.kind))
                 case b: BeltSlot.Brew => Option.unless(b.spent)(BrewKind.item(b.kind))
+                case h: BeltSlot.HolyWater =>
+                  Option.unless(h.spent)(MaterialGenerator.item(pangea.model.item.MaterialKind.HolyWater))
                 case r: BeltSlot.Rose =>
                   val fresh = RoseKind.item(r.kind)
                   Option.unless(r.withered)(fresh.copy(details = fresh.details match {
