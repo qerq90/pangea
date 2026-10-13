@@ -57,7 +57,7 @@ object ThievesSpec extends ZIOSpecDefault {
     test("объявление: выездное, со своим уровнем и своей сложностью") {
       assertTrue(BoardKind.Thieves.away && BoardKind.Thieves.rolledLvl) &&
       assertTrue(BoardSlot(BoardKind.Thieves, lvl = 17L).difficulty == 17) &&
-      assertTrue(pangea.model.quest.BoardRates.Layout.toMap.get(BoardKind.Thieves).contains(1))
+      assertTrue(pangea.model.quest.BoardRates.Pool.contains(BoardKind.Thieves))
     },
 
     test("в подворотне выходят трое-шестеро одной расы уровнем в задание") {

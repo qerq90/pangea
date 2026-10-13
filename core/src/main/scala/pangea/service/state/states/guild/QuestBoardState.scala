@@ -32,10 +32,12 @@ import java.util.concurrent.TimeUnit
   * взятым и не сданным: неделя и есть срок. На экране видно, сколько до неё
   * осталось. Брать можно хоть все объявления разом.
   *
-  * Что просят: трофей названной расы (сложность 1, плата как и была — опыт по
-  * трофею и дублон) либо дело потяжелее (сложность 15) — найти караван и
-  * перебить охрану или найти пещеру и выбить всех. Тяжёлые отмечаются сами,
-  * там, где дело и делается; награду герой забирает, вернувшись к доске.
+  * Что просят: у новичков (1–25) — всегда три трофея названных рас (плата как и
+  * была — опыт по трофею и дублон), а остальные места доска добирает из пула
+  * ([[BoardRates.Pool]]): караван, пещера, канализация, воры, гномьи припасы,
+  * некромант. Старшие доски целиком из пула, трофеев на них не просят. Тяжёлые
+  * отмечаются сами, там, где дело и делается; награду герой забирает,
+  * вернувшись к доске.
   */
 case class QuestBoardState(
   heroDao:       HeroDao,
@@ -128,6 +130,7 @@ case class QuestBoardState(
       case BoardKind.CaravanRout => content.text("questBoard.ask.caravan")
       case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
       case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
+      case BoardKind.NecromancerHunt => content.text("questBoard.ask.necro")
       case BoardKind.Thieves     => content.text("questBoard.ask.thieves")
       case BoardKind.DwarfSupply => content.format("questBoard.ask.dwarves",
         "name" -> band(slot), "brew" -> brewOf(slot).map(_.label).getOrElse(""),
@@ -280,7 +283,7 @@ case class QuestBoardState(
   private def regenerate(user: User, hero: Hero, now: Long): Task[BoardData] =
     for {
       seed <- Random.nextLong
-      slots = QuestBoardState.roll(Rng(seed))
+      slots = QuestBoardState.roll(BoardTier.of(hero.lvl), Rng(seed))
       data  = BoardData(BoardRates.weekOf(now), BoardTier.of(hero.lvl).key, slots)
       _    <- save(user, data)
     } yield data
@@ -349,11 +352,16 @@ object QuestBoardState {
   /** Ряд с выходом: восемь объявлений занимают четыре ряда по два. */
   val ExitRow: Int = BoardRates.Slots / 2
 
-  /** Свежая доска: по [[BoardRates.Layout]], трофейным — своя раса, выездным —
-    * свой уровень. Расы в пределах доски не повторяются, пока их хватает. */
-  def roll(rng: Rng): List[BoardSlot] = {
-    val kinds = BoardRates.Layout.flatMap { case (k, n) => List.fill(n)(k) }
-    kinds.foldLeft((List.empty[BoardSlot], List.empty[String], rng)) { case ((acc, used, r), kind) =>
+  /** Свежая доска раздела `tier`: у новичков сперва три трофейных, остальные
+    * места — из пула ([[BoardRates.Pool]]), каждый вид не больше раза; какие
+    * виды попадут, решает бросок, а стоят они в порядке пула. Трофейным — своя
+    * раса, выездным — свой уровень, гномам — свой отвар. Расы в пределах доски
+    * не повторяются, пока их хватает. */
+  def roll(tier: BoardTier, rng: Rng): List[BoardSlot] = {
+    val trophies          = BoardRates.trophiesFor(tier)
+    val (picked, rngPool) = pickKinds(BoardRates.Pool, BoardRates.Slots - trophies, rng)
+    val kinds = List.fill(trophies)(BoardKind.Trophy) ++ BoardRates.Pool.filter(picked.contains)
+    kinds.foldLeft((List.empty[BoardSlot], List.empty[String], rngPool)) { case ((acc, used, r), kind) =>
       if (kind.rolledLvl) {
         val (lvl, r1) = r.between(SewerRates.MinLvl, SewerRates.MaxLvl + 1L)
         (acc :+ BoardSlot(kind, lvl = lvl), used, r1)
@@ -369,5 +377,17 @@ object QuestBoardState {
         (acc :+ BoardSlot(kind, Some(race)), used :+ race, r1)
       }
     } match { case (slots, _, _) => slots }
+  }
+
+  /** `n` разных видов из пула наугад; пул меньше — берутся все. */
+  private def pickKinds(pool: List[BoardKind], n: Int, rng: Rng): (Set[BoardKind], Rng) = {
+    @annotation.tailrec
+    def loop(left: List[BoardKind], need: Int, acc: Set[BoardKind], r: Rng): (Set[BoardKind], Rng) =
+      if (need <= 0 || left.isEmpty) (acc, r)
+      else {
+        val (k, next) = r.pick(left)
+        loop(left.filterNot(_ == k), need - 1, acc + k, next)
+      }
+    loop(pool, n, Set.empty, rng)
   }
 }

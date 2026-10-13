@@ -468,16 +468,17 @@ case class BattleState(
 
   /** За каким заданием герой пришёл в этот бой: видно по роутингу добычи — он
     * говорит, куда бой вернётся, а значит и откуда герой здесь. Караван и
-    * пещера с канализацией ходят своими состояниями, воры — экраном поживы.
-    * Пещеру и канализацию различает сама сцена. */
+    * пещеры ходят своими состояниями, воры — экраном поживы. Пещеру, канализацию
+    * и пещеру некроманта различает сама сцена. */
   private def questBehind(user: User): Task[Option[BoardKind]] =
     heroDao.readSceneData(user.userId).map(_.flatMap(_.as[LootState.LootData].toOption).flatMap { loot =>
       loot.returnState.flatMap {
         case StateType.ThievesSpoils => Some(BoardKind.Thieves)
         case StateType.Caravan       => Some(BoardKind.CaravanRout)
         case StateType.MonsterCave   =>
-          val sewer = loot.eventData.flatMap(_.as[pangea.model.cave.CaveScene].toOption).exists(_.sewer)
-          Some(if (sewer) BoardKind.SewerRats else BoardKind.CaveClear)
+          loot.eventData.flatMap(_.as[pangea.model.cave.CaveScene].toOption)
+            .map(pangea.service.state.states.events.cave.MonsterCaveState.questOf)
+            .orElse(Some(BoardKind.CaveClear))
         case _ => None
       }
     })
@@ -1462,7 +1463,7 @@ case class BattleState(
                        Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L))
             ratLvl = battle.minionLvl.max(1L).toInt
             slots  = seeds.zip(pcts).map { case (seed, pct) =>
-                       val (rarity, _) = CaveGenerator.rollRatRarity(Rng(seed))
+                       val (rarity, _) = CaveGenerator.rollQuestRarity(Rng(seed))
                        val m = MonsterGenerator.generateOfRaceAndRarity(ratLvl, Race.Animal, rarity)
                        MonsterSlot(m.lvl, m.race.entryName, m.rarity.entryName, m.fightStats,
                          m.fightStats.hp, m.fightStats.armor, m.marked,

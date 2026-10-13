@@ -39,8 +39,9 @@ object RoadProgress {
   *
   * Взяв такое объявление, герой уходит из города сам: кнопок на дороге нет,
   * идти ему [[SewerRates.RoadMs]], и всё, что он может, — ждать. По таймеру
-  * поллер доводит его до места: канализация катается здесь же, уровнем в
-  * уровень задания, и дальше это обычная пещера ([[StateType.MonsterCave]]).
+  * поллер доводит его до места: канализация или пещера некроманта катается
+  * здесь же, уровнем в уровень задания, и дальше это обычная пещера
+  * ([[StateType.MonsterCave]]).
   *
   * Дорога одна на все выездные задания: новому виду достаточно своей ветки в
   * [[QuestRoadState.arrive]].
@@ -100,6 +101,17 @@ case class QuestRoadState(heroDao: HeroDao, scheduler: Scheduler, content: Scene
           for {
             seed      <- Random.nextLong
             (scene, _) = CaveGenerator.sewer(r.lvl.max(SewerRates.MinLvl), Rng(seed))
+            _         <- heroDao.writeSceneData(user.userId, scene.asJson)
+            _         <- renderer.show(user, Screen(content.text("questRoad.arrived"), Nil))
+          } yield StateType.MonsterCave
+
+        // Пещера некроманта: чья родня в ней поднята, решается здесь, на месте.
+        case Some(r) if r.kind == BoardKind.NecromancerHunt =>
+          for {
+            raceIdx   <- Random.nextIntBounded(Race.mortals.size)
+            seed      <- Random.nextLong
+            (scene, _) = CaveGenerator.necroCave(r.lvl.max(SewerRates.MinLvl),
+                           Race.mortals(raceIdx).entryName, Rng(seed))
             _         <- heroDao.writeSceneData(user.userId, scene.asJson)
             _         <- renderer.show(user, Screen(content.text("questRoad.arrived"), Nil))
           } yield StateType.MonsterCave

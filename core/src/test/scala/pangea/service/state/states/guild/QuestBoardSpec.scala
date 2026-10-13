@@ -76,31 +76,53 @@ object QuestBoardSpec extends ZIOSpecDefault {
       assertTrue(BoardTier.values.sliding(2).forall { case Seq(a, b) => b.from == a.to + 1L; case _ => true })
     },
 
-    test("свежая доска: восемь объявлений, тяжёлые по одному, расы трофеев не повторяются") {
-      val slots  = QuestBoardState.roll(Rng(7L))
-      val races  = slots.flatMap(_.race)
-      assertTrue(slots.size == BoardRates.Slots) &&
-      assertTrue(slots.count(_.kind == BoardKind.CaravanRout) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.CaveClear) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.SewerRats) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.Thieves) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.DwarfSupply) == 1) &&
-      assertTrue(slots.count(_.kind == BoardKind.Trophy) == 3) &&
+    test("доска новичков: три трофея разных рас и пять разных видов из пула") {
+      val boards = (1L to 300L).toList.map(s => QuestBoardState.roll(BoardTier.Novice, Rng(s)))
+      val first  = boards.head
+      val races  = first.flatMap(_.race)
+      def pooled(b: List[BoardSlot]): List[BoardKind] = b.filterNot(_.kind == BoardKind.Trophy).map(_.kind)
+      def onBoard(b: List[BoardSlot], k: BoardKind): Boolean = pooled(b).exists(_ == k)
+      def inPool(k: BoardKind): Boolean = BoardRates.Pool.exists(_ == k)
+      // остальное — из пула, и ни один вид не повторяется
+      val fromPool = boards.forall(b => pooled(b).distinct == pooled(b) && pooled(b).forall(inPool))
+      // какие виды попадут — решает бросок: каждый бывает и на доске, и мимо неё
+      val rolled   = BoardRates.Pool.forall(k => boards.exists(onBoard(_, k)) && boards.exists(b => !onBoard(b, k)))
+      // стоят они в порядке пула
+      val ordered  = boards.forall(b => pooled(b) == BoardRates.Pool.filter(k => onBoard(b, k)))
+      assertTrue(boards.forall(_.size == BoardRates.Slots)) &&
+      assertTrue(boards.forall(_.count(_.kind == BoardKind.Trophy) == BoardRates.NoviceTrophies)) &&
       assertTrue(races.size == 3 && races.distinct.size == 3) &&
+      assertTrue(boards.forall(b => pooled(b).size == BoardRates.Slots - BoardRates.NoviceTrophies)) &&
+      assertTrue(fromPool && rolled && ordered) &&
       // сложности: трофей — один знак, караван и пещера — пятнадцать
       assertTrue(BoardKind.Trophy.difficulty == 1 && BoardKind.CaravanRout.difficulty == 15) &&
       assertTrue(BoardKind.CaveClear.difficulty == 15)
     },
 
-    test("канализация: уровень задания 1–25 и он же сложность объявления") {
-      val sewers = (1L to 300L).toList.map(s =>
-        QuestBoardState.roll(Rng(s)).find(_.kind == BoardKind.SewerRats).get)
-      val lvls   = sewers.map(_.lvl)
+    test("старшие доски целиком из пула: трофеев нет, видов не больше восьми и без повторов") {
+      val boards = for {
+        tier <- BoardTier.values.toList.filterNot(_ == BoardTier.Novice)
+        s    <- 1L to 50L
+      } yield QuestBoardState.roll(tier, Rng(s))
+      assertTrue(boards.forall(b => !b.exists(_.kind == BoardKind.Trophy))) &&
+      assertTrue(boards.forall(_.size == BoardRates.Pool.size.min(BoardRates.Slots))) &&
+      assertTrue(boards.forall(b => b.map(_.kind).distinct.size == b.size)) &&
+      assertTrue(BoardRates.trophiesFor(BoardTier.Seasoned) == 0 && BoardRates.trophiesFor(BoardTier.Novice) == 3)
+    },
+
+    test("выездные: уровень задания 1–25 и он же сложность объявления") {
+      val away   = (1L to 300L).toList.flatMap(s => QuestBoardState.roll(BoardTier.Seasoned, Rng(s)))
+                     .filter(s => s.kind == BoardKind.SewerRats || s.kind == BoardKind.NecromancerHunt)
+      val sewers = away.filter(_.kind == BoardKind.SewerRats)
+      val necros = away.filter(_.kind == BoardKind.NecromancerHunt)
+      val lvls   = away.map(_.lvl)
+      assertTrue(sewers.size == 300 && necros.size == 300) &&
       assertTrue(lvls.forall(l => l >= SewerRates.MinLvl && l <= SewerRates.MaxLvl)) &&
       // уровень катается, а не стоит на месте, и всю шкалу задевает
-      assertTrue(lvls.distinct.size > 15) &&
+      assertTrue(sewers.map(_.lvl).distinct.size > 15 && necros.map(_.lvl).distinct.size > 15) &&
       // сложность объявления — его собственный уровень, а не ставка вида
-      assertTrue(sewers.forall(s => s.difficulty == s.lvl.toInt)) &&
+      assertTrue(away.forall(s => s.difficulty == s.lvl.toInt)) &&
+      assertTrue(BoardKind.NecromancerHunt.away && BoardKind.NecromancerHunt.rolledLvl) &&
       // у прочих видов сложность по-прежнему общая
       assertTrue(BoardSlot(BoardKind.CaveClear).difficulty == BoardKind.CaveClear.difficulty)
     },
@@ -111,7 +133,9 @@ object QuestBoardSpec extends ZIOSpecDefault {
         (state, dao, _, r, _) = t
         _     <- state.action(testUser, tap("BoardMine"), r)
         fresh <- saved(dao)
-        idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
+        // канализацию пул может и не вывесить — кладём её на доску сами
+        _     <- dao.writeQuestData(userId, fresh.copy(slots = List(BoardSlot(BoardKind.SewerRats, lvl = 9L))).asJson)
+        idx    = 0
         out   <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}$idx"), r)
         data  <- saved(dao)
         road  <- dao.readSceneData(userId).map(_.flatMap(_.as[RoadProgress].toOption).get)
@@ -131,7 +155,8 @@ object QuestBoardSpec extends ZIOSpecDefault {
         (state, dao, _, r, _) = t
         _     <- state.action(testUser, tap("BoardMine"), r)
         fresh <- saved(dao)
-        idx    = fresh.slots.indexWhere(_.kind == BoardKind.SewerRats)
+        _     <- dao.writeQuestData(userId, fresh.copy(slots = List(BoardSlot(BoardKind.SewerRats, lvl = 9L))).asJson)
+        idx    = 0
         _     <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}$idx"), r)
         // герой ушёл с задания, сцена пуста — и он снова у доски
         _     <- dao.writeSceneData(userId, io.circe.Json.Null)
@@ -266,8 +291,8 @@ object QuestBoardSpec extends ZIOSpecDefault {
     },
 
     test("заказ гномов: десять склянок одного толка, и всё разом") {
-      val orders = (1L to 300L).toList.map(s =>
-        QuestBoardState.roll(Rng(s)).find(_.kind == BoardKind.DwarfSupply).get)
+      val orders = (1L to 300L).toList.flatMap(s =>
+        QuestBoardState.roll(BoardTier.Seasoned, Rng(s)).find(_.kind == BoardKind.DwarfSupply))
       val brews  = orders.flatMap(_.brew)
       assertTrue(BoardKind.DwarfSupply.difficulty == 5 && BoardRates.BrewsWanted == 10) &&
       // отвар всегда первого ранга, и он катается
@@ -392,7 +417,7 @@ object QuestBoardSpec extends ZIOSpecDefault {
         c <- ZIO.attempt(SceneContent.load())
       } yield assertTrue(BoardTier.values.forall(t => c.text(s"questBoard.locked.${t.key}").nonEmpty)) &&
               assertTrue(BoardKind.values.forall(k => c.text(s"questBoard.ask.${k.key}").nonEmpty)) &&
-              assertTrue(List("markCaravan", "markCave", "doneCaravan", "doneCave", "doneSewer", "taken",
+              assertTrue(List("markCaravan", "markCave", "doneCaravan", "doneCave", "doneSewer", "doneNecro", "taken",
                 "paid", "paidTrophy", "noTrophy", "notYet", "stateAway", "goLabel", "depart")
                 .forall(f => c.text(s"questBoard.$f").nonEmpty)) &&
               assertTrue(List("enter", "wait", "arrived", "lost").forall(f => c.text(s"questRoad.$f").nonEmpty)) &&

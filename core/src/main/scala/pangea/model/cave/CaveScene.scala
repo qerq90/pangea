@@ -84,7 +84,12 @@ object CaveDir extends Enum[CaveDir] {
   *                  крысы вместо смертных, свои слова и своя развязка
   * @param questLvl  уровень задания: по нему, а не по этажу лабиринта, считаются
   *                  статы крыс. У пещеры он нулевой
-  * @param floor     ярус канализации: первый просторный, второй короткий
+  * @param floor     ярус выездной пещеры: первый просторный, второй короткий
+  * @param necro     это пещера некроманта по заданию с доски: вся родня одной
+  *                  расы поднята, ярусов два, как в канализации, а внизу ждёт
+  *                  сам Некромант
+  * @param altarBroken алтарь расколот: на него положили проклятые кости, и из
+  *                  разлома встал Некромант. Такой камень больше ничего не берёт
   */
 final case class CaveScene(
   race:      String,
@@ -108,11 +113,18 @@ final case class CaveScene(
   /** Хозяин пещеры, если она особая: имя варианта минибосса. Он сидит в логове,
     * и пока он жив, пещера не выбита. В пещере Некроманта вся родня внутри
     * поднята — мобы те же по расе, но мёртвые (см. [[undeadMobs]]). */
-  boss:      Option[String] = None
+  boss:      Option[String] = None,
+  necro:     Boolean = false,
+  altarBroken: Boolean = false
 ) {
 
-  /** Поднята ли вся живность внутри: так живёт пещера Некроманта. */
-  def undeadMobs: Boolean = boss.contains("Necromancer")
+  /** Поднята ли вся живность внутри: так живёт пещера Некроманта — и та, где
+    * он хозяин в лабиринте, и та, куда за ним посылает доска. */
+  def undeadMobs: Boolean = necro || boss.contains("Necromancer")
+
+  /** Выездное место по заданию с доски — канализация или пещера некроманта:
+    * два яруса, сила обитателей от уровня задания, а уходят отсюда в город. */
+  def away: Boolean = sewer || necro
 
   def room: CaveRoom = rooms.lift(at).getOrElse(rooms.head)
 
@@ -129,9 +141,9 @@ final case class CaveScene(
   /** Живых мобов в пещере не осталось. */
   def cleared: Boolean = rooms.forall(_.monsters <= 0)
 
-  /** Последний ярус: у пещеры он единственный, у канализации — второй. Только
+  /** Последний ярус: у пещеры он единственный, у выездных — второй. Только
     * на нём зачистка что-то значит. */
-  def lastFloor: Boolean = !sewer || floor >= SewerRates.Floors
+  def lastFloor: Boolean = !away || floor >= SewerRates.Floors
 }
 
 object CaveScene {
@@ -155,7 +167,9 @@ object CaveScene {
       "sewer"         -> s.sewer.asJson,
       "questLvl"      -> s.questLvl.asJson,
       "floor"         -> s.floor.asJson,
-      "boss"          -> s.boss.asJson)
+      "boss"          -> s.boss.asJson,
+      "necro"         -> s.necro.asJson,
+      "altarBroken"   -> s.altarBroken.asJson)
 
   implicit val decoder: Decoder[CaveScene] = (c: HCursor) =>
     for {
@@ -178,8 +192,10 @@ object CaveScene {
       questLvl  <- c.getOrElse[Long]("questLvl")(0L)
       floor     <- c.getOrElse[Int]("floor")(1)
       boss      <- c.getOrElse[Option[String]]("boss")(None)
+      necro     <- c.getOrElse[Boolean]("necro")(false)
+      broken    <- c.getOrElse[Boolean]("altarBroken")(false)
     } yield CaveScene(race, rooms, at, inside, page, weakened, poisoned, expEarned, restUsed, restUntil,
-                      rewarded, spent, pending, trophy, treasure, sewer, questLvl, floor, boss)
+                      rewarded, spent, pending, trophy, treasure, sewer, questLvl, floor, boss, necro, broken)
 }
 
 /** Числа пещеры. Вынесены из компаньонов нарочно — их читают и генератор, и
@@ -244,7 +260,8 @@ object CaveRates {
 }
 
 /** Числа канализации. Механика у неё пещерная — те же комнаты, та же ходьба, те
-  * же находки, — а вот обитатели, ярусы и алтарь свои. */
+  * же находки, — а вот обитатели, ярусы и алтарь свои. Пещера некроманта по
+  * заданию с доски устроена так же и живёт по тем же числам. */
 object SewerRates {
 
   /** Уровень задания катается в этих границах. Он же сложность объявления на
@@ -319,6 +336,26 @@ object CaveGenerator {
     val (rooms, next) = build(CaveRates.MinRooms, CaveRates.MaxRooms, CaveRates.MinMonsters,
       CaveRates.MaxMonsters, SewerRates.AltarChancePct, withRest = true, withStairs = true, rng)
     (CaveScene(Race.Animal.entryName, rooms, sewer = true, questLvl = questLvl, floor = 1), next)
+  }
+
+  /** Верхний ярус пещеры некроманта: устроен как верх канализации — алтарь
+    * стоит всегда, ход вниз есть непременно, — только живых здесь нет: вся
+    * родня расы `race` давно поднята. */
+  def necroCave(questLvl: Long, race: String, rng: Rng): (CaveScene, Rng) = {
+    val (rooms, next) = build(CaveRates.MinRooms, CaveRates.MaxRooms, CaveRates.MinMonsters,
+      CaveRates.MaxMonsters, SewerRates.AltarChancePct, withRest = true, withStairs = true, rng)
+    (CaveScene(race, rooms, necro = true, questLvl = questLvl, floor = 1), next)
+  }
+
+  /** Нижний ярус пещеры некроманта: короткий, как и в канализации, а в самой
+    * дальней клетке — логово самого Некроманта. Пока он жив, задание не
+    * сделано. */
+  def necroDeep(questLvl: Long, race: String, rng: Rng): (CaveScene, Rng) = {
+    val (rooms, next) = build(SewerRates.DeepMinRooms, SewerRates.DeepMaxRooms,
+      SewerRates.DeepMinMonsters, SewerRates.DeepMaxMonsters, SewerRates.DeepAltarChancePct,
+      withRest = false, withStairs = false, rng)
+    (CaveScene(race, withLair(rooms), inside = true, questLvl = questLvl, floor = 2,
+      boss = Some("Necromancer"), necro = true), next)
   }
 
   /** Нижний ярус: короткий, без угла для отдыха и без хода дальше — дальше
@@ -493,8 +530,9 @@ object CaveGenerator {
     (CaveRates.RarityPool(i), next)
   }
 
-  /** Кто выскочил в канализации: обычная крыса или чумная (см. [[SewerRates.RarityPool]]). */
-  def rollRatRarity(rng: Rng): (Rarity, Rng) = {
+  /** Кто выскочил в выездной пещере: в канализации — обычная крыса или чумная,
+    * в пещере некроманта — мертвец второго или третьего тира (см. [[SewerRates.RarityPool]]). */
+  def rollQuestRarity(rng: Rng): (Rarity, Rng) = {
     val (i, next) = roll(rng, SewerRates.RarityPool.size)
     (SewerRates.RarityPool(i), next)
   }
