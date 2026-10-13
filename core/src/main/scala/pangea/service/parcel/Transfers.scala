@@ -116,49 +116,62 @@ final case class Transfers(
       _    <- ZIO.when(items.nonEmpty)(tell(sender, name, target, items))
     } yield items
 
-  /** Передать серебро. Отправитель платит сразу: сперва с рук, нехватку из
-    * ячейки, как любые траты (см. [[Purse]]). Получателю оно ложится в
-    * банковскую ячейку, а не приняла она — ждёт его в городе, как выручка с
-    * аукциона (см. [[Payouts]]): на руках в лабиринте половина сгорела бы при
-    * смерти. Самого героя получателя здесь не трогаем — его пишут только под
-    * его собственным локом. Зачислить не вышло — серебро возвращается. */
-  def sendSilver(sender: User, hero: Hero, target: TransferTarget, amount: Long): Task[Transfers.Outcome] = {
-    val line = Transfers.moneyLine(Money.Silver, amount)
-    purse.charge(sender.userId, hero, amount).flatMap {
+  /** Передать серебро. Отправитель платит сразу — сумму и комиссию сверху
+    * (см. [[Transfers.fee]]): сперва с рук, нехватку из ячейки, как любые траты
+    * (см. [[Purse]]). Получателю сумма ложится в банковскую ячейку, а не
+    * приняла она — ждёт его в городе, как выручка с аукциона (см. [[Payouts]]):
+    * на руках в лабиринте половина сгорела бы при смерти. Комиссия не достаётся
+    * никому. Самого героя получателя здесь не трогаем — его пишут только под
+    * его собственным локом. Зачислить не вышло — всё снятое возвращается. */
+  def sendSilver(sender: User, hero: Hero, target: TransferTarget, amount: Long): Task[Transfers.Outcome] =
+    tooLittle(Money.Silver, amount) match {
+      case Some(refusal) => ZIO.succeed(Transfers.Outcome.Forbidden(refusal))
       case None =>
-        purse.total(hero).map(have => Transfers.Outcome.Forbidden(
-          content.format("transfer.money.notEnoughSilver", "have" -> have.toString)))
-      case Some(paid) =>
-        val refund = heroDao.updateSilver(sender.userId, paid.silver + amount)
-        for {
-          intoVault <- bank.depositSilver(target.heroId, amount).either.flatMap {
-                         case Right(_) => ZIO.succeed(true)
-                         case Left(_)  => payouts.queue(target.heroId, silver = amount).as(false)
-                       }.tapError(_ => refund)
-          _         <- tellMoney(sender, target, line, if (intoVault) Transfers.Landed.Vault else Transfers.Landed.City)
-        } yield Transfers.Outcome.Sent(content.format("transfer.money.sent", "money" -> line, "to" -> target.name))
+        val fee  = Transfers.fee(amount)
+        val cost = amount + fee
+        purse.charge(sender.userId, hero, cost).flatMap {
+          case None =>
+            purse.total(hero).map(have => Transfers.Outcome.Forbidden(
+              notEnough("transfer.money.notEnoughSilver", Money.Silver, cost, fee, have)))
+          case Some(paid) =>
+            val refund = heroDao.updateSilver(sender.userId, paid.silver + cost)
+            for {
+              intoVault <- bank.depositSilver(target.heroId, amount).either.flatMap {
+                             case Right(_) => ZIO.succeed(true)
+                             case Left(_)  => payouts.queue(target.heroId, silver = amount).as(false)
+                           }.tapError(_ => refund)
+              _         <- tellMoney(sender, target, Transfers.moneyLine(Money.Silver, amount),
+                             if (intoVault) Transfers.Landed.Vault else Transfers.Landed.City)
+            } yield Transfers.Outcome.Sent(sentLine(Money.Silver, amount, target))
+        }
     }
-  }
 
-  /** Дублоны, шаг первый — под локом отправителя: снять с его рук. `Some` —
-    * отказ: столько у него нет, и ничего не списано.
+  /** Дублоны, шаг первый — под локом отправителя: снять с его рук сумму и
+    * комиссию сверху (см. [[Transfers.fee]]). `Some` — отказ: меньше минимума
+    * или столько у него нет, и ничего не списано.
     *
     * Дублоны не теряются нигде, поэтому и отдают их откуда угодно, и получатель
     * берёт их сразу в руки ([[giveDoubloons]]) — ждать города им незачем. */
   def takeDoubloons(sender: User, hero: Hero, amount: Long): Task[Option[String]] =
-    if (hero.doubloons < amount)
-      ZIO.some(content.format("transfer.money.notEnoughDoubloons", "have" -> hero.doubloons.toString))
-    else heroDao.updateDoubloons(sender.userId, hero.doubloons - amount).as(None)
+    tooLittle(Money.Doubloons, amount) match {
+      case Some(refusal) => ZIO.some(refusal)
+      case None =>
+        val fee  = Transfers.fee(amount)
+        val cost = amount + fee
+        if (hero.doubloons < cost)
+          ZIO.some(notEnough("transfer.money.notEnoughDoubloons", Money.Doubloons, cost, fee, hero.doubloons))
+        else heroDao.updateDoubloons(sender.userId, hero.doubloons - cost).as(None)
+    }
 
   /** Шаг второй — под локом ПОЛУЧАТЕЛЯ: дублоны ему в руки. Героя читаем
     * заново, уже под его локом: иначе зачисление затёрлось бы его же тратой. */
   def giveDoubloons(target: TransferTarget, amount: Long): Task[Unit] =
     addDoubloons(target.userId, amount)
 
-  /** Зачислить не вышло — вернуть отправителю. Тоже под его локом и тоже по
-    * свежему герою: между шагами он мог что-то купить. */
+  /** Зачислить не вышло — вернуть отправителю всё снятое, комиссию тоже. Под
+    * его локом и по свежему герою: между шагами он мог что-то купить. */
   def returnDoubloons(sender: User, amount: Long): Task[Unit] =
-    addDoubloons(sender.userId, amount)
+    addDoubloons(sender.userId, amount + Transfers.fee(amount))
 
   private def addDoubloons(userId: UserId, amount: Long): Task[Unit] =
     heroDao.getHeroByUserId(userId).someOrFail(new Throwable(s"Нет героя у игрока ${userId.value}"))
@@ -166,11 +179,28 @@ final case class Transfers(
 
   /** Дублоны дошли: письмо получателю, строка в беседу. Возвращает ответ
     * отправителю. */
-  def doubloonsDelivered(sender: User, target: TransferTarget, amount: Long): Task[String] = {
-    val line = Transfers.moneyLine(Money.Doubloons, amount)
-    tellMoney(sender, target, line, Transfers.Landed.Hand)
-      .as(content.format("transfer.money.sent", "money" -> line, "to" -> target.name))
-  }
+  def doubloonsDelivered(sender: User, target: TransferTarget, amount: Long): Task[String] =
+    tellMoney(sender, target, Transfers.moneyLine(Money.Doubloons, amount), Transfers.Landed.Hand)
+      .as(sentLine(Money.Doubloons, amount, target))
+
+  /** Меньше минимума не передают (см. [[Transfers.MinMoney]]). */
+  private def tooLittle(money: Money, amount: Long): Option[String] =
+    Option.when(amount < Transfers.MinMoney)(content.format("transfer.money.tooLittle",
+      "min" -> Transfers.moneyLine(money, Transfers.MinMoney)))
+
+  /** Отказ, когда денег не хватает: сколько нужно с комиссией и сколько есть. */
+  private def notEnough(key: String, money: Money, cost: Long, fee: Long, have: Long): String =
+    content.format(key,
+      "need" -> Transfers.moneyLine(money, cost),
+      "fee"  -> Transfers.moneyLine(money, fee),
+      "have" -> Transfers.moneyLine(money, have))
+
+  /** Ответ отправителю: что ушло и сколько сгорело комиссией. */
+  private def sentLine(money: Money, amount: Long, target: TransferTarget): String =
+    content.format("transfer.money.sent",
+      "money" -> Transfers.moneyLine(money, amount),
+      "to"    -> target.name,
+      "fee"   -> Transfers.moneyLine(money, Transfers.fee(amount)))
 
   /** Письмо получателю — где теперь его деньги, — и строка в общий чат. */
   private def tellMoney(sender: User, target: TransferTarget, line: String, landed: Transfers.Landed): Task[Unit] =
@@ -235,6 +265,17 @@ object Transfers {
     /** Дублоны — сразу в руки. */
     case object Hand  extends Landed
   }
+
+  /** Меньше этого денег не передают — ни серебра, ни дублонов. */
+  val MinMoney: Long = 50L
+
+  /** Комиссия с передачи денег, в процентах. Платит отправитель сверху суммы,
+    * и не достаётся она никому: получатель получает ровно названное. */
+  val FeePct: Long = 10L
+
+  /** Комиссия с этой суммы, с округлением вверх: десятая часть, но не меньше —
+    * с 55 это 6, а не 5. */
+  def fee(amount: Long): Long = (amount * FeePct + 99L) / 100L
 
   /** Сумма со значком валюты: 🪙 серебро, 🟡 дублоны — как везде в игре. */
   def moneyLine(money: Money, amount: Long): String = money match {
