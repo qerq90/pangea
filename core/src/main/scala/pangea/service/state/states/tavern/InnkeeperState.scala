@@ -58,6 +58,9 @@ case class InnkeeperState(
       "WolfLore"          -> Target.Run { (user, _, renderer) => offerWolfLore(user, renderer) },
       "SellSchnapps"      -> Target.Run { (user, _, renderer) => sellSchnapps(user, renderer) },
       "PayWolfLore"       -> Target.Run { (user, _, renderer) => payWolfLore(user, renderer) },
+      "RatKingLore"       -> Target.Run { (user, _, renderer) => offerRatKingLore(user, renderer) },
+      "PayRatKingLore"    -> Target.Run { (user, _, renderer) => payRatKingLore(user, renderer) },
+      "NecroLore"         -> Target.Run { (user, _, renderer) => necroLore(user, renderer) },
       "BackFromInnkeeper" -> Target.Goto(StateType.Tavern),
       CityExit.route
     ),
@@ -92,6 +95,13 @@ case class InnkeeperState(
       // И про Белого волка — после первой встречи на поляне.
       wolfBtn = Option.when(lore.metWolf && !lore.wolfLore)(
         content.choice("WolfLore", "innkeeper.wolfLoreLabel"))
+      // И про Крысиного короля — после встречи в его логове.
+      ratKingBtn = Option.when(lore.metRatKing && !lore.ratKingLore)(
+        content.choice("RatKingLore", "innkeeper.ratKingLoreLabel"))
+      // Про Некроманта рассказывать он не берётся: отправит к Жрецу, и кнопка
+      // после этого уходит — рассказ теперь у того.
+      necroBtn = Option.when(lore.metNecro && !lore.necroSent)(
+        content.choice("NecroLore", "innkeeper.necroLoreLabel"))
       // Шнапс из красавки в сумке — Трактирщик его выкупает.
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
@@ -115,6 +125,8 @@ case class InnkeeperState(
             loreBtn,
             joeBtn,
             wolfBtn,
+            ratKingBtn,
+            necroBtn,
             schnappsBtn,
             Some(content.choice("OpenCharacter", "common.character")),
             Some(content.choice("BackFromInnkeeper", "innkeeper.backLabel")),
@@ -234,6 +246,42 @@ case class InnkeeperState(
                  List(content.choice("BackFromLore", "innkeeper.wolfLoreDone"))))
     } yield StateType.Innkeeper
 
+  /** Предложение рассказа про Крысиного короля: цена и две кнопки. */
+  private def offerRatKingLore(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(
+      content.format("innkeeper.ratKingLoreOffer", "price" -> InnkeeperState.RatKingLorePrice.toString),
+      List(
+        content.choice("PayRatKingLore", "innkeeper.ratKingLorePay"),
+        content.choice("BackFromLore", "innkeeper.ratKingLoreDecline")
+      ))).as(StateType.Innkeeper)
+
+  private def payRatKingLore(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero   <- getHero(user)
+      lore   <- readLore(user)
+      wallet <- purse.wallet(hero)
+      _ <- if (lore.ratKingLore) showMenu(user, renderer)
+           else if (!wallet.canAfford(InnkeeperState.RatKingLorePrice))
+             renderer.show(user, Screen(content.text("innkeeper.ratKingLoreNoSilver"), Nil)) *>
+               showMenu(user, renderer)
+           else
+             purse.charge(user.userId, hero, InnkeeperState.RatKingLorePrice) *>
+               heroDao.writeLoreData(user.userId, lore.copy(ratKingLore = true).asJson) *>
+               renderer.show(user, Screen(
+                 content.text("innkeeper.ratKingLoreText"),
+                 List(content.choice("BackFromLore", "innkeeper.ratKingLoreDone"))))
+    } yield StateType.Innkeeper
+
+  /** Про Некроманта Трактирщик не рассказывает — и денег за это не берёт: такие
+    * вопросы к Жрецу. С этой минуты у Жреца появляется свой рассказ. */
+  private def necroLore(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      lore <- readLore(user)
+      _    <- ZIO.unless(lore.necroSent)(heroDao.writeLoreData(user.userId, lore.copy(necroSent = true).asJson))
+      _    <- renderer.show(user, Screen(content.text("innkeeper.necroLoreText"),
+                List(content.choice("BackFromLore", "innkeeper.necroLoreDone"))))
+    } yield StateType.Innkeeper
+
   /** Шнапс уходит весь разом, по цене за бутылку (см. BrewRates.SchnappsPrice). */
   private def sellSchnapps(user: User, renderer: Renderer): Task[StateType] =
     for {
@@ -271,6 +319,9 @@ object InnkeeperState {
 
   /** Цена рассказа про Белого волка. */
   val WolfLorePrice: Long = 1500L
+
+  /** Цена рассказа про Крысиного короля — как за Гнилого Джо. */
+  val RatKingLorePrice: Long = 1000L
 
   /** Бутылки шнапса из красавки в сумке. */
   /** Что Трактирщик берёт себе: любой отвар, который не пьют, а продают

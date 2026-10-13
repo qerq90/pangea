@@ -7,7 +7,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{Aura, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Aura, AuraRates, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
@@ -3521,6 +3521,19 @@ case class BattleState(
               val after   = if (outcome == Outcome.Victory && swept.promoteNext.isEmpty) endOfRoundHero(hero1, nowMs) else hero1
               TurnResult(after, swept.copy(consumableUsedThisRound = consumed), log, outcome, endsRound = false)
             }
+          case Some(h: BeltSlot.HolyWater) if h.spent =>
+            cont(hero, battle, content.text("battle.belt.gone"))
+          // Вода уже на поле — вторая склянка ничего не прибавит, её не тратим.
+          case Some(_: BeltSlot.HolyWater) if battle.holyWater =>
+            cont(hero, battle, content.text("battle.holyWater.already"))
+          case Some(h: BeltSlot.HolyWater) =>
+            quickHandsRoll(hero).map { case (consumed, qhLog) =>
+              // Святая вода держится до конца боя. Ячейка пустеет, но помнит
+              // склянку: после боя доберёт такую же из сумки.
+              TurnResult(withBelt(hero, b.updated(idx, h.poured)),
+                battle.copy(holyWater = true, consumableUsedThisRound = consumed),
+                Vector(content.text("battle.holyWater.poured")) ++ qhLog, Outcome.Continue, endsRound = false)
+            }
         }
       case _ => cont(hero, battle, content.text("battle.belt.none"))
     }
@@ -3773,6 +3786,11 @@ case class BattleState(
                         case Some(item) => (slots :+ r.refilled, used :+ item, bag.filterNot(_.id == item.id))
                         case None       => (slots :+ r, used, bag)
                       }
+                    case ((slots, used, bag), h: BeltSlot.HolyWater) if h.spent =>
+                      bag.find(_.material.contains(pangea.model.item.MaterialKind.HolyWater)) match {
+                        case Some(item) => (slots :+ h.refilled, used :+ item, bag.filterNot(_.id == item.id))
+                        case None       => (slots :+ h, used, bag)
+                      }
                     case ((slots, used, bag), other) => (slots :+ other, used, bag)
                   }
           (slots, used, _) = taken
@@ -3887,12 +3905,51 @@ case class BattleState(
     * союзник тоже сказан — это событие, а не сдача.
     *
     * Герой-некромант на пороге 10 сам числится нежитью, поэтому своей же аурой
-    * лечится. */
-  private def auraTick(res: TurnResult, on: Boolean): TurnResult = {
-    val byHero = res.hero.sets.auras.foldLeft(res)((acc, aura) => heroAura(acc, aura, on))
-    // Чужая аура: её держит моб, и платит он своей энергией. Правила те же — и
-    // она так же не разбирает, кто на поле свой.
-    byHero.battle.auraHolder.fold(byHero) { case (aura, _) => mobAura(byHero, aura) }
+    * лечится.
+    *
+    * Святая вода и миазмы гасят друг друга: пока на поле держится тьма — чья
+    * угодно, героя или Некроманта, — не работает ни она, ни вода. Свернул герой
+    * миазмы, выдохся или пал Некромант — вода начинает жечь мёртвых. */
+  private def auraTick(res: TurnResult, on: Boolean): TurnResult =
+    if (res.battle.holyWater && miasmaHeld(res, on)) holyClash(res)
+    else {
+      val byHero = res.hero.sets.auras.foldLeft(res)((acc, aura) => heroAura(acc, aura, on))
+      // Чужая аура: её держит моб, и платит он своей энергией. Правила те же — и
+      // она так же не разбирает, кто на поле свой.
+      val byMob = byHero.battle.auraHolder.fold(byHero) { case (aura, _) => mobAura(byHero, aura) }
+      if (byMob.battle.holyWater) holyTick(byMob) else byMob
+    }
+
+  /** Держатся ли на поле миазмы в этом раунде: герой их не свернул и ему есть
+    * чем платить — или их держит моб, у которого хватает энергии. Осевшие
+    * миазмы святую воду не гасят. */
+  private def miasmaHeld(res: TurnResult, on: Boolean): Boolean = {
+    val miasma = Aura.Miasma
+    val byHero = on && res.hero.sets.auras.contains(miasma) && res.hero.fightStats.energy >= miasma.minEnergy
+    val byMob  = res.battle.auraHolder.exists { case (aura, energy) => aura == miasma && energy >= aura.minEnergy }
+    byHero || byMob
+  }
+
+  /** Святая вода и миазмы встретились: обе молчат, и строка об этом одна. */
+  private def holyClash(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound) res
+    else res.copy(log = res.log :+ content.text("battle.holyWater.clash"))
+
+  /** Святая вода на поле: каждый мёртвый — свой, чужой, сам герой-нежить —
+    * теряет долю максимума HP. Живых и камня она не касается, а нет на поле
+    * мёртвых — молчит, чтобы не сорить строкой каждый раунд. */
+  private def holyTick(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound || !undeadOnField(res)) res
+    else applyAura(res, Aura.HolyWater, 0L,
+      Vector(content.format("battle.aura.holyWater.holds", "pct" -> AuraRates.HolyWaterPct.toString)))
+
+  /** Есть ли на поле хоть один мёртвый: герой, союзник или моб. */
+  private def undeadOnField(res: TurnResult): Boolean = {
+    val b = res.battle
+    res.hero.sets.heroIsUndead ||
+      b.group.allies.exists(a => a.alive && Nature.of(a.kind.race) == Nature.Undead) ||
+      (b.monsterCurrentHp > 0L && Nature.of(b.monsterRace, b.monsterUndead) == Nature.Undead) ||
+      b.group.others.exists(s => s.alive && Nature.of(s.race, s.undead) == Nature.Undead)
   }
 
   /** Аура, которую держит моб (Некромант): энергия его, правила общие. Энергии
@@ -3928,10 +3985,13 @@ case class BattleState(
     * групповом бою это были бы двадцать строк. */
   private def applyAura(res: TurnResult, aura: Aura, spent: Long, head: Vector[String]): TurnResult = {
     def power(maxHp: Long): Long = aura.power(maxHp, spent)
+    // Передышка после лечения — только у аур, что её дают (миазмы). Святой
+    // воде до неё дела нет, и счётчики передышки она не трогает.
+    val calms = aura.calmRounds > 0
 
     // ── Герой ─────────────────────────────────────────────────────────────────
     val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
-    val heroSign   = if (res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
+    val heroSign   = if (calms && res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
     val maxHp      = res.hero.effectiveMaxHp(0L)
     val heroHp     = heroSign match {
       // Лечение не опускает: текущее HP выше потолка аура не срезает.
@@ -3944,8 +4004,8 @@ case class BattleState(
 
     // ── Союзники: та же мера, по их природе ───────────────────────────────────
     val allies = res.battle.group.allies.map { a =>
-      val next = a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0))
-      val sign = if (a.miasmaCalm > 0 || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
+      val next = if (calms) a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0)) else a
+      val sign = if ((calms && a.miasmaCalm > 0) || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
       sign match {
         case s if s > 0 => next.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
         case s if s < 0 => next.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
@@ -3970,6 +4030,7 @@ case class BattleState(
   /** Аура по чужой стороне: каждому по его природе, павшие уходят в добычу.
     * Строк не даёт — о себе аура сказала одной на всё поле. */
   private def auraOnMonsters(battle: SoloPveBattle, aura: Aura, power: Long => Long): SoloPveBattle = {
+    val calms = aura.calmRounds > 0
     def touched(sign: Int, cur: Long, maxHp: Long): Long = sign match {
       case s if s > 0 => (cur + power(maxHp)).min(maxHp).max(cur)
       case s if s < 0 => (cur - power(maxHp)).max(0L)
@@ -3977,19 +4038,21 @@ case class BattleState(
     }
     // Активный: его HP живут в полях боя.
     val afterActive = {
-      val sign = if (battle.effects.monsterMiasmaCalm > 0 || battle.monsterCurrentHp <= 0L) 0
+      val sign = if ((calms && battle.effects.monsterMiasmaCalm > 0) || battle.monsterCurrentHp <= 0L) 0
                  else aura.sign(Nature.of(battle.monsterRace, battle.monsterUndead))
       battle.copy(
         monsterCurrentHp = touched(sign, battle.monsterCurrentHp, battle.monsterStats.hp),
-        effects = battle.effects.copy(monsterMiasmaCalm = (battle.effects.monsterMiasmaCalm - 1).max(0)))
+        effects = if (!calms) battle.effects
+                  else battle.effects.copy(monsterMiasmaCalm = (battle.effects.monsterMiasmaCalm - 1).max(0)))
     }
     // Слоты строя: павших убираем с конца, чтобы индексы не плыли.
     val slots = afterActive.group.others.zipWithIndex.map { case (slot, idx) =>
-      val sign = if (slot.effects.monsterMiasmaCalm > 0 || !slot.alive) 0
+      val sign = if ((calms && slot.effects.monsterMiasmaCalm > 0) || !slot.alive) 0
                  else aura.sign(Nature.of(slot.race, slot.undead))
       val hp   = touched(sign, slot.currentHp, slot.stats.hp)
       (slot.copy(currentHp = hp,
-         effects = slot.effects.copy(monsterMiasmaCalm = (slot.effects.monsterMiasmaCalm - 1).max(0))),
+         effects = if (!calms) slot.effects
+                   else slot.effects.copy(monsterMiasmaCalm = (slot.effects.monsterMiasmaCalm - 1).max(0))),
        idx, hp <= 0L && slot.alive)
     }
     val withSlots = afterActive.copy(group = afterActive.group.copy(others = slots.map(_._1)))
@@ -5418,6 +5481,7 @@ object BattleState {
     case d: BeltSlot.Dust => d.spent
     case b: BeltSlot.Brew => b.spent
     case r: BeltSlot.Rose => r.withered
+    case h: BeltSlot.HolyWater => h.spent
     case _                => false
   }
 
