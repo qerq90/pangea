@@ -251,7 +251,7 @@ object BeltBrewSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("На пояс легло из сумки"))
     },
 
-    test("гнилой зов из ячейки пояса ставит запах: ближайшая встреча — Гнилой Джо") {
+    test("гнилой зов из ячейки пояса ставит запах, а к кому он ведёт — не говорит") {
       val h = hero(BeltSlot.Brew(BrewKind.RotCall))
       for {
         t <- makeState(h, battle(h, 1000L))
@@ -261,7 +261,7 @@ object BeltBrewSpec extends ZIOSpecDefault {
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(after.statBoosts.hasActive(BrewRates.RotCallBoost, 0L)) &&
               assertTrue(slots(after) == List(BeltSlot.Brew(BrewKind.RotCall, spent = true))) &&
-              assertTrue(screens.contains("ближайшая встреча в лабиринте — Гнилой Джо"))
+              assertTrue(screens.contains("Узелок развязан") && !screens.contains("Джо"))
     },
 
     test("шнапс, самогон, сонный дурман и приговор в ячейку не ложатся") {

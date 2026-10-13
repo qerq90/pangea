@@ -91,9 +91,11 @@ sealed abstract class BrewKind(
     case _                  => None
   }
 
-  /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна. */
+  /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна;
+    * собранное не из трав (узелок гнилого зова) — тоже одно. */
   def portions: Int =
-    if (recipe.exists(_.herbRank >= 2)) BrewRates.RarePortions else BrewRates.Portions
+    if (recipe.exists(_.herbRank >= 2) || !recipe.forall(_.isHerb)) BrewRates.RarePortions
+    else BrewRates.Portions
 
   /** Какие фляги заправляет. */
   def refills: Set[RefillSource] = effect match {
@@ -318,7 +320,8 @@ object BrewKind extends Enum[BrewKind] {
     * ранга не входит. */
   case object RotCall extends BrewKind(
     "Гнилой зов",
-    List(PlagueWorms, RatPelt, RatTail),
+    // Шкурки с крыс падают чаще хвостов, поэтому их в узелок идёт больше.
+    List(PlagueWorms, RatTail, RatTail, RatPelt, RatPelt, RatPelt),
     "Тугой узелок, от которого несёт падалью. Развяжешь — и смрад сам поведёт тебя туда, где гниль гуще, к тому, кто гнилью живёт. Час, не больше: потом выдохнется.",
     BrewEffect.RotCall)
 

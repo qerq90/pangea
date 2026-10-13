@@ -234,7 +234,7 @@ object CubeCraft {
   // Отвар не из трав (гнилой зов из крысиного добра): рецепт — вещи по списку,
   // как он есть. Травяной варке такой не по зубам — она видит одни травы.
   private object MaterialBrew extends Recipe {
-    val size = 3
+    val size = 6
     override def portions: Int = BrewRates.Portions
     override def portionsFor(result: Item): Int = result.brew.map(_.portions).getOrElse(BrewRates.Portions)
     private lazy val kinds: List[BrewKind] =
@@ -319,13 +319,13 @@ object CubeCraft {
   private val recipes: List[Recipe] = List(
     DivineForge,                                            // 9
     NineHeads,                                             // 9
+    MaterialBrew,                                          // 6 (не из трав: гнилой зов)
     RuneFold,                                              // 5
     LegendaryReforge(mithril = 2, levelDelta = 1, keepName = true),  // 3
     GemUpgrade,                                            // 3
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
     BrewDistill,                                           // 3 (склянка + травы)
-    MaterialBrew,                                          // 3 (отвар не из трав)
     HerbBrew,                                              // 2-4
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     RoseBloom,                                             // 2
