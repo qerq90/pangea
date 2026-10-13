@@ -205,15 +205,15 @@ object DungeonStateSpec extends ZIOSpecDefault {
         content   <- ZIO.attempt(SceneContent.load())
         scheduler <- TestScheduler.make
         state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
-        // что бы ни выпало в пуле событий, на запах гнили выходит Джо
+        // что бы ни выпало в пуле событий, смрад узелка выводит к Джо
         _        <- TestRandom.feedInts(67)
         result   <- state.action(testUser, tap("FindEvent"), renderer)
         updated  <- heroDao.getHeroByUserId(userId).map(_.get)
         now      <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         screens  <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(result == StateType.RottenJoe) &&
-              assertTrue(screens.contains("Запах привёл его первым")) &&
-              // запах сгорел: второй раз Джо сам не придёт
+              assertTrue(screens.contains("Смрад узелка вёл вас")) &&
+              // узелок выдохся: второй раз сам к Джо не выведет
               assertTrue(!updated.statBoosts.hasActive(pangea.model.item.BrewRates.RotCallBoost, now))
     },
 

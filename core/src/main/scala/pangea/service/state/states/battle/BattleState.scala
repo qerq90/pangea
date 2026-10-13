@@ -3661,7 +3661,7 @@ case class BattleState(
         boosted(BrewRates.WolfCallBoost, ParamsBuff.zero, nowMs + BrewRates.WolfCallMs,
           content.text("battle.belt.wolfCall"))
 
-      // Гнилой зов — так же, только ближайшим придёт Гнилой Джо.
+      // Гнилой зов — узелок: смрад ведёт к Гнилому Джо, ближайшая встреча — он.
       case BrewEffect.RotCall =>
         boosted(BrewRates.RotCallBoost, ParamsBuff.zero, nowMs + BrewRates.RotCallMs,
           content.text("battle.belt.rotCall"))

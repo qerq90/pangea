@@ -203,13 +203,13 @@ case class InventoryState(
   // ── Отвары из трав ─────────────────────────────────────────────────────────
 
   /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
-    * «Выпить» у того, что пьётся; «На пояс» у того, чем пользуются в бою;
+    * «Использовать» у того, что применяют с карточки; «На пояс» у того, чем пользуются в бою;
     * «Заправить флягу», если у героя есть фляга такого толка — на поясе или
     * надетая по-старому; «Смазать оружие» у смазок. Шнапс уходит Трактирщику,
     * кнопок у него нет.
     *
     * Боевой отвар с карточки не пьётся вовсе — об этом говорим прямо, иначе
-    * игрок будет искать у него кнопку «Выпить». */
+    * игрок будет искать у него кнопку «Использовать». */
   private def showBrew(user: User, item: Item, kind: BrewKind, all: List[Item], renderer: Renderer): Task[StateType] =
     getHero(user).flatMap { hero =>
       val count   = ItemStack.countOf(all, item)
@@ -300,7 +300,7 @@ case class InventoryState(
                      StatBoost(BrewRates.WolfCallBoost, ParamsBuff.zero, now + BrewRates.WolfCallMs), now))
             res <- consume(user, item, hero, content.text("brew.wolfCall"), renderer)
           } yield res
-        // Гнилой зов — так же, только на запах приходит Гнилой Джо.
+        // Гнилой зов — узелок: так же час, только смрад ведёт к Гнилому Джо.
         case Some(BrewEffect.RotCall) =>
           for {
             now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))

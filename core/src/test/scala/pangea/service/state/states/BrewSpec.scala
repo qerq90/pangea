@@ -100,7 +100,7 @@ object BrewSpec extends ZIOSpecDefault {
         card <- r.sentScreens.map(_.last)
       } yield assertTrue(card.text.contains("Зверобойный отвар")) &&
               assertTrue(card.text.contains("из ячейки пояса")) &&
-              // «Выпить» у него нет — только «На пояс»
+              // «Использовать» у него нет — только «На пояс»
               assertTrue(card.choices.map(_.id) == List("BeltPut", "Drop", "InventoryList")) &&
               // сколько лечит, сказано в описании
               assertTrue(card.text.contains(s"${BrewRates.PotionHealPct}% здоровья"))
@@ -251,14 +251,16 @@ object BrewSpec extends ZIOSpecDefault {
         said  <- texts(r)
         hero  <- dao.getHeroByUserId(userId).map(_.get)
         now   <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-      } yield assertTrue(card.choices.map(_.id).contains("DrinkBrew")) &&
+      } yield assertTrue(card.choices.exists(c => c.id == "DrinkBrew" && c.label == "Использовать")) &&
+              // это не питьё, а узелок, который ведёт к Джо
+              assertTrue(card.text.contains("Тугой узелок") && !card.text.contains("Пить")) &&
               assertTrue(hero.statBoosts.hasActive(BrewRates.RotCallBoost, now)) &&
               assertTrue(!hero.statBoosts.hasActive(BrewRates.RotCallBoost, now + BrewRates.RotCallMs)) &&
               assertTrue(hero.statBoosts.strFactor(now) == 1.0 && hero.statBoosts.agiFactor(now) == 1.0) &&
-              assertTrue(said.contains("несёт падалью") && inv.snapshot.isEmpty)
+              assertTrue(said.contains("Вы развязываете узелок") && inv.snapshot.isEmpty)
     },
 
-    test("грибную смесь не пьют: у неё нет кнопки «Выпить»") {
+    test("грибную смесь не пьют: у неё нет кнопки «Использовать»") {
       for {
         t <- inventory(baseHero, List(brew(BrewKind.MushroomMix, 1L)))
         (state, _, inv, r) = t

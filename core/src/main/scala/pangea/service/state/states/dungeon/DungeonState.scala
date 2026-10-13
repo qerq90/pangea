@@ -114,8 +114,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       // Волчий зов: пока от героя пахнет палёным хмелем, навстречу выходит
       // Белый волк — и запах на этом кончается.
       called  = hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now)
-      // Гнилой зов: на запах гнили выходит Гнилой Джо. Оба запаха разом — волк
-      // первым, Джо следующим осмотром.
+      // Гнилой зов: смрад развязанного узелка выводит к Гнилому Джо. Оба зова
+      // разом — волк первым, Джо следующим осмотром.
       rotten  = hero.statBoosts.hasActive(BrewRates.RotCallBoost, now)
       // Приговор: имя рода держится час, и первая же встреча — его именное
       // существо, которое кто-то уже почти добил.
@@ -228,8 +228,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     } yield StateType.Battle
   }
 
-  /** На запах гнили вышел Гнилой Джо: та же встреча, что и на раскопках, — с
-    * выбором, драться ли. Запах на этом кончается. */
+  /** Смрад узелка вывел к Гнилому Джо: та же встреча, что и на раскопках, — с
+    * выбором, драться ли. Узелок на этом выдыхается. */
   private def joeOnCall(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
     heroDao.updateStatBoosts(user.userId, hero.statBoosts.without(BrewRates.RotCallBoost)) *>
       heroDao.writeSceneData(user.userId, io.circe.Json.Null) *>
