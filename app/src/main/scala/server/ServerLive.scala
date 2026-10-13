@@ -12,6 +12,7 @@ import pangea.model.user.VkId
 import pangea.service.admin.{AdminConfig, AdminPanel}
 import pangea.service.donation.Donations
 import pangea.service.state.{StateHandler, UserAction}
+import pangea.service.activity.GroupEvent
 import pangea.service.chat.ChatCommand
 import server.model.{ServerConfig, VkEvent}
 import zio.interop.catz._
@@ -65,7 +66,7 @@ final class ServerLive(
                      UserAction(msg.text, msg.payload)
                    ))
                 .catchAll(err => ZIO.logError(err.getMessage))
-          case None => ZIO.attempt(println(json.noSpaces))
+          case None => groupEvent(json)
         }).catchAll { err =>
           ZIO.logError(s"error occurred: $err")
         }
@@ -90,6 +91,20 @@ final class ServerLive(
               case _ => ZIO.unit
             }
         }
+    }
+
+  /** События группы для конкурса активности. Их легко подделать — а за них
+    * дают дублоны, — поэтому принимаем только с секретом из настроек Callback
+    * API; пока секрет не задан, не принимаем вовсе. Прочие события — в лог,
+    * как и раньше. */
+  private def groupEvent(json: Json): Task[Unit] =
+    GroupEvent.typeOf(json) match {
+      case Some(tpe) if GroupEvent.Types.contains(tpe) =>
+        val expected = config.vkSecret.map(_.trim).filter(_.nonEmpty)
+        if (expected.isEmpty) ZIO.logWarning(s"$tpe: VK_SECRET не задан — конкурс активности не считает")
+        else if (GroupEvent.secretOf(json) != expected) ZIO.logWarning(s"$tpe с неверным секретом — пропускаю")
+        else ZIO.foreachDiscard(GroupEvent.parse(json))(stateHandler.groupEvent)
+      case _ => ZIO.attempt(println(json.noSpaces))
     }
 
   private val httpApp: HttpApp[Task] = (routes <+> payments.routes <+> logs.routes).orNotFound

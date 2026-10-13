@@ -1,5 +1,6 @@
 package app
 
+import pangea.dao.activity.ActivityDao
 import pangea.dao.arena.ArenaDao
 import pangea.dao.Transactor
 import pangea.dao.config.PostgresConfig
@@ -9,6 +10,7 @@ import pangea.dao.parcel.ParcelDao
 import pangea.dao.auction.AuctionDao
 import pangea.dao.payment.PaymentDao
 import pangea.dao.payout.PayoutDao
+import pangea.dao.referral.ReferralDao
 import pangea.dao.bank.BankVaultDao
 import pangea.dao.barrel.BarrelDao
 import pangea.dao.hero.HeroDao
@@ -28,10 +30,12 @@ import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.repository.user.UserRepository
 import pangea.client.robokassa.{RobokassaClient, RobokassaConfig}
+import pangea.service.activity.ActivityContest
 import pangea.service.admin.{AdminConfig, AdminPanel}
 import pangea.service.donation.Donations
 import pangea.service.parcel.{Parcels, Transfers}
 import pangea.service.payout.Payouts
+import pangea.service.referral.Referrals
 import pangea.service.schedule.{Scheduler, SchedulerPoller}
 import pangea.service.sender.Api
 import pangea.service.sender.vk.config.VkConfig
@@ -50,7 +54,7 @@ object Main extends ZIOAppDefault {
   override val bootstrap: ZLayer[ZIOAppArgs, Nothing, Unit] =
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j
 
-  private type Env = Server with SchedulerPoller with Donations
+  private type Env = Server with SchedulerPoller with Donations with ActivityContest
 
   private val env =
     ZLayer.make[Env](
@@ -68,6 +72,8 @@ object Main extends ZIOAppDefault {
       AuctionDao.live,
       ArtifactDao.live,
       PayoutDao.live,
+      ActivityDao.live,
+      ReferralDao.live,
       PaymentDao.live,
       ParcelDao.live,
       ItemDao.live,
@@ -88,6 +94,8 @@ object Main extends ZIOAppDefault {
       AuctionRepository.live,
       ArtifactRepository.live,
       Payouts.live,
+      ActivityContest.live,
+      Referrals.live,
       RobokassaConfig.live,
       RobokassaClient.live,
       Donations.live,
@@ -112,11 +120,24 @@ object Main extends ZIOAppDefault {
         ZIO.sleep(1.minute)).forever
     }
 
+  /** Итоги недели конкурса активности: раз в минуту смотрим, не началась ли
+    * новая неделя и подведена ли прошлая. Подведённая повторно ничего не
+    * платит — минута тут лишь задержка до наград после полуночи понедельника. */
+  private val contestLoop =
+    ZIO.serviceWithZIO[ActivityContest] { contest =>
+      (ZIO
+        .clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+        .flatMap(contest.settle)
+        .catchAllCause(cause => ZIO.logErrorCause("Итоги конкурса активности упали", cause)) *>
+        ZIO.sleep(1.minute)).forever
+    }
+
   private val program =
     for {
       poller <- ZIO.service[SchedulerPoller]
       _      <- poller.start.forkDaemon
       _      <- reconcileLoop.forkDaemon
+      _      <- contestLoop.forkDaemon
       _      <- ZIO.serviceWithZIO[Server](_.run())
     } yield ()
 

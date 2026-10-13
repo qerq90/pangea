@@ -6,7 +6,10 @@ import pureconfig._
 import pureconfig.generic.auto._
 import zio._
 
-case class ServerConfig(host: Host, port: Port)
+/** @param vkSecret секретный ключ Callback API группы (`VK_SECRET`). Без него
+  *                 события конкурса активности не принимаются: их легко
+  *                 подделать, а за них дают дублоны. */
+case class ServerConfig(host: Host, port: Port, vkSecret: Option[String] = None)
 
 object ServerConfig {
   private val loadConfig =

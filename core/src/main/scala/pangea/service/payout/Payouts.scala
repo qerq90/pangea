@@ -27,6 +27,19 @@ final case class Payouts(dao: PayoutDao, heroDao: HeroDao, content: SceneContent
       ).unit
     }
 
+  /** Вне города: отдать только дублоны — они не сгорают нигде, а серебро
+    * пусть ждёт города дальше. Забираем всё разом и серебро кладём обратно:
+    * если кто-то тем временем добавил ещё, прибавка сложится, а не пропадёт. */
+  def deliverDoubloons(user: User, hero: Hero, renderer: Renderer): Task[Unit] =
+    dao.takeAll(hero.id).flatMap { case (silver, doubloons) =>
+      ZIO.when(silver > 0L)(dao.add(hero.id, silver, 0L)) *>
+        ZIO.when(doubloons > 0L)(
+          heroDao.updateDoubloons(user.userId, hero.doubloons + doubloons) *>
+            renderer.show(user, Screen(content.format("bank.auction.doubloonsDelivered",
+              "money" -> moneyLine(0L, doubloons)), Nil))
+        ).unit
+    }
+
   private def moneyLine(silver: Long, doubloons: Long): String =
     List(Option.when(silver > 0L)(s"🪙 $silver"), Option.when(doubloons > 0L)(s"🟡 $doubloons"))
       .flatten.mkString(" и ")

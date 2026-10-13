@@ -28,6 +28,7 @@ import pangea.model.state.StateType.{
   HallAzat,
   HarborQuarter,
   HeroStats,
+  FriendCode,
   Innkeeper,
   Inventory,
   Loot,
@@ -134,7 +135,8 @@ import pangea.service.state.states.gustavo.{
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
-import pangea.service.state.states.hero.{HeroStatsState, KnowledgeState, SkillsState, SquadState}
+import pangea.service.state.states.hero.{FriendCodeState, HeroStatsState, KnowledgeState, SkillsState, SquadState}
+import pangea.service.referral.Referrals
 import pangea.service.state.states.tavern.{
   CardSellerState,
   InnkeeperState,
@@ -163,7 +165,8 @@ object StatesMap {
       with Donations
       with Journal
       with SceneContent
-      with Scheduler,
+      with Scheduler
+      with Referrals,
     Throwable,
     StatesMap
   ] =
@@ -186,6 +189,7 @@ object StatesMap {
         content       <- ZIO.service[SceneContent]
         scheduler     <- ZIO.service[Scheduler]
         arenaDao      <- ZIO.service[ArenaDao]
+        referrals     <- ZIO.service[Referrals]
         // Кошель героя: своё серебро, а следом — ячейка в Торговом доме.
         bank           = Some(bankRepo)
         // Ларец Азата и Живая сумка ловят добычу до того, как она попадёт в сумку.
@@ -211,6 +215,7 @@ object StatesMap {
           Dungeon   -> DungeonState(heroDao, inventoryRepo, scheduler, content),
           Arena     -> ArenaState(heroDao, arenaDao, content, scheduler, Some(players)),
           HeroStats -> HeroStatsState(heroDao, content, artifacts),
+          FriendCode -> FriendCodeState(heroDao, referrals, content),
           FoundItem -> FoundItemState(
             heroDao,
             inventoryRepo,

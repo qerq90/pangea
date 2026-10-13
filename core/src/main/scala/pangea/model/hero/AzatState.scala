@@ -41,6 +41,17 @@ case class AzatState(
 
   def blessingActive(nowMs: Long): Boolean = blessingUntil.exists(_ > nowMs)
 
+  /** Благословить на `durationMs`: от остатка, если оно ещё идёт, иначе от
+    * «сейчас». Отсчёт суточных отдыхов ставится здесь же: новый срок считает
+    * полуночи с этой минуты, продлённый — дальше по своей отметке. Так выдают
+    * благословение и храм, и код друга. */
+  def blessedFor(durationMs: Long, nowMs: Long): AzatState = {
+    val base = blessingUntil.filter(_ > nowMs).getOrElse(nowMs)
+    copy(
+      blessingUntil  = Some(base + durationMs),
+      restsGrantedAt = if (blessingActive(nowMs)) restsGrantedAt.orElse(Some(nowMs)) else Some(nowMs))
+  }
+
   /** Доначисляет мгновенные отдыхи за каждые прошедшие сутки благословения.
    *  Начисление ЛЕНИВОЕ: полуночи считаются от последней выдачи до «сейчас» (но
    *  не дальше конца благословения), поэтому отдыхи не теряются, даже если игрок
@@ -49,6 +60,11 @@ case class AzatState(
    *  Возвращает состояние как есть, если благословения нет или новых суток не
    *  набралось — вызывающему достаточно сравнить с исходным. */
   def withDailyRests(nowMs: Long): AzatState = blessingUntil match {
+    // Благословение идёт, а отсчёта нет: храм его не ставил, и суточные отдыхи
+    // так и не начинали капать. Начинаем отсюда — прошлых суток не вернуть, а
+    // следующие начислятся.
+    case Some(until) if restsGrantedAt.isEmpty =>
+      if (until > nowMs) copy(restsGrantedAt = Some(nowMs)) else this
     case Some(until) =>
       val from = restsGrantedAt.getOrElse(nowMs)
       val to   = nowMs.min(until)

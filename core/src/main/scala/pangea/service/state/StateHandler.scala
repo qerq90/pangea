@@ -8,8 +8,10 @@ import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.repository.hero.HeroRepository
 import pangea.repository.user.UserRepository
 import io.circe.syntax.EncoderOps
+import pangea.service.activity.{ActivityContest, GroupEvent}
 import pangea.service.admin.AdminPanel
 import pangea.engine.SceneContent
+import pangea.service.referral.Referrals
 import pangea.service.chat.{ChatCommand, ChatProfile}
 import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.payout.Payouts
@@ -32,8 +34,19 @@ class StateHandler(
   states: Map[StateType, State],
   admin: AdminPanel,
   content: SceneContent,
-  lock: PlayerLock
+  lock: PlayerLock,
+  // Конкурс активности в группе и код друга. Без них (тесты) этих частей
+  // просто нет: события группы не считаются, бонус за 10 уровень не платится.
+  activity: Option[ActivityContest] = None,
+  referrals: Option[Referrals] = None
 ) {
+
+  /** Событие группы ВК для конкурса активности: вышел пост, игрок поставил
+    * лайк или оставил комментарий. Лок игрока не нужен — героя это не трогает,
+    * только таблицы конкурса. */
+  def groupEvent(event: GroupEvent): Task[Unit] =
+    ZIO.foreachDiscard(activity)(contest =>
+      ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS)).flatMap(now => contest.handle(event, now)))
 
   def makeActionVK(
       vkId: VkId,
@@ -124,6 +137,10 @@ class StateHandler(
                     .orElse(ZIO.succeed(StateHandler.TransferSomeone))
           text <- command match {
                     case ChatCommand.Self.Gear => ZIO.succeed(ChatProfile.gear(name, hero))
+                    // Таблица конкурса активности: она общая, но спрашивают её тоже
+                    // в беседе — ответ туда же.
+                    case ChatCommand.Self.Rating =>
+                      activity.fold[Task[String]](ZIO.succeed(content.text("activity.off")))(_.board(now))
                     case ChatCommand.Self.Profile =>
                       AzatData.load(heroDao, sender.userId, now).map(azat =>
                         ChatProfile.profile(name, hero, now, azat.blessingActive(now), azat.instantRests, content))
@@ -291,8 +308,12 @@ class StateHandler(
       }
       // Выручка с аукциона, не влезшая в банковскую ячейку, догоняет героя в
       // городе: в лабиринте такие деньги наполовину сгорели бы при смерти.
-      _ <- ZIO.when(StateType.cityStates.contains(hero.state))(
-             payouts.deliver(user, hero, renderer).ignore)
+      // Дублоны не сгорают нигде — они приходят где угодно (переводы, призы
+      // конкурса, награда за код друга).
+      _ <- (if (StateType.cityStates.contains(hero.state)) payouts.deliver(user, hero, renderer)
+            else payouts.deliverDoubloons(user, hero, renderer)).ignore
+      // Друг, пришедший по коду, дорос до 10 уровня — владельцу кода награда.
+      _ <- ZIO.foreachDiscard(referrals)(_.payLevelBonus(user, hero)).ignore
       // Посылки ложатся в банковскую ячейку откуда угодно: она не при герое.
       _ <- parcels.deliver(user, hero, renderer).ignore
       hero <- heroRepo.getHero(user.userId).map(_.getOrElse(hero))
@@ -449,7 +470,7 @@ object StateHandler {
 
   val live: ZLayer[
     Api with StatesMap with HeroRepository with UserRepository with HeroDao with Payouts with Parcels
-      with Transfers with AdminPanel with SceneContent,
+      with Transfers with AdminPanel with SceneContent with ActivityContest with Referrals,
     Nothing,
     StateHandler
   ] =
@@ -465,8 +486,10 @@ object StateHandler {
         statesMap <- ZIO.service[StatesMap]
         admin     <- ZIO.service[AdminPanel]
         content   <- ZIO.service[SceneContent]
+        activity  <- ZIO.service[ActivityContest]
+        referrals <- ZIO.service[Referrals]
         lock <- Ref.make(Map.empty[UserId, Semaphore]).map(new PlayerLock(_))
       } yield new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, statesMap.states,
-                               admin, content, lock)
+                               admin, content, lock, Some(activity), Some(referrals))
     )
 }
