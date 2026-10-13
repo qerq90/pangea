@@ -12,7 +12,7 @@ import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Scree
 import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.model.hero.{Equipment, Hero, WeaponCoat, WeaponDust}
 import pangea.model.inventory.Inventory
-import pangea.model.item.{BeltSlot, Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, MaterialKind, QuestItemKind, TrophyKind}
+import pangea.model.item.{BeltSlot, Gem, GemBreaking, Item, ItemDetails, ItemStack, ItemType, MaterialKind, QuestItemKind, RefillSource, TrophyKind}
 import pangea.model.monster.Race
 import pangea.model.quest.{Difficulty, NpcQuest}
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
@@ -164,8 +164,10 @@ case class InventoryState(
           val count    = ItemStack.countOf(inv.items.data, item)
           val text     = itemDetail(item, hero, hero.silver) + stackLine(count)
           // Розу, выкованную до её переезда в пояс, носить в доп. слоте больше
-          // незачем: раскрывается она из ячейки.
-          val canEquip = ItemType.equippable.contains(item.itemType) && item.rose.isEmpty
+          // незачем: раскрывается она из ячейки. Фляге тоже место на поясе — у
+          // неё «На пояс» вместо «Надеть».
+          val canEquip = ItemType.equippable.contains(item.itemType) && item.rose.isEmpty &&
+                         item.itemType != ItemType.Flask
           val canCombine = item.itemType == ItemType.TreasureMapHalf
           // Пять малых рун одного узора складываются в большую — прямо в сумке.
           val canFoldRune = item.isSmallRune
@@ -202,8 +204,9 @@ case class InventoryState(
 
   /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
     * «Выпить» у того, что пьётся; «На пояс» у того, чем пользуются в бою;
-    * «Заправить флягу», если надетая фляга такого толка; «Смазать оружие» у
-    * смазок. Шнапс уходит Трактирщику, кнопок у него нет.
+    * «Заправить флягу», если у героя есть фляга такого толка — на поясе или
+    * надетая по-старому; «Смазать оружие» у смазок. Шнапс уходит Трактирщику,
+    * кнопок у него нет.
     *
     * Боевой отвар с карточки не пьётся вовсе — об этом говорим прямо, иначе
     * игрок будет искать у него кнопку «Выпить». */
@@ -212,10 +215,7 @@ case class InventoryState(
       val count   = ItemStack.countOf(all, item)
       val beltOnly = if (kind.combat) "\n" + content.text("brew.beltOnly") else ""
       val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + beltOnly + stackLine(count)
-      val flaskFits = hero.equipment.flask.details match {
-        case f: ItemDetails.Flask => kind.refills.contains(f.effect.refillSource)
-        case _                    => false
-      }
+      val flaskFits = InventoryState.brewFlasks(hero).exists(f => kind.refills.contains(f.source))
       val coats = kind.effect match { case BrewEffect.Coat(_, _) => true; case _ => false }
       val choices = List(
         Option.when(kind.drinkable)(content.choice("DrinkBrew", "brew.drink").copy(color = ChoiceColor.Positive, row = Some(0))),
@@ -230,20 +230,22 @@ case class InventoryState(
       renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
     }
 
-  /** Заправить надетую флягу отваром: только флягу своего толка и только неполную. */
+  /** Заправить флягу отваром: только флягу своего толка и только неполную —
+    * первую такую среди фляг героя (см. [[InventoryState.brewFlasks]]). */
   private def refillByBrew(user: User, renderer: Renderer): Task[StateType] =
     withSelected(user, renderer) { (item, hero) =>
-      (item.brew, hero.equipment.flask.details) match {
-        case (Some(kind), f: ItemDetails.Flask) if !kind.refills.contains(f.effect.refillSource) =>
-          renderer.show(user, Screen(content.text("brew.wrongFlask"), Nil)) *> showItem(user, item.id, renderer)
-        case (Some(_), f: ItemDetails.Flask) if f.charges >= f.maxCharges =>
-          renderer.show(user, Screen(content.text("brew.flaskFull"), Nil)) *> showItem(user, item.id, renderer)
-        case (Some(_), f: ItemDetails.Flask) =>
-          val refilled = hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.refilled))
-          heroDao.updateEquipment(user.userId, refilled) *>
-            consume(user, item, hero, content.format("brew.refilled", "flask" -> hero.equipment.flask.name), renderer)
-        case _ =>
-          renderer.show(user, Screen(content.text("brew.noFlask"), Nil)) *> showItem(user, item.id, renderer)
+      val flasks  = InventoryState.brewFlasks(hero)
+      val fitting = item.brew.toList.flatMap(kind => flasks.filter(f => kind.refills.contains(f.source)))
+      fitting.find(f => f.charges < f.maxCharges) match {
+        case Some(f) =>
+          heroDao.updateEquipment(user.userId, f.refilled) *>
+            consume(user, item, hero, content.format("brew.refilled", "flask" -> f.name), renderer)
+        case None =>
+          val why =
+            if (fitting.nonEmpty) "brew.flaskFull"
+            else if (flasks.nonEmpty && item.brew.isDefined) "brew.wrongFlask"
+            else "brew.noFlask"
+          renderer.show(user, Screen(content.text(why), Nil)) *> showItem(user, item.id, renderer)
       }
     }
 
@@ -556,6 +558,9 @@ case class InventoryState(
         case Some(item) =>
           if (!ItemType.equippable.contains(item.itemType))
             renderer.show(user, Screen(content.text("inventory.notEquippable"), Nil)).as(false)
+          // Кнопка со старой карточки фляги: в слот её больше не надевают.
+          else if (item.itemType == ItemType.Flask)
+            renderer.show(user, Screen(content.text("inventory.flaskToBelt"), Nil)).as(false)
           else if (item.lvl > hero.lvl)
             renderer.show(user, Screen(
               content.format("inventory.tooHighLevel",
@@ -1012,6 +1017,32 @@ object InventoryState {
 
   /** Сколько родов помещается в ряд на экране приговора. */
   val RacesPerRow: Int = 3
+
+  /** Фляга, которую можно заправить отваром: её толк, заряды и снаряжение, в
+    * котором она уже полна. */
+  final case class BrewFlask(name: String, source: RefillSource, charges: Int, maxCharges: Int,
+                             refilled: Equipment)
+
+  /** Фляги героя по порядку: сперва надетая по-старому, за ней — с пояса по
+    * ячейкам. Фляги теперь живут на поясе, старый слот лишь доживает. */
+  def brewFlasks(hero: Hero): List[BrewFlask] = {
+    val equip = hero.equipment
+    val inSlot = equip.flask.details match {
+      case f: ItemDetails.Flask =>
+        List(BrewFlask(equip.flask.name, f.effect.refillSource, f.charges, f.maxCharges,
+          equip.copy(flask = equip.flask.copy(details = f.refilled))))
+      case _ => Nil
+    }
+    val onBelt = equip.belt.details match {
+      case b: ItemDetails.Belt =>
+        b.slots.zipWithIndex.collect { case (f: BeltSlot.Flask, i) =>
+          BrewFlask(f.name, f.kind.effect.refillSource, f.charges, f.maxCharges,
+            equip.copy(belt = equip.belt.copy(details = b.updated(i, f.refilled))))
+        }
+      case _ => Nil
+    }
+    inSlot ++ onBelt
+  }
 
 
   val ItemActionPrefix = "InventoryItem_"

@@ -256,6 +256,31 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("пополнена")))
     },
 
+    test("FindEvent Spring → фляга целителя на поясе наполнена, даже пустая; кузнеца — нет") {
+      import pangea.model.item.{BeltSlot, FlaskKind, ItemType, Rarity}
+      val beltItem = Item(3L, "Пояс", 1L, Rarity.Green, ItemType.Belt,
+                       attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
+                       details = ItemDetails.Belt(List(
+                         BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 0),
+                         BeltSlot.Flask(FlaskKind.Smith, Rarity.Gray, 1))))
+      val hero = TestFixtures.hero(userId).copy(equipment = TestFixtures.emptyEquipment.copy(belt = beltItem))
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, hero)
+        renderer  <- TestRenderer.make
+        content   <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
+        state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
+        _         <- TestRandom.feedInts(67, 99) // без засады
+        _         <- state.action(testUser, tap("FindEvent"), renderer)
+        updated   <- heroDao.getHeroByUserId(userId).map(_.get)
+        screens   <- renderer.sentScreens
+      } yield assertTrue(updated.equipment.belt.details == ItemDetails.Belt(List(
+                BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, FlaskKind.chargesFor(Rarity.Gray)),
+                // ручей — вода: кузнецу он не наливает
+                BeltSlot.Flask(FlaskKind.Smith, Rarity.Gray, 1)))) &&
+              assertTrue(screens.exists(_.text.contains("пополнена")))
+    },
+
     test("FindEvent Spring → фляги в инвентаре пополнены") {
       import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
       val flaskInInv = Item(2L, "Запасная фляга", 1L, Rarity.Gray, ItemType.Flask,

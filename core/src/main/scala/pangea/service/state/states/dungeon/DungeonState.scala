@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
-import pangea.model.item.BrewRates
+import pangea.model.item.{BeltSlot, BrewRates, ItemDetails}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.hero.Hero
 import pangea.model.schedule.TaskKind
@@ -248,14 +248,25 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     val flask    = hero.equipment.flask
     // Ручей — вода: наполняет только флягу целителя; кузнеца, стихийную и прочие — нет.
     val flaskDetails = flask.details match {
-      case f: pangea.model.item.ItemDetails.Flask if f.effect.refillsAtSpring => Some(f)
-      case _                                                                  => None
+      case f: ItemDetails.Flask if f.effect.refillsAtSpring => Some(f)
+      case _                                                => None
     }
-    val hasFlask = flaskDetails.isDefined
+    // И на поясе ту же воду — хоть початую, хоть выпитую до дна.
+    val beltRefilled = hero.equipment.belt.details match {
+      case b: ItemDetails.Belt if b.slots.exists(BeltSlot.refillsAtSpring) =>
+        Some(b.copy(slots = b.slots.map {
+          case f: BeltSlot.Flask if BeltSlot.refillsAtSpring(f) => f.refilled
+          case other                                            => other
+        }))
+      case _ => None
+    }
+    val hasFlask = flaskDetails.isDefined || beltRefilled.isDefined
+    val refilledEq = hero.equipment.copy(
+      flask = flaskDetails.fold(flask)(f => flask.copy(details = f.refilled)),
+      belt  = beltRefilled.fold(hero.equipment.belt)(b => hero.equipment.belt.copy(details = b)))
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, energy = newEnergy))
-      _ <- ZIO.foreachDiscard(flaskDetails)(f => heroDao.updateEquipment(user.userId,
-             hero.equipment.copy(flask = flask.copy(details = f.refilled))))
+      _ <- ZIO.when(hasFlask)(heroDao.updateEquipment(user.userId, refilledEq))
       _ <- inventoryRepo.refillFlasks(hero.id).orElse(ZIO.unit)
       _ <- renderer.show(user, Screen(
              content.format("dungeon.spring",

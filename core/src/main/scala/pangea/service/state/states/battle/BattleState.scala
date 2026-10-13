@@ -3366,29 +3366,34 @@ case class BattleState(
     * присылает отдельное сообщение со списком ячеек, и кнопки живут внутри
     * него (`inline`), поэтому боевая клавиатура и экран боя остаются как есть.
     *
-    * Опустевшие ячейки в список не попадают: брать из них нечего. */
+    * Опустевшие ячейки стоят в списке с пометкой «пусто», но кнопки у них нет:
+    * брать из них нечего. */
   private def showBelt(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero  <- getHero(user)
       belt   = hero.equipment.belt
-      // Пустые ячейки из списка уходят, но номер у кнопки — настоящий: иначе
-      // высыпанная горсть в первой ячейке сдвинула бы все остальные.
+      // Номер у строки и у кнопки — настоящий номер ячейки: иначе высыпанная
+      // горсть в первой ячейке сдвинула бы все остальные.
+      slots  = BattleState.beltCells(hero)
       cells  = BattleState.beltUsable(hero)
       cap    = ItemDetails.Belt.capacityFor(belt.rarity)
       screen =
         if (belt.itemType != ItemType.Belt) Screen(content.text("battle.belt.none"), Nil, inline = true)
-        else if (cells.isEmpty) Screen(content.text("battle.belt.empty"), Nil, inline = true)
+        else if (slots.isEmpty) Screen(content.text("battle.belt.empty"), Nil, inline = true)
         else {
-          val lines = cells.zipWithIndex.map { case ((slot, _), i) =>
-            content.format("battle.belt.line", "n" -> (i + 1).toString,
-              "name" -> slot.name, "uses" -> slot.uses.toString)
+          val lines = slots.map { case (slot, idx) =>
+            if (slot.uses > 0)
+              content.format("battle.belt.line", "n" -> (idx + 1).toString,
+                "name" -> slot.name, "uses" -> slot.uses.toString)
+            else content.format("battle.belt.spentLine", "n" -> (idx + 1).toString, "name" -> slot.name)
           }
           val buttons = cells.zipWithIndex.map { case ((slot, idx), i) =>
             pangea.engine.Choice("BeltUse", pangea.engine.Choice.fit(
               content.format("battle.belt.useBtn", "name" -> slot.name)),
               data = Map("slot" -> idx.toString), row = Some(i))
           }
-          Screen(content.format("battle.belt.head", "used" -> cells.size.toString,
+          val head = if (cells.isEmpty) "battle.belt.headSpent" else "battle.belt.head"
+          Screen(content.format(head, "used" -> slots.size.toString,
             "cap" -> cap.toString) + "\n" + lines.mkString("\n"), buttons, inline = true)
         }
       _ <- renderer.show(user, screen)
@@ -3455,14 +3460,14 @@ case class BattleState(
       case b: ItemDetails.Belt =>
         b.at(idx) match {
           case None => cont(hero, battle, content.text("battle.belt.gone"))
+          // Кнопка из старого сообщения: у пустой ячейки кнопки нет.
           case Some(f: BeltSlot.Flask) if f.empty =>
-            cont(hero, battle, content.text("battle.flaskEmpty"))
+            cont(hero, battle, content.text("battle.belt.gone"))
           case Some(f: BeltSlot.Flask) =>
             quickHandsRoll(hero).map { case (consumed, qhLog) =>
-              // Пустая фляга в ячейке не остаётся: место важнее памяти о ней.
-              val spent = f.spent
-              val next  = if (spent.empty) b.without(idx) else b.updated(idx, spent)
-              val drunk = withBelt(hero, next)
+              // Выпитая до дна фляга остаётся в ячейке пустой: её дольют
+              // Густаво, ручей или отвар, а вампирская напьётся крови сама.
+              val drunk = withBelt(hero, b.updated(idx, f.spent))
               flaskEffect(drunk, battle.copy(consumableUsedThisRound = consumed), f.kind.effect,
                 f.name, nowMs, qhLog)
             }
@@ -4694,7 +4699,7 @@ case class BattleState(
       // Задание Густаво: павшие идут в счёт, пока действует его зелье.
       _ <- NpcQuestLog.onVictory(heroDao, user.userId, fallen.size, GustavoState.potionActive(hero, now))
       // Вампирская фляга пьёт кровь павших: с каждого — шанс на глоток.
-      flaskRefill <- vampiricRefill(user, hero, fallen.size)
+      flaskRefill <- vampiricRefill(user, fallen.size)
       // Счёт убитых за всю жизнь: пятидесятый оставляет письмо Марисе (сотый
       // зовёт старейшину мурлоков — см. выше).
       _ <- heroDao.updateKills(user.userId, kills)
@@ -4731,20 +4736,41 @@ case class BattleState(
     )
 
   /** Вампирская фляга: за каждого павшего — бросок на +1 заряд (FlaskRates.VampiricRefillPct),
-    * но не выше полной. Бросок не тратится, если фляга не вампирская или полна.
+    * но не выше полной. Бросок не тратится, если фляги нет или она полна. Пьёт
+    * фляга из старого слота, а нет её — первая неполная вампирская на поясе,
+    * хоть бы и пустая.
+    *
+    * Героя читаем заново: до нас пояс уже добрал из сумки опустевшие ячейки
+    * ([[refillBelt]]), и запись по старому снимку стёрла бы этот добор.
     * Возвращает (сколько долила, зарядов стало, максимум), если долила. */
-  private def vampiricRefill(user: User, hero: Hero, slain: Int): Task[Option[(Int, Int, Int)]] =
-    hero.equipment.flask.details match {
-      case f @ ItemDetails.Flask(FlaskEffect.Vampiric(_, _), charges, max) if charges < max =>
-        ZIO.foldLeft((1 to slain).toList)(charges) { (cur, _) =>
-          chanceRoll(cur < max, FlaskRates.VampiricRefillPct).map(hit => if (hit) cur + 1 else cur)
-        }.flatMap { after =>
-          if (after == charges) ZIO.succeed(None)
-          else heroDao.updateEquipment(user.userId,
-                 hero.equipment.copy(flask = hero.equipment.flask.copy(details = f.withCharges(after))))
-                 .as(Some((after - charges, after, max)))
-        }
-      case _ => ZIO.succeed(None)
+  private def vampiricRefill(user: User, slain: Int): Task[Option[(Int, Int, Int)]] =
+    getHero(user).flatMap { hero =>
+      val equip = hero.equipment
+      val inSlot = equip.flask.details match {
+        case f @ ItemDetails.Flask(FlaskEffect.Vampiric(_, _), charges, max) if charges < max =>
+          Some((charges, max, (n: Int) => equip.copy(flask = equip.flask.copy(details = f.withCharges(n)))))
+        case _ => None
+      }
+      val onBelt = equip.belt.details match {
+        case b: ItemDetails.Belt =>
+          b.slots.zipWithIndex.collectFirst {
+            case (f: BeltSlot.Flask, i) if f.kind.effect.refillSource == RefillSource.Blood && f.charges < f.maxCharges =>
+              (f.charges, f.maxCharges,
+                (n: Int) => equip.copy(belt = equip.belt.copy(details = b.updated(i, f.copy(charges = n)))))
+          }
+        case _ => None
+      }
+      inSlot.orElse(onBelt) match {
+        case None => ZIO.succeed(None)
+        case Some((charges, max, withCharges)) =>
+          ZIO.foldLeft((1 to slain).toList)(charges) { (cur, _) =>
+            chanceRoll(cur < max, FlaskRates.VampiricRefillPct).map(hit => if (hit) cur + 1 else cur)
+          }.flatMap { after =>
+            if (after == charges) ZIO.succeed(None)
+            else heroDao.updateEquipment(user.userId, withCharges(after))
+                   .as(Some((after - charges, after, max)))
+          }
+      }
     }
 
   /** Серебро с благословением Азата — на его бонус больше. */
@@ -5359,19 +5385,20 @@ object BattleState {
     case _                    => 0
   }
 
-  /** Что лежит на поясе героя. Пустые ячейки не показываем: брать из них
-    * нечего — ни глотка, ни горсти. */
-  def beltSlots(hero: Hero): List[BeltSlot] = hero.equipment.belt.details match {
-    case b: ItemDetails.Belt => b.slots.filter(_.uses > 0)
+  /** Чем на поясе героя ещё можно воспользоваться — их число стоит на кнопке
+    * «Пояс». Пустые ячейки не считаем: брать из них нечего — ни глотка, ни
+    * горсти. */
+  def beltSlots(hero: Hero): List[BeltSlot] = beltUsable(hero).map(_._1)
+
+  /** Все ячейки пояса с их настоящими номерами — и полные, и опустевшие. */
+  def beltCells(hero: Hero): List[(BeltSlot, Int)] = hero.equipment.belt.details match {
+    case b: ItemDetails.Belt => b.slots.zipWithIndex
     case _                   => Nil
   }
 
-  /** То же, но с настоящими номерами ячеек: по ним кнопка и найдёт содержимое,
-    * сколько бы пустых ячеек ни стояло выше. */
-  def beltUsable(hero: Hero): List[(BeltSlot, Int)] = hero.equipment.belt.details match {
-    case b: ItemDetails.Belt => b.slots.zipWithIndex.filter(_._1.uses > 0)
-    case _                   => Nil
-  }
+  /** Ячейки, из которых есть что взять, с настоящими номерами: по ним кнопка и
+    * найдёт содержимое, сколько бы пустых ячеек ни стояло выше. */
+  def beltUsable(hero: Hero): List[(BeltSlot, Int)] = beltCells(hero).filter(_._1.uses > 0)
 
   /** Что лежит в ячейке с этим номером. */
   def beltAt(hero: Hero, idx: Int): Option[BeltSlot] = hero.equipment.belt.details match {

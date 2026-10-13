@@ -198,11 +198,14 @@ case class Item(
       case ItemDetails.Belt(slots) =>
         val cap  = ItemDetails.Belt.capacityFor(rarity)
         val head = s"🎽 Ячеек: ${slots.size}/$cap"
+        // Опустевшая ячейка помнит, чем была полна, — и честно говорит, что пуста.
         val body = slots.map {
-          case f: BeltSlot.Flask => s"• ${f.name} — ${f.charges}/${f.maxCharges}"
-          case d: BeltSlot.Dust  => s"• ${d.name}"
+          case f: BeltSlot.Flask =>
+            s"• ${f.name} — " + (if (f.empty) s"пусто (0/${f.maxCharges})" else s"${f.charges}/${f.maxCharges}")
+          case d: BeltSlot.Dust  => s"• ${d.name}" + (if (d.spent) " — пусто" else "")
           case b: BeltSlot.Brew  => s"• ${b.name}" + (if (b.spent) " — пусто" else "")
-          case r: BeltSlot.Rose  => s"• ${r.name} — ${r.charges}/${r.maxCharges}"
+          case r: BeltSlot.Rose  =>
+            s"• ${r.name} — " + (if (r.withered) s"пусто (0/${r.maxCharges})" else s"${r.charges}/${r.maxCharges}")
         }
         head :: body
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)

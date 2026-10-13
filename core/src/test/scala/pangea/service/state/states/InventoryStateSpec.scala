@@ -442,6 +442,24 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(!screens.last.text.contains("Ур."))
     },
 
+    test("у фляги нет «Надеть», только «На пояс»; старая кнопка не прячет её в скрытый слот") {
+      val flask = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Healer, Rarity.Blue).copy(id = 60L)
+      for {
+        quad                                <- makeState(baseHero, List(flask))
+        (state, heroDao, invRepo, renderer)  = quad
+        _    <- state.action(testUser, selectItem(flask.id), renderer)
+        card <- renderer.sentScreens.map(_.last)
+        // «Надеть» со старой карточки фляги
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        said <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+        hero <- heroDao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(!card.choices.exists(_.id == "Equip") && card.choices.exists(_.id == "BeltPut")) &&
+              assertTrue(said.contains("Флягу не надевают")) &&
+              // фляга осталась в сумке, старый слот пуст
+              assertTrue(hero.equipment.flask.itemType == ItemType.NoItem) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(flask.id))
+    },
+
     test("Объединить две половинки одной зоны → одна целая карта, половинки удалены") {
       for {
         quad                          <- makeState(baseHero, List(kinetHalfA, kinetHalfB))

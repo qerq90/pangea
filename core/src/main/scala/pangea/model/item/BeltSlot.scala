@@ -65,6 +65,12 @@ object BeltSlot {
     def withered: Boolean = charges <= 0
   }
 
+  /** Нальёт ли ячейку ручей: только флягу с водой (см. [[FlaskEffect.refillsAtSpring]]). */
+  def refillsAtSpring(slot: BeltSlot): Boolean = slot match {
+    case f: Flask => f.kind.effect.refillsAtSpring
+    case _        => false
+  }
+
   /** Что из сумки вообще можно положить на пояс: фляга, пыль, отвар (кроме
     * того, что в бою ни к чему — см. [[BrewKind.beltable]]) или цветок. */
   def of(item: Item): Option[BeltSlot] = item.details match {
