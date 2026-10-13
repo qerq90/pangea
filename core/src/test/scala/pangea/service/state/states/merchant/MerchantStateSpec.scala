@@ -472,12 +472,33 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(ids.contains("Sell") && ids.contains("Back"))
     },
 
-    test("Back → переход в MarketSquare") {
+    test("Back → к уличным торговцам, к выбору между Ришелье и Густаво") {
       for {
         t <- makeState(richHero)
         (state, _, _, renderer) = t
         result <- state.action(testUser, tap("Back"), renderer)
-      } yield assertTrue(result == StateType.MarketSquare)
+      } yield assertTrue(result == StateType.StreetMerchants)
+    },
+
+    test("уличные торговцы — своя сцена: Ришелье, Густаво, назад на площадь, в город") {
+      for {
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        street    = pangea.service.state.states.StreetMerchantsState(content)
+        square    = pangea.service.state.states.MarketSquareState(content)
+        _        <- street.enter(testUser, renderer)
+        screen   <- renderer.sentScreens.map(_.last)
+        toStreet <- square.action(testUser, tap("StreetMerchants"), renderer)
+        rich     <- street.action(testUser, tap("MerchantRichelieu"), renderer)
+        gus      <- street.action(testUser, tap("Gustavo"), renderer)
+        back     <- street.action(testUser, tap("BackToMarketSquare"), renderer)
+        city     <- street.action(testUser, tap("GoToCity"), renderer)
+      } yield assertTrue(screen.choices.map(_.id) == List("MerchantRichelieu", "Gustavo", "BackToMarketSquare", "GoToCity")) &&
+              assertTrue(toStreet == StateType.StreetMerchants) &&
+              assertTrue(rich == StateType.Merchant && gus == StateType.Gustavo) &&
+              assertTrue(back == StateType.MarketSquare && city == StateType.GlobalMap) &&
+              // это город: отсюда передают вещи, сюда приходит выручка
+              assertTrue(StateType.cityStates.contains(StateType.StreetMerchants))
     }
   )
 }

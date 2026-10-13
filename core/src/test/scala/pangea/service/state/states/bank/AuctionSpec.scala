@@ -89,6 +89,16 @@ object AuctionSpec extends ZIOSpecDefault {
               assertTrue(back == StateType.TradeHouse)
     },
 
+    test("«В город» уводит на городскую площадь — и с ячейкой, и без неё") {
+      for {
+        f       <- auction()
+        _       <- f.state.enter(testUser, f.renderer)
+        city    <- f.state.action(testUser, tap("GoToCity"), f.renderer)
+        g       <- auction(cells = 0)
+        noVault <- g.state.action(testUser, tap("GoToCity"), g.renderer)
+      } yield assertTrue(city == StateType.GlobalMap && noVault == StateType.GlobalMap)
+    },
+
     test("меню: лоты, выставить, мои лоты и назад") {
       for {
         f       <- auction()

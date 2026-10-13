@@ -11,9 +11,9 @@ import pangea.service.purse.Purse
 import pangea.service.state.{State, UserAction}
 import zio.Task
 
-/** Пополнение бутылей надетого пояса у Густаво. За 100 серебра за каждую недостающую бутыль
- *  восстанавливает `charges` пояса до `maxCharges`. Нет надетого пояса или он уже полный —
- *  сообщение без списаний. По завершении возвращает в раздел припасов [[GustavoSuppliesState]]. */
+/** «Пополнить пояс» у Густаво: доливает фляги в ячейках надетого пояса, по 100
+ *  серебра за каждый недостающий заряд. Нет пояса или доливать нечего —
+ *  сообщение без списаний. По завершении возвращает в меню [[GustavoState]]. */
 case class GustavoBeltState(
   heroDao: HeroDao,
   content: SceneContent
@@ -27,12 +27,12 @@ case class GustavoBeltState(
   private val branch = new Branch(
     routes = Map(
       "Refill" -> Target.Run { (u, _, r) => buy(u, r) },
-      "Back"   -> Target.Goto(StateType.GustavoSupplies)
+      "Back"   -> Target.Goto(StateType.Gustavo)
     ),
-    fallback = Target.Goto(StateType.GustavoSupplies)
+    fallback = Target.Goto(StateType.Gustavo)
   )
 
-  override def targetStates: Set[StateType] = Set(StateType.GustavoSupplies)
+  override def targetStates: Set[StateType] = Set(StateType.Gustavo)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = show(user, renderer)
 
@@ -77,7 +77,7 @@ case class GustavoBeltState(
              renderer.show(user, Screen(content.format("gustavo.supplies.beltNotEnoughSilver", "cost" -> price.toString), back))
            else
              refill(user, hero, belt, price, renderer)
-    } yield StateType.GustavoSupplies
+    } yield StateType.Gustavo
 
   /** Густаво наливает фляги прямо на поясе — те, что ему по силам (кровь он не
     * разливает, см. [[pangea.model.item.FlaskEffect.refillsAtGustavo]]). */

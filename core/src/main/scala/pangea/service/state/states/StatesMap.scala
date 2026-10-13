@@ -27,6 +27,7 @@ import pangea.model.state.StateType.{
   GustavoSupplies,
   HallAzat,
   HarborQuarter,
+  StreetMerchants,
   HeroStats,
   FriendCode,
   Innkeeper,
@@ -198,6 +199,7 @@ object StatesMap {
           GlobalMap     -> GlobalMapState(heroDao, content),
           HarborQuarter -> HarborQuarterState(content),
           MarketSquare  -> MarketSquareState(content),
+          StreetMerchants -> StreetMerchantsState(content),
           UnassumingBarrel -> UnassumingBarrelState(
             heroDao,
             inventoryRepo,
