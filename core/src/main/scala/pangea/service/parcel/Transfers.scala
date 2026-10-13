@@ -21,7 +21,7 @@ final case class TransferTarget(heroId: HeroId, userId: UserId, name: String)
 /** Общая часть передачи вещей: что подходит под запрос, можно ли отдать сразу
  *  и как, собственно, отдать. Этим пользуются и команда из беседы, и экран
  *  выбора в личке — правила у них одни. Деньги передаются здесь же
- *  ([[sendMoney]]), но своим путём: в сумке их нет. */
+ *  ([[sendSilver]], [[takeDoubloons]]), но своим путём: в сумке их нет. */
 final case class Transfers(
   inventoryRepo: InventoryRepository,
   userRepo:      UserRepository,
@@ -116,72 +116,72 @@ final case class Transfers(
       _    <- ZIO.when(items.nonEmpty)(tell(sender, name, target, items))
     } yield items
 
-  /** Передать деньги. Отправитель платит сразу: серебро — сперва с рук,
-    * нехватку из ячейки, как любые траты (см. [[Purse]]); дублоны — с рук.
-    * Получателю серебро ложится в банковскую ячейку, а не приняла она — ждёт
-    * его в городе, как выручка с аукциона (см. [[Payouts]]); дублоны ждут в
-    * городе всегда: ячейка держит только серебро. Самого героя получателя здесь
-    * не трогаем — его пишут только под его собственным локом. Зачислить не
-    * вышло — деньги возвращаются отправителю. */
-  def sendMoney(
-    sender: User,
-    hero:   Hero,
-    target: TransferTarget,
-    money:  Money,
-    amount: Long
-  ): Task[Transfers.Outcome] = {
-    val line = Transfers.moneyLine(money, amount)
-    charge(sender, hero, money, amount).flatMap {
-      case None => notEnough(hero, money).map(Transfers.Outcome.Forbidden(_))
-      case Some(refund) =>
+  /** Передать серебро. Отправитель платит сразу: сперва с рук, нехватку из
+    * ячейки, как любые траты (см. [[Purse]]). Получателю оно ложится в
+    * банковскую ячейку, а не приняла она — ждёт его в городе, как выручка с
+    * аукциона (см. [[Payouts]]): на руках в лабиринте половина сгорела бы при
+    * смерти. Самого героя получателя здесь не трогаем — его пишут только под
+    * его собственным локом. Зачислить не вышло — серебро возвращается. */
+  def sendSilver(sender: User, hero: Hero, target: TransferTarget, amount: Long): Task[Transfers.Outcome] = {
+    val line = Transfers.moneyLine(Money.Silver, amount)
+    purse.charge(sender.userId, hero, amount).flatMap {
+      case None =>
+        purse.total(hero).map(have => Transfers.Outcome.Forbidden(
+          content.format("transfer.money.notEnoughSilver", "have" -> have.toString)))
+      case Some(paid) =>
+        val refund = heroDao.updateSilver(sender.userId, paid.silver + amount)
         for {
-          intoVault <- credit(target, money, amount).tapError(_ => refund)
-          _         <- tellMoney(sender, target, line, intoVault)
-        } yield Transfers.Outcome.Sent(content.format("transfer.money.sent",
-          "money" -> line, "to" -> target.name))
+          intoVault <- bank.depositSilver(target.heroId, amount).either.flatMap {
+                         case Right(_) => ZIO.succeed(true)
+                         case Left(_)  => payouts.queue(target.heroId, silver = amount).as(false)
+                       }.tapError(_ => refund)
+          _         <- tellMoney(sender, target, line, if (intoVault) Transfers.Landed.Vault else Transfers.Landed.City)
+        } yield Transfers.Outcome.Sent(content.format("transfer.money.sent", "money" -> line, "to" -> target.name))
     }
   }
 
-  /** Списать с отправителя. Возвращает, как вернуть деньги назад, если
-    * зачислить их не выйдет; `None` — столько у него нет, и ничего не списано. */
-  private def charge(sender: User, hero: Hero, money: Money, amount: Long): Task[Option[Task[Unit]]] =
-    money match {
-      case Money.Silver =>
-        purse.charge(sender.userId, hero, amount).map(_.map(paid =>
-          heroDao.updateSilver(sender.userId, paid.silver + amount)))
-      case Money.Doubloons =>
-        if (hero.doubloons < amount) ZIO.none
-        else heroDao.updateDoubloons(sender.userId, hero.doubloons - amount)
-               .as(Some(heroDao.updateDoubloons(sender.userId, hero.doubloons)))
-    }
+  /** Дублоны, шаг первый — под локом отправителя: снять с его рук. `Some` —
+    * отказ: столько у него нет, и ничего не списано.
+    *
+    * Дублоны не теряются нигде, поэтому и отдают их откуда угодно, и получатель
+    * берёт их сразу в руки ([[giveDoubloons]]) — ждать города им незачем. */
+  def takeDoubloons(sender: User, hero: Hero, amount: Long): Task[Option[String]] =
+    if (hero.doubloons < amount)
+      ZIO.some(content.format("transfer.money.notEnoughDoubloons", "have" -> hero.doubloons.toString))
+    else heroDao.updateDoubloons(sender.userId, hero.doubloons - amount).as(None)
 
-  /** Зачислить получателю: `true` — легло в ячейку, `false` — ждёт в городе. */
-  private def credit(target: TransferTarget, money: Money, amount: Long): Task[Boolean] =
-    money match {
-      case Money.Silver =>
-        bank.depositSilver(target.heroId, amount).either.flatMap {
-          case Right(_) => ZIO.succeed(true)
-          case Left(_)  => payouts.queue(target.heroId, silver = amount).as(false)
-        }
-      case Money.Doubloons => payouts.queue(target.heroId, doubloons = amount).as(false)
-    }
+  /** Шаг второй — под локом ПОЛУЧАТЕЛЯ: дублоны ему в руки. Героя читаем
+    * заново, уже под его локом: иначе зачисление затёрлось бы его же тратой. */
+  def giveDoubloons(target: TransferTarget, amount: Long): Task[Unit] =
+    addDoubloons(target.userId, amount)
 
-  /** Отказ, когда денег не хватает: сколько есть на самом деле. Серебро
-    * считается вместе с ячейкой — его оттуда и доберут. */
-  private def notEnough(hero: Hero, money: Money): Task[String] =
-    money match {
-      case Money.Silver =>
-        purse.total(hero).map(have => content.format("transfer.money.notEnoughSilver", "have" -> have.toString))
-      case Money.Doubloons =>
-        ZIO.succeed(content.format("transfer.money.notEnoughDoubloons", "have" -> hero.doubloons.toString))
-    }
+  /** Зачислить не вышло — вернуть отправителю. Тоже под его локом и тоже по
+    * свежему герою: между шагами он мог что-то купить. */
+  def returnDoubloons(sender: User, amount: Long): Task[Unit] =
+    addDoubloons(sender.userId, amount)
+
+  private def addDoubloons(userId: UserId, amount: Long): Task[Unit] =
+    heroDao.getHeroByUserId(userId).someOrFail(new Throwable(s"Нет героя у игрока ${userId.value}"))
+      .flatMap(h => heroDao.updateDoubloons(userId, h.doubloons + amount))
+
+  /** Дублоны дошли: письмо получателю, строка в беседу. Возвращает ответ
+    * отправителю. */
+  def doubloonsDelivered(sender: User, target: TransferTarget, amount: Long): Task[String] = {
+    val line = Transfers.moneyLine(Money.Doubloons, amount)
+    tellMoney(sender, target, line, Transfers.Landed.Hand)
+      .as(content.format("transfer.money.sent", "money" -> line, "to" -> target.name))
+  }
 
   /** Письмо получателю — где теперь его деньги, — и строка в общий чат. */
-  private def tellMoney(sender: User, target: TransferTarget, line: String, intoVault: Boolean): Task[Unit] =
+  private def tellMoney(sender: User, target: TransferTarget, line: String, landed: Transfers.Landed): Task[Unit] =
     for {
       fromName <- players.getDisplayName(sender).orElse(ZIO.succeed(content.text("transfer.someone")))
       receiver <- userRepo.getUserById(target.userId).option.map(_.flatten)
-      key       = if (intoVault) "transfer.money.noticeVault" else "transfer.money.noticeCity"
+      key       = landed match {
+                    case Transfers.Landed.Vault => "transfer.money.noticeVault"
+                    case Transfers.Landed.City  => "transfer.money.noticeCity"
+                    case Transfers.Landed.Hand  => "transfer.money.noticeHand"
+                  }
       _        <- ZIO.foreachDiscard(receiver)(r => players.notify(r, content.format(key,
                     "from" -> fromName, "money" -> line)).ignore)
       _        <- players.announce(content.format("transfer.money.announce",
@@ -223,6 +223,17 @@ object Transfers {
     final case class Forbidden(message: String) extends Outcome
     /** Надо уточнить кнопками: экипировка или несколько разных вещей. */
     case object NeedPick extends Outcome
+  }
+
+  /** Куда легли переданные деньги — об этом пишем получателю. */
+  sealed trait Landed
+  object Landed {
+    /** Серебро — в банковскую ячейку. */
+    case object Vault extends Landed
+    /** Серебро, которое ячейка не приняла: ждёт его в городе. */
+    case object City  extends Landed
+    /** Дублоны — сразу в руки. */
+    case object Hand  extends Landed
   }
 
   /** Сумма со значком валюты: 🪙 серебро, 🟡 дублоны — как везде в игре. */

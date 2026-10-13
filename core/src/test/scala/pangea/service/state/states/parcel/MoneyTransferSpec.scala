@@ -16,7 +16,8 @@ import zio.test._
 
 /** Деньги из рук в руки: «Передать серебро 100» и «Передать дублоны 5» в
   * ответ на сообщение игрока в общей беседе. В сумке их не ищут — серебро
-  * ложится получателю в ячейку (или ждёт его в городе), дублоны ждут в городе. */
+  * ложится получателю в ячейку (или ждёт его в городе), а дублоны, которые не
+  * теряются нигде, отдают откуда угодно, и в руки они идут сразу. */
 object MoneyTransferSpec extends ZIOSpecDefault {
 
   private val userId     = UserId(1L)
@@ -102,16 +103,31 @@ object MoneyTransferSpec extends ZIOSpecDefault {
                 to == friendUs && text.contains("в городе") })
     },
 
-    test("дублоны всегда ждут в городе: ячейка держит только серебро") {
+    test("дублоны идут сразу в руки: ни ячейки, ни ожидания города") {
       for {
         t <- chat(doubloons = 10L)
-        (handler, dao, bank, payoutDao, _, api) = t
-        _    <- say(handler, "Передать дублоны 3", -1L)
-        me   <- heroOf(dao, userId)
-        sent <- api.sentMessages
-      } yield assertTrue(me.doubloons == 7L && bank.silverSnapshot == 0L) &&
-              assertTrue(payoutDao.snapshot.get(friendHero).contains((0L, 3L))) &&
-              assertTrue(sent.exists(_._1.contains("🟡 3 отправлено игроку")))
+        (handler, dao, bank, payoutDao, players, api) = t
+        _      <- say(handler, "Передать дублоны 3", -1L)
+        me     <- heroOf(dao, userId)
+        friend <- heroOf(dao, friendUs)
+        sent   <- api.sentMessages
+      } yield assertTrue(me.doubloons == 7L && friend.doubloons == 3L) &&
+              assertTrue(bank.silverSnapshot == 0L && payoutDao.snapshot.isEmpty) &&
+              assertTrue(sent.exists(_._1.contains("🟡 3 отправлено игроку"))) &&
+              assertTrue(players.sentLetters.exists { case (to, text) =>
+                to == friendUs && text.contains("🟡 3") && text.contains("уже у вас") })
+    },
+
+    test("дублоны отдают и из лабиринта: они не теряются нигде") {
+      for {
+        t <- chat(doubloons = 10L, state = StateType.Dungeon)
+        (handler, dao, _, _, _, api) = t
+        _      <- say(handler, "Передать 4 дублона", -1L)
+        me     <- heroOf(dao, userId)
+        friend <- heroOf(dao, friendUs)
+        sent   <- api.sentMessages.map(_.map(_._1).mkString("\n"))
+      } yield assertTrue(me.doubloons == 6L && friend.doubloons == 4L) &&
+              assertTrue(!sent.contains("только из города"))
     },
 
     test("денег не хватает или сумму не назвали — ничего не списано, вещей не ищем") {
@@ -133,7 +149,7 @@ object MoneyTransferSpec extends ZIOSpecDefault {
               assertTrue(!sent.contains("В сумке нет ничего похожего"))
     },
 
-    test("из лабиринта денег не передать — только из города") {
+    test("серебро из лабиринта не передать — только из города") {
       for {
         t <- chat(silver = 500L, state = StateType.Dungeon)
         (handler, dao, bank, _, _, api) = t
