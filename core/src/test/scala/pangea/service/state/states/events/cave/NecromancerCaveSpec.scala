@@ -75,7 +75,7 @@ object NecromancerCaveSpec extends ZIOSpecDefault {
       assertTrue(lvl == 10L && necro.bossLvl(1L) == 1L && necro.bossLvl(4L) == 1L && necro.bossLvl(9L) == 2L) &&
       assertTrue(s.hp == 350L * lvl && s.armor == 300L * lvl) &&
       assertTrue(s.atk == 150L * lvl && s.energy == 150L * lvl) &&
-      assertTrue(s.accuracy == 100L * lvl && s.defence == 150L * lvl && s.evasion == 150L * lvl) &&
+      assertTrue(s.accuracy == 50L * lvl && s.defence == 150L * lvl && s.evasion == 150L * lvl) &&
       assertTrue(necro.energyRegen(lvl) == 11L * lvl) &&
       assertTrue(necro.expReward(lvl) == 200L * lvl) &&
       // он нежить, дерётся не один и держит поле миазмами

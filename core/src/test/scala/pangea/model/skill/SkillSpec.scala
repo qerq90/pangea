@@ -125,7 +125,7 @@ object SkillSpec extends ZIOSpecDefault {
         assertTrue(v(Skill.BloodHarvest) == 2.0 * b.str + 0.6 * f.atk + 0.12 * hp) &&
         assertTrue(Skill.BloodHarvestHpCostPct == 10L && Skill.BloodHarvestHpToDamagePct == 12L) &&
         assertTrue(v(Skill.Bleeding) == 4.0 * b.agi + 0.3 * f.accuracy + 0.3 * f.atk + 5.0 * b.int) &&
-        assertTrue(v(Skill.WeakSpotStrike) == 2.0 * b.agi + 0.8 * f.accuracy + 4.0 * b.int + 0.1 * f.atk) &&
+        assertTrue(v(Skill.WeakSpotStrike) == 2.0 * b.agi + 0.4 * f.accuracy + 4.0 * b.int + 0.1 * f.atk) &&
         // Размашистый: половина урона — соседям цели
         assertTrue(Skill.SweepingStrike.effect == Skill.Effect.Sweep(50)) &&
         assertTrue(Skill.Ram.describe(hero10).contains("Позволяет сменить место в бою")) &&

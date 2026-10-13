@@ -109,7 +109,7 @@ object RatKingBattleSpec extends ZIOSpecDefault {
       assertTrue(king.bossLvl(10L) == 3L && king.bossLvl(1L) == 1L && king.bossLvl(3L) == 1L) &&
       assertTrue(king.bossLvl(4L) == 1L && king.bossLvl(7L) == 2L && king.levelDivisor == 3L) &&
       assertTrue(s.hp == 450L * bossLvl && s.armor == 400L * bossLvl && s.atk == 50L * bossLvl) &&
-      assertTrue(s.energy == 100L * bossLvl && s.accuracy == 200L * bossLvl) &&
+      assertTrue(s.energy == 100L * bossLvl && s.accuracy == 100L * bossLvl) &&
       assertTrue(s.defence == 100L * bossLvl && s.evasion == 50L * bossLvl) &&
       assertTrue(king.energyRegen(bossLvl) == 7L * bossLvl) &&
       assertTrue(king.expReward(bossLvl) == 100L * bossLvl) &&

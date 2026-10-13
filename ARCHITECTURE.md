@@ -338,11 +338,11 @@ effectiveMaxArmor = ⌊allArmor × (1 − armorPct) × max(defence × (1 − def
 
 Шанс попадания по любому юниту считается **одинаково для обеих сторон**: атакующий попадает, если бросок `1..100` **больше** уклонения защищающегося. Уклонение:
 ```
-dodgeChance = 100 × (agi + evasion) / (agi + evasion + defence × 1 + attackerAccuracy × 1.5)
+dodgeChance = 100 × (agi + evasion) / (agi + evasion + defence × 1 + attackerAccuracy × 3)
 ```
 зажато в **[5, 95]** (проценты).
 - Положительные параметры (числитель): ловкость `agi` и уклонение `evasion` **защищающегося**
-- Отрицательные (знаменатель): защита `defence` защищающегося (×1) и точность `accuracy` **атакующего** (×1.5)
+- Отрицательные (знаменатель): защита `defence` защищающегося (×1) и точность `accuracy` **атакующего** (×3). Вес был 1.5: его подняли вдвое, а точность на новых вещах и у мобов вдвое срезали — попадания те же, а урон умений от точности меньше
 - `BattleState.dodgeChance(agi, evasion, defence, attackerAccuracy)` — единственная функция:
   - **уклонение игрока** от удара моба: `dodgeChance(heroAgi, heroEvasion, heroDefence, monsterAccuracy)`
   - **уклонение моба** от удара игрока: `dodgeChance(0, monsterEvasion, monsterDefence, heroAccuracy)` — у моба нет ловкости (`agi = 0`)

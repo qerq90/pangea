@@ -145,7 +145,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(battle.monsterStats.hp == 1500L * 2L) &&
               assertTrue(battle.monsterStats.armor == 750L * 2L) &&
               assertTrue(battle.monsterStats.atk == 250L * 2L) &&
-              assertTrue(battle.monsterStats.accuracy == 250L * 2L) &&
+              assertTrue(battle.monsterStats.accuracy == 125L * 2L) &&
               assertTrue(battle.monsterStats.evasion == 100L * 2L) &&
               assertTrue(battle.monsterStats.energy == 150L * 2L) &&
               assertTrue(battle.monsterStats.defence == 0L) &&
@@ -165,7 +165,7 @@ object ElementalLairStateSpec extends ZIOSpecDefault {
               assertTrue(battle.monsterStats.hp == 1250L * 2L) &&
               assertTrue(battle.monsterStats.armor == 1500L * 2L) &&
               assertTrue(battle.monsterStats.atk == 350L * 2L) &&
-              assertTrue(battle.monsterStats.accuracy == 200L * 2L) &&
+              assertTrue(battle.monsterStats.accuracy == 100L * 2L) &&
               assertTrue(battle.monsterStats.evasion == 50L * 2L) &&
               assertTrue(battle.monsterStats.energy == 100L * 2L) &&
               assertTrue(battle.monsterStats.defence == 0L) &&

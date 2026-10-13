@@ -132,8 +132,14 @@ object ThievesSpec extends ZIOSpecDefault {
                   } yield (out, said, board, loot)
                 }
         died <- fight(dying, thiefAtk = 9999).flatMap { case (state, dao, r) =>
+                  // Уклонение не бывает ниже 5%: вор изредка промахивается и по
+                  // беззащитному — бьём, пока бой не кончится.
+                  def attack(left: Int): Task[StateType] =
+                    state.action(testUser, tap("Attack"), r).flatMap { st =>
+                      if (st == StateType.Battle && left > 1) attack(left - 1) else ZIO.succeed(st)
+                    }
                   for {
-                    out   <- state.action(testUser, tap("Attack"), r)
+                    out   <- attack(10)
                     said  <- texts(r)
                     board <- boardOf(dao)
                   } yield (out, said, board)

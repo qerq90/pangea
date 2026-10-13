@@ -1175,10 +1175,19 @@ object BattleStateSpec extends ZIOSpecDefault {
       assertTrue(chance == 95.0)
     },
 
-    test("dodgeChance: формула 100*(agi+evasion)/(agi+evasion+def+acc*1.5)") {
-      // agi+evasion=20, знаменатель = 20 + 10 + 10*1.5 = 45 → 2000/45 ≈ 44.44
+    test("dodgeChance: формула 100*(agi+evasion)/(agi+evasion+def+acc*3)") {
+      // agi+evasion=20, знаменатель = 20 + 10 + 10*3 = 60 → 2000/60 ≈ 33.33
       val chance = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 10L, attackerAccuracy = 10L)
-      assertTrue(math.abs(chance - 2000.0 / 45.0) < 1e-9)
+      assertTrue(math.abs(chance - 2000.0 / 60.0) < 1e-9)
+    },
+
+    test("dodgeChance: вдвое меньше точности при вдвое большем весе — тот же шанс") {
+      // Точность вещей и мобов срезали вдвое, а её вес в попадании подняли
+      // вдвое: при той же половине точности уклонение то же, что было при
+      // полной точности и весе 1.5.
+      val was = 100.0 * 20.0 / (20.0 + 10.0 + 40.0 * 1.5)
+      val now = BattleState.dodgeChance(agi = 10L, evasion = 10L, defence = 10L, attackerAccuracy = 20L)
+      assertTrue(math.abs(now - was) < 1e-9)
     },
 
     test("dodgeChance: защита и точность моба снижают уклонение") {
