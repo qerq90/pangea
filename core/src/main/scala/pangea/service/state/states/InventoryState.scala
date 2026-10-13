@@ -45,6 +45,9 @@ case class InventoryState(
       // иначе после каждого взгляда на вещь приходится листать заново. Сбрасываем
       // только выбранную вещь: карточку мы закрыли.
       "InventoryList"     -> Target.Run { (u, _, r) => backToList(u) *> showList(u, r).as(StateType.Inventory) },
+      // Отказ в подтверждении или выборе, начатом с карточки, — назад на неё,
+      // а не в список: у стопки остались ещё вещи.
+      "ItemCard"          -> Target.Run { (u, _, r) => backToCard(u, r) },
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
@@ -92,7 +95,14 @@ case class InventoryState(
     } yield if (keeps) StateType.Backpack else StateType.HeroStats
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
-    writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
+    readScene(user).flatMap { scene =>
+      scene.selectedId.filter(_ => scene.cardOnReturn.contains(true)) match {
+        // Вернулись со вставки камня — на карточку той же стопки: камни в ней,
+        // может, ещё остались.
+        case Some(id) => writeScene(user, scene.copy(cardOnReturn = None)) *> showItem(user, id, renderer).unit
+        case None     => writeScene(user, InventoryScene(page = Some(0))) *> showList(user, renderer).unit
+      }
+    }
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -132,17 +142,22 @@ case class InventoryState(
 
   // ── Детальный экран выбранного предмета ────────────────────────────────────
 
+  /** Карточка вещи. У стопки показываем ПЕРВУЮ её вещь, а тратим ПОСЛЕДНЮЮ
+    * (см. [[withSelected]]): показанная остаётся в сумке, пока в стопке есть
+    * что-то ещё, и после действия игрок возвращается на ту же карточку — с
+    * меньшим счётчиком, — а не в список. */
   private def showItem(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
     for {
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       scene <- readScene(user)
-      res <- inv.items.data.find(_.id == itemId) match {
+      shown  = inv.items.data.find(_.id == itemId).map(i => stackOf(inv.items.data, i).headOption.getOrElse(i))
+      res <- shown match {
         case None => showList(user, renderer)
         case Some(item) if item.isQuestItem =>
-          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showQuestItem(user, item, renderer)
+          writeScene(user, scene.copy(selectedId = Some(item.id))) *> showQuestItem(user, item, renderer)
         case Some(item @ InventoryState.Brewed(kind)) =>
-          writeScene(user, scene.copy(selectedId = Some(itemId))) *> showBrew(user, item, kind, inv.items.data, renderer)
+          writeScene(user, scene.copy(selectedId = Some(item.id))) *> showBrew(user, item, kind, inv.items.data, renderer)
         case Some(item) =>
           // Сколько таких же лежит в сумке — счётчик над описанием; кнопки при
           // этом трогают ровно один предмет из стопки.
@@ -178,7 +193,7 @@ case class InventoryState(
             Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
             Some(content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative))
           ).flatten
-          writeScene(user, scene.copy(selectedId = Some(itemId))) *>
+          writeScene(user, scene.copy(selectedId = Some(item.id))) *>
             renderer.show(user, Screen(text, choices)).as(StateType.Inventory)
       }
     } yield res
@@ -305,7 +320,7 @@ case class InventoryState(
     }
     val rows = (races.size + InventoryState.RacesPerRow - 1) / InventoryState.RacesPerRow
     renderer.show(user, Screen(content.text("brew.whichRace"),
-      buttons :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(rows), color = ChoiceColor.Negative)))
+      buttons :+ content.choice("ItemCard", "inventory.exit").copy(row = Some(rows), color = ChoiceColor.Negative)))
       .as(StateType.Inventory)
   }
 
@@ -341,7 +356,7 @@ case class InventoryState(
           val heavyLine = if (heavy.isEmpty) "" else "\n" + content.format("brew.heavyStay", "names" -> heavy.map(_.name).mkString(", "))
           val choices = curable.distinct.map(t =>
             Choice("CureTraumaPick", t.name, data = Map("trauma" -> t.name), color = ChoiceColor.Positive, row = Some(0))
-          ) :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
+          ) :+ content.choice("ItemCard", "inventory.exit").copy(row = Some(1), color = ChoiceColor.Negative)
           renderer.show(user, Screen(content.text("brew.whichTrauma") + heavyLine, choices)).as(StateType.Inventory)
         }
     } yield res
@@ -372,7 +387,7 @@ case class InventoryState(
   private def consume(user: User, item: Item, hero: Hero, line: String, renderer: Renderer): Task[StateType] =
     inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
       renderer.show(user, Screen(line, Nil)) *>
-      afterStackUse(user, hero, item, renderer)
+      backToCard(user, renderer)
 
   // ── Сюжетные предметы («Письмо Марисе») ────────────────────────────────────
 
@@ -584,7 +599,7 @@ case class InventoryState(
         _ <- NpcQuestLog.onReputation(heroDao, user.userId, gained)
         _ <- renderer.show(user, Screen(content.format("purse.returned",
                "reputation" -> gained.toString, "total" -> total.toString), Nil))
-        r <- backToList(user) *> showList(user, renderer).as(StateType.Inventory)
+        r <- backToCard(user, renderer)
       } yield r
     }
 
@@ -601,7 +616,7 @@ case class InventoryState(
         _ <- heroDao.updateSilver(user.userId, hero.silver + amount)
         _ <- ZIO.when(jackpot)(renderer.show(user, Screen(content.text("purse.jackpot"), Nil)))
         _ <- renderer.show(user, Screen(content.format("purse.opened", "silver" -> amount.toString), Nil))
-        r <- backToList(user) *> showList(user, renderer).as(StateType.Inventory)
+        r <- backToCard(user, renderer)
       } yield r
     }
 
@@ -612,41 +627,22 @@ case class InventoryState(
     }
 
   private def dropSelected(user: User, renderer: Renderer): Task[StateType] =
-    for {
-      scene <- readScene(user)
-      res <- scene.selectedId match {
-        case None => showList(user, renderer)
-        case Some(id) => dropById(user, id, renderer)
-      }
-    } yield res
+    withSelected(user, renderer) { (item, hero) =>
+      inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+        renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil)) *>
+        backToCard(user, renderer)
+    }
 
-  private def dropById(user: User, itemId: Long, renderer: Renderer): Task[StateType] =
-    for {
-      hero <- getHero(user)
-      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      res <- inv.items.data.find(_.id == itemId) match {
-        case None => showList(user, renderer)
-        case Some(item) =>
-          inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            renderer.show(user, Screen(content.format("inventory.dropped", "name" -> item.name), Nil)) *>
-            afterStackUse(user, hero, item, renderer)
-      }
-    } yield res
+  /** Назад на карточку выбранной вещи. Потратили последнюю вещь стопки (или
+    * вещь была одна) — карточки больше нет, и [[showItem]] уводит в список. */
+  private def backToCard(user: User, renderer: Renderer): Task[StateType] =
+    readScene(user).flatMap(_.selectedId.fold(showList(user, renderer))(showItem(user, _, renderer)))
 
-  /** Куда вернуться, потратив одну вещь: если это была стопка и в ней что-то
-    * осталось — на карточку следующей такой же (представитель стопки — последний,
-    * как в [[ItemStack.grouped]]), чтобы выбрасывать или сыпать пыль по одной,
-    * не возвращаясь всякий раз в список; иначе — в список. */
-  private def afterStackUse(user: User, hero: Hero, spent: Item, renderer: Renderer): Task[StateType] =
-    ItemStack.key(spent) match {
-      case None => showList(user, renderer)
-      case Some(k) =>
-        inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).flatMap { inv =>
-          inv.items.data.filter(i => ItemStack.key(i).contains(k)) match {
-            case Nil  => showList(user, renderer)
-            case rest => showItem(user, rest.last.id, renderer)
-          }
-        }
+  /** Вещи той же стопки, в порядке сумки; у вещи без стопки — она одна. */
+  private def stackOf(items: List[Item], item: Item): List[Item] =
+    ItemStack.key(item) match {
+      case Some(k) => items.filter(i => ItemStack.key(i).contains(k))
+      case None    => List(item)
     }
 
   // ── Объединение половинок карты ────────────────────────────────────────────
@@ -709,17 +705,19 @@ case class InventoryState(
       res <- items.find(i => i.id == itemId && i.isSmallRune).flatMap(i => i.runeStone.map(i -> _)) match {
         case None => showList(user, renderer)
         case Some((first, details)) =>
+          // Складываем последние пять: показанная первой остаётся на карточке,
+          // если малых рун этого узора больше пяти.
           val pieces = items.filter(_.runeStone.exists(d =>
-            d.size == RuneStoneSize.Small && d.runeKey == details.runeKey)).take(RuneStone.PiecesPerBig)
+            d.size == RuneStoneSize.Small && d.runeKey == details.runeKey)).takeRight(RuneStone.PiecesPerBig)
           val rune   = Rune.byKey(details.runeKey)
           (pieces.sizeIs == RuneStone.PiecesPerBig, rune) match {
             case (false, _) =>
               renderer.show(user, Screen(content.format("inventory.runeNeedMore",
                 "name" -> first.name, "have" -> pieces.size.toString, "need" -> RuneStone.PiecesPerBig.toString), Nil)) *>
-                showList(user, renderer)
+                showItem(user, itemId, renderer)
             case (_, None) => showList(user, renderer)
             case (true, Some(_)) if inv.freeSlots <= 0 =>
-              renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showList(user, renderer)
+              renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showItem(user, itemId, renderer)
             case (true, Some(r)) =>
               val big = RuneStone.item(r, RuneStoneSize.Big)
               for {
@@ -727,7 +725,7 @@ case class InventoryState(
                 persisted <- itemRepository.persist(hero.id, big)
                 _         <- inventoryRepo.addItem(hero.id, persisted).mapError(e => new Throwable(e.toString))
                 _         <- renderer.show(user, Screen(content.format("inventory.runeFolded", "name" -> big.name), Nil))
-                back      <- showList(user, renderer)
+                back      <- backToCard(user, renderer)
               } yield back
           }
       }
@@ -750,7 +748,7 @@ case class InventoryState(
               data  = Map("slot" -> idx.toString),
               color = ChoiceColor.Negative,
               row   = Some(0))
-          } :+ content.choice("InventoryList", "inventory.exit").copy(row = Some(1))
+          } :+ content.choice("ItemCard", "inventory.exit").copy(row = Some(1))
           renderer.show(user, Screen(
             content.format("inventory.breakGemWhich", "item" -> item.name), choices)).as(StateType.Inventory)
       }
@@ -775,7 +773,7 @@ case class InventoryState(
           List(
             Choice("BreakGemDo", content.text("inventory.breakGemYes"),
               data = Map("slot" -> idx.toString), color = ChoiceColor.Negative, row = Some(0)),
-            Choice("InventoryList", content.text("inventory.breakGemNo"), row = Some(1))
+            Choice("ItemCard", content.text("inventory.breakGemNo"), row = Some(1))
           ))).as(StateType.Inventory)
     }
 
@@ -788,7 +786,7 @@ case class InventoryState(
             case None => showList(user, renderer)
             case Some((emptied, gem)) =>
               inventoryRepo.updateItem(hero.id, emptied).mapError(e => new Throwable(e.toString)) *>
-                grantDust(user, hero, gem, renderer, showList(user, renderer))
+                grantDust(user, hero, gem, renderer, showList(user, renderer), backToCard(user, renderer))
           }
         }
     }
@@ -806,7 +804,7 @@ case class InventoryState(
               "count" -> gem.dustYield.toString),
             List(
               Choice("CrushGemDo", content.text("inventory.breakGemYes"), color = ChoiceColor.Negative, row = Some(0)),
-              Choice("InventoryList", content.text("inventory.breakGemNo"), row = Some(1))
+              Choice("ItemCard", content.text("inventory.breakGemNo"), row = Some(1))
             ))).as(StateType.Inventory)
       }
     }
@@ -817,16 +815,17 @@ case class InventoryState(
         case None => showList(user, renderer)
         case Some(gem) =>
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-            grantDust(user, hero, gem, renderer, afterStackUse(user, hero, item, renderer))
+            grantDust(user, hero, gem, renderer, backToCard(user, renderer), backToCard(user, renderer))
       }
     }
 
   /** Выдаёт пыль за сломанный камень. Пыль кладётся отдельными предметами, поэтому
     * место в сумке проверяем заранее: лучше отказать, чем потерять часть пыли.
     * `andThen` — куда уйти после: раскрошенный камень из стопки возвращает на
-    * карточку стопки, камень из гнезда — в список. */
+    * карточку стопки, камень из гнезда — в список. `noRoom` — куда уйти, если
+    * пыль не влезла: на ту же карточку, ничего не потеряв. */
   private def grantDust(user: User, hero: Hero, gem: Gem, renderer: Renderer,
-                        andThen: => Task[StateType]): Task[StateType] =
+                        andThen: => Task[StateType], noRoom: => Task[StateType]): Task[StateType] =
     for {
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       count  = gem.dustYield
@@ -834,7 +833,7 @@ case class InventoryState(
       res <-
         if (free < count)
           renderer.show(user, Screen(content.format("inventory.breakGemNoRoom", "count" -> count.toString), Nil)) *>
-            showList(user, renderer)
+            noRoom
         else
           ZIO.foreachDiscard(1 to count) { _ =>
             itemRepository.persist(hero.id, MaterialGenerator.item(gem.dust))
@@ -845,7 +844,9 @@ case class InventoryState(
             andThen
     } yield res
 
-  /** Общая обвязка «взять выбранный в сцене предмет и героя». */
+  /** Общая обвязка «взять выбранный в сцене предмет и героя». У стопки это
+    * ПОСЛЕДНЯЯ её вещь, хотя на карточке — первая (см. [[showItem]]): так
+    * показанная остаётся на месте, пока в стопке есть что-то ещё. */
   private def withSelected(user: User, renderer: Renderer)(
       f: (Item, Hero) => Task[StateType]): Task[StateType] =
     for {
@@ -854,7 +855,7 @@ case class InventoryState(
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       res <- scene.selectedId.flatMap(id => inv.items.data.find(_.id == id)) match {
         case None       => showList(user, renderer)
-        case Some(item) => f(item, hero)
+        case Some(item) => f(stackOf(inv.items.data, item).lastOption.getOrElse(item), hero)
       }
     } yield res
 
@@ -867,7 +868,7 @@ case class InventoryState(
       item.material.filter(_.gem.isDefined) match {
         case None => showList(user, renderer)
         case Some(_) if hero.equipment.weapon.itemType == ItemType.NoItem =>
-          renderer.show(user, Screen(content.text("inventory.dustNoWeapon"), Nil)) *> showList(user, renderer)
+          renderer.show(user, Screen(content.text("inventory.dustNoWeapon"), Nil)) *> backToCard(user, renderer)
         case Some(dust) =>
           val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
           val line = outcome match {
@@ -885,7 +886,7 @@ case class InventoryState(
           inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
             heroDao.updateWeaponDust(user.userId, outcome.next) *>
             renderer.show(user, Screen(line, Nil)) *>
-            afterStackUse(user, hero, item, renderer)
+            backToCard(user, renderer)
       }
     }
 
@@ -899,11 +900,11 @@ case class InventoryState(
       (BeltSlot.of(item), belt.details) match {
         case (None, _) => showList(user, renderer)
         case (Some(_), _) if belt.itemType != ItemType.Belt =>
-          renderer.show(user, Screen(content.text("inventory.beltNone"), Nil)) *> showList(user, renderer)
+          renderer.show(user, Screen(content.text("inventory.beltNone"), Nil)) *> backToCard(user, renderer)
         case (Some(slot), b: ItemDetails.Belt) =>
           b.put(slot, ItemDetails.Belt.capacityFor(belt.rarity)) match {
             case None =>
-              renderer.show(user, Screen(content.text("inventory.beltFull"), Nil)) *> showList(user, renderer)
+              renderer.show(user, Screen(content.text("inventory.beltFull"), Nil)) *> backToCard(user, renderer)
             case Some(filled) =>
               inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
                 heroDao.updateEquipment(user.userId,
@@ -911,7 +912,7 @@ case class InventoryState(
                 renderer.show(user, Screen(content.format("inventory.beltPutDone",
                   "name" -> slot.name, "used" -> filled.slots.size.toString,
                   "cap" -> ItemDetails.Belt.capacityFor(belt.rarity).toString), Nil)) *>
-                afterStackUse(user, hero, item, renderer)
+                backToCard(user, renderer)
           }
         case _ => showList(user, renderer)
       }
@@ -924,11 +925,16 @@ case class InventoryState(
       scene <- readScene(user)
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      res <- scene.selectedId.filter(id => inv.items.data.exists(i => i.id == id && i.gem.isDefined)) match {
+      gem    = scene.selectedId.flatMap(id => inv.items.data.find(i => i.id == id && i.gem.isDefined))
+      res <- gem match {
         case None => showList(user, renderer)
-        case Some(gemId) =>
-          UiScene.write(heroDao, user.userId, UiScene.Socketing, SocketingState.Scene(gemId))
-            .as(StateType.Socketing)
+        case Some(shown) =>
+          // Вставляем последний камень стопки, а вернёмся на её карточку: если
+          // камни ещё остались, вставлять их можно дальше, не листая список.
+          val toInsert = stackOf(inv.items.data, shown).lastOption.getOrElse(shown)
+          writeScene(user, scene.copy(cardOnReturn = Some(true))) *>
+            UiScene.write(heroDao, user.userId, UiScene.Socketing, SocketingState.Scene(toInsert.id))
+              .as(StateType.Socketing)
       }
     } yield res
 
@@ -1010,7 +1016,10 @@ object InventoryState {
 
   val ItemActionPrefix = "InventoryItem_"
 
-  case class InventoryScene(page: Option[Int] = None, selectedId: Option[Long] = None)
+  /** `cardOnReturn` — вернуться на карточку `selectedId`, когда игрок придёт
+    * обратно с другого экрана (вставки камня), а не в список. */
+  case class InventoryScene(page: Option[Int] = None, selectedId: Option[Long] = None,
+                            cardOnReturn: Option[Boolean] = None)
   object InventoryScene {
     implicit val encoder: Encoder[InventoryScene] = deriveEncoder
     implicit val decoder: Decoder[InventoryScene] = deriveDecoder
