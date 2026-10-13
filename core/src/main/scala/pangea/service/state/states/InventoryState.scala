@@ -25,7 +25,7 @@ import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.states.marisa.MarisaHuntState
 import pangea.service.state.states.murloc.MurlocVillageState
-import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, State, UiScene, UserAction}
+import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, QuestSupport, State, UiScene, UserAction}
 import zio.{Random, Task, ZIO}
 
 case class InventoryState(
@@ -584,7 +584,10 @@ case class InventoryState(
                 renderer.show(user, Screen(
                   content.format("inventory.equipped",
                     "name" -> item.name,
-                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil))).as(false)
+                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil)) *>
+                // Двенадцатая вещь набора — за собранный набор своё достижение.
+                QuestSupport.grantFullSets(heroDao, content, user,
+                  hero.copy(equipment = newEq, fightStats = newFight), renderer)).as(false)
           }
       }
       res <- if (keepScreen) ZIO.succeed(StateType.Inventory) else showList(user, renderer)
