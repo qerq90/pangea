@@ -143,11 +143,8 @@ case class TempleAzatState(
           renderer.show(user, Screen(content.format("temple.blessing.notEnough", "cost" -> BlessingCost.toString), Nil))
         else {
           // Продлеваем от максимума (текущий остаток или now) на неделю; +250 отдыхов.
-          val base    = azat.blessingUntil.filter(_ > now).getOrElse(now)
-          val updated = azat.copy(
-            blessingUntil = Some(base + AzatState.BlessingDurationMs),
-            instantRests  = azat.instantRests + AzatState.BlessingInstantRests
-          )
+          val updated = azat.blessedFor(AzatState.BlessingDurationMs, now)
+            .copy(instantRests = azat.instantRests + AzatState.BlessingInstantRests)
           heroDao.updateDoubloons(user.userId, hero.doubloons - BlessingCost) *>
             saveAzat(user, updated) *>
             renderer.show(user, Screen(content.text("temple.blessing.granted"), Nil))

@@ -62,6 +62,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Registration extends StateType
   case object Dungeon      extends StateType
   case object HeroStats    extends StateType
+  case object FriendCode   extends StateType // «Код друга» из Персонажа: свой код и ввод чужого
   case object Battle       extends StateType
   case object Death        extends StateType
 

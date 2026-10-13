@@ -28,6 +28,7 @@ case class HeroStatsState(
       "OpenSkills"     -> Target.Goto(StateType.Skills),
       "OpenKnowledge"  -> Target.Goto(StateType.Knowledge),
       "OpenSquad"      -> Target.Goto(StateType.Squad),
+      "OpenFriendCode" -> Target.Goto(StateType.FriendCode),
       "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
@@ -155,6 +156,7 @@ case class HeroStatsState(
         content.choice("OpenTraumas", "heroStats.traumas").copy(color = ChoiceColor.Secondary, row = Some(1))),
       Option.when(hero.upgradePoints > 0)(
         content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
+      Some(content.choice("OpenFriendCode", "heroStats.friendCode").copy(row = Some(2))),
       Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
     ).flatten
     Screen(hero.getInfo(nowMs, blessed, instantRests) + traumaLine, choices)
