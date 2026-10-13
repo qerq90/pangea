@@ -59,7 +59,9 @@ object ItemGenerator {
             modifyParameter(item.rarity.factorR3 * 0.4 * item.lvl, rng1)
           (item.withAttack(item.attack + v), r)
         case Stat.Accuracy =>
-          val (v, r) = modifyParameter(item.rarity.factorR3 * item.lvl, rng1)
+          // Половина прежней ставки: в попадании точность весит вдвое больше
+          // (см. BattleState.dodgeChance).
+          val (v, r) = modifyParameter(item.rarity.factorR3 * 0.5 * item.lvl, rng1)
           (item.withAccuracy(item.accuracy + v), r)
         case Stat.Energy =>
           val (v, r) =
@@ -149,7 +151,9 @@ object ItemGenerator {
       } else {
         // Лёгкий профиль: меткость и уклонение. Атаки здесь нет — её даёт
         // только оружие (см. applyMandatory и Stat.Attack в updateExtraParams).
-        val (accuracy, rng3b) = modifyParameter(rarity.factorR * itemLvl, rng3z)
+        // Меткости — половина ставки: в попадании она весит вдвое больше
+        // (см. BattleState.dodgeChance).
+        val (accuracy, rng3b) = modifyParameter(rarity.factorR * 0.5 * itemLvl, rng3z)
         val (evasion, rng3c)  = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(

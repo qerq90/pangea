@@ -268,7 +268,7 @@ object Skill extends Enum[Skill] {
     def baseValue(hero: Hero, nowMs: Long): Double = {
       val b = hero.effectiveBaseStats(nowMs)
       val f = hero.effectiveFightStats(nowMs)
-      2.0 * b.agi + 0.8 * f.accuracy + 4.0 * b.int + 0.1 * f.atk
+      2.0 * b.agi + 0.4 * f.accuracy + 4.0 * b.int + 0.1 * f.atk
     }
     def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
   }

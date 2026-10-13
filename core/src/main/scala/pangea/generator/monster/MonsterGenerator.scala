@@ -9,7 +9,7 @@ import pangea.model.stats.FightStats
 /** Ставки башни со стрелком — за уровень. */
 object TowerRates {
   val AtkPerLvl: Long      = 20L
-  val AccuracyPerLvl: Long = 30L
+  val AccuracyPerLvl: Long = 15L
   val DefencePerLvl: Long  = 20L
   val ArmorPerLvl: Long    = 150L
   val HpPerLvl: Long       = 45L
@@ -146,7 +146,9 @@ object MonsterGenerator {
       // срезанного держится ровной всю игру (см. BattleState.pierce).
       defence = ((5.0 + DefenceBonus) * base * f.defenceFactor).toLong,
       evasion = (16.25 * base * f.evasionFactor).toLong,
-      accuracy = (16.5 * base * f.accuracyFactor).toLong,
+      // Точность у всех вдвое меньше, чем была, а в попадании весит вдвое
+      // больше (см. BattleState.dodgeChance) — бьют мобы так же метко.
+      accuracy = (8.25 * base * f.accuracyFactor).toLong,
       // Потолок энергии — из него моб платит за свои умения (см. MonsterEnergy).
       energy = MonsterEnergy.maxEnergy(level.toLong)
     )

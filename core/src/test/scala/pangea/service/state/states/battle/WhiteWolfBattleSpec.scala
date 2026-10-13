@@ -103,7 +103,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
       assertTrue(wolf.bossLvl(9L) == 2L && wolf.bossLvl(4L) == 1L && wolf.bossLvl(5L) == 1L && wolf.bossLvl(1L) == 1L) &&
       assertTrue(wolf.bossLvl(13L) == 3L && MiniBoss.bossLvl(13L) == 2L) && // у элементалей по-прежнему раз в пять
       assertTrue(s.hp == 1000L * bossLvl && s.armor == 650L * bossLvl && s.atk == 300L * bossLvl) &&
-      assertTrue(s.energy == 200L * bossLvl && s.accuracy == 450L * bossLvl) &&
+      assertTrue(s.energy == 200L * bossLvl && s.accuracy == 225L * bossLvl) &&
       assertTrue(s.defence == 50L * bossLvl && s.evasion == 200L * bossLvl) &&
       assertTrue(wolf.energyRegen(bossLvl) == 14L * bossLvl && wolf.expReward(bossLvl) == 150L * bossLvl) &&
       assertTrue(wolf.monsterName == "Белый Волк" && wolf.abilities == 5)

@@ -188,7 +188,7 @@ object SewerSpec extends ZIOSpecDefault {
       assertTrue(f.attackFactor == 0.9 && f.accuracyFactor == 1.2 && f.evasionFactor == 1.6) &&
       // база = уровень × редкость × 1.1 = 10 × 1.2 × 1.1 = 13.2
       assertTrue(rat.atk == 118L && rat.hp == 316L && rat.armor == 91L) &&
-      assertTrue(rat.defence == 46L && rat.evasion == 343L && rat.accuracy == 261L) &&
+      assertTrue(rat.defence == 46L && rat.evasion == 343L && rat.accuracy == 130L) &&
       // чумная сильнее ровно на отношение редкостей
       assertTrue(sick.hp == 422L && sick.atk == 158L)
     },

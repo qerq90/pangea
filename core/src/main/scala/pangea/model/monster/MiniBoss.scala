@@ -131,7 +131,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ArmorPerLvl: Long    = 750L
     val AtkPerLvl: Long      = 250L
     val EnergyPerLvl: Long   = 150L
-    val AccuracyPerLvl: Long = 250L
+    val AccuracyPerLvl: Long = 125L
     val EvasionPerLvl: Long  = 100L
     val EnergyRegenPerLvl: Long = 7L
     val ExpPerLvl: Long      = 200L
@@ -228,7 +228,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ArmorPerLvl: Long       = 1500L
     val AtkPerLvl: Long         = 350L
     val EnergyPerLvl: Long      = 100L
-    val AccuracyPerLvl: Long    = 200L
+    val AccuracyPerLvl: Long    = 100L
     val EvasionPerLvl: Long     = 50L
     val EnergyRegenPerLvl: Long = 7L
     val ExpPerLvl: Long         = 200L
@@ -316,7 +316,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val HpPerLvl: Long          = 2200L
     val AtkPerLvl: Long         = 200L
     val EnergyPerLvl: Long      = 100L
-    val AccuracyPerLvl: Long    = 350L
+    val AccuracyPerLvl: Long    = 175L
     val EvasionPerLvl: Long     = 100L
     val EnergyRegenPerLvl: Long = 5L
     val ExpPerLvl: Long         = 175L
@@ -399,7 +399,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ArmorPerLvl: Long       = 650L
     val AtkPerLvl: Long         = 300L
     val EnergyPerLvl: Long      = 200L
-    val AccuracyPerLvl: Long    = 450L
+    val AccuracyPerLvl: Long    = 225L
     val DefencePerLvl: Long     = 50L
     val EvasionPerLvl: Long     = 200L
     val EnergyRegenPerLvl: Long = 14L
@@ -493,7 +493,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ArmorPerLvl: Long       = 400L
     val AtkPerLvl: Long         = 50L
     val EnergyPerLvl: Long      = 100L
-    val AccuracyPerLvl: Long    = 200L
+    val AccuracyPerLvl: Long    = 100L
     val DefencePerLvl: Long     = 100L
     val EvasionPerLvl: Long     = 50L
     val EnergyRegenPerLvl: Long = 7L
@@ -568,7 +568,7 @@ object MiniBoss extends Enum[MiniBoss] {
     val ArmorPerLvl: Long       = 300L
     val AtkPerLvl: Long         = 150L
     val EnergyPerLvl: Long      = 150L
-    val AccuracyPerLvl: Long    = 100L
+    val AccuracyPerLvl: Long    = 50L
     val DefencePerLvl: Long     = 150L
     val EvasionPerLvl: Long     = 150L
     val EnergyRegenPerLvl: Long = 11L

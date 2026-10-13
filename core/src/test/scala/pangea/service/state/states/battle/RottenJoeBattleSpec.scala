@@ -99,7 +99,7 @@ object RottenJoeBattleSpec extends ZIOSpecDefault {
       assertTrue(s.armor == 0L) && assertTrue(s.defence == 0L) &&
       assertTrue(s.atk == 200L * bossLvl) &&
       assertTrue(s.energy == 100L * bossLvl) &&
-      assertTrue(s.accuracy == 350L * bossLvl) &&
+      assertTrue(s.accuracy == 175L * bossLvl) &&
       assertTrue(s.evasion == 100L * bossLvl) &&
       assertTrue(joe.energyRegen(bossLvl) == 5L * bossLvl) &&
       assertTrue(joe.expReward(bossLvl) == 175L * bossLvl) &&
