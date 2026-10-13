@@ -8,6 +8,7 @@ import pangea.service.admin.AdminPanel
 import pangea.service.chat.ChatCommand
 import pangea.service.chat.ChatCommand.Money
 import pangea.service.parcel.{Parcels, Transfers}
+import pangea.service.parcel.Transfers.{FeePct, MinMoney}
 import pangea.service.payout.Payouts
 import pangea.service.state.{PlayerLock, State, StateHandler}
 import pangea.test._
@@ -17,7 +18,8 @@ import zio.test._
 /** Деньги из рук в руки: «Передать серебро 100» и «Передать дублоны 5» в
   * ответ на сообщение игрока в общей беседе. В сумке их не ищут — серебро
   * ложится получателю в ячейку (или ждёт его в городе), а дублоны, которые не
-  * теряются нигде, отдают откуда угодно, и в руки они идут сразу. */
+  * теряются нигде, отдают откуда угодно, и в руки они идут сразу. Меньше 50 не
+  * передают, а сверху суммы отправитель платит 10% комиссии — она сгорает. */
 object MoneyTransferSpec extends ZIOSpecDefault {
 
   private val userId     = UserId(1L)
@@ -74,6 +76,13 @@ object MoneyTransferSpec extends ZIOSpecDefault {
       assertTrue(ChatCommand.moneyQuery("серебро и дублоны").isEmpty)
     },
 
+    test("комиссия — десятая часть сверху, с округлением вверх; меньше 50 не передают") {
+      assertTrue(MinMoney == 50L && FeePct == 10L) &&
+      assertTrue(Transfers.fee(50L) == 5L && Transfers.fee(100L) == 10L) &&
+      // не меньше десятой части: с 55 — шесть, а не пять
+      assertTrue(Transfers.fee(55L) == 6L && Transfers.fee(51L) == 6L)
+    },
+
     test("серебро: с отправителя списано, получателю легло в ячейку, беседа знает") {
       for {
         t <- chat(silver = 500L)
@@ -81,9 +90,10 @@ object MoneyTransferSpec extends ZIOSpecDefault {
         _      <- say(handler, "Передать серебро 100", -1L)
         me     <- heroOf(dao, userId)
         sent   <- api.sentMessages
-      } yield assertTrue(me.silver == 400L) &&
+      } yield // сто ушло получателю, десять сгорело комиссией
+              assertTrue(me.silver == 390L) &&
               assertTrue(bank.silverSnapshot == 100L && payoutDao.snapshot.isEmpty) &&
-              assertTrue(sent.exists(_._1.contains("🪙 100 отправлено игроку"))) &&
+              assertTrue(sent.exists(m => m._1.contains("🪙 100 отправлено игроку") && m._1.contains("Комиссия — 🪙 10"))) &&
               assertTrue(players.announced.exists(m => m.contains("передал 🪙 100") &&
                 m.contains("[id" + sender.vkId.value) && m.contains("[id" + friend.vkId.value))) &&
               // получатель знает, где теперь его деньги
@@ -97,7 +107,7 @@ object MoneyTransferSpec extends ZIOSpecDefault {
         (handler, dao, bank, payoutDao, players, _) = t
         _  <- say(handler, "Передать 250 серебра", -1L)
         me <- heroOf(dao, userId)
-      } yield assertTrue(me.silver == 250L && bank.silverSnapshot == 0L) &&
+      } yield assertTrue(me.silver == 500L - 250L - 25L && bank.silverSnapshot == 0L) &&
               assertTrue(payoutDao.snapshot.get(friendHero).contains((250L, 0L))) &&
               assertTrue(players.sentLetters.exists { case (to, text) =>
                 to == friendUs && text.contains("в городе") })
@@ -105,45 +115,50 @@ object MoneyTransferSpec extends ZIOSpecDefault {
 
     test("дублоны идут сразу в руки: ни ячейки, ни ожидания города") {
       for {
-        t <- chat(doubloons = 10L)
+        t <- chat(doubloons = 100L)
         (handler, dao, bank, payoutDao, players, api) = t
-        _      <- say(handler, "Передать дублоны 3", -1L)
+        _      <- say(handler, "Передать дублоны 50", -1L)
         me     <- heroOf(dao, userId)
         friend <- heroOf(dao, friendUs)
         sent   <- api.sentMessages
-      } yield assertTrue(me.doubloons == 7L && friend.doubloons == 3L) &&
+      } yield // получатель получает ровно названное, комиссия сгорает
+              assertTrue(me.doubloons == 45L && friend.doubloons == 50L) &&
               assertTrue(bank.silverSnapshot == 0L && payoutDao.snapshot.isEmpty) &&
-              assertTrue(sent.exists(_._1.contains("🟡 3 отправлено игроку"))) &&
+              assertTrue(sent.exists(m => m._1.contains("🟡 50 отправлено игроку") && m._1.contains("Комиссия — 🟡 5"))) &&
               assertTrue(players.sentLetters.exists { case (to, text) =>
-                to == friendUs && text.contains("🟡 3") && text.contains("уже у вас") })
+                to == friendUs && text.contains("🟡 50") && text.contains("уже у вас") })
     },
 
     test("дублоны отдают и из лабиринта: они не теряются нигде") {
       for {
-        t <- chat(doubloons = 10L, state = StateType.Dungeon)
+        t <- chat(doubloons = 100L, state = StateType.Dungeon)
         (handler, dao, _, _, _, api) = t
-        _      <- say(handler, "Передать 4 дублона", -1L)
+        _      <- say(handler, "Передать 60 дублонов", -1L)
         me     <- heroOf(dao, userId)
         friend <- heroOf(dao, friendUs)
         sent   <- api.sentMessages.map(_.map(_._1).mkString("\n"))
-      } yield assertTrue(me.doubloons == 6L && friend.doubloons == 4L) &&
+      } yield assertTrue(me.doubloons == 100L - 60L - 6L && friend.doubloons == 60L) &&
               assertTrue(!sent.contains("только из города"))
     },
 
-    test("денег не хватает или сумму не назвали — ничего не списано, вещей не ищем") {
+    test("не хватает с комиссией, меньше минимума, без суммы — ничего не списано, вещей не ищем") {
       for {
-        t <- chat(silver = 50L, doubloons = 1L)
+        t <- chat(silver = 100L, doubloons = 50L)
         (handler, dao, bank, payoutDao, players, api) = t
+        // ровно сто есть, но с комиссией нужно сто десять
         _    <- say(handler, "Передать серебро 100", -1L)
-        _    <- say(handler, "Передать дублоны 5", -2L)
-        _    <- say(handler, "Передать серебро", -3L)
+        _    <- say(handler, "Передать дублоны 50", -2L)
+        _    <- say(handler, "Передать серебро 49", -3L)
+        _    <- say(handler, "Передать 30 дублонов", -4L)
+        _    <- say(handler, "Передать серебро", -5L)
         me   <- heroOf(dao, userId)
         sent <- api.sentMessages.map(_.map(_._1).mkString("\n"))
-      } yield assertTrue(me.silver == 50L && me.doubloons == 1L) &&
+      } yield assertTrue(me.silver == 100L && me.doubloons == 50L) &&
               assertTrue(bank.silverSnapshot == 0L && payoutDao.snapshot.isEmpty) &&
               assertTrue(players.announced.isEmpty) &&
-              assertTrue(sent.contains("Столько серебра у вас нет") && sent.contains("🪙 50")) &&
-              assertTrue(sent.contains("Столько дублонов у вас нет") && sent.contains("🟡 1")) &&
+              assertTrue(sent.contains("Не хватает серебра: нужно 🪙 110 вместе с комиссией 🪙 10")) &&
+              assertTrue(sent.contains("Не хватает дублонов: нужно 🟡 55 вместе с комиссией 🟡 5")) &&
+              assertTrue(sent.contains("Меньше 🪙 50 не передать") && sent.contains("Меньше 🟡 50 не передать")) &&
               assertTrue(sent.contains("Сколько передать?")) &&
               // в сумке «серебро» не искали
               assertTrue(!sent.contains("В сумке нет ничего похожего"))
