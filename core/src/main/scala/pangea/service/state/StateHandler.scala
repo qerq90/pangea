@@ -74,9 +74,12 @@ class StateHandler(
   /** «Передать» из общей беседы: адресата бот берёт из процитированного
     * сообщения, а выбирать вещь отправитель будет у себя в личке — там у
     * каждой кнопки видны характеристики, и одинаковые названия не путаются.
+    * «Передать серебро 100» и «Передать дублоны 5» отдают деньги: их в сумке
+    * не ищут.
     *
-    * Отдавать можно только из города; получатель может быть где угодно, вещь
-    * придёт ему посылкой. */
+    * Вещи и серебро отдают только из города; получатель может быть где угодно,
+    * вещь придёт ему посылкой, серебро — в ячейку или в руки в городе. Дублоны
+    * не теряются нигде: их отдают откуда угодно, и в руки они идут сразу. */
   def transferFromChat(senderVk: VkId, targetVk: VkId, query: String, eventId: Long): Task[Unit] = {
     val renderer = VkRenderer(api)
     userRepo.getUserByVkId(senderVk).flatMap {
@@ -86,9 +89,13 @@ class StateHandler(
           // Ключ события беседы приходит готовым (см. ChatCommand.eventKey):
           // он отрицательный, чтобы не путаться с номерами из лички.
           userRepo.checkAndRecordEvent(sender.userId, eventId).flatMap { fresh =>
-            ZIO.when(fresh)(startTransfer(sender, targetVk, query, renderer)).unit
+            if (fresh) startTransfer(sender, targetVk, query, renderer) else ZIO.none
           }
         }
+          // Хвост передачи — то, что делается уже под локом получателя (дублоны
+          // ему в руки). Два лока разом не держим: двое, что одновременно
+          // передают друг другу, ждали бы друг друга вечно.
+          .flatMap(ZIO.foreachDiscard(_)(identity))
     }
   }
 
@@ -125,51 +132,98 @@ class StateHandler(
         } yield ()
     }
 
-  private def startTransfer(sender: User, targetVk: VkId, query: String, renderer: Renderer): Task[Unit] =
+  /** Начало передачи — под локом отправителя. Возвращает хвост, если он есть:
+    * то, что надо сделать уже под локом получателя, когда этот лок отпущен. */
+  private def startTransfer(sender: User, targetVk: VkId, query: String, renderer: Renderer): Task[Option[Task[Unit]]] =
     for {
       heroOp   <- heroRepo.getHero(sender.userId)
       targetOp <- userRepo.getUserByVkId(targetVk)
       targetHero <- targetOp.fold(ZIO.none: Task[Option[pangea.model.hero.Hero]])(u => heroRepo.getHero(u.userId))
-      _ <- (heroOp, targetOp, targetHero) match {
+      money     = ChatCommand.moneyQuery(query)
+      // Дублоны не теряются нигде — их можно отдать хоть из лабиринта.
+      anywhere  = money.exists(_._1 == ChatCommand.Money.Doubloons)
+      tail <- (heroOp, targetOp, targetHero) match {
         case (Some(hero), Some(target), Some(theirHero)) if target.userId != sender.userId =>
-          if (!StateType.cityStates.contains(hero.state))
-            api.sendMessage(sender, StateHandler.TransferNotInCity, List.empty, None)
+          if (!anywhere && !StateType.cityStates.contains(hero.state))
+            api.sendMessage(sender, StateHandler.TransferNotInCity, List.empty, None).as(None)
           else
             for {
               name   <- api.getName(target).map(r => s"${r.response.head.firstName} ${r.response.head.lastName}")
                           .orElse(ZIO.succeed(StateHandler.TransferSomeone))
               to      = TransferTarget(theirHero.id, target.userId, name)
-              item    = ChatCommand.itemQuery(query)
-              count   = ChatCommand.count(query)
-              now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-              // Понятное название уходит сразу; экран нужен только там, где
-              // вещь можно спутать, — в первую очередь у экипировки.
-              outcome <- transfers.quickSend(sender, hero, to, item, count, now)
-              _ <- outcome match {
-                case Transfers.Outcome.Sent(message) =>
-                  api.sendMessage(sender, message, List.empty, None)
-                case Transfers.Outcome.Forbidden(message) =>
-                  api.sendMessage(sender, message, List.empty, None)
-                case Transfers.Outcome.Empty =>
-                  api.sendMessage(sender, StateHandler.transferNothing(item), List.empty, None)
-                case Transfers.Outcome.NeedPick =>
-                  val scene = TransferState.TransferScene(
-                    toHeroId = theirHero.id.value,
-                    toUserId = target.userId.value,
-                    toName   = name,
-                    query    = item,
-                    count    = count)
-                  heroDao.writeSceneData(sender.userId, scene.asJson) *>
-                    // Куда вернуть после передачи — туда же, откуда позвали.
-                    heroDao.writeReturnState(sender.userId, Some(hero.state)) *>
-                    enterState(sender, StateType.Transfer, renderer)
-              }
-            } yield ()
+              tail   <- money match {
+                          case Some((ChatCommand.Money.Doubloons, Some(amount))) =>
+                            startDoubloons(sender, hero, to, amount)
+                          case Some((ChatCommand.Money.Silver, Some(amount))) =>
+                            transfers.sendSilver(sender, hero, to, amount).flatMap(reply(sender, _)).as(None)
+                          // Деньги, но без суммы: спрашиваем, сколько.
+                          case Some((_, None)) =>
+                            api.sendMessage(sender, content.text("transfer.money.howMuch"), List.empty, None).as(None)
+                          case None =>
+                            sendItems(sender, hero, target, theirHero, to, query, renderer).as(None)
+                        }
+            } yield tail
         case (Some(_), _, _) =>
-          api.sendMessage(sender, StateHandler.TransferNoTarget, List.empty, None)
-        case _ => ZIO.unit
+          api.sendMessage(sender, StateHandler.TransferNoTarget, List.empty, None).as(None)
+        case _ => ZIO.none
+      }
+    } yield tail
+
+  /** Дублоны: с отправителя снимаем здесь, под его локом, а зачисляем хвостом —
+    * под локом получателя. Не вышло зачислить — возвращаем, снова под локом
+    * отправителя. «Отправлено» говорим, только когда дублоны дошли. */
+  private def startDoubloons(sender: User, hero: pangea.model.hero.Hero, to: TransferTarget,
+                             amount: Long): Task[Option[Task[Unit]]] =
+    transfers.takeDoubloons(sender, hero, amount).flatMap {
+      case Some(refusal) => api.sendMessage(sender, refusal, List.empty, None).as(None)
+      case None =>
+        ZIO.some(
+          lock.withLock(to.userId)(transfers.giveDoubloons(to, amount)).foldZIO(
+            err =>
+              ZIO.logError(s"Дублоны не дошли до ${to.userId.value}: ${err.getMessage}") *>
+                lock.withLock(sender.userId)(transfers.returnDoubloons(sender, amount)) *>
+                api.sendMessage(sender, content.text("transfer.money.failed"), List.empty, None).unit,
+            _ =>
+              transfers.doubloonsDelivered(sender, to, amount)
+                .flatMap(api.sendMessage(sender, _, List.empty, None)).unit
+          ))
+    }
+
+  /** Ответ отправителю на итог передачи. */
+  private def reply(sender: User, outcome: Transfers.Outcome): Task[Unit] =
+    outcome match {
+      case Transfers.Outcome.Sent(message)      => api.sendMessage(sender, message, List.empty, None).unit
+      case Transfers.Outcome.Forbidden(message) => api.sendMessage(sender, message, List.empty, None).unit
+      case Transfers.Outcome.Empty | Transfers.Outcome.NeedPick => ZIO.unit
+    }
+
+  /** Вещь: понятное название уходит сразу; экран нужен только там, где вещь
+    * можно спутать, — в первую очередь у экипировки. */
+  private def sendItems(sender: User, hero: pangea.model.hero.Hero, target: User, theirHero: pangea.model.hero.Hero,
+                        to: TransferTarget, query: String, renderer: Renderer): Task[Unit] = {
+    val item  = ChatCommand.itemQuery(query)
+    val count = ChatCommand.count(query)
+    for {
+      now     <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      outcome <- transfers.quickSend(sender, hero, to, item, count, now)
+      _ <- outcome match {
+        case Transfers.Outcome.Empty =>
+          api.sendMessage(sender, StateHandler.transferNothing(item), List.empty, None)
+        case Transfers.Outcome.NeedPick =>
+          val scene = TransferState.TransferScene(
+            toHeroId = theirHero.id.value,
+            toUserId = target.userId.value,
+            toName   = to.name,
+            query    = item,
+            count    = count)
+          heroDao.writeSceneData(sender.userId, scene.asJson) *>
+            // Куда вернуть после передачи — туда же, откуда позвали.
+            heroDao.writeReturnState(sender.userId, Some(hero.state)) *>
+            enterState(sender, StateType.Transfer, renderer)
+        case sentOrRefused => reply(sender, sentOrRefused)
       }
     } yield ()
+  }
 
   /** Показать экран состояния и записать его герою (без проверки «уже там»). */
   private def enterState(user: User, to: StateType, renderer: Renderer): Task[Unit] =
@@ -383,7 +437,7 @@ object StateHandler {
 
   /** Ответы на «Передать» из беседы: короткие и в личку, чтобы не шуметь в чате. */
   val TransferNotInCity: String =
-    "Передавать вещи можно только из города: дойдите до Кинета и повторите."
+    "Передавать вещи и деньги можно только из города: дойдите до Кинета и повторите."
 
   val TransferNoTarget: String =
     "Не понял, кому передавать. Ответьте на сообщение игрока (или перешлите его) и напишите «Передать …»."

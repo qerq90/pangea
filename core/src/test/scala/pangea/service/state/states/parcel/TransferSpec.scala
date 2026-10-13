@@ -55,9 +55,12 @@ object TransferSpec extends ZIOSpecDefault {
       parcelDao = TestParcelDao.empty
       content  <- ZIO.attempt(SceneContent.load())
       players   = new TestPlayers
-      parcels   = Parcels(parcelDao, TestBankRepository.withCells(1), content)
+      bank      = TestBankRepository.withCells(1)
+      parcels   = Parcels(parcelDao, bank, content)
+      payouts   = pangea.service.payout.Payouts(TestPayoutDao.empty, heroDao, content)
       hero     <- heroDao.getHeroByUserId(userId).map(_.get)
-    } yield (Transfers(invRepo, userRepo, parcels, players, content), hero, invRepo, parcelDao, players)
+    } yield (Transfers(invRepo, userRepo, parcels, players, content, heroDao, bank, payouts),
+             hero, invRepo, parcelDao, players)
 
   private def transfer(items: List[Item], query: String, count: Int = 1) =
     for {
@@ -72,7 +75,8 @@ object TransferSpec extends ZIOSpecDefault {
       players   = new TestPlayers
       renderer <- TestRenderer.make
       parcels   = Parcels(parcelDao, bank, content)
-      transfers = Transfers(invRepo, userRepo, parcels, players, content)
+      transfers = Transfers(invRepo, userRepo, parcels, players, content, heroDao, bank,
+                    pangea.service.payout.Payouts(TestPayoutDao.empty, heroDao, content))
     } yield (TransferState(heroDao, invRepo, transfers, content),
              invRepo, parcelDao, bank, players, renderer)
 

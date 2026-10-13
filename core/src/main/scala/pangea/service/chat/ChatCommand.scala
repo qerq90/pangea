@@ -1,13 +1,20 @@
 package pangea.service.chat
 
 /** Команды, которые бот слушает в общей беседе Пангеи: «Передать» в ответ
- *  (или пересылкой) на сообщение того, кому передают, и две команды о себе —
- *  «Мой профиль» и «Моё снаряжение», ответ на которые уходит туда же, в
- *  беседу: о себе рассказывают при всех. */
+ *  (или пересылкой) на сообщение того, кому передают, — вещь или деньги, — и
+ *  две команды о себе — «Мой профиль» и «Моё снаряжение», ответ на которые
+ *  уходит туда же, в беседу: о себе рассказывают при всех. */
 object ChatCommand {
 
   /** Слово, с которого начинается передача. */
   val Transfer: String = "передать"
+
+  /** Деньги, которые передают фразой из беседы. */
+  sealed trait Money
+  object Money {
+    case object Silver    extends Money
+    case object Doubloons extends Money
+  }
 
   /** Команда о себе: ответ бот пишет в саму беседу. */
   sealed trait Self
@@ -59,6 +66,27 @@ object ChatCommand {
   def transferQuery(text: String): Option[String] = {
     val trimmed = text.trim
     Option.when(trimmed.toLowerCase.startsWith(Transfer))(trimmed.drop(Transfer.length).trim)
+  }
+
+  // Серебро узнаём по самому слову, а не по корню: «серебряное кольцо» —
+  // вещь, а не деньги. Дублон же ни в одном названии вещи не встречается.
+  private val SilverWords = Set("серебро", "серебра", "серебру", "серебром", "серебре")
+
+  /** Про деньги ли запрос: «Передать серебро 100», «Передать 5 дублонов»,
+    * «Передать 🪙 1 000». Возвращает валюту и сумму; сумма `None` — её не
+    * назвали (или назвали не числом). Целиком `None` — денег в запросе нет,
+    * значит, ищем вещь; назвали обе валюты сразу — тоже не разобрать. */
+  def moneyQuery(query: String): Option[(Money, Option[Long])] = {
+    val words     = bare(query).split(' ').toList.filter(_.nonEmpty)
+    val silver    = query.contains("🪙") || words.exists(SilverWords.contains)
+    val doubloons = query.contains("🟡") || words.exists(_.startsWith("дублон"))
+    // Сумму собираем из всех чисел подряд: «1 000» — это тысяча, а не единица.
+    val amount    = words.filter(_.forall(_.isDigit)).mkString.toLongOption.filter(_ > 0L)
+    (silver, doubloons) match {
+      case (true, false) => Some(Money.Silver -> amount)
+      case (false, true) => Some(Money.Doubloons -> amount)
+      case _             => None
+    }
   }
 
   /** Сколько штук просят. Понимает «2 штуки», «2 шт», «х2»; по умолчанию одна. */
