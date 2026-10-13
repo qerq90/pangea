@@ -180,13 +180,102 @@ object InventoryStateSpec extends ZIOSpecDefault {
         _      <- state.action(testUser, tap("Drop"), renderer)
         last   <- renderer.sentScreens.map(_.last)
       } yield assertTrue(screen.text.contains("В сумке таких: 3")) &&
-              // ушёл ровно один камень из стопки
+              // ушёл ровно один камень из стопки — последний: показанный первым
+              // остаётся, и карточка стоит на месте
               assertTrue(left.size == 2) &&
-              assertTrue(!left.exists(_.id == 221L)) &&
-              // и мы остались на карточке стопки — со следующим камнем и счётом 2
+              assertTrue(!left.exists(_.id == 223L) && left.exists(_.id == 221L)) &&
+              // и мы остались на карточке стопки — с тем же камнем и счётом 2
               assertTrue(after.text.contains("В сумке таких: 2") && after.choices.exists(_.id == "Drop")) &&
               // выбросили последний — только теперь список
               assertTrue(invRepo.snapshot.isEmpty && !last.choices.exists(_.id == "Drop"))
+    },
+
+    test("кошелёк из стопки: вернуть и развязать — остаёмся на карточке, уходит последний") {
+      import pangea.service.state.states.events.thieves.ThievesState
+      import pangea.model.item.TrophyKind
+      // Кошельки разного уровня лежат одной стопкой; благодарность — по тому,
+      // что ушёл, то есть по последнему.
+      val purses = List(ThievesState.purse(10L).copy(id = 401L),
+                        ThievesState.purse(20L).copy(id = 402L),
+                        ThievesState.purse(30L).copy(id = 403L))
+      for {
+        quad                             <- makeState(baseHero, purses)
+        (state, heroDao, invRepo, renderer) = quad
+        _       <- state.action(testUser, selectItem(403L), renderer)   // кнопка из списка
+        opened  <- renderer.sentScreens.map(_.last)
+        _       <- state.action(testUser, tap("PurseReturn"), renderer)
+        hero    <- heroDao.getHeroByUserId(userId).map(_.get)
+        after1  <- renderer.sentScreens.map(_.last)
+        left1    = invRepo.snapshot.map(_.id)
+        _       <- state.action(testUser, tap("PurseOpen"), renderer)
+        after2  <- renderer.sentScreens.map(_.last)
+        left2    = invRepo.snapshot.map(_.id)
+        _       <- state.action(testUser, tap("PurseOpen"), renderer)
+        gone    <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(opened.text.contains("В сумке таких: 3")) &&
+              assertTrue(hero.guildReputation == TrophyKind.reputationFor(TrophyKind.Relic.coef, 30L)) &&
+              // ушёл последний, а мы на той же карточке — с меньшим счётом
+              assertTrue(left1 == List(401L, 402L) && after1.choices.exists(_.id == "PurseReturn")) &&
+              assertTrue(after1.text.contains("В сумке таких: 2")) &&
+              assertTrue(left2 == List(401L) && after2.choices.exists(_.id == "PurseOpen")) &&
+              // развязали последний — карточки больше нет, список
+              assertTrue(invRepo.snapshot.isEmpty && !gone.choices.exists(_.id == "PurseOpen"))
+    },
+
+    test("малые руны: складываются последние пять, карточка стопки остаётся") {
+      import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
+      import pangea.model.item.PassiveKind
+      val rune  = Rune.Passive(PassiveKind.QuickHands)
+      val small = (1 to 7).map(i => RuneStone.item(rune, RuneStoneSize.Small).copy(id = 500L + i)).toList
+      for {
+        quad                          <- makeState(baseHero, small)
+        (state, _, invRepo, renderer)  = quad
+        _      <- state.action(testUser, selectItem(507L), renderer)
+        _      <- state.action(testUser, tap("CombineRune"), renderer)
+        folded <- renderer.sentScreens.map(_.last)
+        left    = invRepo.snapshot
+        // двух не хватает на большую — отказ, но с карточки не уходим
+        _      <- state.action(testUser, tap("CombineRune"), renderer)
+        refused <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(left.count(_.isSmallRune) == 2 && left.exists(_.id == 501L) && left.exists(_.id == 502L)) &&
+              assertTrue(left.exists(_.runeStone.exists(_.size == RuneStoneSize.Big))) &&
+              assertTrue(folded.choices.exists(_.id == "CombineRune") && folded.text.contains("В сумке таких: 2")) &&
+              assertTrue(refused.choices.exists(_.id == "CombineRune"))
+    },
+
+    test("«Нет» в подтверждении — назад на карточку стопки, а не в список") {
+      val stones = (1 to 2).map(i => GemGenerator.item(GemKind.Ruby, 2).copy(id = 600L + i)).toList
+      for {
+        quad                          <- makeState(baseHero, stones)
+        (state, _, invRepo, renderer)  = quad
+        _      <- state.action(testUser, selectItem(602L), renderer)
+        _      <- state.action(testUser, tap("CrushGem"), renderer)
+        ask    <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, tap("ItemCard"), renderer)
+        back   <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(ask.choices.exists(_.id == "ItemCard")) &&
+              assertTrue(back.text.contains("В сумке таких: 2") && back.choices.exists(_.id == "CrushGem")) &&
+              assertTrue(invRepo.snapshot.size == 2)
+    },
+
+    test("вставка камня из стопки: уходит последний, а вернёмся на карточку стопки") {
+      import pangea.service.state.UiScene
+      val stones = (1 to 3).map(i => GemGenerator.item(GemKind.Topaz, 1).copy(id = 700L + i)).toList
+      for {
+        quad                              <- makeState(baseHero, stones)
+        (state, heroDao, _, renderer)      = quad
+        _      <- state.action(testUser, selectItem(703L), renderer)
+        next   <- state.action(testUser, tap("SocketInsert"), renderer)
+        sock   <- heroDao.readSceneData(userId).map(_.flatMap(_.hcursor.downField(UiScene.Socketing).get[Long]("gemId").toOption))
+        // экран вставки вернул нас в сумку
+        _      <- state.enter(testUser, renderer)
+        back   <- renderer.sentScreens.map(_.last)
+        // а обычный вход в сумку — по-прежнему список
+        _      <- state.enter(testUser, renderer)
+        list   <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(next == StateType.Socketing && sock.contains(703L)) &&
+              assertTrue(back.text.contains("В сумке таких: 3") && back.choices.exists(_.id == "SocketInsert")) &&
+              assertTrue(!list.choices.exists(_.id == "SocketInsert"))
     },
 
     test("пыль из стопки сыплется по одной, не выкидывая из карточки") {
