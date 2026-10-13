@@ -8,7 +8,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.ItemGenerator
 import pangea.model.hero.Hero
-import pangea.model.item.{FlaskKind, Item, ItemStack, ItemType, Rarity}
+import pangea.model.item.{FlaskKind, Item, ItemDetails, ItemStack, ItemType, Rarity}
 import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -666,12 +666,25 @@ object MerchantState {
     else
       // Камни и материалы крафта не хлам никогда: их редкость ничего не говорит
       // о ценности (вечно огненное железо — серое, а стоит дороже иной вещи).
+      // Расходники пояса — отвар и цветок — тоже.
       item.itemType != ItemType.Gem &&
         item.itemType != ItemType.Material &&
         item.itemType != ItemType.Brew &&
+        item.itemType != ItemType.Rose &&
+        // Пояс, снятый с чем-то в ячейках, хламом не считается: под нож ушло бы
+        // и содержимое, а «Продать хлам» его не показывает — серый пояс с
+        // раскрывшейся розой внутри ушёл бы за пару монет.
+        !holdsSomething(item) &&
         s.rarities.contains(item.rarity) &&
         (s.passives || item.passive.isEmpty) &&
         (s.actives || item.activeSkill.isEmpty)
+
+  /** Лежит ли что-нибудь в ячейках этого пояса: полная фляга, горсть, склянка
+    * или цветок. Опустевшие ячейки только помнят содержимое — их не считаем. */
+  private def holdsSomething(item: Item): Boolean = item.details match {
+    case b: ItemDetails.Belt => b.slots.exists(_.uses > 0)
+    case _                   => false
+  }
 
   final case class MerchantData(
     items: List[MerchantItem],

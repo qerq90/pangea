@@ -231,14 +231,15 @@ object CubeCraft {
       })
   }
 
-  // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты делят
-  // травы между собой, поэтому жадный «первый подходящий» сварил бы три
-  // костоправных из трав, сложенных под три разных отвара. Вместо этого по
-  // травам в кубе строится план: наибольшее число отваров, при равенстве — как
-  // можно больше разных; каждое применение забирает первый шаг плана, а остаток
-  // пула на следующем шаге даёт тот же план без него.
+  // Травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепт — от двух
+  // трав до четырёх. Рецепты делят травы между собой, поэтому жадный «первый
+  // подходящий» сварил бы три костоправных из трав, сложенных под три разных
+  // отвара. Вместо этого по травам в кубе строится план: наибольшее число
+  // отваров, при равенстве — тот, что берёт в дело больше трав, при равенстве —
+  // как можно больше разных; каждое применение забирает первый шаг плана, а
+  // остаток пула на следующем шаге даёт тот же план без него.
   private object HerbBrew extends Recipe {
-    val size = 3
+    val size = 4
     override def portions: Int = BrewRates.Portions
     override def portionsFor(result: Item): Int = result.brew.map(_.portions).getOrElse(BrewRates.Portions)
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
@@ -255,26 +256,44 @@ object CubeCraft {
       }
     }
 
-    /** Лучший план варки из этих трав: больше отваров, при равенстве — больше
-      * разных видов, при равенстве — по порядку BrewKind. Пул мал, состояний по
-      * счётчикам трав немного — поиск с памятью. */
+    /** Насколько далеко смотрим вперёд, выбирая, что варить первым. План
+      * строится заново перед каждой варкой, и нужен из него только первый шаг,
+      * поэтому заглядывать дальше незачем: сосчитать его до конца по большой
+      * куче трав — это миллионы состояний (а в сумку травник набирает и сотню
+      * стеблей), и куб вставал бы на минуты. Трёх шагов хватает, чтобы не
+      * сварить три одинаковых отвара из трав, сложенных под три разных. */
+    private val LookAhead: Int = 3
+
+    /** Лучший план варки из этих трав на [[LookAhead]] шагов вперёд: больше
+      * отваров, при равенстве — тот, что берёт в дело больше трав, при
+      * равенстве — больше разных видов, при равенстве — по порядку BrewKind.
+      * Состояния считаются с памятью: шагов немного, а веток по счётчикам трав
+      * хватает и в пределах трёх. */
     private def bestPlan(counts: Map[MaterialKind, Int]): List[BrewKind] = {
-      val memo = scala.collection.mutable.Map.empty[Map[MaterialKind, Int], List[BrewKind]]
+      val memo = scala.collection.mutable.Map.empty[(Map[MaterialKind, Int], Int), List[BrewKind]]
+      // Трав в дело: рецепт из четырёх трав целиком содержит рецепт из трёх
+      // (живучий сбор — живую воду), и без этой меры длинный рецепт не сварить
+      // никогда: отваров выходит по одному, а короткий стоит в списке раньше.
+      def herbs(plan: List[BrewKind]): Int = plan.map(_.recipe.size).sum
       def better(a: List[BrewKind], b: List[BrewKind]): Boolean =
-        a.size > b.size || (a.size == b.size && a.distinct.size > b.distinct.size)
-      def go(c: Map[MaterialKind, Int]): List[BrewKind] = memo.getOrElseUpdate(c, {
-        // Отвары, которым нужна готовая склянка, из одних трав не варятся.
-        BrewKind.values.toList.filter(_.base.isEmpty).foldLeft(List.empty[BrewKind]) { (best, kind) =>
-          val need = kind.recipe.groupBy(identity).view.mapValues(_.size).toMap
-          if (!need.forall { case (h, n) => c.getOrElse(h, 0) >= n }) best
-          else {
-            val rest = need.foldLeft(c) { case (m, (h, n)) => m.updated(h, m(h) - n) }.filter(_._2 > 0)
-            val plan = kind :: go(rest)
-            if (better(plan, best)) plan else best
+        a.size > b.size ||
+          (a.size == b.size &&
+            (herbs(a) > herbs(b) || (herbs(a) == herbs(b) && a.distinct.size > b.distinct.size)))
+      def go(c: Map[MaterialKind, Int], steps: Int): List[BrewKind] =
+        if (steps <= 0) Nil
+        else memo.getOrElseUpdate((c, steps), {
+          // Отвары, которым нужна готовая склянка, из одних трав не варятся.
+          BrewKind.values.toList.filter(_.base.isEmpty).foldLeft(List.empty[BrewKind]) { (best, kind) =>
+            val need = kind.recipe.groupBy(identity).view.mapValues(_.size).toMap
+            if (!need.forall { case (h, n) => c.getOrElse(h, 0) >= n }) best
+            else {
+              val rest = need.foldLeft(c) { case (m, (h, n)) => m.updated(h, m(h) - n) }.filter(_._2 > 0)
+              val plan = kind :: go(rest, steps - 1)
+              if (better(plan, best)) plan else best
+            }
           }
-        }
-      })
-      go(counts)
+        })
+      go(counts, LookAhead)
     }
   }
 
@@ -288,7 +307,7 @@ object CubeCraft {
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
     BrewDistill,                                           // 3 (склянка + травы)
-    HerbBrew,                                              // 3
+    HerbBrew,                                              // 2-4
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     RoseBloom,                                             // 2
     SetInfusion                                            // 2

@@ -275,6 +275,39 @@ object ArenaSpec extends ZIOSpecDefault {
               assertTrue(tasks.exists(x => x.userId == twoId && x.kind == TaskKind.ArenaPoke))
     },
 
+    test("пояс на арене: баф остаётся в бою, а второй раз за раунд за пояс не взяться") {
+      import pangea.model.item.{BeltSlot, BrewKind, Item, ItemDetails, ItemType, MaterialKind, Rarity}
+      def useSlot(idx: Int): UserAction = UserAction("", Some(s"""{"action":"BeltUse","slot":"$idx"}"""))
+      val belt = Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Belt(List(BeltSlot.Brew(BrewKind.FuryTincture), BeltSlot.Dust(MaterialKind.RubyDust))))
+      val weapon = Item(5L, "Меч", 1L, Rarity.Gray, ItemType.Weapon,
+        attack = 10, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
+      val quick = fighter(oneId, 1L, agi = 20, int = 20)
+      val armed = quick.copy(equipment = quick.equipment.copy(belt = belt, weapon = weapon))
+      val slow  = fighter(twoId, 2L, agi = 5, int = 5)
+      for {
+        t <- arena(oneId -> armed, twoId -> slow)
+        (state, battle, dao, fights, _, r) = t
+        _      <- state.action(one, tap("ArenaByCode"), r)
+        code    = codeOf(fights)
+        _      <- state.action(two, typed(code), r)
+        _      <- state.action(one, tap("ArenaPoke"), r)
+        _      <- battle.action(one, useSlot(0), r)
+        fight1 <- battleOf(dao, oneId)
+        // в том же раунде — отказ: отметка о расходнике пережила ход
+        seen   <- r.sentScreens.map(_.size)
+        _      <- battle.action(one, useSlot(1), r)
+        said   <- r.sentScreens.map(_.drop(seen).map(_.text).mkString("\n"))
+        me     <- heroOf(dao, oneId)
+      } yield assertTrue(fight1.exists(_.heroBattleState.buffs.exists(_.atk > 0L))) &&
+              assertTrue(fight1.exists(_.consumableUsedThisRound)) &&
+              assertTrue(said.contains("уже брались за пояс")) &&
+              // пыль в ячейке не тронута — ход не прошёл
+              assertTrue(me.equipment.belt.details == ItemDetails.Belt(List(
+                BeltSlot.Brew(BrewKind.FuryTincture, spent = true), BeltSlot.Dust(MaterialKind.RubyDust))))
+    },
+
     test("пока ходит соперник, кнопки молчат") {
       val quick = fighter(oneId, 1L, agi = 20, int = 20)
       val slow  = fighter(twoId, 2L, agi = 5, int = 5)

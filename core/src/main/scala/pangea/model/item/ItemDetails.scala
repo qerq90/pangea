@@ -57,8 +57,6 @@ object ItemDetails {
 
     def updated(idx: Int, slot: BeltSlot): Belt = copy(slots = slots.updated(idx, slot))
 
-    /** Пустые фляги с пояса долой: пить из них нечего, а место они держат. */
-    def withoutEmpty: Belt = copy(slots = slots.filter(_.uses > 0))
   }
 
   object Belt {

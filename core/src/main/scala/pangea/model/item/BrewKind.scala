@@ -3,6 +3,7 @@ package pangea.model.item
 import enumeratum._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor}
+import pangea.model.battle.Regen
 import pangea.model.hero.WeaponCoat
 import pangea.model.stats.ParamsBuff
 
@@ -34,6 +35,10 @@ object BrewEffect {
   case object Sentence extends BrewEffect
   /** Пузырь: ближайшая смерть героя не состоится — он останется с одним HP. */
   case object Bubble extends BrewEffect
+  /** Боевой отвар: в бою делает ровно то же, что делала склянка того же толка
+    * (см. [[PotionKind]]). С карточки его не пьют — он работает из ячейки
+    * пояса, и больше нигде. */
+  final case class Potion(kind: PotionKind) extends BrewEffect
 }
 
 /** Отвары: три травы в кубе Азата → порции ([[portions]]). Из трав первого
@@ -54,6 +59,25 @@ sealed abstract class BrewKind(
     case BrewEffect.WolfCall | BrewEffect.Mirror(_)                                 => true
     case BrewEffect.Sentence | BrewEffect.Bubble                                     => true
     case _                                                                           => false
+  }
+
+  /** Кладётся ли в ячейку пояса. На пояс идёт всё, чем в бою можно
+    * воспользоваться, — то есть почти всё: что пьют, что льют на клинок и что
+    * бросают под ноги. Не идёт четыре: шнапс с самогоном носят Трактирщику, а
+    * не в бой; сонным дурманом дымную флягу заправляют в спокойном месте — в
+    * сече переливать его из склянки во флягу поздно; а приговор пьют, когда
+    * выбирают, с кем встретиться, — такое решают до боя, не посреди него. */
+  def beltable: Boolean = this match {
+    case BrewKind.Schnapps | BrewKind.Moonshine    => false
+    case BrewKind.SleepingDope | BrewKind.Sentence => false
+    case _                                         => true
+  }
+
+  /** Боевой отвар — тот, что заменяет склянку: только из ячейки пояса и только
+    * в бою (см. [[BrewEffect.Potion]]). */
+  def combat: Boolean = effect match {
+    case BrewEffect.Potion(_) => true
+    case _                    => false
   }
 
   /** Отвар, который идёт в рецепт вместе с травами: перегонка берёт готовую
@@ -121,6 +145,33 @@ object BrewRates {
 
   /** Самогон: во сколько раз Трактирщик платит за него больше, чем за шнапс. */
   val MoonshineFactor: Long = 3L
+
+  // ── Боевые отвары: числа те же, что были у склянок на старых поясах ──────
+
+  /** Сколько здоровья возвращает зверобойный отвар (% от максимума). */
+  val PotionHealPct: Int = 25
+
+  /** Сколько брони возвращает дубильный настой (% от максимума). */
+  val PotionArmorPct: Int = 20
+
+  /** Сколько энергии возвращает «Второе дыхание» (% от максимума). */
+  val PotionEnergyPct: Int = 25
+
+  /** Прибавка кошачьего настоя к уклонению (в очках шанса). */
+  val PotionDodgePct: Int = 10
+
+  /** Прибавка яростной настойки к атаке (% от текущей). */
+  val PotionAtkPct: Int = 5
+
+  /** Прибавка отвара стойкости к защите (% от текущей). */
+  val PotionDefencePct: Int = 10
+
+  /** Сколько раундов держатся временные прибавки боевых отваров. */
+  val PotionBuffRounds: Int = 5
+
+  /** Живучий сбор: сколько HP в раунд. Число общее с регеном — каждый раунд
+    * оно слабеет на [[Regen.DecayPerRound]]. */
+  val PotionRegenPct: Int = Regen.OnDrink
 }
 
 object BrewKind extends Enum[BrewKind] {
@@ -186,6 +237,59 @@ object BrewKind extends Enum[BrewKind] {
     "Едкая мазь, от которой не затягиваются раны. Смазать клинок — и в ближайшем бою каждый удар по HP пускает врагу кровь; заодно заправляет флягу крови до краёв.",
     BrewEffect.Coat(WeaponCoat.Bleed, RefillSource.Bleed))
 
+  // ── Боевые отвары: те, что носят в ячейке пояса ──────────────────────────
+  // Все они идут через зверобой: трава простая, но единственная из простых,
+  // что держит отвар, годный для сечи. С карточки их не пьют — они работают
+  // из пояса и делают то же, что делали склянки на старых поясах.
+
+  case object WortDecoction extends BrewKind(
+    "Зверобойный отвар",
+    List(StJohnsWort, Chamomile, Calendula),
+    s"Красный, как свежий порез, и пахнет раздавленным стеблем. На полке ему не место — его носят при себе: глоток посреди сечи возвращает ${BrewRates.PotionHealPct}% здоровья и держит на ногах того, кому держаться уже нечем.",
+    BrewEffect.Potion(PotionKind.Healing))
+
+  case object HardyBrew extends BrewKind(
+    "Живучий сбор",
+    List(StJohnsWort, Chamomile, Nettle, Sage),
+    s"Горький сбор, заваренный до черноты. Пьётся не ради сил, а ради упрямства: тело начинает затягивать своё само — ${BrewRates.PotionRegenPct}% здоровья в раунд, и с каждым раундом всё скупее.",
+    BrewEffect.Potion(PotionKind.Regeneration))
+
+  case object TanningBrew extends BrewKind(
+    "Дубильный настой",
+    List(StJohnsWort, Nettle, Wormwood, Sage),
+    s"Вяжущая бурда цвета крепкого чая, и пить её незачем — ею поливают доспех. Кожа на глазах дубеет, ремни стягиваются, бляхи садятся на место, и броня снова держит удар: ${BrewRates.PotionArmorPct}% её возвращается.",
+    BrewEffect.Potion(PotionKind.Metal))
+
+  case object SteadfastBrew extends BrewKind(
+    "Отвар стойкости",
+    List(StJohnsWort, Nettle, Calendula),
+    s"Тёплый, с привкусом железа. От него тяжелеют ноги и разом пропадает охота отступать: +${BrewRates.PotionDefencePct}% к защите на ${BrewRates.PotionBuffRounds} раундов.",
+    BrewEffect.Potion(PotionKind.Defence))
+
+  case object CatBrew extends BrewKind(
+    "Кошачий настой",
+    List(StJohnsWort, Valerian),
+    s"Пахнет так, что на запах из темноты выходят коты — и смотрят, не мигая. Выпивший перенимает их шаг: +${BrewRates.PotionDodgePct}% к уклонению на ${BrewRates.PotionBuffRounds} раундов.",
+    BrewEffect.Potion(PotionKind.Evasion))
+
+  case object SecondWind extends BrewKind(
+    "Второе дыхание",
+    List(StJohnsWort, Sage),
+    s"Обжигает горло и разом разгоняет туман в голове. Возвращает ${BrewRates.PotionEnergyPct}% энергии — ровно столько, чтобы хватило ещё на одно умение.",
+    BrewEffect.Potion(PotionKind.Energy))
+
+  case object FuryTincture extends BrewKind(
+    "Яростная настойка",
+    List(StJohnsWort, Wormwood, Belladonna),
+    s"Горечь, от которой темнеет в глазах и становится всё равно, сколько их против вас: +${BrewRates.PotionAtkPct}% к атаке на ${BrewRates.PotionBuffRounds} раундов.",
+    BrewEffect.Potion(PotionKind.Attack))
+
+  case object StingingExtract extends BrewKind(
+    "Жгучая вытяжка",
+    List(StJohnsWort, Belladonna, Nettle),
+    "Чёрная вытяжка, которой мажут не рану, а кромку. Жжёт даже сквозь ткань, а на лезвии держится до конца боя — и каждый удар по живому оставляет в нём яд.",
+    BrewEffect.Potion(PotionKind.Poison))
+
   // ── Отвары из редких трав второго ранга: по одной склянке за рецепт ──────
 
   case object MushroomMix extends BrewKind(
@@ -233,10 +337,14 @@ object BrewKind extends Enum[BrewKind] {
   val values: IndexedSeq[BrewKind] = findValues
 
   /** Отвары первого ранга — те, что варятся из одних простых трав; за полный
-   *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Отвары на
+   *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Боевые
+   *  отвары на зверобое тоже отсюда: их восемь, и они в набор входят. Отвары на
    *  редкой траве и перегонка сюда не входят: до них зельевару ещё расти. */
   val rank1: IndexedSeq[BrewKind] =
     values.filter(k => k.base.isEmpty && k.recipe.forall(_.herbRank <= 1))
+
+  /** Боевые отвары — те, что носят в ячейке пояса (см. [[BrewKind.combat]]). */
+  val combatBrews: IndexedSeq[BrewKind] = values.filter(_.combat)
 
   /** Отвар, который варится из этого набора трав (порядок не важен), если такой есть. */
   def forHerbs(herbs: List[MaterialKind]): Option[BrewKind] =

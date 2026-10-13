@@ -6,7 +6,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
 import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
-import pangea.model.item.{BeltSlot, GemBreaking, Item, ItemDetails, ItemType}
+import pangea.model.item.{BeltSlot, BrewKind, GemBreaking, Item, ItemDetails, ItemType, RoseKind}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
@@ -132,7 +132,12 @@ case class EquipmentState(
   }
 
   /** Вынуть расходник с пояса: фляга собирается обратно со своими зарядами,
-    * пыль — горстью. В сумке нет места — ячейка остаётся как была. */
+    * пыль — горстью, отвар — склянкой, цветок — со своими раскрытиями. В сумке
+    * нет места — ячейка остаётся как была.
+    *
+    * Пустая ячейка помнит, чем была полна, но вернуть из неё нечего: горсть
+    * высыпана, склянка выпита, цветок осыпался — такая ячейка просто
+    * освобождается. */
   private def takeFromBelt(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     (readScene(user) <*> getHero(user)).flatMap { case (scene, hero) =>
       val belt = hero.equipment.belt
@@ -144,19 +149,33 @@ case class EquipmentState(
               val item = slot match {
                 case f: BeltSlot.Flask =>
                   val fresh = FlaskGenerator.item(f.kind, f.rarity)
-                  fresh.copy(details = fresh.details match {
+                  Some(fresh.copy(details = fresh.details match {
                     case d: ItemDetails.Flask => d.copy(charges = f.charges)
                     case other                => other
-                  })
-                case d: BeltSlot.Dust => MaterialGenerator.item(d.kind)
+                  }))
+                case d: BeltSlot.Dust => Option.unless(d.spent)(MaterialGenerator.item(d.kind))
+                case b: BeltSlot.Brew => Option.unless(b.spent)(BrewKind.item(b.kind))
+                case r: BeltSlot.Rose =>
+                  val fresh = RoseKind.item(r.kind)
+                  Option.unless(r.withered)(fresh.copy(details = fresh.details match {
+                    case d: ItemDetails.Rose => d.copy(charges = r.charges)
+                    case other               => other
+                  }))
               }
-              inventoryRepo.addItem(hero.id, item).foldZIO(
-                _ => renderer.show(user, Screen(content.text("equipment.beltTakeFull"), Nil)),
-                _ => heroDao.updateEquipment(user.userId,
-                       hero.equipment.copy(belt = belt.copy(details = b.without(idx)))) *>
-                     renderer.show(user, Screen(content.format("equipment.beltTaken",
-                       "name" -> slot.name), Nil))
-              ) *> scene.selectedSlot.fold(showList(user, renderer))(showSlot(user, _, renderer))
+              val freed = heroDao.updateEquipment(user.userId,
+                hero.equipment.copy(belt = belt.copy(details = b.without(idx))))
+              val taken = item match {
+                case None =>
+                  freed *> renderer.show(user, Screen(content.format("equipment.beltCleared",
+                    "name" -> slot.name), Nil))
+                case Some(it) =>
+                  inventoryRepo.addItem(hero.id, it).foldZIO(
+                    _ => renderer.show(user, Screen(content.text("equipment.beltTakeFull"), Nil)),
+                    _ => freed *> renderer.show(user, Screen(content.format("equipment.beltTaken",
+                           "name" -> slot.name), Nil))
+                  )
+              }
+              taken *> scene.selectedSlot.fold(showList(user, renderer))(showSlot(user, _, renderer))
           }
         case _ => showList(user, renderer)
       }
@@ -167,7 +186,9 @@ case class EquipmentState(
   private def fittingItems(hero: Hero, slot: Slot): Task[List[Item]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
       .map(_.items.data
-        .filter(i => slot.accepts.contains(i.itemType) && i.lvl <= hero.lvl)
+        // Розы, выкованные до переезда в пояс, лежат в сумке вещами доп. слота —
+        // примерять их больше некуда, место цветка теперь в ячейке.
+        .filter(i => slot.accepts.contains(i.itemType) && i.rose.isEmpty && i.lvl <= hero.lvl)
         .sortBy(i => (-i.lvl, i.name)))
 
   /** Ряд навигации карточки: «Назад» и страницы подбора, если их больше одной. */

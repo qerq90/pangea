@@ -201,6 +201,8 @@ case class Item(
         val body = slots.map {
           case f: BeltSlot.Flask => s"• ${f.name} — ${f.charges}/${f.maxCharges}"
           case d: BeltSlot.Dust  => s"• ${d.name}"
+          case b: BeltSlot.Brew  => s"• ${b.name}" + (if (b.spent) " — пусто" else "")
+          case r: BeltSlot.Rose  => s"• ${r.name} — ${r.charges}/${r.maxCharges}"
         }
         head :: body
       case ItemDetails.Gem(g)            => List(g.weaponEffectText, g.armorEffectText)
@@ -219,7 +221,8 @@ case class Item(
       // Божественное оружие: только описание — ни статов, ни числа ударов, которые она ещё держит.
       case ItemDetails.Divine(k, _, _)    => List(k.description)
       // Роза: описание и сколько раскрытий в ней осталось.
-      case ItemDetails.Rose(k, c, m)      => List(k.description, s"🌹 Раскрытий: $c/$m")
+      case ItemDetails.Rose(k, c, m)      =>
+        List(k.description, s"🌹 Раскрытий: $c/$m", "👝 Раскрывается из ячейки пояса.")
       // Рунный камень: узор, ощущение от него и что даст сама руна.
       case ItemDetails.RuneStone(key, size) =>
         pangea.model.rune.Rune.byKey(key).map(pangea.model.rune.RuneStone.describe(_, size)).getOrElse(Nil)

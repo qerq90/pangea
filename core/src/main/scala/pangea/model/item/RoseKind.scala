@@ -6,7 +6,7 @@ import io.circe.{Decoder, Encoder, HCursor}
 import pangea.model.battle.Element
 
 /** Раскрывшаяся роза: цветок, который вышел из кубa Азата, когда Нераскрытую
- *  розу присыпали пылью самоцвета со спящей стихией. Носится в доп. слоте и
+ *  розу присыпали пылью самоцвета со спящей стихией. Лежит в ячейке пояса и
  *  бьёт по всему полю, как божественное оружие, — только силу берёт от уровня
  *  хозяина, а не от своего, и держит ровно [[RoseRates.Charges]] раскрытий.
  *
@@ -69,14 +69,15 @@ object RoseKind extends Enum[RoseKind] {
   /** Какая роза раскроется от этой пыли. Пыль аметиста и черепа — не отсюда. */
   def fromDust(dust: MaterialKind): Option[RoseKind] = values.find(_.dust == dust)
 
-  /** Готовый цветок: уровня у розы нет, силу она берёт от хозяина. */
+  /** Готовый цветок: уровня у розы нет, силу она берёт от хозяина. Это
+    * расходник для пояса, а не вещь в слот, — отсюда и свой тип. */
   def item(kind: RoseKind): Item =
     Item(
       id = -1L,
       name = kind.itemName,
       lvl = 0L,
       rarity = Rarity.Orange,
-      itemType = ItemType.AdditionalWeapon,
+      itemType = ItemType.Rose,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Rose(kind, RoseRates.Charges, RoseRates.Charges)
     )
