@@ -5,11 +5,12 @@ import io.circe.{Decoder, Encoder, HCursor, Json}
 
 /** Что лежит в ячейке пояса. Пояс — не предмет с зарядами, а сумка на поясе:
   * сколько в ней ячеек, решает редкость самого пояса ([[ItemDetails.Belt]]), а
-  * в ячейке лежит либо фляга со своими зарядами, либо горсть пыли.
+  * в ячейке лежит фляга со своими зарядами, горсть пыли, склянка отвара или
+  * раскрывшаяся роза со своими раскрытиями. Одна ячейка — один предмет.
   *
   * Внутрь кладутся не целые предметы, а их суть: вид и редкость. По ним вещь
-  * собирается заново, когда игрок достаёт её обратно, — у фляг и пыли кроме
-  * вида с редкостью ничего своего и нет. */
+  * собирается заново, когда игрок достаёт её обратно, — у фляг, пыли, отваров
+  * и цветков кроме вида с запасом ничего своего и нет. */
 sealed trait BeltSlot {
 
   /** Название для списка расходников в бою. */
@@ -42,11 +43,36 @@ object BeltSlot {
     def refilled: Dust = copy(spent = false)
   }
 
-  /** Что из сумки вообще можно положить на пояс: фляга или пыль. */
+  /** Склянка отвара в ячейке: одна ячейка — одна склянка, стопка в сумке
+    * остаётся стопкой. Пустая ячейка помнит, чем была полна: после боя она
+    * сама доберёт такой же отвар из сумки, если он там есть. */
+  final case class Brew(kind: BrewKind, spent: Boolean = false) extends BeltSlot {
+    def name: String   = kind.label
+    def uses: Int      = if (spent) 0 else 1
+    def drunk: Brew    = copy(spent = true)
+    def refilled: Brew = copy(spent = false)
+  }
+
+  /** Раскрывшаяся роза в ячейке: цветок ложится целиком, со всеми своими
+    * раскрытиями. Осыпавшаяся ячейка тоже помнит цветок — после боя доберёт
+    * такой же из сумки, если он там есть. */
+  final case class Rose(kind: RoseKind, charges: Int) extends BeltSlot {
+    def name: String      = kind.itemName
+    def uses: Int         = charges
+    def maxCharges: Int   = RoseRates.Charges
+    def spent: Rose       = copy(charges = (charges - 1).max(0))
+    def refilled: Rose    = copy(charges = maxCharges)
+    def withered: Boolean = charges <= 0
+  }
+
+  /** Что из сумки вообще можно положить на пояс: фляга, пыль, отвар (кроме
+    * того, что в бою ни к чему — см. [[BrewKind.beltable]]) или цветок. */
   def of(item: Item): Option[BeltSlot] = item.details match {
     case f: ItemDetails.Flask =>
       FlaskKind.values.find(_.effect == f.effect).map(kind => Flask(kind, item.rarity, f.charges))
     case ItemDetails.Material(kind) if kind.gem.isDefined => Some(Dust(kind))
+    case ItemDetails.Brew(kind) if kind.beltable          => Some(Brew(kind))
+    case r: ItemDetails.Rose                              => Some(Rose(r.kind, r.charges))
     case _                                                => None
   }
 
@@ -58,9 +84,19 @@ object BeltSlot {
     Json.obj("type" -> "Dust".asJson, "kind" -> d.kind.entryName.asJson,
       "spent" -> d.spent.asJson)
 
+  private val brewEnc: Encoder[Brew] = (b: Brew) =>
+    Json.obj("type" -> "Brew".asJson, "kind" -> b.kind.entryName.asJson,
+      "spent" -> b.spent.asJson)
+
+  private val roseEnc: Encoder[Rose] = (r: Rose) =>
+    Json.obj("type" -> "Rose".asJson, "kind" -> r.kind.entryName.asJson,
+      "charges" -> r.charges.asJson)
+
   implicit val encoder: Encoder[BeltSlot] = Encoder.instance {
     case f: Flask => flaskEnc(f)
     case d: Dust  => dustEnc(d)
+    case b: Brew  => brewEnc(b)
+    case r: Rose  => roseEnc(r)
   }
 
   implicit val decoder: Decoder[BeltSlot] = (c: HCursor) =>
@@ -76,6 +112,16 @@ object BeltSlot {
           kind  <- c.get[String]("kind").map(MaterialKind.withName)
           spent <- c.getOrElse[Boolean]("spent")(false)
         } yield Dust(kind, spent)
+      case "Brew" =>
+        for {
+          kind  <- c.get[String]("kind").map(BrewKind.withName)
+          spent <- c.getOrElse[Boolean]("spent")(false)
+        } yield Brew(kind, spent)
+      case "Rose" =>
+        for {
+          kind    <- c.get[String]("kind").map(RoseKind.withName)
+          charges <- c.getOrElse[Int]("charges")(0)
+        } yield Rose(kind, charges)
       case other  => Left(io.circe.DecodingFailure(s"Неизвестное содержимое пояса: $other", c.history))
     }
 }

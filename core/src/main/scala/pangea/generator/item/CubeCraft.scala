@@ -231,14 +231,15 @@ object CubeCraft {
       })
   }
 
-  // Три травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепты делят
-  // травы между собой, поэтому жадный «первый подходящий» сварил бы три
-  // костоправных из трав, сложенных под три разных отвара. Вместо этого по
-  // травам в кубе строится план: наибольшее число отваров, при равенстве — как
-  // можно больше разных; каждое применение забирает первый шаг плана, а остаток
-  // пула на следующем шаге даёт тот же план без него.
+  // Травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепт — от двух
+  // трав до четырёх. Рецепты делят травы между собой, поэтому жадный «первый
+  // подходящий» сварил бы три костоправных из трав, сложенных под три разных
+  // отвара. Вместо этого по травам в кубе строится план: наибольшее число
+  // отваров, при равенстве — тот, что берёт в дело больше трав, при равенстве —
+  // как можно больше разных; каждое применение забирает первый шаг плана, а
+  // остаток пула на следующем шаге даёт тот же план без него.
   private object HerbBrew extends Recipe {
-    val size = 3
+    val size = 4
     override def portions: Int = BrewRates.Portions
     override def portionsFor(result: Item): Int = result.brew.map(_.portions).getOrElse(BrewRates.Portions)
     def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] = {
@@ -260,8 +261,14 @@ object CubeCraft {
       * счётчикам трав немного — поиск с памятью. */
     private def bestPlan(counts: Map[MaterialKind, Int]): List[BrewKind] = {
       val memo = scala.collection.mutable.Map.empty[Map[MaterialKind, Int], List[BrewKind]]
+      // Трав в дело: рецепт из четырёх трав целиком содержит рецепт из трёх
+      // (живучий сбор — живую воду), и без этой меры длинный рецепт не сварить
+      // никогда: отваров выходит по одному, а короткий стоит в списке раньше.
+      def herbs(plan: List[BrewKind]): Int = plan.map(_.recipe.size).sum
       def better(a: List[BrewKind], b: List[BrewKind]): Boolean =
-        a.size > b.size || (a.size == b.size && a.distinct.size > b.distinct.size)
+        a.size > b.size ||
+          (a.size == b.size &&
+            (herbs(a) > herbs(b) || (herbs(a) == herbs(b) && a.distinct.size > b.distinct.size)))
       def go(c: Map[MaterialKind, Int]): List[BrewKind] = memo.getOrElseUpdate(c, {
         // Отвары, которым нужна готовая склянка, из одних трав не варятся.
         BrewKind.values.toList.filter(_.base.isEmpty).foldLeft(List.empty[BrewKind]) { (best, kind) =>
@@ -288,7 +295,7 @@ object CubeCraft {
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
     BrewDistill,                                           // 3 (склянка + травы)
-    HerbBrew,                                              // 3
+    HerbBrew,                                              // 2-4
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     RoseBloom,                                             // 2
     SetInfusion                                            // 2

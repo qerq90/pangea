@@ -148,7 +148,9 @@ case class InventoryState(
           // этом трогают ровно один предмет из стопки.
           val count    = ItemStack.countOf(inv.items.data, item)
           val text     = itemDetail(item, hero, hero.silver) + stackLine(count)
-          val canEquip = ItemType.equippable.contains(item.itemType)
+          // Розу, выкованную до её переезда в пояс, носить в доп. слоте больше
+          // незачем: раскрывается она из ячейки.
+          val canEquip = ItemType.equippable.contains(item.itemType) && item.rose.isEmpty
           val canCombine = item.itemType == ItemType.TreasureMapHalf
           // Пять малых рун одного узора складываются в большую — прямо в сумке.
           val canFoldRune = item.isSmallRune
@@ -183,12 +185,17 @@ case class InventoryState(
   // ── Отвары из трав ─────────────────────────────────────────────────────────
 
   /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
-    * «Выпить» у того, что пьётся; «Заправить флягу», если надетая фляга такого
-    * толка; «Смазать оружие» у смазок. Шнапс уходит Трактирщику, кнопок у него нет. */
+    * «Выпить» у того, что пьётся; «На пояс» у того, чем пользуются в бою;
+    * «Заправить флягу», если надетая фляга такого толка; «Смазать оружие» у
+    * смазок. Шнапс уходит Трактирщику, кнопок у него нет.
+    *
+    * Боевой отвар с карточки не пьётся вовсе — об этом говорим прямо, иначе
+    * игрок будет искать у него кнопку «Выпить». */
   private def showBrew(user: User, item: Item, kind: BrewKind, all: List[Item], renderer: Renderer): Task[StateType] =
     getHero(user).flatMap { hero =>
       val count   = ItemStack.countOf(all, item)
-      val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + stackLine(count)
+      val beltOnly = if (kind.combat) "\n" + content.text("brew.beltOnly") else ""
+      val text    = s"${item.displayTitle}\n${item.statsLines.mkString("\n")}" + beltOnly + stackLine(count)
       val flaskFits = hero.equipment.flask.details match {
         case f: ItemDetails.Flask => kind.refills.contains(f.effect.refillSource)
         case _                    => false
@@ -196,6 +203,9 @@ case class InventoryState(
       val coats = kind.effect match { case BrewEffect.Coat(_, _) => true; case _ => false }
       val choices = List(
         Option.when(kind.drinkable)(content.choice("DrinkBrew", "brew.drink").copy(color = ChoiceColor.Positive, row = Some(0))),
+        // Склянка ложится в ячейку пояса — оттуда её достают в бою.
+        Option.when(BeltSlot.of(item).isDefined)(
+          content.choice("BeltPut", "inventory.beltPut").copy(color = ChoiceColor.Positive, row = Some(0))),
         Option.when(coats)(content.choice("CoatWeapon", "brew.coat").copy(color = ChoiceColor.Positive, row = Some(0))),
         Option.when(flaskFits)(content.choice("RefillByBrew", "brew.refill").copy(color = ChoiceColor.Positive, row = Some(0))),
         Some(content.choice("Drop", "inventory.drop").copy(color = ChoiceColor.Negative, row = Some(0))),
@@ -1117,6 +1127,7 @@ object InventoryState {
     case ItemType.Material         => Item.NoItem // материал не экипируется
     case ItemType.QuestItem        => Item.NoItem // сюжетный предмет не экипируется
     case ItemType.Brew             => Item.NoItem // отвар не экипируется
+    case ItemType.Rose             => Item.NoItem // роза ложится в ячейку пояса
     case ItemType.RuneStone        => Item.NoItem // рунный камень не экипируется
     case ItemType.NoItem           => Item.NoItem
   }
@@ -1146,6 +1157,7 @@ object InventoryState {
     case ItemType.Material         => eq // материал не экипируется
     case ItemType.QuestItem        => eq // сюжетный предмет не экипируется
     case ItemType.Brew             => eq // отвар не экипируется
+    case ItemType.Rose             => eq // роза ложится в ячейку пояса
     case ItemType.RuneStone        => eq // рунный камень не экипируется
     case ItemType.NoItem           => eq
   }

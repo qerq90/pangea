@@ -30,7 +30,7 @@ object ItemType extends Enum[ItemType] {
   // Типы, которые не надеваются: трофеи, карты клада и камни-усилители. Пусто
   // (NoItem) сюда тоже относится, но оно и так исключено из itemTypes.
   private val nonEquippable: Set[ItemType] =
-    Set(Trophy, TreasureMap, TreasureMapHalf, Gem, Material, QuestItem, Brew, RuneStone)
+    Set(Trophy, TreasureMap, TreasureMapHalf, Gem, Material, QuestItem, Brew, RuneStone, Rose)
 
   /** Надеваемые типы — всё, кроме трофеев, карт клада и NoItem. Экраны, где
    *  предмет предлагается к надеванию, опираются на этот список. */
@@ -77,6 +77,10 @@ object ItemType extends Enum[ItemType] {
   // Рунный камень (см. RuneStone): плита с узором руны. Не надевается — её
   // читает Казимир, а Ришелье берёт в хлам, если разрешить продажу рун.
   case object RuneStone extends ItemType
+
+  // Раскрывшаяся роза (см. RoseKind): расходник, а не оружие. Не надевается —
+  // ложится в ячейку пояса и раскрывается оттуда.
+  case object Rose extends ItemType
 
   case object NoItem extends ItemType
 
