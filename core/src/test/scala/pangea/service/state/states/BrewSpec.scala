@@ -100,7 +100,7 @@ object BrewSpec extends ZIOSpecDefault {
         card <- r.sentScreens.map(_.last)
       } yield assertTrue(card.text.contains("Зверобойный отвар")) &&
               assertTrue(card.text.contains("из ячейки пояса")) &&
-              // «Выпить» у него нет — только «На пояс»
+              // «Использовать» у него нет — только «На пояс»
               assertTrue(card.choices.map(_.id) == List("BeltPut", "Drop", "InventoryList")) &&
               // сколько лечит, сказано в описании
               assertTrue(card.text.contains(s"${BrewRates.PotionHealPct}% здоровья"))
@@ -224,7 +224,48 @@ object BrewSpec extends ZIOSpecDefault {
               assertTrue(!hero.statBoosts.without(BrewRates.WolfCallBoost).hasActive(BrewRates.WolfCallBoost, now))
     },
 
-    test("грибную смесь не пьют: у неё нет кнопки «Выпить»") {
+    test("гнилой зов: червь, два хвоста и три шкурки в кубе → одна штука; в первый ранг он не входит") {
+      import MaterialKind.{PlagueWorms, RatPelt, RatTail}
+      def from(kinds: List[MaterialKind]) =
+        CubeCraft.craft(kinds.zipWithIndex.map { case (m, i) => herb(m, i.toLong + 1L) }, charges = 5, Rng(7L))
+      val full  = from(List(PlagueWorms, RatTail, RatTail, RatPelt, RatPelt, RatPelt))
+      val short = from(List(PlagueWorms, RatTail, RatTail, RatPelt, RatPelt))
+      val desc  = BrewKind.RotCall.description
+      assertTrue(BrewKind.RotCall.recipe.count(_ == PlagueWorms) == 1 &&
+        BrewKind.RotCall.recipe.count(_ == RatTail) == 2 && BrewKind.RotCall.recipe.count(_ == RatPelt) == 3) &&
+      assertTrue(full.chargesUsed == 1 && full.items.size == 1) &&
+      assertTrue(full.items.forall(_.brew.contains(BrewKind.RotCall))) &&
+      // без одной шкурки куб ничего не собирает — всё остаётся как было
+      assertTrue(short.chargesUsed == 0 && short.items.size == 5) &&
+      // «Зельевар I», гномы и Густаво по-прежнему смотрят на восемнадцать травяных
+      assertTrue(!BrewKind.rank1.contains(BrewKind.RotCall) && BrewKind.rank1.size == 18) &&
+      assertTrue(BrewKind.RotCall.drinkable && BrewKind.RotCall.beltable) &&
+      // рецепта карточка не раскрывает
+      assertTrue(!desc.contains("черв") && !desc.contains("шкур") && !desc.contains("хвост"))
+    },
+
+    test("гнилой зов держится час и ничего не прибавляет к характеристикам") {
+      for {
+        t <- inventory(baseHero, List(brew(BrewKind.RotCall, 1L)))
+        (state, dao, inv, r) = t
+        _     <- state.action(testUser, selectItem(1L), r)
+        card  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("DrinkBrew"), r)
+        said  <- texts(r)
+        hero  <- dao.getHeroByUserId(userId).map(_.get)
+        now   <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+      } yield assertTrue(card.choices.exists(c => c.id == "DrinkBrew" && c.label == "Использовать")) &&
+              // это не питьё, а узелок, который ведёт к Джо
+              assertTrue(card.text.contains("Тугой узелок") && !card.text.contains("Пить")) &&
+              assertTrue(hero.statBoosts.hasActive(BrewRates.RotCallBoost, now)) &&
+              assertTrue(!hero.statBoosts.hasActive(BrewRates.RotCallBoost, now + BrewRates.RotCallMs)) &&
+              assertTrue(hero.statBoosts.strFactor(now) == 1.0 && hero.statBoosts.agiFactor(now) == 1.0) &&
+              assertTrue(said.contains("Вы развязываете узелок") && inv.snapshot.isEmpty) &&
+              // к кому он ведёт, игрок узнаёт, только попробовав
+              assertTrue(!said.contains("Джо"))
+    },
+
+    test("грибную смесь не пьют: у неё нет кнопки «Использовать»") {
       for {
         t <- inventory(baseHero, List(brew(BrewKind.MushroomMix, 1L)))
         (state, _, inv, r) = t

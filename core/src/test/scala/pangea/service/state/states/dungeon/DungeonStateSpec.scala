@@ -195,6 +195,46 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(!updated.statBoosts.hasActive(pangea.model.item.BrewRates.WolfCallBoost, now))
     },
 
+    test("гнилой зов: вместо обычного события — встреча с Гнилым Джо, и запах сгорает") {
+      val called = TestFixtures.hero(userId).copy(statBoosts = pangea.model.stats.StatBoosts.none.add(
+        pangea.model.stats.StatBoost(pangea.model.item.BrewRates.RotCallBoost,
+          pangea.model.stats.ParamsBuff.zero, pangea.model.item.BrewRates.RotCallMs), 0L))
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, called)
+        renderer  <- TestRenderer.make
+        content   <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
+        state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
+        // что бы ни выпало в пуле событий, смрад узелка выводит к Джо
+        _        <- TestRandom.feedInts(67)
+        result   <- state.action(testUser, tap("FindEvent"), renderer)
+        updated  <- heroDao.getHeroByUserId(userId).map(_.get)
+        now      <- zio.Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+        screens  <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(result == StateType.RottenJoe) &&
+              assertTrue(screens.contains("Смрад узелка вёл вас")) &&
+              // узелок выдохся: второй раз сам к Джо не выведет
+              assertTrue(!updated.statBoosts.hasActive(pangea.model.item.BrewRates.RotCallBoost, now))
+    },
+
+    test("оба запаха разом: первым выходит волк, Джо — следующим осмотром") {
+      val both = TestFixtures.hero(userId).copy(statBoosts = pangea.model.stats.StatBoosts.none
+        .add(pangea.model.stats.StatBoost(pangea.model.item.BrewRates.WolfCallBoost,
+          pangea.model.stats.ParamsBuff.zero, pangea.model.item.BrewRates.WolfCallMs), 0L)
+        .add(pangea.model.stats.StatBoost(pangea.model.item.BrewRates.RotCallBoost,
+          pangea.model.stats.ParamsBuff.zero, pangea.model.item.BrewRates.RotCallMs), 0L))
+      for {
+        heroDao   <- TestHeroDao.withHero(userId, both)
+        renderer  <- TestRenderer.make
+        content   <- ZIO.attempt(SceneContent.load())
+        scheduler <- TestScheduler.make
+        state      = DungeonState(heroDao, TestInventoryRepository.accepting, scheduler, content)
+        _        <- TestRandom.feedInts(67, 67)
+        first    <- state.action(testUser, tap("FindEvent"), renderer)
+        second   <- state.action(testUser, tap("FindEvent"), renderer)
+      } yield assertTrue(first == StateType.Battle && second == StateType.RottenJoe)
+    },
+
     test("FindEvent Spring (индекс 67) → восстанавливает HP, без засады остаётся в Dungeon") {
       val lowHpHero = TestFixtures.hero(userId).copy(
         fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L)

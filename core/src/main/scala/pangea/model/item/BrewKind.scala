@@ -28,6 +28,8 @@ object BrewEffect {
   case object Bomb extends BrewEffect
   /** Запах, на который приходит Белый волк: ближайшая встреча в лабиринте — он. */
   case object WolfCall extends BrewEffect
+  /** Смрад, который ведёт героя к Гнилому Джо: ближайшая встреча в лабиринте — он. */
+  case object RotCall extends BrewEffect
   /** Призрачные копии: первые `copies` ударов по герою уходят в них. */
   final case class Mirror(copies: Int) extends BrewEffect
   /** Приговор: герой называет расу, и следующая встреча — её именное существо,
@@ -52,11 +54,11 @@ sealed abstract class BrewKind(
   val description: String,
   val effect:      BrewEffect
 ) extends EnumEntry {
-  /** Пьётся ли с карточки (кнопка «Выпить»). Заправка и смазка — свои кнопки,
+  /** Применяется ли с карточки (кнопка «Использовать»). Заправка и смазка — свои кнопки,
    *  а грибную смесь не пьют вовсе: её бросают под ноги врагам в бою. */
   def drinkable: Boolean = effect match {
     case BrewEffect.CureTrauma | BrewEffect.InstantRest | BrewEffect.Boost(_, _, _) => true
-    case BrewEffect.WolfCall | BrewEffect.Mirror(_)                                 => true
+    case BrewEffect.WolfCall | BrewEffect.RotCall | BrewEffect.Mirror(_)            => true
     case BrewEffect.Sentence | BrewEffect.Bubble                                     => true
     case _                                                                           => false
   }
@@ -89,9 +91,11 @@ sealed abstract class BrewKind(
     case _                  => None
   }
 
-  /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна. */
+  /** Сколько склянок выходит из одного рецепта: редкая трава в составе — одна;
+    * собранное не из трав (узелок гнилого зова) — тоже одно. */
   def portions: Int =
-    if (recipe.exists(_.herbRank >= 2)) BrewRates.RarePortions else BrewRates.Portions
+    if (recipe.exists(_.herbRank >= 2) || !recipe.forall(_.isHerb)) BrewRates.RarePortions
+    else BrewRates.Portions
 
   /** Какие фляги заправляет. */
   def refills: Set[RefillSource] = effect match {
@@ -129,6 +133,11 @@ object BrewRates {
 
   /** Имя бафа «на запах пришёл волк» в [[pangea.model.stats.StatBoosts]]. */
   val WolfCallBoost: String = "brew:wolfCall"
+
+  /** Гнилой зов: сколько смрад узелка ведёт героя к Гнилому Джо (час), и имя
+    * его бафа. */
+  val RotCallMs: Long      = 60L * 60L * 1000L
+  val RotCallBoost: String = "brew:rotCall"
 
   /** Приговор: префикс бафа (за ним — раса) и сколько он держится. */
   val SentenceBoost: String = "brew:sentence:"
@@ -305,6 +314,17 @@ object BrewKind extends Enum[BrewKind] {
     "Жжёный хмель с чем-то ещё, чего не разобрать. Выпить — и запах пойдёт от вас самих: тот, кто держится позади и не показывается, подойдёт ближе. Час, не больше: потом выветрится.",
     BrewEffect.WolfCall)
 
+  /** Не отвар, а материальный компонент: узелок из того, что срезают с крыс в
+    * канализации. Его не пьют — развязывают, и смрад ведёт героя к Гнилому
+    * Джо. Собирается в кубе своим рецептом (см. CubeCraft) и в отвары первого
+    * ранга не входит. */
+  case object RotCall extends BrewKind(
+    "Гнилой зов",
+    // Шкурки с крыс падают чаще хвостов, поэтому их в узелок идёт больше.
+    List(PlagueWorms, RatTail, RatTail, RatPelt, RatPelt, RatPelt),
+    "Тугой узелок, от которого несёт падалью. Развяжешь — и смрад сам поведёт тебя туда, где гниль гуще, к тому, кто гнилью живёт. Час, не больше: потом выдохнется.",
+    BrewEffect.RotCall)
+
   case object Sentence extends BrewKind(
     "Зелье приговора",
     List(DoomFlower, Belladonna, Chamomile),
@@ -340,9 +360,10 @@ object BrewKind extends Enum[BrewKind] {
   /** Отвары первого ранга — те, что варятся из одних простых трав; за полный
    *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Боевые
    *  отвары на зверобое тоже отсюда: их восемь, и они в набор входят. Отвары на
-   *  редкой траве и перегонка сюда не входят: до них зельевару ещё расти. */
+   *  редкой траве, перегонка и то, что варят не из трав (гнилой зов), сюда не
+   *  входят. */
   val rank1: IndexedSeq[BrewKind] =
-    values.filter(k => k.base.isEmpty && k.recipe.forall(_.herbRank <= 1))
+    values.filter(k => k.base.isEmpty && k.recipe.forall(m => m.isHerb && m.herbRank <= 1))
 
   /** Боевые отвары — те, что носят в ячейке пояса (см. [[BrewKind.combat]]). */
   val combatBrews: IndexedSeq[BrewKind] = values.filter(_.combat)
