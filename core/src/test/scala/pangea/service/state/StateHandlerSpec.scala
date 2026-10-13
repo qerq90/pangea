@@ -163,8 +163,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       } yield
         // эффект реально применился и был виден только внутри active_battle текущего боя
         assertTrue(duringBattle.effects.heroVampiricHits > 0) &&
-        // заряд списался по-настоящему, и пустая ячейка ушла с пояса
-        assertTrue(beltAfterDrink.slots.isEmpty) &&
+        // заряд списался по-настоящему, а пустая фляга осталась в ячейке
+        assertTrue(beltAfterDrink.slots == List(BeltSlot.Flask(FlaskKind.Vampiric, ItemRarity.Gray, 0))) &&
         // /home полностью стирает бой вместе с баффом — раз объекта с баффом больше
         // не существует, ему неоткуда «остаться навсегда» или перейти в следующий бой
         assertTrue(activeBattleAfter.isEmpty) &&

@@ -335,6 +335,29 @@ object BrewSpec extends ZIOSpecDefault {
               assertTrue(h2.equipment.flask.details == ItemDetails.Flask(FlaskKind.Smoke.effect, 6, 6) && inv2.snapshot.map(_.id) == List(10L))
     },
 
+    test("живая вода заправляет и флягу на поясе — даже выпитую до дна; чужого толка не трогает") {
+      val beltItem = Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Belt(List(
+          BeltSlot.Flask(FlaskKind.Smoke, Rarity.Gray, 0),
+          BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 0))))
+      val belted = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = beltItem))
+      for {
+        t <- inventory(belted, List(brew(BrewKind.LivingWater, 10L)))
+        (state, dao, inv, r) = t
+        _    <- state.action(testUser, selectItem(10L), r)
+        card <- r.sentScreens.map(_.last)
+        _    <- state.action(testUser, tap("RefillByBrew"), r)
+        h    <- dao.getHeroByUserId(userId).map(_.get)
+        log  <- texts(r)
+      } yield assertTrue(card.choices.exists(_.id == "RefillByBrew")) &&
+              // дымную живая вода не берёт — заправлена фляга целителя во второй ячейке
+              assertTrue(h.equipment.belt.details == ItemDetails.Belt(List(
+                BeltSlot.Flask(FlaskKind.Smoke, Rarity.Gray, 0),
+                BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, FlaskKind.chargesFor(Rarity.Gray))))) &&
+              assertTrue(log.contains("полна до краёв") && inv.snapshot.isEmpty)
+    },
+
     test("ядовитая и кровавая смазки: мажут оружие на ближайший бой и заправляют флягу своего толка") {
       val poisonFlask = pangea.generator.item.FlaskGenerator.item(FlaskKind.Poison, Rarity.Blue).copy(id = 1L,
         details = ItemDetails.Flask(FlaskKind.Poison.effect, 2, 6))

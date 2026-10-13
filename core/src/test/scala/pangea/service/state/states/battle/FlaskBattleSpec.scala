@@ -5,7 +5,7 @@ import pangea.engine.SceneContent
 import pangea.generator.item.FlaskGenerator
 import pangea.model.battle.{Bleed, Burn, Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
-import pangea.model.item.{FlaskKind, FlaskRates, Item, ItemDetails, ItemType, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, BrewKind, FlaskKind, FlaskRates, Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -50,13 +50,14 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       // Без энергии: умений моб не кастует, и броски хода предсказуемы.
       FightStats(atk = 20, hp = hp, armor = armor, defence = 0, evasion = 0, accuracy = 1, energy = 0))
 
-  private def makeState(h: Hero, b: SoloPveBattle) =
+  private def makeState(h: Hero, b: SoloPveBattle,
+                        inv: TestInventoryRepository = TestInventoryRepository.accepting) =
     for {
       dao      <- TestHeroDao.withHero(userId, h)
       _        <- dao.writeActiveBattle(userId, b.asJson)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-    } yield (BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content), dao, renderer)
+    } yield (BattleState(dao, inv, TestItemRepository.make, content), dao, renderer)
 
   private def use(h: Hero, b: SoloPveBattle, actions: String*) =
     for {
@@ -296,6 +297,39 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(lucky._1 == 3 && lucky._2.contains("напилась крови: +1 заряд (3/6)")) &&
               assertTrue(unlucky._1 == 2 && !unlucky._2.contains("напилась крови")) &&
               assertTrue(full._1 == 6 && !full._2.contains("напилась крови"))
+    },
+
+    test("вампирская фляга на поясе тоже пьёт кровь — даже пустая, а добор пояса из сумки не теряется") {
+      // Синий пояс: вампирская фляга без зарядов и выпитая склянка, которую
+      // пояс после боя доберёт из сумки.
+      val beltItem = Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Belt(List(
+          BeltSlot.Flask(FlaskKind.Vampiric, ItemRarity.Blue, 0),
+          BeltSlot.Brew(BrewKind.WortDecoction, spent = true))))
+      val h0    = hero(FlaskKind.Vampiric)
+      val h     = h0.copy(fightStats = h0.fightStats.copy(atk = 100000L),
+                    equipment = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest, belt = beltItem))
+      val spare = BrewKind.item(BrewKind.WortDecoction).copy(id = 42L)
+      val inv   = TestInventoryRepository.withItems(List(spare))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(hp = 10L), h), inv)
+        (state, dao, r) = t
+        // удар героя (60), сид добычи (long), бросок фляги (5 — повезло)
+        _   <- TestRandom.feedInts(60, 5) *> TestRandom.feedLongs(100L, 7L)
+        _   <- state.action(testUser, tap("Attack"), r)
+        u   <- dao.getHeroByUserId(userId).map(_.get)
+        log <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        slots = u.equipment.belt.details match {
+                  case b: ItemDetails.Belt => b.slots
+                  case _                   => Nil
+                }
+      } yield assertTrue(slots == List(
+                BeltSlot.Flask(FlaskKind.Vampiric, ItemRarity.Blue, 1),
+                // склянку пояс добрал из сумки — глоток крови её не стёр
+                BeltSlot.Brew(BrewKind.WortDecoction))) &&
+              assertTrue(log.contains("напилась крови: +1 заряд (1/6)")) &&
+              assertTrue(inv.snapshot.isEmpty)
     },
 
     test("смазка из отвара держится весь бой: каждый удар по HP травит, после боя сходит вместе с пылью") {

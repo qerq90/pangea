@@ -227,7 +227,9 @@ object BeltBrewSpec extends ZIOSpecDefault {
         _    <- state.action(testUser, useSlot(0), r)
         list <- r.sentScreens.map(_.last)
       } yield assertTrue(list.choices.size == 1) &&
-              assertTrue(list.text.contains(FlaskKind.Healer.label)) &&
+              assertTrue(list.text.contains("2. " + FlaskKind.Healer.label + " — 2")) &&
+              // высыпанная горсть видна пустой и без кнопки
+              assertTrue(list.text.contains("1. " + MaterialKind.RubyDust.displayName + " — пусто")) &&
               // кнопка несёт НАСТОЯЩИЙ номер ячейки, а не номер строки в списке
               assertTrue(list.choices.head.data.get("slot").contains("1"))
     },

@@ -426,7 +426,7 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(second.fightStats.hp > first.fightStats.hp)
     },
 
-    test("фляга из ячейки пояса лечит и тратит заряд, а пустая ячейка уходит") {
+    test("фляга из ячейки пояса лечит и тратит заряд, а выпитая до дна остаётся в ячейке пустой") {
       val hero = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
         equipment  = TestFixtures.emptyEquipment.copy(
@@ -436,9 +436,26 @@ object BattleStateSpec extends ZIOSpecDefault {
         (state, dao, renderer) = t
         _     <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer)
         after <- dao.getHeroByUserId(userId).map(_.get)
+        // список пояса, который пришёл следом за глотком
+        list  <- renderer.sentScreens.map(_.last)
+        // кнопка из старого сообщения, уже в другом бою: пить нечего, фляга цела
+        t2    <- makeState(after, strongBattle)
+        (state2, dao2, renderer2) = t2
+        _     <- state2.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), renderer2)
+        again <- dao2.getHeroByUserId(userId).map(_.get)
+        said  <- renderer2.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(after.fightStats.hp > 10L) &&
-              // заряд был последним: ячейка освободилась
-              assertTrue(beltSlots(after.equipment.belt).isEmpty)
+              // заряд был последним, но фляга никуда не делась
+              assertTrue(beltSlots(after.equipment.belt) == List(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Gray, 0))) &&
+              assertTrue(beltSlots(again.equipment.belt) == beltSlots(after.equipment.belt)) &&
+              assertTrue(said.contains("Эта ячейка уже пуста")) &&
+              // в бою пустая ячейка видна в списке, но кнопки у неё нет
+              assertTrue(list.text.contains("1. " + FlaskKind.Healer.label + " — пусто")) &&
+              assertTrue(list.text.contains("Достать нечего")) &&
+              assertTrue(list.choices.isEmpty) &&
+              // и в карточке пояса она пустая, а не пропавшая
+              assertTrue(after.equipment.belt.statsLines.contains(
+                "• " + FlaskKind.Healer.label + " — пусто (0/" + FlaskKind.chargesFor(ItemRarity.Gray) + ")"))
     },
 
     test("горсть пыли из пояса ложится на оружие, а ячейка помнит, чем была полна") {
