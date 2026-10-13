@@ -300,6 +300,14 @@ case class InventoryState(
                      StatBoost(BrewRates.WolfCallBoost, ParamsBuff.zero, now + BrewRates.WolfCallMs), now))
             res <- consume(user, item, hero, content.text("brew.wolfCall"), renderer)
           } yield res
+        // Гнилой зов — так же, только на запах приходит Гнилой Джо.
+        case Some(BrewEffect.RotCall) =>
+          for {
+            now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            _   <- heroDao.updateStatBoosts(user.userId, hero.statBoosts.add(
+                     StatBoost(BrewRates.RotCallBoost, ParamsBuff.zero, now + BrewRates.RotCallMs), now))
+            res <- consume(user, item, hero, content.text("brew.rotCall"), renderer)
+          } yield res
         case Some(BrewEffect.Boost(name, buff, label)) =>
           for {
             now <- ZIO.clockWith(_.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS))

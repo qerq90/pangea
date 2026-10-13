@@ -231,6 +231,24 @@ object CubeCraft {
       })
   }
 
+  // Отвар не из трав (гнилой зов из крысиного добра): рецепт — вещи по списку,
+  // как он есть. Травяной варке такой не по зубам — она видит одни травы.
+  private object MaterialBrew extends Recipe {
+    val size = 3
+    override def portions: Int = BrewRates.Portions
+    override def portionsFor(result: Item): Int = result.brew.map(_.portions).getOrElse(BrewRates.Portions)
+    private lazy val kinds: List[BrewKind] =
+      BrewKind.values.toList.filter(k => k.base.isEmpty && !k.recipe.forall(_.isHerb))
+    def tryMatch(pool: List[Item], rng: Rng): Option[(List[Item], Item, Rng)] =
+      kinds.collectFirst(Function.unlift { kind =>
+        kind.recipe
+          .foldLeft(Option(List.empty[Item])) { (acc, m) =>
+            acc.flatMap(taken => pool.find(i => i.material.contains(m) && !taken.contains(i)).map(taken :+ _))
+          }
+          .map(consumed => (consumed, BrewKind.item(kind), rng))
+      })
+  }
+
   // Травы первого ранга по рецепту (см. BrewKind) → отвар. Рецепт — от двух
   // трав до четырёх. Рецепты делят травы между собой, поэтому жадный «первый
   // подходящий» сварил бы три костоправных из трав, сложенных под три разных
@@ -307,6 +325,7 @@ object CubeCraft {
     DustAssembly,                                          // 3
     SetSalvage,                                            // 3
     BrewDistill,                                           // 3 (склянка + травы)
+    MaterialBrew,                                          // 3 (отвар не из трав)
     HerbBrew,                                              // 2-4
     LegendaryReforge(mithril = 1, levelDelta = 0, keepName = false), // 2
     RoseBloom,                                             // 2

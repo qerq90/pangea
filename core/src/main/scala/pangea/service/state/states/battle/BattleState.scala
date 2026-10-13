@@ -3661,6 +3661,11 @@ case class BattleState(
         boosted(BrewRates.WolfCallBoost, ParamsBuff.zero, nowMs + BrewRates.WolfCallMs,
           content.text("battle.belt.wolfCall"))
 
+      // Гнилой зов — так же, только ближайшим придёт Гнилой Джо.
+      case BrewEffect.RotCall =>
+        boosted(BrewRates.RotCallBoost, ParamsBuff.zero, nowMs + BrewRates.RotCallMs,
+          content.text("battle.belt.rotCall"))
+
       // Пузырь: срока у плёнки нет — она ждёт смерти, сколько бы её ни ждать.
       case BrewEffect.Bubble =>
         boosted(BrewRates.BubbleBoost, ParamsBuff.zero, Long.MaxValue, content.text("battle.belt.bubble"))

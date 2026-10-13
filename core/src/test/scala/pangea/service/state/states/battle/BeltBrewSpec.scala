@@ -251,6 +251,19 @@ object BeltBrewSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("На пояс легло из сумки"))
     },
 
+    test("гнилой зов из ячейки пояса ставит запах: ближайшая встреча — Гнилой Джо") {
+      val h = hero(BeltSlot.Brew(BrewKind.RotCall))
+      for {
+        t <- makeState(h, battle(h, 1000L))
+        (state, dao, r) = t
+        _       <- state.action(testUser, useSlot(0), r)
+        after   <- dao.getHeroByUserId(userId).map(_.get)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.statBoosts.hasActive(BrewRates.RotCallBoost, 0L)) &&
+              assertTrue(slots(after) == List(BeltSlot.Brew(BrewKind.RotCall, spent = true))) &&
+              assertTrue(screens.contains("ближайшая встреча в лабиринте — Гнилой Джо"))
+    },
+
     test("шнапс, самогон, сонный дурман и приговор в ячейку не ложатся") {
       assertTrue(BeltSlot.of(BrewKind.item(BrewKind.Schnapps)).isEmpty) &&
       assertTrue(BeltSlot.of(BrewKind.item(BrewKind.Moonshine)).isEmpty) &&

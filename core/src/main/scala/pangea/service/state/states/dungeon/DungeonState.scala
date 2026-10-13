@@ -52,7 +52,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     fallback = Target.Goto(StateType.Dungeon)
   )
 
-  override def targetStates: Set[StateType] = branch.gotoTargets + StateType.HeroStats + StateType.MurlocElder
+  override def targetStates: Set[StateType] =
+    branch.gotoTargets + StateType.HeroStats + StateType.MurlocElder + StateType.RottenJoe
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -113,6 +114,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       // Волчий зов: пока от героя пахнет палёным хмелем, навстречу выходит
       // Белый волк — и запах на этом кончается.
       called  = hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now)
+      // Гнилой зов: на запах гнили выходит Гнилой Джо. Оба запаха разом — волк
+      // первым, Джо следующим осмотром.
+      rotten  = hero.statBoosts.hasActive(BrewRates.RotCallBoost, now)
       // Приговор: имя рода держится час, и первая же встреча — его именное
       // существо, которое кто-то уже почти добил.
       doomed  = sentencedRace(hero, now)
@@ -134,6 +138,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
                   case (_, Some(race), _) => revenge(user, race, killLog)
                   case (_, _, Some(prey)) => sentencedPrey(user, hero, prey, renderer)
                   case _ if called        => wolfOnCall(user, hero, renderer)
+                  case _ if rotten        => joeOnCall(user, hero, renderer)
                   case _ =>
                     event match {
                       case StateType.Battle => startBattle(user, hero)
@@ -222,6 +227,13 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
              "monster" -> monster.name, "rounds" -> BrewRates.SentenceRounds.toString), Nil))
     } yield StateType.Battle
   }
+
+  /** На запах гнили вышел Гнилой Джо: та же встреча, что и на раскопках, — с
+    * выбором, драться ли. Запах на этом кончается. */
+  private def joeOnCall(user: User, hero: Hero, renderer: Renderer): Task[StateType] =
+    heroDao.updateStatBoosts(user.userId, hero.statBoosts.without(BrewRates.RotCallBoost)) *>
+      heroDao.writeSceneData(user.userId, io.circe.Json.Null) *>
+      renderer.show(user, Screen(content.text("dungeon.rotCall"), Nil)).as(StateType.RottenJoe)
 
   /** На запах вышел Белый волк: тот же зверь, что подкрадывается на поляне, но
     * здесь герой знает, за кем шёл, — и успел приготовиться. */
