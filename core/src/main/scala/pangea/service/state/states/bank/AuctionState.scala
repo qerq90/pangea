@@ -76,11 +76,15 @@ case class AuctionState(
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     resetScene(user) *> withVault(user, renderer)(showMenu(user, renderer))
 
-  // Уйти из аукциона можно всегда, остальное — только с выкупленной ячейкой:
-  // деньги и вещи здесь ходят через неё.
+  // Уйти из аукциона можно всегда — и в Торговый дом, и сразу в город, — а
+  // остальное только с выкупленной ячейкой: деньги и вещи здесь ходят через
+  // неё. Уход нельзя пускать через `withVault`: она держит героя в аукционе, и
+  // «В город» молча оставлял его на месте.
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
-    if (parseAction(ua.payload).contains("LeaveAuction")) branch.act(user, ua, renderer)
-    else withVault(user, renderer)(branch.act(user, ua, renderer).unit).as(StateType.Auction)
+    parseAction(ua.payload) match {
+      case Some("LeaveAuction") | Some(CityExit.Action) => branch.act(user, ua, renderer)
+      case _ => withVault(user, renderer)(branch.act(user, ua, renderer).unit).as(StateType.Auction)
+    }
 
   /** В аукционе участвуют только с ячейкой в Торговом доме. */
   private def withVault(user: User, renderer: Renderer)(action: => Task[Unit]): Task[Unit] =

@@ -51,16 +51,20 @@ case class GustavoState(
       daily.handAction -> Target.Run { (u, _, r) => handDaily(u, r) },
       "GustavoDailyBack" -> Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) },
       "HerbsTalk" -> Target.Goto(StateType.GustavoHerbs),
-      "Supplies"  -> Target.Goto(StateType.GustavoSupplies),
-      "Back"     -> Target.Goto(StateType.MarketSquare),
+      // Фляги теперь живут в поясе — и пополняют сразу его.
+      "Belt"      -> Target.Goto(StateType.GustavoBelt),
+      // Кнопка старых меню, где пояс прятался в «Пополнить припасы».
+      "Supplies"  -> Target.Goto(StateType.GustavoBelt),
+      // Назад — к уличным торговцам, к выбору между Ришелье и Густаво.
+      "Back"     -> Target.Goto(StateType.StreetMerchants),
       CityExit.route
     ),
     fallback = Target.Run { (u, _, r) => renderMenu(u, r).as(StateType.Gustavo) }
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.MarketSquare, StateType.Gustavo, StateType.GustavoHeal,
-        StateType.GustavoBoost, StateType.GustavoSupplies, StateType.GustavoHerbs,
+    Set(StateType.StreetMerchants, StateType.Gustavo, StateType.GustavoHeal,
+        StateType.GustavoBoost, StateType.GustavoBelt, StateType.GustavoHerbs,
         StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = renderMenu(user, renderer)
@@ -229,8 +233,8 @@ case class GustavoState(
     val boostBtn    = content.choice("Boost", "gustavo.boostLabel")
     val herbsBtn    = content.choice("Herbs", "gustavo.herbsLabel")
     val herbsTalk   = content.choice("HerbsTalk", "gustavo.herbs.talkLabel")
-    val suppliesBtn = content.choice("Supplies", "gustavo.suppliesLabel")
-    val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, suppliesBtn) ++ questBtn.toList ++
+    val beltBtn     = content.choice("Belt", "gustavo.beltLabel")
+    val choices = List(healBtn, boostBtn, herbsBtn, herbsTalk, beltBtn) ++ questBtn.toList ++
       dailyBtn.toList ++
       List(content.choice("Back", "gustavo.back"), CityExit.button(content))
     Screen(content.text("gustavo.menu.text"), choices)

@@ -75,7 +75,8 @@ case class MerchantState(
       "CancelSellItem"  -> Target.Run { (u, _,  r) => currentSellPage(u).flatMap(p => showSellList(u, r, p)) },
       "BackFromSell"    -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "OpenCharacter"   -> Target.Run { (u, _,  _) => CharacterMenu.open(heroDao, u.userId, StateType.Merchant) },
-      "Back"            -> Target.Goto(StateType.MarketSquare),
+      // Назад — к уличным торговцам, к выбору между Ришелье и Густаво.
+      "Back"            -> Target.Goto(StateType.StreetMerchants),
       daily.openAction  -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction  -> Target.Run { (u, _, r) => takeDaily(u, r) },
       daily.giveAction  -> Target.Run { (u, _, r) => giveDaily(u, r) },
@@ -90,7 +91,7 @@ case class MerchantState(
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.MarketSquare, StateType.Merchant, StateType.HeroStats, StateType.GlobalMap)
+    Set(StateType.StreetMerchants, StateType.Merchant, StateType.HeroStats, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] =
     for {

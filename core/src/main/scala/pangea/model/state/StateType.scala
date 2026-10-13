@@ -62,6 +62,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object Registration extends StateType
   case object Dungeon      extends StateType
   case object HeroStats    extends StateType
+  case object StreetMerchants extends StateType // уличные торговцы Торговой площади: Ришелье и Густаво
   case object FriendCode   extends StateType // «Код друга» из Персонажа: свой код и ввод чужого
   case object Battle       extends StateType
   case object Death        extends StateType
@@ -134,7 +135,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   /** Городские сцены — где герой «в городе» (сюжетную карту можно открыть только
     * отсюда). Смотрится по `returnState` меню персонажа. */
   val cityStates: Set[StateType] = Set(
-    GlobalMap, HarborQuarter, MarketSquare, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
+    GlobalMap, HarborQuarter, MarketSquare, StreetMerchants, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
     TradeHouse, BankVault, Auction, FetShop, Mail,
     Arena,
     Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoFlask, GustavoBelt,

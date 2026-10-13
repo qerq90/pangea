@@ -10,9 +10,9 @@ case class MarketSquareState(content: SceneContent) extends State {
 
   private val branch = new Branch(
     routes = Map(
-      "StreetMerchants"    -> Target.Run { (user, _, renderer) =>
-                                renderer.show(user, content.screen("marketSquare.streetMerchants"))
-                                  .as(StateType.MarketSquare) },
+      "StreetMerchants"    -> Target.Goto(StateType.StreetMerchants),
+      // Кнопки лавок жили здесь, пока уличные торговцы были подменю площади:
+      // старое сообщение с ними пусть по-прежнему ведёт куда обещало.
       "MerchantRichelieu"  -> Target.Goto(StateType.Merchant),
       "Gustavo"            -> Target.Goto(StateType.Gustavo),
       "Construction"       -> Target.Goto(StateType.Construction),

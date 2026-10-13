@@ -68,7 +68,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
     // ── Меню ────────────────────────────────────────────────────────────────
     suite("GustavoState (меню)")(
 
-      test("enter → зелёная кнопка лечения, баф, травы, припасы, задание, Назад") {
+      test("enter → зелёная кнопка лечения, баф, травы, пояс, задание, Назад") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
@@ -77,8 +77,10 @@ object GustavoStateSpec extends ZIOSpecDefault {
           ids      = screens.last.choices.map(_.id)
           heal     = screens.last.choices.find(_.id == "Heal")
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Positive)) &&
-                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Supplies", "GusQuest",
-                  "GustavoDaily", "Back", "GoToCity"))
+                assertTrue(ids == List("Heal", "Boost", "Herbs", "HerbsTalk", "Belt", "GusQuest",
+                  "GustavoDaily", "Back", "GoToCity")) &&
+                // «Пополнить припасы» больше нет: фляги живут в поясе
+                assertTrue(screens.last.choices.exists(c => c.id == "Belt" && c.label == "Пополнить пояс"))
       },
 
       test("«В город» уводит прямо на площадь — и от прилавка, и с предложения зелья") {
@@ -93,16 +95,18 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(boost == StateType.GlobalMap)
       },
 
-      test("Herbs → заглушка, остаёмся в меню; Supplies → GustavoSupplies") {
+      test("Herbs → заглушка, остаёмся в меню; «Пополнить пояс» → GustavoBelt") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           state = GustavoState(heroDao, TestInventoryRepository.accepting, content)
           herbs   <- state.action(testUser, tap("Herbs"), renderer)
-          supplies <- state.action(testUser, tap("Supplies"), renderer)
+          belt    <- state.action(testUser, tap("Belt"), renderer)
+          // кнопка из старого меню «Пополнить припасы» ведёт туда же
+          stale   <- state.action(testUser, tap("Supplies"), renderer)
           screens <- renderer.sentScreens
         } yield assertTrue(herbs == StateType.Gustavo) &&
-                assertTrue(supplies == StateType.GustavoSupplies) &&
+                assertTrue(belt == StateType.GustavoBelt && stale == StateType.GustavoBelt) &&
                 assertTrue(screens.exists(_.text.contains("трав у тебя нет")))
       },
 
@@ -117,7 +121,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
         } yield assertTrue(heal.exists(_.color == ChoiceColor.Negative))
       },
 
-      test("Heal → GustavoHeal, Boost → GustavoBoost, Back → MarketSquare") {
+      test("Heal → GustavoHeal, Boost → GustavoBoost, Back → к уличным торговцам") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
@@ -127,7 +131,7 @@ object GustavoStateSpec extends ZIOSpecDefault {
           back <- state.action(testUser, tap("Back"), renderer)
         } yield assertTrue(h == StateType.GustavoHeal) &&
                 assertTrue(b == StateType.GustavoBoost) &&
-                assertTrue(back == StateType.MarketSquare)
+                assertTrue(back == StateType.StreetMerchants)
       }
     ),
 
@@ -403,14 +407,14 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(ids == Set("Refill", "Back"))
       },
 
-      test("Refill → пополняет бутыли до максимума, списывает 200, уходит в припасы") {
+      test("Refill → пополняет бутыли до максимума, списывает 200, возвращает к Густаво") {
         for {
           t <- env(heroWithBelt(belt(1, 3)))
           (heroDao, renderer, content) = t
           st      <- GustavoBeltState(heroDao, content).action(testUser, tap("Refill"), renderer)
           h       <- heroDao.getHeroByUserId(userId).map(_.get)
           screens <- renderer.sentScreens
-        } yield assertTrue(st == StateType.GustavoSupplies) &&
+        } yield assertTrue(st == StateType.Gustavo) &&
                 assertTrue(beltCharges(h.equipment.belt).contains(3)) &&
                 assertTrue(h.silver == 4800L) &&
                 assertTrue(screens.exists(_.text.contains("забил бутыли")))
@@ -450,12 +454,12 @@ object GustavoStateSpec extends ZIOSpecDefault {
                 assertTrue(screens.exists(_.text.contains("пояса-то у тебя и нет")))
       },
 
-      test("Back → GustavoSupplies") {
+      test("Back → в меню Густаво") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           st <- GustavoBeltState(heroDao, content).action(testUser, tap("Back"), renderer)
-        } yield assertTrue(st == StateType.GustavoSupplies)
+        } yield assertTrue(st == StateType.Gustavo)
       }
     )
   )
