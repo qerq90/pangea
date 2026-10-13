@@ -58,7 +58,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       lock <- PlayerLock.make
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
-      transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
+      transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels,
+                    new pangea.test.TestPlayers, content, heroDao, TestBankRepository.empty, payouts)
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
                        pangea.service.admin.AdminPanel.disabled, content, lock), heroDao, heroRepo, api)
 
@@ -74,7 +75,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       payoutDao  = TestPayoutDao.empty
       payouts    = Payouts(payoutDao, heroDao, content)
       parcels    = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
-      transfers  = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
+      transfers  = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels,
+                     new pangea.test.TestPlayers, content, heroDao, TestBankRepository.empty, payouts)
       states     = Map[StateType, State](
         StateType.GlobalMap -> GlobalMapState(heroDao, content),
         StateType.Battle    -> BattleState(heroDao, TestInventoryRepository.accepting, TestItemRepository.make, content))
@@ -99,7 +101,7 @@ object StateHandlerSpec extends ZIOSpecDefault {
         _        <- fighter.makeActionVK(vkId, eventId = 2L, UserAction("", None))
         inFight  <- fightDao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(updated.silver == hero.silver + 300L) &&
-              assertTrue(messages.exists(_._1.contains("выручку с аукциона"))) &&
+              assertTrue(messages.exists(_._1.contains("деньги, что вас дожидались"))) &&
               assertTrue(payouts.snapshot.isEmpty) &&
               assertTrue(inFight.silver == hero.silver && fightPayouts.snapshot.nonEmpty)
     },
@@ -256,7 +258,8 @@ object StateHandlerSpec extends ZIOSpecDefault {
       lock <- PlayerLock.make
       payouts   = pangea.service.payout.Payouts(pangea.test.TestPayoutDao.empty, heroDao, content)
       parcels   = pangea.service.parcel.Parcels(TestParcelDao.empty, TestBankRepository.empty, content)
-      transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels, new pangea.test.TestPlayers, content)
+      transfers = pangea.service.parcel.Transfers(TestInventoryRepository.accepting, userRepo, parcels,
+                    new pangea.test.TestPlayers, content, heroDao, TestBankRepository.empty, payouts)
     } yield (new StateHandler(api, userRepo, heroRepo, heroDao, payouts, parcels, transfers, states,
                        pangea.service.admin.AdminPanel.disabled, content, lock), heroDao, api)
 }

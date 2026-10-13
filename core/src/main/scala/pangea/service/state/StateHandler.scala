@@ -74,9 +74,11 @@ class StateHandler(
   /** «Передать» из общей беседы: адресата бот берёт из процитированного
     * сообщения, а выбирать вещь отправитель будет у себя в личке — там у
     * каждой кнопки видны характеристики, и одинаковые названия не путаются.
+    * «Передать серебро 100» и «Передать дублоны 5» отдают деньги: их в сумке
+    * не ищут.
     *
     * Отдавать можно только из города; получатель может быть где угодно, вещь
-    * придёт ему посылкой. */
+    * придёт ему посылкой, а деньги — в ячейку или в руки в городе. */
   def transferFromChat(senderVk: VkId, targetVk: VkId, query: String, eventId: Long): Task[Unit] = {
     val renderer = VkRenderer(api)
     userRepo.getUserByVkId(senderVk).flatMap {
@@ -142,9 +144,16 @@ class StateHandler(
               item    = ChatCommand.itemQuery(query)
               count   = ChatCommand.count(query)
               now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
-              // Понятное название уходит сразу; экран нужен только там, где
-              // вещь можно спутать, — в первую очередь у экипировки.
-              outcome <- transfers.quickSend(sender, hero, to, item, count, now)
+              // Деньги лежат не в сумке: серебро и дублоны передаются своим
+              // путём, а без суммы спрашиваем, сколько. Понятное название вещи
+              // уходит сразу; экран нужен только там, где вещь можно спутать, —
+              // в первую очередь у экипировки.
+              outcome <- ChatCommand.moneyQuery(query) match {
+                           case Some((money, Some(amount))) => transfers.sendMoney(sender, hero, to, money, amount)
+                           case Some((_, None)) =>
+                             ZIO.succeed(Transfers.Outcome.Forbidden(content.text("transfer.money.howMuch")))
+                           case None => transfers.quickSend(sender, hero, to, item, count, now)
+                         }
               _ <- outcome match {
                 case Transfers.Outcome.Sent(message) =>
                   api.sendMessage(sender, message, List.empty, None)
@@ -383,7 +392,7 @@ object StateHandler {
 
   /** Ответы на «Передать» из беседы: короткие и в личку, чтобы не шуметь в чате. */
   val TransferNotInCity: String =
-    "Передавать вещи можно только из города: дойдите до Кинета и повторите."
+    "Передавать вещи и деньги можно только из города: дойдите до Кинета и повторите."
 
   val TransferNoTarget: String =
     "Не понял, кому передавать. Ответьте на сообщение игрока (или перешлите его) и напишите «Передать …»."

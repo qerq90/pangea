@@ -1,12 +1,17 @@
 package pangea.service.parcel
 
+import pangea.dao.hero.HeroDao
 import pangea.engine.{Players, SceneContent}
 import pangea.model.hero.{Hero, HeroId}
 import pangea.model.item.{Item, ItemStack, ItemType}
 import pangea.model.user.{User, UserId}
+import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.user.UserRepository
 import pangea.service.chat.ChatCommand
+import pangea.service.chat.ChatCommand.Money
+import pangea.service.payout.Payouts
+import pangea.service.purse.Purse
 import zio.{Task, ZIO, ZLayer}
 
 /** Кому и что передают. Имя получателя берём из ВК один раз и носим с собой:
@@ -15,14 +20,20 @@ final case class TransferTarget(heroId: HeroId, userId: UserId, name: String)
 
 /** Общая часть передачи вещей: что подходит под запрос, можно ли отдать сразу
  *  и как, собственно, отдать. Этим пользуются и команда из беседы, и экран
- *  выбора в личке — правила у них одни. */
+ *  выбора в личке — правила у них одни. Деньги передаются здесь же
+ *  ([[sendMoney]]), но своим путём: в сумке их нет. */
 final case class Transfers(
   inventoryRepo: InventoryRepository,
   userRepo:      UserRepository,
   parcels:       Parcels,
   players:       Players,
-  content:       SceneContent
+  content:       SceneContent,
+  heroDao:       HeroDao,
+  bank:          BankRepository,
+  payouts:       Payouts
 ) {
+
+  private val purse = Purse(heroDao, Some(bank))
 
   /** Что вообще можно передать: вещь занимает место, не сюжетная и не трофей.
     * Трофеи — личная добыча: их сдают в Гильдии, а не передают друг другу. */
@@ -105,6 +116,80 @@ final case class Transfers(
       _    <- ZIO.when(items.nonEmpty)(tell(sender, name, target, items))
     } yield items
 
+  /** Передать деньги. Отправитель платит сразу: серебро — сперва с рук,
+    * нехватку из ячейки, как любые траты (см. [[Purse]]); дублоны — с рук.
+    * Получателю серебро ложится в банковскую ячейку, а не приняла она — ждёт
+    * его в городе, как выручка с аукциона (см. [[Payouts]]); дублоны ждут в
+    * городе всегда: ячейка держит только серебро. Самого героя получателя здесь
+    * не трогаем — его пишут только под его собственным локом. Зачислить не
+    * вышло — деньги возвращаются отправителю. */
+  def sendMoney(
+    sender: User,
+    hero:   Hero,
+    target: TransferTarget,
+    money:  Money,
+    amount: Long
+  ): Task[Transfers.Outcome] = {
+    val line = Transfers.moneyLine(money, amount)
+    charge(sender, hero, money, amount).flatMap {
+      case None => notEnough(hero, money).map(Transfers.Outcome.Forbidden(_))
+      case Some(refund) =>
+        for {
+          intoVault <- credit(target, money, amount).tapError(_ => refund)
+          _         <- tellMoney(sender, target, line, intoVault)
+        } yield Transfers.Outcome.Sent(content.format("transfer.money.sent",
+          "money" -> line, "to" -> target.name))
+    }
+  }
+
+  /** Списать с отправителя. Возвращает, как вернуть деньги назад, если
+    * зачислить их не выйдет; `None` — столько у него нет, и ничего не списано. */
+  private def charge(sender: User, hero: Hero, money: Money, amount: Long): Task[Option[Task[Unit]]] =
+    money match {
+      case Money.Silver =>
+        purse.charge(sender.userId, hero, amount).map(_.map(paid =>
+          heroDao.updateSilver(sender.userId, paid.silver + amount)))
+      case Money.Doubloons =>
+        if (hero.doubloons < amount) ZIO.none
+        else heroDao.updateDoubloons(sender.userId, hero.doubloons - amount)
+               .as(Some(heroDao.updateDoubloons(sender.userId, hero.doubloons)))
+    }
+
+  /** Зачислить получателю: `true` — легло в ячейку, `false` — ждёт в городе. */
+  private def credit(target: TransferTarget, money: Money, amount: Long): Task[Boolean] =
+    money match {
+      case Money.Silver =>
+        bank.depositSilver(target.heroId, amount).either.flatMap {
+          case Right(_) => ZIO.succeed(true)
+          case Left(_)  => payouts.queue(target.heroId, silver = amount).as(false)
+        }
+      case Money.Doubloons => payouts.queue(target.heroId, doubloons = amount).as(false)
+    }
+
+  /** Отказ, когда денег не хватает: сколько есть на самом деле. Серебро
+    * считается вместе с ячейкой — его оттуда и доберут. */
+  private def notEnough(hero: Hero, money: Money): Task[String] =
+    money match {
+      case Money.Silver =>
+        purse.total(hero).map(have => content.format("transfer.money.notEnoughSilver", "have" -> have.toString))
+      case Money.Doubloons =>
+        ZIO.succeed(content.format("transfer.money.notEnoughDoubloons", "have" -> hero.doubloons.toString))
+    }
+
+  /** Письмо получателю — где теперь его деньги, — и строка в общий чат. */
+  private def tellMoney(sender: User, target: TransferTarget, line: String, intoVault: Boolean): Task[Unit] =
+    for {
+      fromName <- players.getDisplayName(sender).orElse(ZIO.succeed(content.text("transfer.someone")))
+      receiver <- userRepo.getUserById(target.userId).option.map(_.flatten)
+      key       = if (intoVault) "transfer.money.noticeVault" else "transfer.money.noticeCity"
+      _        <- ZIO.foreachDiscard(receiver)(r => players.notify(r, content.format(key,
+                    "from" -> fromName, "money" -> line)).ignore)
+      _        <- players.announce(content.format("transfer.money.announce",
+                    "from"  -> mention(sender.vkId.value, fromName),
+                    "to"    -> receiver.map(r => mention(r.vkId.value, target.name)).getOrElse(target.name),
+                    "money" -> line)).ignore
+    } yield ()
+
   /** Письмо получателю и строка в общий чат: передача — дело публичное. */
   private def tell(sender: User, fromName: String, target: TransferTarget, items: List[Item]): Task[Unit] =
     for {
@@ -133,12 +218,20 @@ object Transfers {
     final case class Sent(message: String) extends Outcome
     /** В сумке нет ничего похожего. */
     case object Empty extends Outcome
-    /** Нашлось, но такое не передают (трофеи). */
+    /** Так не передать: трофеи из рук в руки не ходят, денег не хватает или
+      * сумму не назвали. Отправителю остаётся это сообщение. */
     final case class Forbidden(message: String) extends Outcome
     /** Надо уточнить кнопками: экипировка или несколько разных вещей. */
     case object NeedPick extends Outcome
   }
 
-  val live: ZLayer[InventoryRepository with UserRepository with Parcels with Players with SceneContent, Nothing, Transfers] =
-    ZLayer.fromFunction(Transfers(_, _, _, _, _))
+  /** Сумма со значком валюты: 🪙 серебро, 🟡 дублоны — как везде в игре. */
+  def moneyLine(money: Money, amount: Long): String = money match {
+    case Money.Silver    => s"🪙 $amount"
+    case Money.Doubloons => s"🟡 $amount"
+  }
+
+  val live: ZLayer[InventoryRepository with UserRepository with Parcels with Players with SceneContent
+                     with HeroDao with BankRepository with Payouts, Nothing, Transfers] =
+    ZLayer.fromFunction(Transfers(_, _, _, _, _, _, _, _))
 }
