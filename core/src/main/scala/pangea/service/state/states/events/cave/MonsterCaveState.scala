@@ -123,11 +123,14 @@ case class MonsterCaveState(
              else reward(user, scene, renderer).flatMap(s => showRoom(user, s, renderer))
     } yield res
 
-  /** Порог пещеры: чья она — видно по следам, сколько их — нет. У канализации
-    * гадать не о чем: герой пришёл сюда по объявлению и знает, за кем. */
+  /** Порог пещеры: чья она — видно по следам, сколько их — нет. У выездных
+    * гадать не о чем: герой пришёл сюда по объявлению и знает, за кем, — а у
+    * пещеры некроманта по костям у входа видно ещё и, чья родня там поднята. */
   private def showGate(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
     renderer.show(user, Screen(
       if (scene.sewer) content.format("sewer.gate.text", "lvl" -> Difficulty.render(scene.questLvl.toInt))
+      else if (scene.necro) content.format("necro.gate.text",
+        "race" -> Race.withName(scene.race).genitivePlural, "lvl" -> Difficulty.render(scene.questLvl.toInt))
       else content.format("cave.gate.text", "race" -> Race.withName(scene.race).toString),
       List(
         content.choice("CaveEnter", key(scene, "gate.enter")).copy(color = ChoiceColor.Positive, row = Some(0)),
@@ -262,10 +265,12 @@ case class MonsterCaveState(
   // ── Алтарь тёмных сил ──────────────────────────────────────────────────────
 
   /** Что камень делает с положенной на него вещью. Камни-усилители он
-    * переплавляет в черепа, трофеи поднимает обратно; всё прочее ему
-    * безразлично — такую вещь герой уносит с собой. */
+    * переплавляет в черепа, трофеи поднимает обратно, а проклятые кости его
+    * раскалывают — и из разлома встаёт Некромант. Всё прочее ему безразлично —
+    * такую вещь герой уносит с собой. */
   private def offer(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer): Task[StateType] =
     if (scene.altarSpent) say(user, scene, "altar.spent", renderer)
+    else if (item.material.contains(MaterialKind.CursedBones)) summon(user, hero, scene, item, renderer)
     else item.gem match {
       case Some(gem) if gem.kind == GemKind.Skull => say(user, scene, "altar.skullAlready", renderer)
       case Some(gem)                              => forgeSkull(user, hero, scene, item, gem.grade, renderer)
@@ -274,6 +279,26 @@ case class MonsterCaveState(
         case None       => say(user, scene, "altar.indifferent", renderer)
       }
     }
+
+  /** Проклятые кости на камне: того, кто в них ещё жив, алтарь не выдерживает.
+    * Плита раскалывается, и из разлома встаёт Некромант — со свитой той расы,
+    * чья здесь пещера, как в своём логове. Кости уходят, алтарь разбит насовсем;
+    * вернуться из боя можно только победив — к расколотой плите. */
+  private def summon(user: User, hero: Hero, scene: CaveScene, bones: Item, renderer: Renderer): Task[StateType] = {
+    val lord    = MiniBoss.Necromancer
+    val lvl     = lord.bossLvl(hero.lvl)
+    val broken  = scene.copy(altarSpent = true, altarBroken = true)
+    val routing = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(broken.asJson))
+    val mobLvl  = if (scene.away) scene.questLvl.max(1L) else hero.dungeonLevel.toLong.max(1L)
+    for {
+      _      <- inventoryRepo.removeItem(bones.id, hero.id).mapError(asThrowable)
+      battle <- necromancerFight(hero, scene, lord, lvl, lord.stats(lvl), mobLvl)
+      _      <- heroDao.writeActiveBattle(user.userId,
+                  battle.copy(lootLevel = Option.when(scene.away)(mobLvl)).asJson)
+      _      <- heroDao.writeSceneData(user.userId, routing.asJson)
+      _      <- renderer.show(user, Screen(content.format("cave.altar.bones", "name" -> bones.name), Nil))
+    } yield StateType.Battle
+  }
 
   /** Камень-усилитель уходит в камень алтаря и возвращается черепом того же
     * достоинства — тем самым, что выкапывают из свежих могил. */
@@ -427,12 +452,15 @@ case class MonsterCaveState(
     val room = scene.room
     room.kind match {
       case RoomKind.Rest  => content.text(if (scene.restUsed) "cave.room.restUsed" else "cave.room.rest")
-      case RoomKind.Altar => content.text(if (scene.altarSpent) "cave.room.altarSpent" else "cave.room.altar")
+      case RoomKind.Altar => content.text(
+        if (scene.altarBroken) "cave.room.altarBroken"
+        else if (scene.altarSpent) "cave.room.altarSpent"
+        else "cave.room.altar")
       case RoomKind.Herb  => content.text(if (room.done) "cave.room.herbTaken" else "cave.room.herb")
       case RoomKind.Chest => content.text(if (room.done) "cave.room.chestOpen" else "cave.room.chest")
       case RoomKind.Stash => content.text(if (room.done) "cave.room.stashDug" else "cave.room.stash")
       case RoomKind.Treasure => content.text(if (room.done) "cave.room.treasureDug" else "cave.room.treasure")
-      case RoomKind.Stairs   => content.text("sewer.room.stairs")
+      case RoomKind.Stairs   => awayTxt(scene, "room.stairs")
       case RoomKind.Lair     =>
         val lair = if (scene.sewer) "sewer" else if (scene.undeadMobs) "cave.necro" else "cave.king"
         content.text(if (room.monsters > 0) s"$lair.room.lair" else s"$lair.room.lairEmpty")
@@ -472,13 +500,20 @@ case class MonsterCaveState(
   private def atAltar(scene: CaveScene): Boolean =
     scene.inside && scene.room.kind == RoomKind.Altar
 
-  /** Полный ключ текста: у канализации свои слова там, где они у неё есть
-    * (см. [[MonsterCaveState.SewerSays]]), в остальном она говорит языком
-    * пещеры — механика у них одна, и дублировать её тексты незачем. */
+  /** Полный ключ текста: у канализации и пещеры некроманта свои слова там, где
+    * они у них есть (см. [[MonsterCaveState.SewerSays]], [[MonsterCaveState.NecroSays]]),
+    * в остальном они говорят языком пещеры — механика у них одна, и
+    * дублировать её тексты незачем. */
   private def key(scene: CaveScene, name: String): String =
-    if (scene.sewer && SewerSays.contains(name)) s"sewer.$name" else s"cave.$name"
+    if (scene.sewer && SewerSays.contains(name)) s"sewer.$name"
+    else if (scene.necro && NecroSays.contains(name)) s"necro.$name"
+    else s"cave.$name"
 
   private def txt(scene: CaveScene, name: String): String = content.text(key(scene, name))
+
+  /** Слово, которое есть только у выездных мест (см. [[MonsterCaveState.AwayOnly]]). */
+  private def awayTxt(scene: CaveScene, name: String): String =
+    content.text(if (scene.necro) s"necro.$name" else s"sewer.$name")
 
   /** Чья добыча в сундуке и схроне: в пещере — хозяев пещеры, в канализации —
     * людей, что прятали там своё. Крысы сундуков не набивают. */
@@ -493,14 +528,14 @@ case class MonsterCaveState(
   private def fight(user: User, hero: Hero, scene: CaveScene, idx: Int, renderer: Renderer): Task[StateType] = {
     val race  = Race.withName(scene.race)
     val count = scene.rooms(idx).monsters
-    // В канализации уровень берётся от задания, а не от этажа лабиринта:
-    // объявление обещало крыс именно такой силы (см. SewerRates.MinLvl..MaxLvl).
-    val lvl   = if (scene.sewer) scene.questLvl.toInt.max(1) else hero.dungeonLevel
+    // В выездных уровень берётся от задания, а не от этажа лабиринта:
+    // объявление обещало обитателей именно такой силы (см. SewerRates.MinLvl).
+    val lvl   = if (scene.away) scene.questLvl.toInt.max(1) else hero.dungeonLevel
     for {
       seeds   <- ZIO.foreach(List.fill(count)(()))(_ => Random.nextLong)
       monsters = seeds.map { seed =>
                    val (rarity, _) =
-                     if (scene.sewer) CaveGenerator.rollRatRarity(Rng(seed))
+                     if (scene.away) CaveGenerator.rollQuestRarity(Rng(seed))
                      else CaveGenerator.rollRarity(Rng(seed))
                    val m = weaken(MonsterGenerator.generateOfRaceAndRarity(lvl, race, rarity), scene.weakened)
                    // В пещере Некроманта вся родня поднята: раса своя, природа могильная.
@@ -513,9 +548,9 @@ case class MonsterCaveState(
       gained    = monsters.map(expFor).sum
       next      = scene.withRoom(idx, _.copy(monsters = 0)).copy(expEarned = scene.expEarned + gained)
       routing   = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
-      // В канализации и добыча с опытом — по уровню задания, как и сила крыс.
+      // В выездных и добыча с опытом — по уровню задания, как и сила обитателей.
       _ <- heroDao.writeActiveBattle(user.userId,
-             battle.copy(noKin = true, lootLevel = Option.when(scene.sewer)(lvl.toLong)).asJson)
+             battle.copy(noKin = true, lootLevel = Option.when(scene.away)(lvl.toLong)).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format(key(scene, "ambush"), "count" -> count.toString), Nil))
     } yield StateType.Battle
@@ -534,16 +569,16 @@ case class MonsterCaveState(
     val stats = lord.stats(lvl)
     val next    = scene.withRoom(idx, _.copy(monsters = 0, done = true))
     val routing = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
-    val mobLvl  = if (scene.sewer) scene.questLvl.max(1L) else hero.dungeonLevel.toLong.max(1L)
+    val mobLvl  = if (scene.away) scene.questLvl.max(1L) else hero.dungeonLevel.toLong.max(1L)
     for {
       battle <- lord match {
                   case MiniBoss.Necromancer => necromancerFight(hero, scene, lord, lvl, stats, mobLvl)
                   case _                    => ZIO.succeed(kingFight(hero, lord, lvl, stats, mobLvl))
                 }
-      // Король катает свою добычу по своему уровню, а крысы, которых он позвал,
-      // в канализации падают по уровню задания — как и в комнатах.
+      // Хозяин катает свою добычу по своему уровню, а свита и подмога в
+      // выездных падают по уровню задания — как и в комнатах.
       _ <- heroDao.writeActiveBattle(user.userId,
-             battle.copy(lootLevel = Option.when(scene.sewer)(mobLvl)).asJson)
+             battle.copy(lootLevel = Option.when(scene.away)(mobLvl)).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text(
              if (scene.sewer) "sewer.king" else if (lord == MiniBoss.Necromancer) "cave.necro.lord" else "cave.king.lord"), Nil))
@@ -592,19 +627,20 @@ case class MonsterCaveState(
   }
 
   /** Ход вниз: нижний ярус катается в этот самый момент — до спуска его ещё
-    * нет. Дурман и отрава идут вниз вместе с героем: сквозняк в трубах общий, а
-    * взятый наверху опыт копится дальше — платят за канализацию один раз. */
+    * нет. Дурман и отрава идут вниз вместе с героем: сквозняк общий, а взятый
+    * наверху опыт копится дальше — платят за выездное место один раз. */
   private def descend(user: User, renderer: Renderer): Task[StateType] =
     withScene(user) { scene =>
-      if (!scene.sewer || scene.room.kind != RoomKind.Stairs || scene.room.monsters > 0)
+      if (!scene.away || scene.room.kind != RoomKind.Stairs || scene.room.monsters > 0)
         showRoom(user, scene, renderer)
       else
         for {
           seed      <- Random.nextLong
-          (deep, _)  = CaveGenerator.sewerDeep(scene.questLvl, Rng(seed))
+          (deep, _)  = if (scene.necro) CaveGenerator.necroDeep(scene.questLvl, scene.race, Rng(seed))
+                       else CaveGenerator.sewerDeep(scene.questLvl, Rng(seed))
           below      = deep.copy(weakened = scene.weakened, poisoned = scene.poisoned,
                          expEarned = scene.expEarned, restUsed = true)
-          _         <- renderer.show(user, Screen(content.text("sewer.descended"), Nil))
+          _         <- renderer.show(user, Screen(awayTxt(scene, "descended"), Nil))
           res       <- showRoom(user, below, renderer)
         } yield res
     }
@@ -775,14 +811,14 @@ case class MonsterCaveState(
     * необысканные углы остаются на месте, и уходит он сам, когда захочет. */
   private def reward(user: User, scene: CaveScene, renderer: Renderer): Task[CaveScene] =
     if (!scene.cleared || scene.rewarded || scene.expEarned <= 0L) ZIO.succeed(scene)
-    // Верхний ярус канализации выбит, а большой крысы так и не видели: за
+    // Верхний ярус выездного места выбит, а хозяина так и не видели: за
     // половину дела не платят — надо искать ход вниз.
     else if (!scene.lastFloor)
-      renderer.show(user, Screen(content.text("sewer.upperClear"), Nil)).as(scene)
+      renderer.show(user, Screen(awayTxt(scene, "upperClear"), Nil)).as(scene)
     else {
       val bonus = (scene.expEarned * CaveRates.ClearExpPct / 100L).max(1L)
-      // Канализация в счёт пещер не идёт: за неё своё объявление.
-      val quest = if (scene.sewer) BoardKind.SewerRats else BoardKind.CaveClear
+      // Выездные в счёт пещер не идут: за каждое своё объявление.
+      val quest = questOf(scene)
       for {
         hero   <- getHero(user)
         leveled = hero.gainExp(bonus)
@@ -793,8 +829,7 @@ case class MonsterCaveState(
         // Отдельной строкой, чтобы это не потерялось среди опыта и уровня.
         _      <- renderer.show(user, Screen(content.text(key(scene, "allClear")), Nil))
         closed <- BoardProgress.markDone(heroDao, user.userId, quest)
-        _      <- ZIO.when(closed)(renderer.show(user, Screen(
-                    content.text(if (scene.sewer) "questBoard.doneSewer" else "questBoard.doneCave"), Nil)))
+        _      <- ZIO.when(closed)(renderer.show(user, Screen(content.text(doneKey(quest)), Nil)))
         done    = scene.copy(rewarded = true)
         _      <- writeScene(user, done)
       } yield done
@@ -807,22 +842,22 @@ case class MonsterCaveState(
         content.screen("cave.confirmLeave").choices)).as(StateType.MonsterCave)
     }
 
-  /** Уход. Из пещеры герой возвращается в лабиринт, из канализации — в город:
-    * он и пришёл-то сюда из гильдии, по объявлению.
+  /** Уход. Из пещеры герой возвращается в лабиринт, из выездного места — в
+    * город: он и пришёл-то сюда из гильдии, по объявлению.
     *
-    * Объявление на этом кончается: сцена стирается, и ни в ту пещеру, ни в ту
-    * канализацию дороги больше нет. Зачищенная уже отмечена сделанной — её
+    * Объявление на этом кончается: сцена стирается, и ни в ту пещеру, ни в то
+    * выездное место дороги больше нет. Зачищенное уже отмечено сделанным — его
     * провал не трогает. */
   private def leave(user: User, renderer: Renderer): Task[StateType] =
     readScene(user).flatMap { scene =>
-      val sewer = scene.exists(_.sewer)
-      val quest = if (sewer) BoardKind.SewerRats else BoardKind.CaveClear
+      val away  = scene.exists(_.away)
+      val quest = scene.fold[BoardKind](BoardKind.CaveClear)(questOf)
       scheduler.cancel(user.userId, TaskKind.CaveRest) *>
         heroDao.writeSceneData(user.userId, Json.Null) *>
-        renderer.show(user, Screen(content.text(if (sewer) "sewer.left" else "cave.left"), Nil)) *>
+        renderer.show(user, Screen(content.text(scene.fold("cave.left")(key(_, "left"))), Nil)) *>
         BoardProgress.markFailed(heroDao, user.userId, quest).flatMap(failed =>
           ZIO.when(failed)(renderer.show(user, Screen(content.text("questBoard.failed"), Nil)))) *>
-        ZIO.succeed(if (sewer) StateType.GlobalMap else StateType.Dungeon)
+        ZIO.succeed(if (away) StateType.GlobalMap else StateType.Dungeon)
     }
 
   // ── Вспомогательное ────────────────────────────────────────────────────────
@@ -896,6 +931,28 @@ object MonsterCaveState {
     "supply.map", "supply.mapAlready", "supply.mapHalf",
     "altar.swapped"
   )
+
+  /** То же для пещеры некроманта (`necro.<имя>`): у неё свои слова на всё, что
+    * в канализации своё. */
+  val NecroSays: Set[String] = SewerSays
+
+  /** Слова, которых у пещеры нет вовсе: ход вниз, верхний ярус, спуск. Они
+    * бывают только у выездных мест — `sewer.<имя>` или `necro.<имя>`. */
+  val AwayOnly: Set[String] = Set("upperClear", "room.stairs", "descended")
+
+  /** Какое объявление закрывает это место: канализация и пещера некроманта —
+    * свои, всякая прочая пещера — «выбить пещеру». */
+  def questOf(scene: CaveScene): BoardKind =
+    if (scene.sewer) BoardKind.SewerRats
+    else if (scene.necro) BoardKind.NecromancerHunt
+    else BoardKind.CaveClear
+
+  /** Чем доска отзывается, когда место выбито. */
+  def doneKey(quest: BoardKind): String = quest match {
+    case BoardKind.SewerRats       => "questBoard.doneSewer"
+    case BoardKind.NecromancerHunt => "questBoard.doneNecro"
+    case _                         => "questBoard.doneCave"
+  }
 
   /** Сколько своих помещается в ряд на экране «кем жертвуем». */
   val SwapPerRow: Int = 2

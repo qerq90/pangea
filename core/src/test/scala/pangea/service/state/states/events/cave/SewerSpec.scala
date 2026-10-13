@@ -418,6 +418,66 @@ object SewerSpec extends ZIOSpecDefault {
               assertTrue(out == StateType.GlobalMap && after.contains(io.circe.Json.Null))
     },
 
+    test("бегство из боя в канализации проваливает объявление о крысах, а не о пещере") {
+      val rat   = MonsterGenerator.generateOfRaceAndRarity(7, Race.Animal, Rarity.Uncommon)
+      val tough = hero().copy(fightStats = pangea.model.stats.FightStats(atk = 10, hp = 100000, armor = 0,
+                    defence = 0, evasion = 9999, accuracy = 9999, energy = 0))
+      for {
+        dao   <- TestHeroDao.withHero(userId, tough)
+        r     <- TestRenderer.make
+        c     <- content
+        _     <- dao.writeActiveBattle(userId, SoloPveBattle.from(rat, tough).asJson)
+        _     <- dao.writeQuestData(userId, bothTaken.asJson)
+        _     <- dao.writeSceneData(userId, pangea.service.state.states.LootState.LootData(Nil, Nil,
+                   returnState = Some(StateType.MonsterCave), eventData = Some(smallSewer().asJson)).asJson)
+        state  = pangea.service.state.states.battle.BattleState(
+                   dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
+        out   <- state.action(testUser, tap("ConfirmFlee"), r)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        scene <- dao.readSceneData(userId)
+        said  <- texts(r)
+      } yield assertTrue(out == StateType.Dungeon) &&
+              // объявление о крысах снято, о пещере — висит
+              assertTrue(board.slots.map(_.kind) == List(BoardKind.CaveClear)) &&
+              assertTrue(said.contains("задание провалено")) &&
+              // вернуться в канализацию больше некуда: роутинг стёрт
+              assertTrue(scene.contains(io.circe.Json.Null))
+    },
+
+    test("гибель в канализации тоже проваливает объявление о крысах") {
+      val brute = MonsterGenerator.generateOfRaceAndRarity(7, Race.Animal, Rarity.Uncommon)
+        .copy(fightStats = pangea.model.stats.FightStats(atk = 99999, hp = 100000, armor = 0, defence = 0,
+          evasion = 0, accuracy = 99999, energy = 0))
+      val frail = hero().copy(
+        baseStats  = hero().baseStats.copy(agi = 0),
+        fightStats = pangea.model.stats.FightStats(atk = 10, hp = 1, armor = 0, defence = 0,
+                       evasion = 0, accuracy = 9999, energy = 0))
+      for {
+        dao   <- TestHeroDao.withHero(userId, frail)
+        r     <- TestRenderer.make
+        c     <- content
+        _     <- dao.writeActiveBattle(userId, SoloPveBattle.from(brute, frail).asJson)
+        _     <- dao.writeQuestData(userId, bothTaken.asJson)
+        _     <- dao.writeSceneData(userId, pangea.service.state.states.LootState.LootData(Nil, Nil,
+                   returnState = Some(StateType.MonsterCave), eventData = Some(smallSewer().asJson)).asJson)
+        state  = pangea.service.state.states.battle.BattleState(
+                   dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
+        // Уклонение не бывает ниже 5%: крыса изредка промахивается и по
+        // беззащитному — бьём, пока бой не кончится.
+        out   <- {
+                   def attack(left: Int): Task[StateType] =
+                     state.action(testUser, tap("Attack"), r).flatMap { st =>
+                       if (st == StateType.Battle && left > 1) attack(left - 1) else ZIO.succeed(st)
+                     }
+                   attack(10)
+                 }
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        said  <- texts(r)
+      } yield assertTrue(out == StateType.Death) &&
+              assertTrue(board.slots.map(_.kind) == List(BoardKind.CaveClear)) &&
+              assertTrue(said.contains("задание провалено"))
+    },
+
     test("у канализации свои слова там, где они ей нужны") {
       // Эти два ключа — списки, их читают не text, а list.
       val lists = Set("walls", "rooms.empty")

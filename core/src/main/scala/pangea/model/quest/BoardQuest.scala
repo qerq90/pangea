@@ -87,6 +87,14 @@ object BoardKind extends Enum[BoardKind] {
     override def rolledLvl: Boolean = true
   }
 
+  /** «Уничтожение некроманта» — выездное, как и канализация: пещера, где вся
+    * родня одной расы давно поднята, а сам Некромант ждёт на нижнем ярусе.
+    * Сложность у каждого объявления своя, по уровню задания. */
+  case object NecromancerHunt extends BoardKind("necro", 1) {
+    override def away: Boolean      = true
+    override def rolledLvl: Boolean = true
+  }
+
   def byKey(key: String): Option[BoardKind] = values.find(_.key == key)
 
   implicit val encoder: Encoder[BoardKind] = (k: BoardKind) => k.key.asJson
@@ -220,14 +228,23 @@ object BoardTrophy {
 /** Числа доски. */
 object BoardRates {
 
-  /** Сколько объявлений висит на доске неделю. */
+  /** Больше стольких объявлений на доске не висит. */
   val Slots: Int = 8
 
-  /** Состав доски: столько-то объявлений каждого вида. Здесь и только здесь —
-    * весь расклад, его ещё предстоит пересобрать вместе с новыми заданиями. */
-  val Layout: List[(BoardKind, Int)] =
-    List(BoardKind.Trophy -> 3, BoardKind.CaravanRout -> 1, BoardKind.CaveClear -> 1,
-         BoardKind.SewerRats -> 1, BoardKind.Thieves -> 1, BoardKind.DwarfSupply -> 1)
+  /** Трофейные задания — только на доске новичков, и там их всегда три. На
+    * старших досках трофеев не просят вовсе. */
+  val NoviceTrophies: Int = 3
+
+  /** Пул заданий: из него доска добирает объявления на свободные места —
+    * каждый вид не больше одного раза, какие именно, решает бросок. Новичкам
+    * после трёх трофеев остаётся пять мест, старшим доскам — все восемь; видов
+    * в пуле меньше, чем мест, — объявлений будет меньше. */
+  val Pool: List[BoardKind] =
+    List(BoardKind.CaravanRout, BoardKind.CaveClear, BoardKind.SewerRats,
+         BoardKind.Thieves, BoardKind.DwarfSupply, BoardKind.NecromancerHunt)
+
+  /** Сколько трофейных на доске этого раздела. */
+  def trophiesFor(tier: BoardTier): Int = if (tier == BoardTier.Novice) NoviceTrophies else 0
 
   /** Номер недели по Москве, считая с понедельника: нулевой день эпохи —
     * четверг, поэтому к нему прибавляются три дня до ближайшего понедельника. */
