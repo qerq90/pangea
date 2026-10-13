@@ -232,10 +232,12 @@ object BeltBrewSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("На пояс легло из сумки"))
     },
 
-    test("шнапс и сонный дурман в ячейку не ложатся вовсе") {
+    test("шнапс, самогон, сонный дурман и приговор в ячейку не ложатся") {
       assertTrue(BeltSlot.of(BrewKind.item(BrewKind.Schnapps)).isEmpty) &&
       assertTrue(BeltSlot.of(BrewKind.item(BrewKind.Moonshine)).isEmpty) &&
       assertTrue(BeltSlot.of(BrewKind.item(BrewKind.SleepingDope)).isEmpty) &&
+      // приговор пьют до боя: с кем встретиться, решают не посреди сечи
+      assertTrue(BeltSlot.of(BrewKind.item(BrewKind.Sentence)).isEmpty) &&
       // а всё прочее ложится
       assertTrue(BrewKind.values.filter(_.beltable)
         .forall(k => BeltSlot.of(BrewKind.item(k)).contains(BeltSlot.Brew(k))))

@@ -3388,16 +3388,15 @@ case class BattleState(
       case _ => showBelt(user, renderer)
     }
 
-  /** Вопрос к отвару: какую травму снять, кого приговорить. Кнопки живут
-    * внутри отдельного сообщения, как и сам пояс, — боевая сцена не меняется. */
+  /** Вопрос к отвару: пока такой один — костоправный спрашивает, какую травму
+    * снять. Кнопки живут внутри отдельного сообщения, как и сам пояс, — боевая
+    * сцена не меняется. */
   private def offerBeltPick(user: User, hero: Hero, idx: Int, kind: BrewKind, nowMs: Long,
                             renderer: Renderer): Task[StateType] = {
     val (head, options) = kind.effect match {
       case BrewEffect.CureTrauma =>
         (content.text("battle.belt.whichTrauma"),
           hero.activeTraumas(nowMs).filter(_.severity != Trauma.Heavy).distinct.map(t => (t.name, t.name)))
-      case BrewEffect.Sentence =>
-        (content.text("battle.belt.whichRace"), Race.mortals.toList.map(r => (r.toString, r.entryName)))
       case _ => (content.text("battle.belt.gone"), Nil)
     }
     val buttons = options.zipWithIndex.map { case ((label, pick), i) =>
@@ -3483,15 +3482,13 @@ case class BattleState(
       case _ => cont(hero, battle, content.text("battle.belt.none"))
     }
 
-  /** Годится ли ответ на вопрос отвара: травма ещё на герое и не тяжёлая, род
-    * назван из смертных. Отвару, который ничего не спрашивает, годится любой. */
+  /** Годится ли ответ на вопрос отвара: травма ещё на герое и не тяжёлая.
+    * Отвару, который ничего не спрашивает, годится любой. */
   private def pickValid(hero: Hero, kind: BrewKind, pick: Option[String], nowMs: Long): Boolean =
     kind.effect match {
       case BrewEffect.CureTrauma =>
         pick.flatMap(Trauma.byName)
           .exists(t => t.severity != Trauma.Heavy && hero.activeTraumas(nowMs).contains(t))
-      case BrewEffect.Sentence =>
-        pick.flatMap(Race.withNameOption).exists(Race.mortals.contains)
       case _ => true
     }
 
@@ -3618,18 +3615,10 @@ case class BattleState(
       case BrewEffect.Bubble =>
         boosted(BrewRates.BubbleBoost, ParamsBuff.zero, Long.MaxValue, content.text("battle.belt.bubble"))
 
-      // Приговор: род назван — значит, ближайшая встреча уже решена.
-      case BrewEffect.Sentence =>
-        pick.flatMap(Race.withNameOption).filter(Race.mortals.contains) match {
-          case None       => ZIO.succeed(done(hero, battle, Vector(content.text("battle.belt.gone"))))
-          case Some(race) =>
-            boosted(BrewRates.SentenceBoost + race.entryName, ParamsBuff.zero, nowMs + BrewRates.SentenceMs,
-              content.format("battle.belt.sentenced", "race" -> race.toString))
-        }
-
-      // Шнапс с самогоном в ячейку не ложатся вовсе (см. BrewKind.beltable),
-      // а на Inert не сидит ни один отвар: случиться этой ветке нечем.
-      case BrewEffect.Sellable(_) | BrewEffect.Inert =>
+      // В ячейку эти не ложатся вовсе (см. BrewKind.beltable): шнапс с самогоном
+      // носят Трактирщику, а приговор пьют до боя — с кем встретиться, решают
+      // не посреди сечи. На Inert же не сидит ни один отвар.
+      case BrewEffect.Sellable(_) | BrewEffect.Sentence | BrewEffect.Inert =>
         ZIO.succeed(done(hero, battle, Vector(content.text("battle.belt.notInBattle"))))
     }
   }
@@ -5357,10 +5346,10 @@ object BattleState {
   }
 
   /** Спрашивает ли отвар, на что его тратят: костоправный — какую травму
-    * снять, приговор — кого назвать. */
+    * снять. Приговор спрашивал бы род, но в ячейку он не ложится. */
   def needsPick(kind: BrewKind): Boolean = kind.effect match {
-    case BrewEffect.CureTrauma | BrewEffect.Sentence => true
-    case _                                           => false
+    case BrewEffect.CureTrauma => true
+    case _                     => false
   }
 
   /** Ячейка, которой после боя найдётся замена в сумке. */

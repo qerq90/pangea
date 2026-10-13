@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
-import pangea.model.item.ItemType
+import pangea.model.item.{BrewKind, ItemType}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.squad.{Ally, AllyKind, Squad}
@@ -144,7 +144,9 @@ object GirlStateSpec extends ZIOSpecDefault {
         res2   <- state2.action(testUser, tap("Farewell"), r2)
         h2     <- heroOf(dao2)
       } yield assertTrue(screen.choices.map(_.id) == List("Ask", "Farewell")) &&
-              assertTrue(asked.text.contains("приворотного зелья")) &&
+              // называет настоящий отвар и одну траву из его состава
+              assertTrue(BrewKind.rank1.exists(k => asked.text.contains(k.label) &&
+                k.recipe.exists(h => asked.text.contains(h.displayName)))) &&
               assertTrue(mid.guildReputation == 50L + 30L) &&
               assertTrue(result == StateType.GlobalMap && h.guildReputation == 50L + 30L + 80L) &&   // 10 × 10 × 80%
               assertTrue(res2 == StateType.GlobalMap && h2.guildReputation == 50L + 30L)

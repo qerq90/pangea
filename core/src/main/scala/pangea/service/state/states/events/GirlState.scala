@@ -8,6 +8,7 @@ import pangea.generator.item.TreasureMapGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.{Achievement, Hero}
+import pangea.model.item.{BrewKind, MaterialKind}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.skill.MonsterEnergy
@@ -59,7 +60,7 @@ case class GirlState(
       "Onward"        -> Target.Run { (u, _, _) => clear(u).as(StateType.Dungeon) },
       "Escort"        -> Target.Run { (u, _, r) => escort(u, r) },
       "Decline"       -> Target.Run { (u, _, r) => leave(u, r, "girl.leftAlone", StateType.Dungeon) },
-      "Ask"           -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> show(u, r, Step.Asked) },
+      "Ask"           -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> askWhatSheDid(u, r) },
       "Farewell"      -> Target.Run { (u, _, r) => reward(u, r, _.lvl * RepPerLevelCity) *> clear(u).as(StateType.GlobalMap) },
       "FarewellAsked" -> Target.Run { (u, _, r) => rewardSpread(u, r, RepPerLevelFarewell) *> clear(u).as(StateType.GlobalMap) },
       "OfferBuy"      -> Target.Run { (u, _, r) => offerMap(u, r) },
@@ -302,7 +303,7 @@ case class GirlState(
     case Step.Thanks   => content.screen("girl.thanks")
     case Step.Escort   => content.screen("girl.escort")
     case Step.CityThanks => content.screen("girl.cityThanks")
-    case Step.Asked    => content.screen("girl.asked")
+    case Step.Asked    => askedScreen(scene)
     case Step.CityMap  => content.screen("girl.cityMap")
     case Step.MapOffer => Screen(content.format("girl.mapOffer.text", "price" -> scene.price.toString), content.screen("girl.mapOffer").choices)
     case Step.CityTavern => content.screen("girl.cityTavern")
@@ -312,6 +313,29 @@ case class GirlState(
     case Step.Brother  => content.screen("girl.brother")
     case Step.Demand   => demandScreen(scene.price)
     case _             => Screen(content.text("girl.lightsOut"), Nil)
+  }
+
+  /** «Что ты там делала?» — девушка называет отвар, который собралась варить,
+    * и одну траву из его состава: травы первого ранга и растут за городом.
+    * Что именно, решаем один раз и кладём в сцену — на возврате к тому же шагу
+    * она не должна говорить другое. */
+  private def askWhatSheDid(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- requireScene(user)
+      kind  <- Random.nextIntBounded(BrewKind.rank1.size).map(BrewKind.rank1(_))
+      herb  <- Random.nextIntBounded(kind.recipe.size).map(kind.recipe(_))
+      next   = scene.copy(step = Step.Asked, brew = Some(kind.entryName), herb = Some(herb.entryName))
+      _     <- writeScene(user, next)
+      _     <- renderer.show(user, screenFor(next))
+    } yield StateType.Girl
+
+  /** Что она ответила: отвар и трава из сцены. Старая запись их не несёт —
+    * тогда берём первый отвар набора: говорить ей всё равно надо. */
+  private def askedScreen(scene: GirlScene): Screen = {
+    val kind = scene.brew.flatMap(BrewKind.withNameOption).getOrElse(BrewKind.rank1.head)
+    val herb = scene.herb.flatMap(MaterialKind.withNameOption).getOrElse(kind.recipe.head)
+    Screen(content.format("girl.asked.text", "brew" -> kind.label, "herb" -> herb.displayName),
+      content.screen("girl.asked").choices)
   }
 
   private def resume(user: User, renderer: Renderer): Task[StateType] =
@@ -364,7 +388,11 @@ object GirlState {
     race:          String,
     price:         Long         = 0L,
     lost:          Long         = 0L,
-    roomStartedAt: Option[Long] = None
+    roomStartedAt: Option[Long] = None,
+    /** Отвар, который она собралась варить, и трава из его состава — названные
+      * один раз (см. GirlState.askWhatSheDid). */
+    brew:          Option[String] = None,
+    herb:          Option[String] = None
   )
   object GirlScene {
     implicit val encoder: Encoder[GirlScene] = (s: GirlScene) => Json.obj(
@@ -372,7 +400,9 @@ object GirlState {
       "race"          -> s.race.asJson,
       "price"         -> s.price.asJson,
       "lost"          -> s.lost.asJson,
-      "roomStartedAt" -> s.roomStartedAt.asJson
+      "roomStartedAt" -> s.roomStartedAt.asJson,
+      "brew"          -> s.brew.asJson,
+      "herb"          -> s.herb.asJson
     )
     implicit val decoder: Decoder[GirlScene] = (c: HCursor) =>
       for {
@@ -381,7 +411,9 @@ object GirlState {
         price <- c.getOrElse[Long]("price")(0L)
         lost  <- c.getOrElse[Long]("lost")(0L)
         start <- c.getOrElse[Option[Long]]("roomStartedAt")(None)
-      } yield GirlScene(step, race, price, lost, start)
+        brew  <- c.getOrElse[Option[String]]("brew")(None)
+        herb  <- c.getOrElse[Option[String]]("herb")(None)
+      } yield GirlScene(step, race, price, lost, start, brew, herb)
   }
 
   object Step {

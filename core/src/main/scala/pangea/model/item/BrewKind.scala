@@ -63,12 +63,14 @@ sealed abstract class BrewKind(
 
   /** Кладётся ли в ячейку пояса. На пояс идёт всё, чем в бою можно
     * воспользоваться, — то есть почти всё: что пьют, что льют на клинок и что
-    * бросают под ноги. Шнапс с самогоном носят Трактирщику, а не в бой, а
-    * сонным дурманом дымную флягу заправляют в спокойном месте — в сече
-    * переливать его из склянки во флягу поздно. */
+    * бросают под ноги. Не идёт четыре: шнапс с самогоном носят Трактирщику, а
+    * не в бой; сонным дурманом дымную флягу заправляют в спокойном месте — в
+    * сече переливать его из склянки во флягу поздно; а приговор пьют, когда
+    * выбирают, с кем встретиться, — такое решают до боя, не посреди него. */
   def beltable: Boolean = this match {
-    case BrewKind.Schnapps | BrewKind.Moonshine | BrewKind.SleepingDope => false
-    case _                                                             => true
+    case BrewKind.Schnapps | BrewKind.Moonshine    => false
+    case BrewKind.SleepingDope | BrewKind.Sentence => false
+    case _                                         => true
   }
 
   /** Боевой отвар — тот, что заменяет склянку: только из ячейки пояса и только
@@ -255,7 +257,7 @@ object BrewKind extends Enum[BrewKind] {
   case object TanningBrew extends BrewKind(
     "Дубильный настой",
     List(StJohnsWort, Nettle, Wormwood, Sage),
-    s"Вяжет во рту так, что сводит челюсть, — и кожу вяжет не хуже: ремни стягиваются, бляхи садятся на место, доспех снова держит удар. Возвращает ${BrewRates.PotionArmorPct}% брони.",
+    s"Вяжущая бурда цвета крепкого чая, и пить её незачем — ею поливают доспех. Кожа на глазах дубеет, ремни стягиваются, бляхи садятся на место, и броня снова держит удар: ${BrewRates.PotionArmorPct}% её возвращается.",
     BrewEffect.Potion(PotionKind.Metal))
 
   case object SteadfastBrew extends BrewKind(
@@ -335,14 +337,11 @@ object BrewKind extends Enum[BrewKind] {
   val values: IndexedSeq[BrewKind] = findValues
 
   /** Отвары первого ранга — те, что варятся из одних простых трав; за полный
-   *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Отвары на
-   *  редкой траве и перегонка сюда не входят: до них зельевару ещё расти.
-   *
-   *  Боевые отвары на зверобое — тоже из простых трав, но в набор не идут: он
-   *  собирался до них, а достижение дают один раз, и дорастить его задним
-   *  числом значило бы отодвинуть цель у тех, кто уже рядом с ней. */
+   *  набор сваренных даётся «Зельевар I» (см. Achievement.Brewer1). Боевые
+   *  отвары на зверобое тоже отсюда: их восемь, и они в набор входят. Отвары на
+   *  редкой траве и перегонка сюда не входят: до них зельевару ещё расти. */
   val rank1: IndexedSeq[BrewKind] =
-    values.filter(k => k.base.isEmpty && !k.combat && k.recipe.forall(_.herbRank <= 1))
+    values.filter(k => k.base.isEmpty && k.recipe.forall(_.herbRank <= 1))
 
   /** Боевые отвары — те, что носят в ячейке пояса (см. [[BrewKind.combat]]). */
   val combatBrews: IndexedSeq[BrewKind] = values.filter(_.combat)

@@ -85,8 +85,8 @@ object BrewSpec extends ZIOSpecDefault {
       assertTrue(combat.map(_.recipe.size).toSet == Set(2, 3, 4)) &&
       // наборы не совпадают ни между собой, ни с прежними отварами
       assertTrue(BrewKind.values.map(_.recipe.sortBy(_.entryName)).distinct.size == BrewKind.values.size) &&
-      // «Зельевар I» собирался до них — набор достижения не вырос
-      assertTrue(BrewKind.rank1.size == 10 && !BrewKind.rank1.exists(_.combat)) &&
+      // «Зельевар I» собирает их тоже: десять прежних и восемь боевых
+      assertTrue(BrewKind.rank1.size == 18 && BrewKind.rank1.count(_.combat) == 8) &&
       // зверобой — простая трава, он растёт на поляне вместе с прочими
       assertTrue(MaterialKind.StJohnsWort.herbRank == 1 &&
                  MaterialKind.herbsOfRank(1).contains(MaterialKind.StJohnsWort))
@@ -242,11 +242,13 @@ object BrewSpec extends ZIOSpecDefault {
       val kinds = List[BrewKind](BrewKind.BoneSetter, BrewKind.LivingWater, BrewKind.Invigorating)
       val pool  = kinds.zipWithIndex.flatMap { case (k, i) => k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) } }
       val result = CubeCraft.craft(pool, charges = 50, rng)
-      // и все десять рецептов разом
-      val all    = BrewKind.rank1.toList.zipWithIndex.flatMap { case (k, i) => k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) } }
-      val allRes = CubeCraft.craft(all, charges = 50, rng)
+      // Каждый рецепт первого ранга сходится и своей кучей — все восемнадцать.
+      // Кучей на все сразу их не сварить: короткие рецепты дают больше отваров,
+      // и план выберет их, а не по одному каждого (см. CubeCraft.LookAhead).
+      val each = BrewKind.rank1.toList.map(k =>
+        k -> CubeCraft.craft(k.recipe.zipWithIndex.map { case (h, j) => herb(h, j.toLong + 1L) }, charges = 5, rng))
       assertTrue(result.chargesUsed == 3 && result.items.size == 6 && result.items.flatMap(_.brew).toSet == kinds.toSet) &&
-        assertTrue(allRes.chargesUsed == BrewKind.rank1.size && allRes.items.flatMap(_.brew).toSet == BrewKind.rank1.toSet)
+        assertTrue(each.forall { case (k, r) => r.chargesUsed == 1 && r.items.forall(_.brew.contains(k)) })
     },
 
     test("не по рецепту (две травы, чужой набор) — куб гудит; шесть трав — два отвара") {
@@ -446,14 +448,19 @@ object BrewSpec extends ZIOSpecDefault {
           c   <- ZIO.attempt(SceneContent.load())
         } yield (CubeState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c), dao, r)
       def herbsFor(k: BrewKind) = k.recipe.zipWithIndex.map { case (h, j) => herb(h, (j + 1).toLong) }
-      // травы под все рецепты, кроме последнего, одной кучей — куб сварит их за одну активацию
-      val allButLast = BrewKind.rank1.init.toList.zipWithIndex.flatMap { case (k, i) =>
-        k.recipe.zipWithIndex.map { case (h, j) => herb(h, (i * 10 + j + 1).toLong) }
-      }
+      // Рецепт за рецептом, как зельевар их и собирает: своя куча — своя варка.
+      // Одной кучей на всё это не сделать — план возьмёт то, чего выходит
+      // больше, а не по одному каждого (см. CubeCraft.LookAhead).
+      def brewEach(state: CubeState, dao: TestHeroDao, r: TestRenderer, kinds: List[BrewKind]) =
+        ZIO.foreachDiscard(kinds) { k =>
+          dao.readAzatData(userId).map(_.flatMap(_.as[AzatState].toOption).get).flatMap(a =>
+            dao.writeAzatData(userId, a.copy(cubeItems = herbsFor(k)).asJson)) *>
+            state.action(testUser, tap("CubeActivate"), r)
+        }
       for {
-        t <- cubeWith(allButLast, baseHero)
+        t <- cubeWith(Nil, baseHero)
         (state, dao, r) = t
-        _     <- state.action(testUser, tap("CubeActivate"), r)
+        _     <- brewEach(state, dao, r, BrewKind.rank1.init.toList)
         h1    <- dao.getHeroByUserId(userId).map(_.get)
         lore1 <- HerbLore.readLore(dao, userId)
         // последний рецепт — и достижение
