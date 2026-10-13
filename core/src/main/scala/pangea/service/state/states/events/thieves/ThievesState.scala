@@ -66,7 +66,8 @@ case class ThievesState(heroDao: HeroDao, content: SceneContent) extends State {
       energies <- ZIO.foreach(monsters)(m =>
                     Random.nextLongBetween(MonsterEnergy.StartPctMin, MonsterEnergy.StartPctMax + 1L)
                       .map(pct => MonsterEnergy.startEnergy(m.lvl, m.rarity, pct)))
-      battle   = SoloPveBattle.fromGroup(monsters, hero, energies).copy(noKin = true)
+      // Добыча и опыт — по уровню задания, как и сила разбойников.
+      battle   = SoloPveBattle.fromGroup(monsters, hero, energies).copy(noKin = true, lootLevel = Some(lvl.toLong))
       routing  = LootData(Nil, Nil,
                    returnState = Some(StateType.ThievesSpoils),
                    eventData   = Some(scene.asJson))

@@ -234,6 +234,25 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(killLog.byRace.values.sum == 1L)
     },
 
+    test("бой задания с доски: опыт и добыча по уровню задания, а не по этажу героя") {
+      // Герой на 40-м этаже бьёт разбойников 3-го уровня: награда — как за 3-й.
+      val deep = strongHero.copy(dungeonLevel = 40, maxDungeonLevel = 40)
+      for {
+        quest  <- makeState(deep, weakBattle.copy(lootLevel = Some(3L)))
+        (state, heroDao, renderer) = quest
+        _      <- state.action(testUser, tap("Attack"), renderer)
+        byTask <- heroDao.getHeroByUserId(userId).map(_.get)
+        floor  <- makeState(deep, weakBattle)
+        (state2, heroDao2, renderer2) = floor
+        _      <- state2.action(testUser, tap("Attack"), renderer2)
+        byFloor <- heroDao2.getHeroByUserId(userId).map(_.get)
+        // опыт за обычного моба — уровень × 0.8, не меньше единицы
+        expected = (lvl: Long) => deep.gainExp((lvl * Rarity.Common.factor).toLong.max(1L))
+      } yield assertTrue(byTask.exp == expected(3L).exp && byTask.lvl == expected(3L).lvl) &&
+              // без уровня задания — по этажу, как в лабиринте
+              assertTrue(byFloor.exp == expected(40L).exp && byFloor.lvl == expected(40L).lvl)
+    },
+
     test("Attack убивает Отмеченного тьмой на максимальном этаже → открывается путь вглубь") {
       val hero = strongHero.copy(dungeonLevel = 5, maxDungeonLevel = 5)
       for {

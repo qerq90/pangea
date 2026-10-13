@@ -513,7 +513,9 @@ case class MonsterCaveState(
       gained    = monsters.map(expFor).sum
       next      = scene.withRoom(idx, _.copy(monsters = 0)).copy(expEarned = scene.expEarned + gained)
       routing   = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
-      _ <- heroDao.writeActiveBattle(user.userId, battle.copy(noKin = true).asJson)
+      // В канализации и добыча с опытом — по уровню задания, как и сила крыс.
+      _ <- heroDao.writeActiveBattle(user.userId,
+             battle.copy(noKin = true, lootLevel = Option.when(scene.sewer)(lvl.toLong)).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.format(key(scene, "ambush"), "count" -> count.toString), Nil))
     } yield StateType.Battle
@@ -538,7 +540,10 @@ case class MonsterCaveState(
                   case MiniBoss.Necromancer => necromancerFight(hero, scene, lord, lvl, stats, mobLvl)
                   case _                    => ZIO.succeed(kingFight(hero, lord, lvl, stats, mobLvl))
                 }
-      _ <- heroDao.writeActiveBattle(user.userId, battle.asJson)
+      // Король катает свою добычу по своему уровню, а крысы, которых он позвал,
+      // в канализации падают по уровню задания — как и в комнатах.
+      _ <- heroDao.writeActiveBattle(user.userId,
+             battle.copy(lootLevel = Option.when(scene.sewer)(mobLvl)).asJson)
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text(
              if (scene.sewer) "sewer.king" else if (lord == MiniBoss.Necromancer) "cave.necro.lord" else "cave.king.lord"), Nil))

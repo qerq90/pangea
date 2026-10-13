@@ -76,6 +76,8 @@ object ThievesSpec extends ZIOSpecDefault {
               assertTrue(battle.exists(b => b.group.others.size == 4 && b.monsterRace == Race.Orc.entryName)) &&
               assertTrue(battle.exists(_.monsterLvl == 9L)) &&
               assertTrue(battle.exists(b => b.group.others.forall(_.lvl == 9L))) &&
+              // и добыча с опытом за них — тоже по девятому, а не по этажу героя
+              assertTrue(battle.exists(_.lootLevel.contains(9L))) &&
               // вся шайка уже здесь: звать со стороны им некого
               assertTrue(battle.exists(_.noKin)) &&
               assertTrue(said.contains("это они")) &&
