@@ -76,11 +76,12 @@ case class Hero(
   // `BattleState.damageReduction`). Максимум брони — сумма брони со снаряжения
   // плюс прокачка у Мастера Горна.
   /** Потолок брони: что дало снаряжение и рог мастера, плюс процент от «Крысы»
-   *  (порог 2). Процент кладём в потолок, а не в итоговый боевой стат: иначе
-   *  прибавку срезала бы первая же починка брони. */
+   *  (порог 2) и процент от достижений (см. [[Achievement.armorPct]]). Проценты
+   *  кладём в потолок, а не в итоговый боевой стат: иначе прибавку срезала бы
+   *  первая же починка брони. */
   def maxArmor: Long = {
     val base = equipment.allArmor + masterHornBoosts.armor
-    base + base * sets.armorBonusPct / 100L
+    base + base * sets.armorBonusPct / 100L + base * Achievement.armorPct(this) / 100L
   }
 
   /** Максимум брони с учётом травм: штраф на броню режет потолок. Без травм
@@ -157,10 +158,21 @@ case class Hero(
     )
   }
 
+  /** Прибавки от достижений: сколько и за что — решает [[Achievement]], здесь
+   *  они только ложатся на готовое число, последними. */
+  private def withAchievementStatBonuses(fs: FightStats): FightStats =
+    fs.copy(
+      atk      = fs.atk + fs.atk * Achievement.attackPct(this) / 100L,
+      defence  = fs.defence + fs.defence * Achievement.defencePct(this) / 100L,
+      accuracy = fs.accuracy + fs.accuracy * Achievement.accuracyPct(this) / 100L,
+      evasion  = fs.evasion + fs.evasion * Achievement.evasionPct(this) / 100L
+    )
+
   /** Текущие боевые статы — с учётом активных травм, плоских бафов пассивок,
-   *  камней и наборов. */
+   *  камней, наборов и достижений. */
   def effectiveFightStats(nowMs: Long): FightStats =
-    withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs)))))
+    withAchievementStatBonuses(
+      withSetStatBonuses(withGemStatBonuses(withPassiveStatBonuses(fightStatsWith(combinedPenalties(nowMs))))))
 
   /** Реген героя в конце раунда от пассивок «Целебный» (4% макс.HP) и
    *  «Самовосстанавливающийся» (4% макс.брони). Прибавка каппится потолком, но
@@ -192,9 +204,11 @@ case class Hero(
       vit = (b.applyVit(baseStats.vit) * (1.0 - p.vitPct) * statBoosts.vitFactor(nowMs)).toLong.max(1L),
       str = (b.applyStr(baseStats.str + Achievement.strBonus(this)) * (1.0 - p.strPct) * statBoosts.strFactor(nowMs)).toLong.max(1L),
       // «Некромант» (порог 2) поднимает сам интеллект — последним, поверх расы,
-      // травм и зелий: это прибавка к готовому числу.
+      // травм и зелий: это прибавка к готовому числу. Процент от достижений
+      // (см. Achievement.intPct) ложится следом, своим множителем.
       int = (b.applyInt(baseStats.int + Achievement.intBonus(this)) * (1.0 - p.intPct) *
-               statBoosts.intFactor(nowMs) * (100L + sets.intBonusPct) / 100L).toLong.max(1L)
+               statBoosts.intFactor(nowMs) * (100L + sets.intBonusPct) / 100L *
+               (100L + Achievement.intPct(this)) / 100L).toLong.max(1L)
     )
   }
 

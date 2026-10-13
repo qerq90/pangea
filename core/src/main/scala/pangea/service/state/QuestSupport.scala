@@ -3,7 +3,7 @@ package pangea.service.state
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Renderer, SceneContent, Screen}
 import pangea.model.hero.{Achievement, Hero}
-import pangea.model.item.{Item, QuestItemKind}
+import pangea.model.item.{Item, ItemSet, QuestItemKind}
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
@@ -34,6 +34,14 @@ object QuestSupport {
       ids  = inv.items.data.filter(_.questItem.exists(kinds.contains)).map(_.id).toSet
       _   <- ZIO.when(ids.nonEmpty)(inventoryRepo.removeItems(ids, hero.id).mapError(e => new Throwable(e.toString)))
     } yield ()
+
+  /** Набор собран целиком — все двенадцать вещей надеты разом: за каждый такой
+    * набор своё достижение, один раз и навсегда (см. [[Achievement.forSet]]).
+    * Зовётся после всякого надевания: только надевание и может собрать набор. */
+  def grantFullSets(heroDao: HeroDao, content: SceneContent, user: User, hero: Hero, renderer: Renderer): Task[Hero] =
+    ZIO.foldLeft(ItemSet.values.toList.filter(s => hero.sets.pieces(s) >= Achievement.FullSetPieces))(hero) {
+      (h, set) => grant(heroDao, content, user, h, Achievement.forSet(set), renderer)
+    }
 
   /** Достижение — один раз; строка о нём показывается сразу. */
   def grant(heroDao: HeroDao, content: SceneContent, user: User, hero: Hero, a: Achievement, renderer: Renderer): Task[Hero] =

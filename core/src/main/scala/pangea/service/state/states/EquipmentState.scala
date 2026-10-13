@@ -11,7 +11,7 @@ import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.service.state.states.EquipmentState._
-import pangea.service.state.{InventoryFeedback, ItemMenu, State, UiScene, UserAction}
+import pangea.service.state.{InventoryFeedback, ItemMenu, QuestSupport, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 case class EquipmentState(
@@ -251,7 +251,10 @@ case class EquipmentState(
                 if (oldItem.itemType == ItemType.NoItem)
                   content.format("equipment.wornNow", "name" -> it.name)
                 else
-                  content.format("equipment.wornSwapped", "name" -> it.name, "old" -> oldItem.name), Nil))
+                  content.format("equipment.wornSwapped", "name" -> it.name, "old" -> oldItem.name), Nil)) *>
+              // Двенадцатая вещь набора — за собранный набор своё достижение.
+              QuestSupport.grantFullSets(heroDao, content, user,
+                hero.copy(equipment = newEq, fightStats = newFight), renderer).unit
       }
       // Остаёмся в карточке: видно новые характеристики и что ещё есть примерить.
       res <- showSlot(user, slotIdx, renderer)
