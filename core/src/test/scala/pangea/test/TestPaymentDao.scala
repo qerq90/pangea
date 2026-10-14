@@ -29,9 +29,6 @@ class TestPaymentDao(
   override def byOrderId(orderId: OrderId): Task[Option[Payment]] =
     rowsRef.get.map(_.get(orderId.value))
 
-  override def byPaymentId(paymentId: String): Task[Option[Payment]] =
-    rowsRef.get.map(_.values.find(_.paymentId.contains(paymentId)))
-
   override def pendingOf(userId: UserId): Task[List[Payment]] =
     rowsRef.get.map(
       _.values

@@ -1,5 +1,6 @@
 package pangea.test
 
+import io.circe.Json
 import pangea.model.payment.{DonationSku, OrderId, Payment}
 import pangea.model.user.{User, UserId}
 import pangea.service.donation.Donations
@@ -34,7 +35,7 @@ class TestDonations(
   override def refresh(payment: Payment, now: Long): Task[Donations.Settle] =
     refreshedRef.update(_ :+ payment) *> settleRef.get
 
-  override def notified(params: Map[String, String], now: Long): Task[Donations.Notified] =
+  override def notified(body: Json, now: Long): Task[Donations.Notified] =
     ZIO.succeed(Donations.Notified.Accepted)
 
   override def announce(payment: Payment): Task[Unit] = announcedRef.update(_ :+ payment)
@@ -56,7 +57,7 @@ class TestDonations(
 
 object TestDonations {
 
-  /** Донат выключен — как на проде без логина и паролей магазина. */
+  /** Донат выключен — как на проде без ключей терминала. */
   val off: Donations = new Donations {
     override val enabled                   = false
     override val packs: List[DonationSku]  = Nil
@@ -68,7 +69,7 @@ object TestDonations {
     override def start(user: User, sku: DonationSku, email: String, now: Long) =
       ZIO.succeed(Donations.Start.Disabled)
     override def refresh(payment: Payment, now: Long) = ZIO.succeed(Donations.Settle.Pending)
-    override def notified(params: Map[String, String], now: Long) = ZIO.succeed(Donations.Notified.Accepted)
+    override def notified(body: Json, now: Long)      = ZIO.succeed(Donations.Notified.Accepted)
     override def announce(payment: Payment)           = ZIO.unit
     override def reconcile(now: Long)                 = ZIO.unit
   }
@@ -78,7 +79,7 @@ object TestDonations {
 
   def on(
     packs:  List[DonationSku] = List(pack100, pack550),
-    start:   Donations.Start  = Donations.Start.Disabled,
+    start:   Donations.Start  = Donations.Start.Unavailable,
     settle:  Donations.Settle = Donations.Settle.Pending,
     pending: List[Payment]    = Nil
   ): Task[TestDonations] =

@@ -26,16 +26,16 @@ RUN apt-get update && apt-get install -y curl && \
     chmod +x /usr/local/bin/goose && \
     apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-# Корневой CA Минцифры — «Russian Trusted Root CA». Им подписаны сертификаты
-# части российских сервисов (Т-Банк, например), а в eclipse-temurin его нет:
-# без него запрос к такому сервису падает на PKIX — «unable to find valid
-# certification path to requested target». Робокассе он не нужен (у неё
-# GlobalSign), но держим заранее: лишним не будет.
+# Касса Т-Банка (securepay.tinkoff.ru) отдаёт сертификат, подписанный корневым
+# CA Минцифры — «Russian Trusted Root CA». В eclipse-temurin его нет, и без него
+# первый же запрос к кассе падает на PKIX: «unable to find valid certification
+# path to requested target», то есть донат не работает вовсе.
 #
 # Сертификат лежит в репозитории, а не качается при сборке: так образ собирается
 # одинаково и не зависит от доступности gu-st.ru. Отпечаток сверяется здесь же —
 # подменённый файл обрушит сборку, а не добавит молча чужой корень в доверенные.
-# Он совпадает с публикацией Минцифры на https://gu-st.ru/content/Other/doc/russian_trusted_root_ca.cer
+# Он совпадает с тем, что отдаёт сама касса в своей цепочке, и с публикацией
+# Минцифры на https://gu-st.ru/content/Other/doc/russian_trusted_root_ca.cer
 ARG RU_ROOT_SHA256=D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31
 COPY docker/russian_trusted_root_ca.cer /tmp/ru-root.cer
 RUN keytool -printcert -file /tmp/ru-root.cer | grep -q "SHA256: ${RU_ROOT_SHA256}" && \
