@@ -297,6 +297,8 @@ case class MonsterCaveState(
                   battle.copy(lootLevel = Option.when(scene.away)(mobLvl)).asJson)
       _      <- heroDao.writeSceneData(user.userId, routing.asJson)
       _      <- renderer.show(user, Screen(content.format("cave.altar.bones", "name" -> bones.name), Nil))
+      // Вызванный — тот же Некромант: первая встреча с ним открывает Трактирщика.
+      _      <- meet(user, lord, renderer)
     } yield StateType.Battle
   }
 
@@ -571,8 +573,6 @@ case class MonsterCaveState(
     val routing = LootData(Nil, Nil, returnState = Some(StateType.MonsterCave), eventData = Some(next.asJson))
     val mobLvl  = if (scene.away) scene.questLvl.max(1L) else hero.dungeonLevel.toLong.max(1L)
     for {
-      // Встреча с хозяином: после неё Трактирщику есть о ком рассказать.
-      _      <- markMet(user, lord)
       battle <- lord match {
                   case MiniBoss.Necromancer => necromancerFight(hero, scene, lord, lvl, stats, mobLvl)
                   case _                    => ZIO.succeed(kingFight(hero, lord, lvl, stats, mobLvl))
@@ -584,19 +584,24 @@ case class MonsterCaveState(
       _ <- heroDao.writeSceneData(user.userId, routing.asJson)
       _ <- renderer.show(user, Screen(content.text(
              if (scene.sewer) "sewer.king" else if (lord == MiniBoss.Necromancer) "cave.necro.lord" else "cave.king.lord"), Nil))
+      // Встреча с хозяином: после неё Трактирщику есть о ком рассказать.
+      _ <- meet(user, lord, renderer)
     } yield StateType.Battle
   }
 
-  /** Первая встреча с хозяином логова — в лоре героя: по ней у Трактирщика
-    * появляется, о ком спросить. */
-  private def markMet(user: User, lord: MiniBoss): Task[Unit] =
+  /** Первая встреча с хозяином — в логове или из разлома алтаря — записывается в
+    * лор героя и звучит репликой: после неё у Трактирщика появляется, о ком
+    * спросить. Со знакомым ни отметки, ни слов. */
+  private def meet(user: User, lord: MiniBoss, renderer: Renderer): Task[Unit] =
     HerbLore.readLore(heroDao, user.userId).flatMap { lore =>
-      val met = lord match {
-        case MiniBoss.Necromancer => lore.copy(metNecro = true)
-        case MiniBoss.RatKing     => lore.copy(metRatKing = true)
-        case _                    => lore
+      val first = lord match {
+        case MiniBoss.Necromancer if !lore.metNecro   => Some(lore.copy(metNecro = true) -> "cave.necro.firstMeeting")
+        case MiniBoss.RatKing     if !lore.metRatKing => Some(lore.copy(metRatKing = true) -> "cave.king.firstMeeting")
+        case _                                        => None
       }
-      ZIO.when(met != lore)(HerbLore.writeLore(heroDao, user.userId, met)).unit
+      ZIO.foreachDiscard(first) { case (met, line) =>
+        HerbLore.writeLore(heroDao, user.userId, met) *> renderer.show(user, Screen(content.text(line), Nil))
+      }
     }
 
   /** Крысиный король: один в полях, подмогу зовёт сам. */
