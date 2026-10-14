@@ -4658,11 +4658,17 @@ case class BattleState(
       raid       = battle.story.contains(MurlocQuest.RaidStory)
       storyFight = battle.story.isDefined && !raid
       killLevel  = battle.lootLevel.getOrElse(if (raid) hero.lvl else hero.dungeonLevel.toLong)
+      // Минибосс боя — тот, кто пал минибоссом, когда бы он ни пал: Некроманта
+      // со свитой бьют первым, Крысиный король падает раньше своих крыс. Смотреть
+      // только на последнего добитого нельзя — тогда бой считался бы рядовым.
+      bossIdx    = fallen.indexWhere(_.boss.flatMap(MiniBoss.byName).isDefined)
+      bossAt     = fallen.lift(bossIdx)
+      fallenBoss = bossAt.flatMap(_.boss).flatMap(MiniBoss.byName)
       // У минибосса своя награда за уровень босса, а не по этажу и редкости.
       // Группа — опыт одной суммой за всех.
       baseExp = if (storyFight) 0L
-                else battle.boss
-                  .map(_.expReward(battle.monsterLvl))
+                else fallenBoss.zip(bossAt)
+                  .map { case (b, rec) => b.expReward(rec.lvl) }
                   .getOrElse(fallen.map(m => (killLevel * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
                   .max(1L)
       expGained = if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
@@ -4671,24 +4677,24 @@ case class BattleState(
       seed <- Random.nextLong
       // У минибосса дроп свой и всегда есть; обычная таблица лута не катается.
       // Группа — своя добыча с каждого павшего, по порядку гибели.
-      (perMonster, rngAfter) = battle.boss match {
+      (perMonster, rngAfter) = fallenBoss.zip(bossAt) match {
         case _ if storyFight => (List(battle.monsterName -> List.empty[LootGenerator.LootDrop]), Rng(seed))
-        case Some(e) =>
+        case Some((e, rec)) =>
           // Этаж встречи нужен клыку волка: трофей считается по нему.
-          val (d, r) = LootGenerator.rollMiniBoss(e, battle.monsterLvl, hero.lvl, Rng(seed),
+          val (d, r) = LootGenerator.rollMiniBoss(e, rec.lvl, hero.lvl, Rng(seed),
             floorLvl = hero.dungeonLevel.toLong)
-          // Те, кого босс позвал, а герой добил, роняют своё. Съеденных королём
-          // в павших нет — их не убивали (см. GroupState.devour).
-          val (minions, r2) = battle.group.slain.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], r)) {
-            case ((acc, rr), m) =>
+          // Прочие павшие — те, кого босс позвал, и его свита — роняют своё.
+          // Съеденных королём в павших нет — их не убивали (см. GroupState.devour).
+          // Порядок тот же, что у `fallen`: босс стоит среди павших на своём месте.
+          fallen.zipWithIndex.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], r)) {
+            case ((acc, rr), (m, i)) if i == bossIdx => (acc :+ (m.name -> d), rr)
+            case ((acc, rr), (m, _)) =>
               val (dd, r3) = LootGenerator.roll(
                 Rarity.withName(m.rarity), Race.withName(m.race), killLevel, rr,
                 gearChanceBonusPct = hero.gems.gearDropBonusPct,
                 rarityBumpPct = if (blessed) BattleState.BlessingBonusPct else 0L)
               (acc :+ (m.name -> dd), r3)
           }
-          // Порядок тот же, что у `fallen`: сперва павшие в строю, босс последним.
-          (minions :+ (battle.monsterName -> d), r2)
         case None =>
           fallen.foldLeft((List.empty[(String, List[LootGenerator.LootDrop])], Rng(seed))) { case ((acc, rng), m) =>
             val (d, r) = LootGenerator.roll(
@@ -4745,7 +4751,7 @@ case class BattleState(
                     else ZIO.succeed(false)
       // После добычи с элементаля игрок идёт осматривать ЕГО логово. Гнилого Джо
       // это не касается — осматривать после него нечего.
-      lootReturn = if (battle.boss.exists(_.race == Race.Elemental))
+      lootReturn = if (fallenBoss.exists(_.race == Race.Elemental))
                      Some(StateType.ElementalSearch)
                    else prev.flatMap(_.returnState).orElse(Option.when(elderWaits)(StateType.MurlocElder))
       // Первый экран добычи — первый павший; остальные ждут своей очереди. Имя
@@ -4792,13 +4798,14 @@ case class BattleState(
         heroDao.updateMaxDungeonLevel(user.userId, newMaxDungeon)
       )
     } yield VictoryOutcome(
-      monsterName       = if (battle.boss.isDefined) battle.monsterName else fallen.map(_.name).mkString(", "),
+      monsterName       = bossAt.filter(_ => fallenBoss.isDefined).map(_.name)
+                            .getOrElse(fallen.map(_.name).mkString(", ")),
       expGained         = expGained,
       newLvl            = Option.when(leveled.lvl > hero.lvl)(leveled.lvl),
       unlocksDarkness   = unlocksDarkness,
       cubeDropped       = cubeDropped,
-      elementalDefeated = battle.boss.exists(_ != MiniBoss.WhiteWolf),
-      wolfDefeated      = battle.boss.contains(MiniBoss.WhiteWolf),
+      elementalDefeated = fallenBoss.exists(_ != MiniBoss.WhiteWolf),
+      wolfDefeated      = fallenBoss.contains(MiniBoss.WhiteWolf),
       slainCount        = fallen.size,
       letterFound       = letterFound,
       flaskRefill       = flaskRefill

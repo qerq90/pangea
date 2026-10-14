@@ -270,7 +270,7 @@ case class SoloPveBattle(
 
   /** Активный моб как запись о павшем — для добычи после боя. */
   def slainActive: SlainMonster =
-    SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName, monsterUndead)
+    SlainMonster(monsterLvl, monsterRace, monsterRarity, monsterMarked, monsterName, monsterUndead, bossKind)
 
   /** Куда встанет пришедший: за спины своих, на первое место позади последнего
     * из них. Хвост схемы занят (в караване там башни) — на самое дальнее

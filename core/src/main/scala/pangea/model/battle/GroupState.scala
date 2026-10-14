@@ -123,7 +123,7 @@ final case class MonsterSlot(
   def alive: Boolean = currentHp > 0L
 
   /** Слот как запись о павшем — для добычи после боя. */
-  def slain: SlainMonster = SlainMonster(lvl, race, rarity, marked, name, undead)
+  def slain: SlainMonster = SlainMonster(lvl, race, rarity, marked, name, undead, boss)
 
   /** Проценты для строки группового экрана. */
   def hpPct: Long    = if (stats.hp <= 0L) 0L else currentHp * 100L / stats.hp
@@ -153,7 +153,10 @@ object MonsterSlot {
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */
 final case class SlainMonster(lvl: Long, race: String, rarity: String, marked: Boolean, name: String,
-                              undead: Boolean = false)
+                              undead: Boolean = false,
+                              /** Пал минибоссом: по этой метке победа и платит за
+                                * него как за босса, даже если его добили не последним. */
+                              boss: Option[String] = None)
 
 object SlainMonster {
   implicit val encoder: Encoder[SlainMonster] = deriveEncoder
@@ -165,7 +168,8 @@ object SlainMonster {
       marked <- c.getOrElse[Boolean]("marked")(false)
       name   <- c.getOrElse[String]("name")("")
       undead <- c.getOrElse[Boolean]("undead")(false)
-    } yield SlainMonster(lvl, race, rarity, marked, name, undead)
+      boss   <- c.getOrElse[Option[String]]("boss")(None)
+    } yield SlainMonster(lvl, race, rarity, marked, name, undead, boss)
 }
 
 /** Групповая часть боя. Мобы стоят в строю по местам 1, 2, …; герой стоит на
