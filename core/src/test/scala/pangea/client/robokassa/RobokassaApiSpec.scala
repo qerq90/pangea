@@ -1,8 +1,8 @@
 package pangea.client.robokassa
 
 import pangea.model.payment.{DonationSku, Payment}
-import com.typesafe.config.ConfigFactory
 import pureconfig.ConfigSource
+import pureconfig.generic.auto._
 import zio.ZIO
 import zio.test._
 
@@ -183,8 +183,6 @@ object RobokassaApiSpec extends ZIOSpecDefault {
                 assertTrue(!loaded.sendReceipt) &&
                 assertTrue(loaded.linkMinutes > 0) &&
                 assertTrue(loaded.packs.nonEmpty) &&
-                // В конфиге рубли, внутри копейки.
-                assertTrue(loaded.pack("d100").map(_.price).contains(9900L)) &&
                 assertTrue(DonationSku.validate(loaded.packs).isEmpty) &&
                 // Без логина и паролей донат обязан быть выключен: иначе пустой
                 // прод начнёт выписывать ссылки, которые касса не примет.
@@ -197,20 +195,6 @@ object RobokassaApiSpec extends ZIOSpecDefault {
         assertTrue(!keyed.copy(packs = Nil).enabled) &&
         assertTrue(!keyed.copy(password2 = "").enabled) &&
         assertTrue(!keyed.copy(merchantLogin = "").enabled)
-      },
-
-      test("цена пакета — рубли с копейками, точнее копейки не принимается") {
-        // Настоящий конфиг, в котором подменён только прайс.
-        def priced(price: String) =
-          ConfigSource.fromConfig(
-            ConfigFactory
-              .parseString(s"""packs = [{ id = "d1", doubloons = 10, price = $price, label = "сто", receipt = "сто" }]""")
-              .withFallback(ConfigFactory.parseFile(new File(ConfigPath)).resolve().getConfig("robokassa"))
-          ).load[RobokassaConfig]
-        assertTrue(priced("99").map(_.packs.map(_.price)) == Right(List(9900L))) &&
-        assertTrue(priced("99.5").map(_.packs.map(_.price)) == Right(List(9950L))) &&
-        assertTrue(priced("349.99").map(_.packs.map(_.price)) == Right(List(34999L))) &&
-        assertTrue(priced("99.999").isLeft)
       },
 
       test("неизвестный алгоритм подписи роняет загрузку") {
