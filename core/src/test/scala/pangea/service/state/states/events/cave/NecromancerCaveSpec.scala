@@ -18,6 +18,24 @@ object NecromancerCaveSpec extends ZIOSpecDefault {
   private val hero  = TestFixtures.hero(UserId(1L)).copy(lvl = 41L)
   private val necro = MiniBoss.Necromancer
 
+  /** Орк из этой пещеры: поднятый — свой для Некроманта, живой — чужой. */
+  private val livingOrc = Monster(0L, 10L, Race.Orc, Rarity.Common,
+    FightStats(atk = 1, hp = 100, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
+  private val risenOrc  = livingOrc.copy(undead = true)
+
+  /** Строй для шага: Некромант в полях на месте `at`, герой — на `heroAt`,
+    * мертвецы и живые — на своих местах. */
+  private def formation(at: Int, risen: List[Int], living: List[Int] = Nil, heroAt: Int = 1): SoloPveBattle = {
+    val base = SoloPveBattle.fromGroup(List(risenOrc, risenOrc, livingOrc), hero, Nil)
+    val dead = base.group.others(0)
+    val warm = base.group.others(1)
+    base.copy(group = base.group.copy(
+      heroPos   = heroAt,
+      activePos = at,
+      others    = risen.map(_ => dead) ++ living.map(_ => warm),
+      places    = risen ++ living))
+  }
+
   /** Пещеры по сидам — чтобы считать доли. */
   private val caves = (1L to 400L).toList.map(s => CaveGenerator.generate(Race.Orc.entryName, Rng(s))._1)
 
@@ -115,22 +133,41 @@ object NecromancerCaveSpec extends ZIOSpecDefault {
       assertTrue(MiniBoss.values.flatMap(_.set).distinct.size == MiniBoss.values.size)
     },
 
-    test("мистический шаг: уходит на самое дальнее свободное место, и пара пустеет") {
-      val mob = Monster(0L, 10L, Race.Orc, Rarity.Common,
-        FightStats(atk = 1, hp = 100, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
-      val b   = SoloPveBattle.fromGroup(List.fill(4)(mob), hero, Nil)
-      // Герой и активный на первом месте, свои заняли 2–4: прятаться — в хвост
-      // схемы, на пятнадцатое.
+    test("мистический шаг: встаёт сразу за спинами своих, а не в хвост схемы, и пара пустеет") {
+      // Герой и он на первом месте, свои на 2–4: прятаться — на пятое, сразу за
+      // ними, а не на пятнадцатое.
+      val b     = formation(at = 1, risen = List(2, 3, 4))
       val hide  = b.necromancerHideaway
       val moved = hide.fold(b)(b.stepActiveTo)
-      assertTrue(hide.contains(pangea.model.battle.Formation.MonsterPlaces)) &&
-      assertTrue(moved.group.activePos == pangea.model.battle.Formation.MonsterPlaces) &&
+      assertTrue(!b.necromancerCovered && hide.contains(5)) &&
       // напротив героя теперь пусто: достать спрятавшегося можно только подойдя
-      assertTrue(!moved.group.paired) &&
-      // дальше прятаться некуда — шаг станет пропуском
-      assertTrue(moved.necromancerHideaway.isEmpty) &&
+      assertTrue(moved.group.activePos == 5 && !moved.group.paired) &&
+      // теперь он за спинами своих — следующий шаг никуда его не ведёт
+      assertTrue(moved.necromancerCovered && moved.necromancerHideaway.isEmpty) &&
       // и строй его оттуда не тянет
       assertTrue(moved.copy(bossKind = Some(MiniBoss.Necromancer.entryName)).pullFree.isEmpty)
+    },
+
+    test("мистический шаг: кто и так за спинами своих, тот стоит, даже если новые поднялись позади") {
+      val b = formation(at = 5, risen = List(2, 3, 6, 7))
+      assertTrue(b.necromancerCovered && b.necromancerHideaway.isEmpty)
+    },
+
+    test("мистический шаг: свои позади — встаёт за ближайшим из них; живые не заслоняют, а одному прятаться не за кем") {
+      // Мертвецы отошли на 6 и 9, напротив героя он сам, на втором — живой орк.
+      val b = formation(at = 1, risen = List(6, 9), living = List(2))
+      assertTrue(!b.necromancerCovered && b.necromancerHideaway.contains(7)) &&
+      // своих не осталось — шаг станет пропуском
+      assertTrue(formation(at = 1, risen = Nil, living = List(2)).necromancerHideaway.isEmpty)
+    },
+
+    test("мистический шаг к герою не ведёт: свои по другую руку от зашедшего вглубь героя не в счёт") {
+      // Герой на пятом, он на двенадцатом, свои на 3 и 4: места за ними (1 и 2)
+      // ближе к герою, чем стоит он сам, — туда шаг не идёт.
+      val b = formation(at = 12, risen = List(3, 4), heroAt = 5)
+      assertTrue(!b.necromancerCovered && b.necromancerHideaway.isEmpty) &&
+      // а свой по его руку, ближе к герою, его заслоняет
+      assertTrue(formation(at = 12, risen = List(3, 8), heroAt = 5).necromancerCovered)
     },
 
     test("воскрешение поднимает только своих мертвецов и забирает их из добычи") {
