@@ -140,21 +140,43 @@ case class SoloPveBattle(
           group.others(idx).copy(currentEnergy = (group.others(idx).currentEnergy - spent).max(0L)))))
       }
 
-  /** Куда Некроманту прятаться: самое дальнее от героя СВОБОДНОЕ место строя,
-    * если оно дальше того, где он стоит. Занятые места не годятся — вставать
-    * вторым на чужое место нельзя, а поменяться значило бы выставить своего
-    * мертвеца на место, где его никто не достанет. Прятаться некуда — None, и
-    * тогда шаг становится пропуском, бесплатным. */
+  /** Стоит ли Некромант за спинами своих: между ним и героем есть хоть один его
+    * мертвец. Тогда мистический шаг ему ни к чему — он стоит, где стоял, даже
+    * если позади него поднялись новые. */
+  def necromancerCovered: Boolean = coveredAt(group.activePos)
+
+  /** Куда Некроманту прятаться: за спины своих — на ближайшее к герою свободное
+    * место, перед которым стоит хоть один его мертвец, но не ближе к герою, чем
+    * он стоит сейчас: к герою шаг его не ведёт. Занятые места не годятся —
+    * вставать вторым на чужое место нельзя, а поменяться значило бы выставить
+    * своего мертвеца на место, где его никто не достанет. Он и так за спинами
+    * своих, своих не осталось или встать за ними некуда — None, и тогда шаг
+    * становится пропуском, бесплатным. */
   def necromancerHideaway: Option[Int] = {
     val mine = math.abs(group.activePos - group.heroPos)
-    group.freePlaces.filter(p => math.abs(p - group.heroPos) > mine)
-      .sortBy(p => (-math.abs(p - group.heroPos), -p)).headOption
+    if (necromancerCovered) None
+    else group.freePlaces
+      .filter(p => math.abs(p - group.heroPos) >= mine && coveredAt(p))
+      .sortBy(p => (math.abs(p - group.heroPos), -p)).headOption
+  }
+
+  /** Заслоняет ли место `pos` от героя мертвец строя: стоит по ту же руку от
+    * героя, что и место, и ближе к нему — или прямо напротив героя. Если герой
+    * зашёл вглубь строя, мертвец по другую руку от него здесь никого не
+    * заслоняет. */
+  private def coveredAt(pos: Int): Boolean = {
+    val d = pos - group.heroPos
+    group.entries.exists { case (p, slot) =>
+      val u = p - group.heroPos
+      slot.alive && Nature.of(slot.race, slot.undead) == Nature.Undead &&
+        math.abs(u) < math.abs(d) && (u == 0 || math.signum(u) == math.signum(d))
+    }
   }
 
   /** Активный уходит на свободное место `pos`. Пара при этом пустеет: напротив
     * героя никого не остаётся, и достать ушедшего можно только подойдя.
     *
-    * Этим Некромант и прячется — за спинами своих, в хвосте строя; строй его
+    * Этим Некромант и прячется — за спинами своих; строй его
     * оттуда не тянет ([[MiniBoss.holdsPosition]]), а колдовать он продолжает:
     * круг способностей идёт у того, кто стоит в полях боя, где бы он ни стоял. */
   def stepActiveTo(pos: Int): SoloPveBattle = copy(group = group.copy(activePos = pos))
