@@ -19,7 +19,8 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   // боя, под девушку — у ручья, под поляну цветов — по одному у боя и у находки, под
   // пещеру с монстрами — снова у боя, под караван — у серебряной жилы. Пещера и поляна
   // стоят сразу за боем, караван — сразу за жилой, чтобы билеты событий дальше по
-  // списку не сдвигались.
+  // списку не сдвигались. Проценты — для полного пула: часть событий открывается
+  // только в глубине (см. EventMinLevel), и выше пул меньше ста билетов.
   val BattleTickets: Int = 37
 
   val events: List[StateType] =
@@ -39,6 +40,26 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
     val battleTickets = (BattleTickets * battleFactor).round.toInt.max(0)
     List.fill(battleTickets)(Battle) ++ events.filter(_ != Battle)
   }
+
+  /** С какого уровня лабиринта событие попадает в пул: события открываются по
+   *  мере спуска. Чего здесь нет, то встречается с первого уровня. У закрытого
+   *  события в пуле нет ни одного билета, поэтому доли остальных выше. */
+  val EventMinLevel: Map[StateType, Int] = Map(
+    Girl          -> 5,  // групповые бои
+    TreasureMobs  -> 5,
+    ElementalLair -> 7,  // минибосс
+    MonsterCave   -> 10,
+    Caravan       -> 10
+  )
+
+  /** Открыто ли событие на этом уровне лабиринта. */
+  def eventOpen(event: StateType, dungeonLevel: Int): Boolean =
+    dungeonLevel >= EventMinLevel.getOrElse(event, 1)
+
+  /** Пул на этом уровне лабиринта: закрытые события выпадают целиком, а бой
+   *  множится, как и прежде (см. [[eventsWithBattleFactor]]). */
+  def eventsAt(dungeonLevel: Int, battleFactor: Double): List[StateType] =
+    eventsWithBattleFactor(battleFactor).filter(eventOpen(_, dungeonLevel))
 
   case object GlobalMap     extends StateType
   case object HarborQuarter    extends StateType
