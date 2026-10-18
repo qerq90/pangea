@@ -3,7 +3,7 @@ package pangea.model.arena
 import enumeratum._
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder, HCursor, Json}
-import pangea.model.battle.{BattleEffects, HeroBattleState, SkillSlotState}
+import pangea.model.battle.{BattleAlly, BattleEffects, HeroBattleState, SkillSlotState}
 import pangea.model.hero.HeroId
 import pangea.model.user.UserId
 
@@ -24,6 +24,21 @@ object ArenaStatus extends Enum[ArenaStatus] {
 
   implicit val encoder: Encoder[ArenaStatus] = (s: ArenaStatus) => s.entryName.asJson
   implicit val decoder: Decoder[ArenaStatus] = (c: HCursor) => c.as[String].map(ArenaStatus.withName)
+}
+
+/** Союзник стороны на песке. `id` — его номер на весь бой: по нему его узнают
+  * в чужом зеркале боя, где он — «моб» (см. `MonsterSlot.arenaUnit`). Сам
+  * союзник — как в лабиринте: место, раны, энергия. */
+final case class ArenaAlly(id: Int, ally: BattleAlly)
+
+object ArenaAlly {
+  implicit val encoder: Encoder[ArenaAlly] = (a: ArenaAlly) =>
+    Json.obj("id" -> a.id.asJson, "ally" -> a.ally.asJson)
+  implicit val decoder: Decoder[ArenaAlly] = (c: HCursor) =>
+    for {
+      id   <- c.get[Int]("id")
+      ally <- c.get[BattleAlly]("ally")
+    } yield ArenaAlly(id, ally)
 }
 
 /** Одна сторона боя. HP, брони и энергии здесь нет: они живут в самом герое,
@@ -66,7 +81,16 @@ final case class ArenaSide(
   // Сколько своих ходов сторона не сможет двинуться: её пригвоздили
   // («Пригвоздить», «Заградительный залп»). Считается на том, кого
   // пригвоздили, как и `blocked`.
-  rooted:  Int                  = 0
+  rooted:  Int                  = 0,
+  // Союзники стороны на песке: крысы из-под ног, в групповом бою — отряд.
+  // Сторона падает, только когда пали все: и герой, и они.
+  allies:  List[ArenaAlly]      = Nil,
+  // Номер для следующего, кто выйдет на песок за эту сторону.
+  nextAlly: Int                 = 1,
+  // Что сторона наложила на союзников соперника — яд, кровь, огонь, путы, — по
+  // их номерам. Живёт здесь и тикает в её ходы, как наложенное на самого
+  // соперника живёт в `effects`.
+  marks:   Map[Int, BattleEffects] = Map.empty
 )
 
 object ArenaSide {
@@ -85,7 +109,10 @@ object ArenaSide {
       "shieldUp" -> s.shieldUp.asJson,
       "counterUp" -> s.counterUp.asJson,
       "pos"     -> s.pos.asJson,
-      "rooted"  -> s.rooted.asJson)
+      "rooted"  -> s.rooted.asJson,
+      "allies"  -> s.allies.asJson,
+      "nextAlly" -> s.nextAlly.asJson,
+      "marks"   -> s.marks.asJson)
 
   implicit val decoder: Decoder[ArenaSide] = (c: HCursor) =>
     for {
@@ -103,8 +130,11 @@ object ArenaSide {
       counter <- c.getOrElse[Boolean]("counterUp")(false)
       pos     <- c.getOrElse[Int]("pos")(1)
       rooted  <- c.getOrElse[Int]("rooted")(0)
+      allies  <- c.getOrElse[List[ArenaAlly]]("allies")(Nil)
+      next    <- c.getOrElse[Int]("nextAlly")(1)
+      marks   <- c.getOrElse[Map[Int, BattleEffects]]("marks")(Map.empty)
     } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen, blocked, shield,
-      counter, pos, rooted)
+      counter, pos, rooted, allies, next, marks)
 }
 
 /** Бой на арене: двое, чей сейчас ход и до какой минуты он думает.

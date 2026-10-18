@@ -29,7 +29,7 @@ import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.dao.arena.ArenaDao
-import pangea.model.arena.{ArenaRates, ArenaSide}
+import pangea.model.arena.{ArenaAlly, ArenaRates, ArenaSide}
 import pangea.service.state.states.arena.ArenaBattle
 import pangea.service.state.states.battle.BattleState.{ArenaOwnActions, Victim}
 import pangea.service.schedule.Scheduler
@@ -112,7 +112,7 @@ case class BattleState(
     * павшую в бою она уже не заменяет. */
   private def startingRat(user: User, battle: SoloPveBattle, renderer: Renderer): Task[Unit] =
     getHero(user).flatMap { hero =>
-      // На арену отряд не выходит — и крыса из-под ног тоже.
+      // На арене крыса на старте выходит вместе с героем (см. ArenaBattle.withStartingRat).
       if (!hero.sets.startsWithRat || battle.group.round > 0 || battle.group.hasRatAlly || battle.arena.isDefined) ZIO.unit
       else callRat(hero, battle) match {
         case None => ZIO.unit
@@ -197,8 +197,10 @@ case class BattleState(
       allied  <- allyPhase(promoted)
       promoted2 = promoteAfterKill(allied)
       sided   <- sideMobsPhase(promoted2, now)
+      // Арена: раны на чужих бойцах тикают в конце хода того, кто их наложил.
+      wounded  = arenaWounds(sided)
       // Активный вне пары мог истечь ранами на своём ходу — тогда следующий.
-      promoted3 = promoteAfterKill(sided)
+      promoted3 = promoteAfterKill(wounded)
       // Аура держит всё поле: нежить крепнет, живые чахнут. Добитых ею разбираем
       // тем же порядком, что павших от ран.
       // Раны союзников тикают там же, где и прочие: после всех ходов раунда.
@@ -229,14 +231,9 @@ case class BattleState(
     * Возвращает бой и строку для лога, либо None, если встать некуда. */
   private def callRat(hero: Hero, battle: SoloPveBattle): Option[(SoloPveBattle, String)] =
     battle.group.nearestFreeAllyPlace.map { pos =>
-      val rarity = if (hero.sets.summonsPlagueRats) Rarity.Rare else Rarity.Uncommon
-      val rat    = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, Race.Animal, rarity)
-      val form   = pangea.model.squad.UndeadForm(rat.name, hero.lvl, rat.fightStats)
-      val ally   = BattleAlly(pangea.model.squad.AllyKind.Rat, pos,
-        hp = rat.fightStats.hp, armor = rat.fightStats.armor, energy = rat.fightStats.energy,
-        stats = rat.fightStats, lvl = hero.lvl, undead = Some(form), home = 0)
+      val ally = BattleState.ratAlly(hero, pos)
       (battle.copy(group = battle.group.copy(allies = battle.group.allies :+ ally)),
-       content.format("battle.ratCall", "name" -> rat.name, "n" -> pos.toString))
+       content.format("battle.ratCall", "name" -> ally.name, "n" -> pos.toString))
     }
 
   /** «Крыса», порог 6: раз в раунд из-под ног героя может выскочить крыса. Пока
@@ -244,7 +241,7 @@ case class BattleState(
   private def ratCall(hero: Hero, res: TurnResult): Task[TurnResult] =
     chanceRoll(
       res.outcome == Outcome.Continue && res.endsRound && !res.battle.group.heroDown &&
-        res.battle.arena.isEmpty && hero.sets.ratSummonChancePct > 0,
+        hero.sets.ratSummonChancePct > 0,
       hero.sets.ratSummonChancePct
     ).map {
       case false => res
@@ -546,10 +543,25 @@ case class BattleState(
           _ <- passTurn(user, ref, res, before, note, nowMs, renderer)
         } yield StateType.Battle
 
-      // Соперник обнулён — он проиграл, а герой уходит с песка своим ходом.
-      // Пыль и пояс — как после любого боя (см. afterBattle).
+      // Герой пал, а его отряд ещё на ногах: сторона падает только целиком.
+      // Он лежит, отряд бьётся за него — ход уходит сопернику.
+      case Outcome.Death if res.battle.group.allies.exists(_.alive) =>
+        val down = res.copy(battle = res.battle.copy(group = res.battle.group.copy(heroDown = true)),
+                            outcome = Outcome.Continue)
+        for {
+          _ <- (persistHero *> heroDao.writeActiveBattle(user.userId, down.battle.asJson)).uninterruptible
+          _ <- showLog
+          _ <- renderer.show(user, Screen(content.text("arena.down"), Nil))
+          _ <- passTurn(user, ref, down, before, note, nowMs, renderer)
+        } yield StateType.Battle
+
+      // Соперник со всем отрядом обнулён — он проиграл, а герой уходит с песка
+      // своим ходом. Лежал, пока отряд добивал, — встаёт с единицей HP. Пыль и
+      // пояс — как после любого боя (см. afterBattle).
       case Outcome.Victory =>
-        (persistHero *> afterBattle(user, res.hero)).uninterruptible.flatMap { refilled =>
+        val standing = if (res.hero.fightStats.hp <= 0L) ArenaBattle.beaten(res.hero) else res.hero
+        (heroDao.updateEquipmentAndFightStats(user.userId, standing.equipment, standing.fightStats) *>
+          persistExtras(user, res, before, nowMs) *> afterBattle(user, standing)).uninterruptible.flatMap { refilled =>
           showLog *> showRefilled(user, refilled, renderer) *>
             endArena(user, ref, winner = true, arenaSummary(note, before, res, None), nowMs, renderer)
         }
@@ -585,8 +597,9 @@ case class BattleState(
                            heroDao.updateFightStats(foeUser, hurt.fightStats)
                          }
               // Соперник читает не чужие «вы ударили», а сводку: что применили
-              // и чем это для него обернулось.
-              lines = arenaSummary(note, before, res, foeHero)
+              // и чем это для него и его отряда обернулось.
+              lines = arenaSummary(note, before, res, foeHero,
+                        fight.sideOf(foeUser).map(_.allies).getOrElse(Nil))
               // Сбитого с мысли, отброшенного и пригвождённого запоминаем на нём
               // самом: в своём зеркале он этого не видит.
               foeSide = fight.sideOf(foeUser).map(ArenaBattle.foeAfterTurn(_, res.battle))
@@ -678,11 +691,14 @@ case class BattleState(
           fresh    = ArenaBattle.assemble(fight, me, foe, hero, foeHero, nowMs)
           _       <- heroDao.writeActiveBattle(user.userId, fresh.asJson)
           // Чужой ход — кнопки прячем: жать их всё равно нельзя, а соблазн есть.
-          _       <- if (fight.isTurn(user.userId)) showArenaScreen(user, hero, fresh, nowMs, renderer)
-                     else showArenaPlaces(user, fresh, renderer) *>
+          // Свой, а герой лежит — бьётся отряд, и ход уходит сам.
+          out     <- if (fight.isTurn(user.userId) && fresh.group.heroDown)
+                       resolveLoaded(user, renderer, hero, fresh, nowMs, content.text("arena.turn.down"))(downTurn)
+                     else if (fight.isTurn(user.userId)) showArenaScreen(user, hero, fresh, nowMs, renderer).as(StateType.Battle)
+                     else (showArenaPlaces(user, fresh, renderer) *>
                             renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name),
-                              Nil, hideKeyboard = true))
-        } yield StateType.Battle
+                              Nil, hideKeyboard = true))).as(StateType.Battle)
+        } yield out
       case _ => ZIO.succeed(StateType.Battle).unit.as(StateType.Battle)
     }
 
@@ -706,18 +722,21 @@ case class BattleState(
     * Полные тексты умений написаны от первого лица («ваш рёв раскатывается»)
     * — в чужом логе они и длинны, и читаются как свои. Здесь только суть:
     * название да числа. */
-  private def arenaSummary(note: String, before: Hero, res: TurnResult, foeBefore: Option[Hero]): List[String] = {
+  private def arenaSummary(note: String, before: Hero, res: TurnResult, foeBefore: Option[Hero],
+                           foeAllies: List[ArenaAlly] = Nil): List[String] = {
     val what = if (note.isEmpty) content.text("arena.turn.acted") else note
     val dealt = foeBefore.map { h =>
-      (h.fightStats.hp - res.battle.monsterCurrentHp).max(0L) +
-        (h.fightStats.armor - res.battle.monsterCurrentArmor).max(0L)
+      val after = ArenaBattle.foeAfter(h, res.battle)
+      (h.fightStats.hp - after.fightStats.hp).max(0L) + (h.fightStats.armor - after.fightStats.armor).max(0L)
     }.getOrElse(0L)
+    val alliesHurt = ArenaBattle.alliesHurt(foeAllies, res.battle)
     val hpBack    = (res.hero.fightStats.hp - before.fightStats.hp).max(0L)
     val armorBack = (res.hero.fightStats.armor - before.fightStats.armor).max(0L)
     val hpLost    = (before.fightStats.hp - res.hero.fightStats.hp).max(0L)
     List(
       Some(content.format("arena.turn.did", "what" -> what)),
       Option.when(dealt > 0L)(content.format("arena.turn.dealt", "n" -> dealt.toString)),
+      Option.when(alliesHurt > 0L)(content.format("arena.turn.alliesHurt", "n" -> alliesHurt.toString)),
       Option.when(hpBack > 0L || armorBack > 0L)(content.format("arena.turn.healed",
         "hp" -> hpBack.toString, "armor" -> armorBack.toString)),
       // Своё же горение или яд соперник тоже видит — иначе чужое HP «само» падает.
@@ -760,9 +779,12 @@ case class BattleState(
     renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil))
 
   /** Минута вышла: бьём за зевнувшего обычной атакой — и ход уходит дальше.
-    * Достать соперника нечем — он выжидает: ход уходит всё равно. */
+    * Достать соперника нечем — он выжидает: ход уходит всё равно. Герой лежит
+    * — бьётся его отряд. */
   private def arenaTimeout(user: User, renderer: Renderer): Task[StateType] =
     heroDao.readActiveBattle(user.userId).map(_.flatMap(_.as[SoloPveBattle].toOption)).flatMap {
+      case Some(b) if b.arena.isDefined && b.group.heroDown =>
+        resolve(user, renderer, content.text("arena.turn.down"))(downTurn)
       case Some(b) if b.arena.isDefined =>
         getHero(user).flatMap { hero =>
           if (heroTargets(hero, b).nonEmpty)
@@ -807,6 +829,13 @@ case class BattleState(
       case Some(pos) => strikeSide(hero, battle, pos, nowMs, Vector.empty, Set.empty).flatMap(closeTurn(_, nowMs, Set.empty))
     }
   }
+
+  /** Арена: герой лежит, а отряд бьётся — в его ход действует только отряд,
+    * раны на чужих тикают, и ход уходит сопернику. Самого героя не трогают:
+    * ни тиков, ни ответа. */
+  private def downTurn(hero: Hero, battle: SoloPveBattle, @annotation.unused nowMs: Long): Task[TurnResult] =
+    ZIO.succeed(TurnResult(hero, battle.copy(group = battle.group.copy(heroDown = true)),
+      Vector(content.text("arena.downTurn")), Outcome.Continue))
 
   /** «Ждать»: бить некого — герой пропускает удар, раунд идёт своим чередом. */
   private def waitTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
@@ -1057,7 +1086,7 @@ case class BattleState(
             // Защита моба режет удар ДО разбивки по броне/HP, иначе поехали бы
             // грани стихий (см. splitElementalDamage).
             // На арене соперник мог поднять щит своим ходом — он режет и удар героя.
-            guarded = BattleState.shieldCut(battle.monsterShieldUp,
+            guarded = BattleState.shieldCut(battle.foeShieldUp,
                         (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L))
             // Предел босса за раунд: Крысиный король отдаёт не больше пятой
             // части запаса, сколько бы герой ни вложил в удар и умение.
@@ -1192,7 +1221,7 @@ case class BattleState(
     * ArenaBattle.counterPower); защита и броня героя режут её как обычный удар.
     * Вне арены силы нет — и броска тоже. */
   private def arenaCounter(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] =
-    if (battle.monsterCounterPower <= 0L) ZIO.succeed((hero, battle, Vector.empty))
+    if (battle.foeCounterPower <= 0L) ZIO.succeed((hero, battle, Vector.empty))
     else
       Random.nextLongBetween(80L, 121L).map { spread =>
         val raw       = (battle.monsterCounterPower * spread / 100L).max(1L)
@@ -1277,7 +1306,8 @@ case class BattleState(
     * сооружения — железо, Гнилой Джо и так нежить, а Крысиный король — не тело,
     * а сборище крыс. Белый волк встаёт как по клыку. */
   private def necroRise(before: SoloPveBattle, res: TurnResult): Task[TurnResult] =
-    if (res.hero.sets.riseChancePct <= 0L) ZIO.succeed(res)
+    // На арене павшие не встают за героем: соперник и его отряд — не добыча.
+    if (res.hero.sets.riseChancePct <= 0L || res.battle.arena.isDefined) ZIO.succeed(res)
     else {
       val fresh  = res.battle.group.slain.drop(before.group.slain.size)
       val active = Option.when(res.battle.monsterCurrentHp <= 0L && before.monsterCurrentHp > 0L)(
@@ -3269,7 +3299,7 @@ case class BattleState(
       crit: Boolean
   ): Task[TurnResult] = {
     // На арене соперник мог поднять щит — умение по нему режется так же, как удар.
-    val raw = BattleState.shieldCut(battle.monsterShieldUp, if (crit) value.max(1L) * 2L else value.max(1L))
+    val raw = BattleState.shieldCut(battle.foeShieldUp, if (crit) value.max(1L) * 2L else value.max(1L))
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
@@ -4419,7 +4449,9 @@ case class BattleState(
     * копят энергию и лечат соседей. Раны на них (яд, кровь, огонь) тикают как у
     * всех; кого добило — уходит в павшие. */
   private def sideMobsPhase(res: TurnResult, nowMs: Long): Task[TurnResult] =
-    if (res.outcome != Outcome.Continue || !(res.battle.isGroup || res.battle.unpaired || res.battle.group.heroDown) || !res.endsRound) ZIO.succeed(res)
+    // На арене чужие бойцы ходят в зеркале соперника, своим ходом, — не здесь.
+    if (res.outcome != Outcome.Continue || !(res.battle.isGroup || res.battle.unpaired || res.battle.group.heroDown) ||
+        !res.endsRound || res.battle.arena.isDefined) ZIO.succeed(res)
     else {
       val n = res.battle.group.others.size
       val smokeLine = if (res.battle.effects.heroInSmoke) Vector(content.text("battle.flaskSmokeHolds")) else Vector.empty[String]
@@ -4576,6 +4608,32 @@ case class BattleState(
       log3 = log1 ++ log2 ++ (if (dotLine.isEmpty) Vector.empty else Vector(dotLine))
     } yield (h2, if (countered) b2.copy(heroCounterReady = false) else b2, ticked, log3)
   }
+
+  /** Арена: раны на бойцах соперника — и на нём самом, и на его союзниках —
+    * тикают в конце хода стороны, которая их наложила: ход за ход, как у мобов
+    * в лабиринте в их ход. Сроки эффектов на том, кто в полях, уже оттикали в
+    * `tickBuffs`; на строе — тикают здесь. Добитого ранами — в павшие. */
+  private def arenaWounds(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.arena.isEmpty) res
+    else {
+      val mult = res.hero.sets.burnGrowthMult
+      val (active, activeLine, _) = tickMonsterEffects(res.battle, res.battle.monsterName, mult)
+      val n = active.group.others.size
+      val (b, lines, _) = (0 until n).foldLeft((active, Vector(activeLine).filter(_.nonEmpty), 0)) {
+        case ((acc, log, fallen), i) =>
+          val idx  = i - fallen
+          val tmp0 = acc.withActive(acc.group.others(idx))
+          val tmp1 = tmp0.copy(effects = tmp0.effects.withMonsterPart(tickSlotEffects(tmp0.effects.monsterPart)))
+          val (tmp, line, _) = tickMonsterEffects(tmp1, tmp1.monsterName, mult)
+          val placed = acc.copy(group = acc.group.copy(others = acc.group.others.updated(idx, tmp.activeSlot)))
+          val log2   = if (line.isEmpty) log else log :+ line
+          if (tmp.monsterCurrentHp > 0L) (placed, log2, fallen)
+          else (placed.sideFallen(idx), log2 :+ content.format("battle.group.sideSlain", "monster" -> tmp.monsterName),
+                fallen + 1)
+      }
+      val outcome = if (b.monsterCurrentHp <= 0L) Outcome.Victory else Outcome.Continue
+      res.copy(battle = b, outcome = outcome, sideLog = res.sideLog ++ lines)
+    }
 
   /** Временные эффекты на мобе вне пары тикают сами: общий `tickBuffs` крутит
     * только активную пару. */
@@ -5738,6 +5796,19 @@ object BattleState {
     * нагрудника — Таран и «Отбросить», удары телом и щитом, — только вблизи. */
   def skillReach(hero: Hero, skill: Skill): Int =
     if (Skill.armorSkills.contains(skill)) GroupState.Reach else heroReach(hero)
+
+  /** Крыса из-под ног героя (набор «Крыса»): обычная на пороге 6, чумная на
+    * пороге 12 ([[HeroSets.summonsPlagueRats]]), уровнем в самого героя.
+    * `home = 0` помечает её как пришедшую не из отряда — после боя в лабиринте
+    * по этому признаку она в отряд и попадает (см. squadAfterBattle). */
+  def ratAlly(hero: Hero, pos: Int): BattleAlly = {
+    val rarity = if (hero.sets.summonsPlagueRats) Rarity.Rare else Rarity.Uncommon
+    val rat    = MonsterGenerator.generateOfRaceAndRarity(hero.lvl.toInt, Race.Animal, rarity)
+    val form   = pangea.model.squad.UndeadForm(rat.name, hero.lvl, rat.fightStats)
+    BattleAlly(pangea.model.squad.AllyKind.Rat, pos,
+      hp = rat.fightStats.hp, armor = rat.fightStats.armor, energy = rat.fightStats.energy,
+      stats = rat.fightStats, lvl = hero.lvl, undead = Some(form), home = 0)
+  }
 
   /** На сколько мест прыгает «Отскок» и отлетает цель «Отбрасывающего
     * выстрела»: на одно меньше дальности оружия, но хоть на одно, — так цель

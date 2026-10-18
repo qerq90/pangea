@@ -109,7 +109,11 @@ final case class MonsterSlot(
   // Своё имя этого существа, если оно именное (легендарный из списка расы).
   customName:    Option[String] = None,
   /** Поднятый некромантом: раса своя, природа могильная (см. [[Nature]]). */
-  undead:        Boolean        = false
+  undead:        Boolean        = false,
+  /** На арене: кто это из бойцов соперника — сам он
+    * ([[SoloPveBattle.ArenaHeroUnit]]) или его союзник под своим номером. По
+    * этому номеру урон и путы возвращаются его стороне. */
+  arenaUnit:     Option[Int]    = None
 ) {
   def toMonster: Monster =
     Monster(0L, lvl, Race.withName(race), Rarity.withName(rarity), stats, marked, customName, undead)
@@ -147,8 +151,9 @@ object MonsterSlot {
       boss          <- c.getOrElse[Option[String]]("boss")(None)
       customName    <- c.getOrElse[Option[String]]("customName")(None)
       undead        <- c.getOrElse[Boolean]("undead")(false)
+      arenaUnit     <- c.getOrElse[Option[Int]]("arenaUnit")(None)
     } yield MonsterSlot(lvl, race, rarity, stats, currentHp, currentArmor, marked, currentEnergy, effects,
-                        boss, customName, undead)
+                        boss, customName, undead, arenaUnit)
 }
 
 /** Убитый моб — ровно то, что нужно, чтобы после боя накатать за него добычу. */
