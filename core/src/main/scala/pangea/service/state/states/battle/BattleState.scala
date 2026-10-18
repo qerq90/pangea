@@ -29,7 +29,7 @@ import pangea.service.state.states.gustavo.GustavoState
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.dao.arena.ArenaDao
-import pangea.model.arena.ArenaRates
+import pangea.model.arena.{ArenaRates, ArenaSide}
 import pangea.service.state.states.arena.ArenaBattle
 import pangea.service.state.states.battle.BattleState.{ArenaOwnActions, Victim}
 import pangea.service.schedule.Scheduler
@@ -112,7 +112,8 @@ case class BattleState(
     * павшую в бою она уже не заменяет. */
   private def startingRat(user: User, battle: SoloPveBattle, renderer: Renderer): Task[Unit] =
     getHero(user).flatMap { hero =>
-      if (!hero.sets.startsWithRat || battle.group.round > 0 || battle.group.hasRatAlly) ZIO.unit
+      // На арену отряд не выходит — и крыса из-под ног тоже.
+      if (!hero.sets.startsWithRat || battle.group.round > 0 || battle.group.hasRatAlly || battle.arena.isDefined) ZIO.unit
       else callRat(hero, battle) match {
         case None => ZIO.unit
         case Some((joined, line)) =>
@@ -243,7 +244,7 @@ case class BattleState(
   private def ratCall(hero: Hero, res: TurnResult): Task[TurnResult] =
     chanceRoll(
       res.outcome == Outcome.Continue && res.endsRound && !res.battle.group.heroDown &&
-        hero.sets.ratSummonChancePct > 0,
+        res.battle.arena.isEmpty && hero.sets.ratSummonChancePct > 0,
       hero.sets.ratSummonChancePct
     ).map {
       case false => res
@@ -586,10 +587,11 @@ case class BattleState(
               // Соперник читает не чужие «вы ударили», а сводку: что применили
               // и чем это для него обернулось.
               lines = arenaSummary(note, before, res, foeHero)
-              // Сбитого с мысли запоминаем на нём самом: в своём зеркале он
-              // этого запрета не видит.
-              foeSide = fight.sideOf(foeUser).map(_.copy(blocked = ArenaBattle.blockFor(res.battle)))
-              told    = foeSide.foldLeft(mine.fold(fight)(fight.withSide))(_ withSide _).withLog(lines)
+              // Сбитого с мысли, отброшенного и пригвождённого запоминаем на нём
+              // самом: в своём зеркале он этого не видит.
+              foeSide = fight.sideOf(foeUser).map(ArenaBattle.foeAfterTurn(_, res.battle))
+              moves   = arenaMoves(fight.sideOf(user.userId), fight.sideOf(foeUser), res.battle)
+              told    = foeSide.foldLeft(mine.fold(fight)(fight.withSide))(_ withSide _).withLog(lines ++ moves)
               updated = told.seenBy(user.userId).passTurn(foeUser, nowMs)
               _ <- dao.update(updated, nowMs)
               _ <- scheduler.cancel(user.userId, TaskKind.ArenaTurn)
@@ -677,8 +679,9 @@ case class BattleState(
           _       <- heroDao.writeActiveBattle(user.userId, fresh.asJson)
           // Чужой ход — кнопки прячем: жать их всё равно нельзя, а соблазн есть.
           _       <- if (fight.isTurn(user.userId)) showArenaScreen(user, hero, fresh, nowMs, renderer)
-                     else renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name),
-                            Nil, hideKeyboard = true))
+                     else showArenaPlaces(user, fresh, renderer) *>
+                            renderer.show(user, Screen(content.format("arena.waitFoe", "name" -> foe.name),
+                              Nil, hideKeyboard = true))
         } yield StateType.Battle
       case _ => ZIO.succeed(StateType.Battle).unit.as(StateType.Battle)
     }
@@ -722,6 +725,19 @@ case class BattleState(
     ).flatten
   }
 
+  /** Что ход сделал с местами — для соперника: кто куда встал и надолго ли он
+    * пригвождён. Строй он увидит и сам, но сводка должна объяснять, почему
+    * соперник вдруг далеко. */
+  private def arenaMoves(me: Option[ArenaSide], foe: Option[ArenaSide], battle: SoloPveBattle): List[String] =
+    List(
+      me.filter(_.pos != battle.group.heroPos).map(_ =>
+        content.format("arena.turn.moved", "n" -> battle.group.heroPos.toString)),
+      foe.filter(_.pos != battle.group.activePos).map(_ =>
+        content.format("arena.turn.pushedYou", "n" -> battle.group.activePos.toString)),
+      foe.filter(_.rooted < battle.effects.monsterRootedTurns).map(_ =>
+        content.format("arena.turn.pinnedYou", "n" -> battle.effects.monsterRootedTurns.toString))
+    ).flatten
+
   /** Пересказать сопернику чужой ход — один раз: прочитанное помечаем. */
   private def tellFoeTurn(user: User, fight: pangea.model.arena.ArenaFight, dao: ArenaDao,
                           nowMs: Long, renderer: Renderer): Task[Unit] =
@@ -735,14 +751,26 @@ case class BattleState(
   private def showArenaScreen(user: User, hero: Hero, battle: SoloPveBattle,
                               nowMs: Long, renderer: Renderer): Task[Unit] =
     mixCount(hero).flatMap(mixes =>
-      renderer.show(user, buildBattleScreen(hero, battle, hero.effectiveMaxHp(nowMs), nowMs, mixes)))
+      showArenaPlaces(user, battle, renderer) *>
+        renderer.show(user, buildBattleScreen(hero, battle, hero.effectiveMaxHp(nowMs), nowMs, mixes)))
 
-  /** Минута вышла: бьём за зевнувшего обычной атакой — и ход уходит дальше. */
+  /** Строй на арене виден всегда, даже вплотную: от расстояния зависит, кто
+    * кого достаёт и бьёт ли лук в полную силу. */
+  private def showArenaPlaces(user: User, battle: SoloPveBattle, renderer: Renderer): Task[Unit] =
+    renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil))
+
+  /** Минута вышла: бьём за зевнувшего обычной атакой — и ход уходит дальше.
+    * Достать соперника нечем — он выжидает: ход уходит всё равно. */
   private def arenaTimeout(user: User, renderer: Renderer): Task[StateType] =
     heroDao.readActiveBattle(user.userId).map(_.flatMap(_.as[SoloPveBattle].toOption)).flatMap {
       case Some(b) if b.arena.isDefined =>
-        renderer.show(user, Screen(content.text("arena.timeout"), Nil)) *>
-          attackRoute(user, None, renderer)
+        getHero(user).flatMap { hero =>
+          if (heroTargets(hero, b).nonEmpty)
+            renderer.show(user, Screen(content.text("arena.timeout"), Nil)) *> attackRoute(user, None, renderer)
+          else
+            renderer.show(user, Screen(content.text("arena.timeoutWait"), Nil)) *>
+              resolve(user, renderer, content.text("arena.turn.wait"))(waitTurn)
+        }
       case _ => ZIO.succeed(StateType.Battle)
     }
 
@@ -954,7 +982,8 @@ case class BattleState(
     * раунда). Издалека никого не тянем: павший в паре замены не подставляет, и
     * место перед героем враги занимают сами, шаг за шагом. */
   private def pullFreeStep(res: TurnResult): TurnResult =
-    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.group.heroDown) res
+    // На арене соперник ходит сам и только своим ходом: за него здесь не шагают.
+    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.group.heroDown || res.battle.arena.isDefined) res
     else {
       // Сперва тот, кто в полях боя, делает свой шаг, потом смотрим, не дошёл ли
       // кто-нибудь до места напротив героя.
@@ -2954,10 +2983,10 @@ case class BattleState(
       nowMs: Long,
       target: Int
   ): Task[TurnResult] = {
-    // «Отскок»: сперва прыжок, потом выстрел — уже с нового места. На арене мест
-    // нет: там он просто стреляет.
+    // «Отскок»: сперва прыжок, потом выстрел — уже с нового места. Пригвождённый
+    // не прыгает — стреляет с места.
     val leapTo =
-      if (slot.skill.effect != Skill.Effect.Leap || battle0.arena.isDefined) None
+      if (slot.skill.effect != Skill.Effect.Leap || battle0.effects.heroRooted) None
       else battle0.group.leapSpot(target, BattleState.displacement(hero), BattleState.skillReach(hero, slot.skill))
     val battle      = leapTo.fold(battle0)(p => battle0.copy(group = battle0.group.copy(heroPos = p)))
     val home        = battle.group.activePos
@@ -3110,16 +3139,16 @@ case class BattleState(
 
         case Skill.Effect.Leap =>
           // Прыжок уже сделан (см. начало): выстрел — как удар, срезанный защитой.
-          val jump =
-            if (battle0.arena.isDefined) ""
-            else leapTo.fold(content.text("battle.group.leapNoRoom"))(p => content.format("battle.group.leap", "n" -> p.toString)) + "\n"
+          val jump = leapTo.fold(content.text(
+              if (battle0.effects.heroRooted) "battle.group.leapPinned" else "battle.group.leapNoRoom"))(p =>
+              content.format("battle.group.leap", "n" -> p.toString)) + "\n"
           dealSkillDamage(hero, bumped, reduced, dealt => jump + tmpl.replace("{}", dealt.toString), next)
 
         case Skill.Effect.Push =>
           // Урон, срезанный защитой; выживший отлетает от героя, и пара рвётся.
-          // Минибосса и сооружение не сдвинуть. На арене мест нет — просто удар.
+          // Минибосса и сооружение не сдвинуть.
           val pushed: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] = (h, b, lines) =>
-            if (b.monsterCurrentHp <= 0 || b.arena.isDefined) next(h, b, lines)
+            if (b.monsterCurrentHp <= 0) next(h, b, lines)
             else b.pushActive(BattleState.displacement(hero)) match {
               case Some((moved, to)) =>
                 nextAt(to)(h, moved, lines :+ content.format("battle.group.pushed", "monster" -> b.monsterName, "n" -> to.toString))
@@ -4654,7 +4683,7 @@ case class BattleState(
         // дальние подтягиваются к герою на одно свободное место — чтобы в
         // следующем раунде достать его сбоку; в сводку это не идёт, перестановка
         // и так видна по строю
-        (b1, _) = b1q.closeIn
+        (b1, _) = if (b1q.arena.isDefined) (b1q, Nil) else b1q.closeIn
         log1 = log1a ++ log1b ++ entered.map(m => content.format("battle.group.fromQueue", "monster" -> m.name)).toVector
         // перемешивание: каждый четвёртый раунд, если есть кого мешать. Жребий
         // тянут только подвижные — сооружения стоят где стояли. Группу берём у
@@ -4662,7 +4691,7 @@ case class BattleState(
         // строя, один моб пропадёт, а другой задвоится. Строй не изменился —
         // молчим: сообщать о перемешивании, которого не было, незачем.
         shuffled <-
-          if (!b1.isGroup || b1.group.round % GroupState.ShufflePeriod != 0) ZIO.succeed((b1, Vector.empty[String]))
+          if (!b1.isGroup || b1.arena.isDefined || b1.group.round % GroupState.ShufflePeriod != 0) ZIO.succeed((b1, Vector.empty[String]))
           else Random.shuffle(b1.movableInOrder.indices.toList).map { order =>
             val mixed = b1.reshuffle(order)
             val b     = mixed.copy(group = mixed.group.copy(pendingMove = None))
@@ -4676,7 +4705,7 @@ case class BattleState(
         // Таран: в пару встаёт тот, кого таранили
         // Таран: герой шагает на место, куда таранил; мобы остаются где стояли
         rammed = b2.group.pendingMove match {
-          case Some(pos) if b2.group.hasMonster(pos) =>
+          case Some(pos) if b2.group.hasMonster(pos) && !b2.effects.heroRooted =>
             val moved = b2.moveHeroTo(pos)
             // Таран бьёт только мобов; союзник, стоявший напротив таранённого,
             // уступает позицию герою и встаёт на его прежнюю.
@@ -5188,7 +5217,9 @@ case class BattleState(
       battle <- getBattle(user)
       mixes  <- mixCount(hero)
       prefs  <- BattleState.prefs(heroDao, user.userId)
-      _ <- ZIO.when(battle.group.hasFormation)(renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
+      // На арене строй виден всегда: от расстояния зависит, кто кого достаёт.
+      _ <- ZIO.when(battle.group.hasFormation || battle.arena.isDefined)(
+             renderer.show(user, Screen(groupLines(battle).mkString("\n"), Nil)))
       _ <- renderer.show(
         user,
         buildBattleScreen(hero, battle, hero.effectiveMaxHp(now), now, mixes, prefs.miasma)
@@ -5501,11 +5532,14 @@ object BattleState {
     * [[Formation.HeroPlaces]], а хвост чужого строя — не его сторона, даже когда
     * враги стоят глубже. Место может быть занято союзником (тогда поменяются)
     * или пустым. */
-  def stepTargets(battle: SoloPveBattle): List[Int] = {
-    val here  = battle.group.heroPos
-    val edge  = battle.group.rows.min(Formation.HeroPlaces)
-    List(here - 1, here + 1).filter(p => p >= 1 && p <= edge)
-  }
+  def stepTargets(battle: SoloPveBattle): List[Int] =
+    // Пригвождённый с места не сходит.
+    if (battle.effects.heroRooted) Nil
+    else {
+      val here  = battle.group.heroPos
+      val edge  = battle.group.rows.min(Formation.HeroPlaces)
+      List(here - 1, here + 1).filter(p => p >= 1 && p <= edge)
+    }
 
   /** Исход хода — определяет переход и терминальные действия в [[BattleState.commit]]. */
   sealed trait Outcome
