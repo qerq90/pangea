@@ -129,8 +129,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
       _       <- ZIO.when(killLog != killLog0)(KillLogData.write(heroDao, user.userId, killLog))
       gang     = killLog.gangDue
       avengers = killLog.owed(KillLogData.RevengeEvery).headOption
-      // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле.
-      pool    = StateType.eventsWithBattleFactor(hero.passives.battleEncounterFactor)
+      // «Охотник»/«Скрытность» сдвигают долю боевых событий в пуле, а глубина
+      // открывает новые события (StateType.EventMinLevel).
+      pool    = StateType.eventsAt(hero.dungeonLevel, hero.passives.battleEncounterFactor)
       idx    <- Random.nextIntBounded(pool.size)
       event   = pool(idx)
       result <- (gang, avengers, doomed) match {
