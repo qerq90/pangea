@@ -4,18 +4,21 @@ import io.circe.Json
 import io.circe.jawn.decode
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
+import pangea.domain.Rng
 import pangea.engine.{Beat, Branch, Choice, Journal, Narrative, Players, Renderer, SceneContent, Screen, Target}
+import pangea.generator.item.ItemGenerator
 import pangea.model.GameEvent
 import pangea.model.hero.LoreData
-import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemType, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Grip, Item, ItemDetails, ItemType, Rarity}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
-import pangea.service.state.{State, UserAction}
-import zio.{Task, ZIO}
+import pangea.service.state.states.InventoryState
+import pangea.service.state.{FirstStepsQuest, NpcQuestLog, State, UserAction}
+import zio.{Random, Task, ZIO}
 
 case class RegistrationState(
   players:       Players,
@@ -66,8 +69,21 @@ case class RegistrationState(
       }
     }.toMap
 
+  /** Пробуждение после портала (`registration.arrival`): падение на крышу
+    * сторожки посреди лабиринта, тайник искателя, мысли вслух — и задание,
+    * которое герой ставит себе сам. Отдельно от пролога: все его биты ведут к
+    * порталу, а эти идут уже после выбора расы. */
+  private lazy val arrival: Map[String, Target] =
+    new Narrative(content.beats("registration.arrival")).toRoutes(Registration)
+
+  /** Маршруты поверх пробуждения: обыск выдаёт тайник, «Встать» — задание. */
+  private lazy val arrivalRoutes: Map[String, Target] = Map(
+    "ArrivalSearch" -> Target.Run { (user, ua, renderer) => search(user, ua, renderer) },
+    "ArrivalStand"  -> Target.Run { (user, _, renderer)  => stand(user, renderer) }
+  )
+
   private lazy val branch: Branch = new Branch(
-    routes = prologue.toRoutes(Registration) ++ pickRoutes ++ Map(
+    routes = prologue.toRoutes(Registration) ++ arrival ++ pickRoutes ++ arrivalRoutes ++ Map(
       "ConfirmRace"     -> Target.Run { (user, ua, renderer)  => confirmRace(user, ua, renderer) },
       "RaceDescription" -> Target.Run { (user, ua, renderer)  => getRaceDescription(user, ua.text, renderer) },
       "Race"            -> Target.Run { (user, _, renderer)   => getRace(user, renderer) }
@@ -75,30 +91,77 @@ case class RegistrationState(
     fallback = Target.Run { (user, _, renderer) => showWelcome(user, renderer) }
   )
 
-  /** Финал: раса выбрана и подтверждена — герой получает стартовое снаряжение
-    * и уходит в лабиринт. Это единственный выход из регистрации. Ветка пролога
-    * (какой смертью прошёл) переезжает из scene_data в durable `lore_data`:
-    * сцена сейчас сотрётся, а выбор ещё пригодится сюжету. */
+  /** Раса выбрана и подтверждена — герой падает на крышу сторожки в лабиринте
+    * (см. [[arrival]]). Ветка пролога (какой смертью прошёл) переезжает из
+    * scene_data в durable `lore_data`: сцена дальше занята пробуждением, а выбор
+    * ещё пригодится сюжету. */
   private def confirmRace(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     for {
       race   <- ZIO.fromEither(ua.payload.toRight(new Throwable("ConfirmRace без payload")).flatMap(decode[Race]))
       branch <- readBranch(user)
       _      <- heroDao.updateRace(user.userId, race)
-      lore   <- heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
+      lore   <- loreOf(user)
       _      <- heroDao.writeLoreData(user.userId, lore.copy(prologueBranch = branch).asJson)
       _      <- journal.append(GameEvent(user.userId, "race_selected",
                   Json.obj("race" -> race.entryName.asJson, "prologueBranch" -> branch.asJson)))
-      hero <- heroDao.getHeroByUserId(user.userId)
-      _    <- ZIO.whenCase(hero) { case Some(h) =>
-                 ZIO.foreachDiscard(RegistrationState.starterItems) { item =>
-                   itemRepo.persist(h.id, item)
-                     .flatMap(itemWithId => inventoryRepo.addItem(h.id, itemWithId))
-                     .orElse(ZIO.unit)
-                 } *>
-                 renderer.show(user, Screen(content.text("registration.startingEquipment"), Nil))
-               }
-      _    <- heroDao.writeSceneData(user.userId, Json.Null)
+      _      <- heroDao.writeSceneData(user.userId, Json.obj())
+      res    <- showArrival("Landing", user, ua, renderer)
+    } yield res
+
+  /** Обыск сторожки: тайник искателя — меч и щит в руки, пояс с флягой целителя
+    * на себя, двуручный топор в сумку (см. [[RegistrationState.kit]]). Выдаётся
+    * один раз: ВК, бывает, шлёт кнопку дважды, и второй обыск только покажет
+    * сцену. */
+  private def search(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    for {
+      scene <- heroDao.readSceneData(user.userId)
+      found  = scene.exists(_.hcursor.get[Boolean](RegistrationState.KitKey).contains(true))
+      _     <- ZIO.unless(found)(grantKit(user))
+      res   <- showArrival("ArrivalSearch", user, ua, renderer)
+    } yield res
+
+  private def grantKit(user: User): Task[Unit] =
+    heroDao.getHeroByUserId(user.userId).flatMap {
+      case None => ZIO.unit
+      case Some(h) =>
+        for {
+          seed   <- Random.nextLong
+          kit     = RegistrationState.kit(Rng(seed))
+          sword  <- itemRepo.persist(h.id, kit.sword)
+          shield <- itemRepo.persist(h.id, kit.shield)
+          belt   <- itemRepo.persist(h.id, kit.belt)
+          axe    <- itemRepo.persist(h.id, kit.axe)
+          worn    = List(sword, shield, belt)
+          eq      = h.equipment.copy(weapon = sword, leftHand = shield, belt = belt)
+          fight   = worn.foldLeft(h.fightStats)((f, it) => InventoryState.applyDelta(f, it, Item.NoItem))
+          _      <- heroDao.updateEquipmentAndFightStats(user.userId, eq, fight)
+          _      <- inventoryRepo.addItem(h.id, axe).orElse(ZIO.unit)
+          _      <- heroDao.writeSceneData(user.userId, Json.obj(RegistrationState.KitKey -> true.asJson))
+        } yield ()
+    }
+
+  /** «Встать»: герой ставит себе задание «Встать на ноги» (см.
+    * [[pangea.model.quest.FirstSteps]]) и уходит в лабиринт — к городу ему ещё
+    * идти. Это единственный выход из регистрации. Задание пишется один раз,
+    * сцена регистрации стирается. */
+  private def stand(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      lore   <- loreOf(user)
+      _      <- ZIO.unless(lore.firstSteps)(heroDao.writeLoreData(user.userId, lore.copy(firstSteps = true).asJson))
+      hero   <- heroDao.getHeroByUserId(user.userId)
+      quests <- NpcQuestLog.load(heroDao, user.userId)
+      _      <- ZIO.foreachDiscard(hero)(h => renderer.show(user, Screen(FirstStepsQuest.taken(content, h, quests), Nil)))
+      _      <- heroDao.writeSceneData(user.userId, Json.Null)
     } yield StateType.Dungeon
+
+  private def showArrival(key: String, user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    arrival.get(key) match {
+      case Some(Target.Run(show)) => show(user, ua, renderer)
+      case _                      => ZIO.succeed(Registration)
+    }
+
+  private def loreOf(user: User): Task[LoreData] =
+    heroDao.readLoreData(user.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
 
   private def readBranch(user: User): Task[Option[String]] =
     heroDao.readSceneData(user.userId)
@@ -135,11 +198,27 @@ object RegistrationState {
   /** Ключ в scene_data, под которым живёт выбранная ветка пролога. */
   val BranchKey: String = "prologueBranch"
 
-  val starterItems: List[Item] = List(
-    Item(-1L,  "Меч новобранца",            1L, Rarity.Gray, ItemType.Weapon,
-      attack = 1, accuracy = 1, energy = 0, armor = 0, defence = 0, evasion = 0),
-    Item(-2L,  "Фляга начинающего исследователя", 1L, Rarity.Gray, ItemType.Flask,
-      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
-  )
+  /** Отметка в scene_data: тайник в сторожке уже обыскан. */
+  val KitKey: String = "kitFound"
+
+  /** Тайник искателя в сторожке, куда герой падает после портала. */
+  final case class Kit(sword: Item, shield: Item, axe: Item, belt: Item)
+
+  /** Всё белое и первого уровня, статы — как у обычной добычи, а имена свои:
+    * хозяин тайника — искатель. На поясе — фляга целителя: у белой как раз
+    * четыре глотка, а у белого пояса одна ячейка — под неё. */
+  def kit(rng: Rng): Kit = {
+    val white = Rarity.White
+    def named(item: Item, noun: String): Item = item.copy(name = s"${white.emoji} Простой $noun Искателя")
+    val (sword, r1)  = ItemGenerator.createItemOfType(ItemType.Weapon, 1L, white, rng, Some(Grip.OneHanded))
+    val (shield, r2) = ItemGenerator.createItemOfType(ItemType.Shield, 1L, white, r1)
+    val (axe, r3)    = ItemGenerator.createItemOfType(ItemType.Weapon, 1L, white, r2, Some(Grip.TwoHanded))
+    val (belt, _)    = ItemGenerator.createItemOfType(ItemType.Belt, 1L, white, r3)
+    val flask        = BeltSlot.Flask(FlaskKind.Healer, white, FlaskKind.chargesFor(white))
+    Kit(
+      sword  = named(sword, "Меч"),
+      shield = named(shield, "Круглый Щит"),
+      axe    = named(axe, "Двуручный Топор"),
+      belt   = named(belt, "Пояс").copy(details = ItemDetails.Belt(List(flask))))
+  }
 }

@@ -2,6 +2,7 @@ package pangea.service.state.states.registration
 
 import pangea.engine.SceneContent
 import pangea.model.hero.LoreData
+import pangea.model.item.{BeltSlot, FlaskKind, Grip, ItemDetails, ItemType, Rarity}
 import pangea.model.monster.Race
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -41,6 +42,9 @@ object RegistrationStateSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
       invRepo   = TestInventoryRepository.accepting
     } yield (RegistrationState(new TestPlayers, heroDao, invRepo, TestItemRepository.make, journal, content), renderer, heroDao, invRepo)
+
+  /** Пробуждение до последней кнопки: обыск, мысли вслух. */
+  private val arrivalPath = List("ArrivalSearch", "Monologue1", "Monologue2", "Monologue3")
 
   override def spec = suite("RegistrationState")(
 
@@ -196,29 +200,74 @@ object RegistrationStateSpec extends ZIOSpecDefault {
               assertTrue(desc.choices.map(_.id) == List("ConfirmRace", "Race"))
     },
 
-    test("подтверждение расы: раса сохранена, стартовые предметы выданы, герой в лабиринте") {
+    test("подтверждение расы: раса сохранена, а герой падает на крышу сторожки — пока с пустыми руками") {
       for {
         quad                           <- makeStateWithHero
         (state, renderer, heroDao, invRepo) = quad
         _       <- state.action(testUser, tap("Pick_Elf"), renderer) // в сцене лежит ветка
         result  <- state.action(testUser, confirmRace(Race.Demon), renderer)
         snap    <- heroDao.raceSnapshot
-        scene   <- heroDao.readSceneData(userId)
         lore    <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
-        screens <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Dungeon) &&
+        screen  <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(result == StateType.Registration) &&
               // раса — та, что выбрана в конце, а не та, чью ветку прошли
               assertTrue(snap.get(testUser.userId).contains(Race.Demon)) &&
               // а ветка пролога остаётся с героем навсегда — сюжету пригодится
               assertTrue(lore.exists(_.prologueBranch.contains("Elf"))) &&
-              assertTrue(invRepo.snapshot.map(_.name).toSet ==
-                Set("Меч новобранца", "Фляга начинающего исследователя")) &&
-              assertTrue(screens.exists(_.text.contains("снаряжение"))) &&
-              // сцена пролога после выхода не тянется за героем
+              assertTrue(screen.text.contains("соломенная крыша") && screen.choices.map(_.id) == List("ArrivalSearch")) &&
+              // старого снаряжения новобранца больше нет
+              assertTrue(invRepo.snapshot.isEmpty)
+    },
+
+    test("обыск сторожки: меч и щит в руках, пояс с флягой целителя на четыре глотка, топор в сумке — и только раз") {
+      for {
+        quad                           <- makeStateWithHero
+        (state, renderer, heroDao, invRepo) = quad
+        _      <- state.action(testUser, confirmRace(Race.Human), renderer)
+        _      <- state.action(testUser, tap("ArrivalSearch"), renderer)
+        _      <- state.action(testUser, tap("ArrivalSearch"), renderer) // ВК прислал кнопку дважды
+        hero   <- heroDao.getHeroByUserId(userId).map(_.get)
+        screen <- renderer.sentScreens.map(_.last)
+      } yield {
+        val eq    = hero.equipment
+        val slots = eq.belt.details match { case b: ItemDetails.Belt => b.slots; case _ => Nil }
+        val gear  = List(eq.weapon, eq.leftHand, eq.belt) ++ invRepo.snapshot
+        assertTrue(eq.weapon.name == "⚪ Простой Меч Искателя" && eq.weapon.grip.contains(Grip.OneHanded)) &&
+        assertTrue(eq.leftHand.name == "⚪ Простой Круглый Щит Искателя" && eq.leftHand.itemType == ItemType.Shield) &&
+        assertTrue(eq.belt.name == "⚪ Простой Пояс Искателя") &&
+        assertTrue(slots == List(BeltSlot.Flask(FlaskKind.Healer, Rarity.White, 4))) &&
+        assertTrue(invRepo.snapshot.map(_.name) == List("⚪ Простой Двуручный Топор Искателя")) &&
+        assertTrue(invRepo.snapshot.forall(_.twoHanded)) &&
+        assertTrue(gear.forall(i => i.rarity == Rarity.White && i.lvl == 1L)) &&
+        // защита щита легла в боевые статы
+        assertTrue(hero.fightStats.defence >= TestFixtures.hero(userId).fightStats.defence + 3L) &&
+        assertTrue(screen.choices.map(_.id) == List("Monologue1"))
+      }
+    },
+
+    test("мысли вслух и «Встать»: задание «Встать на ноги» с тремя пунктами — и герой в лабиринте") {
+      for {
+        quad                         <- makeStateWithHero
+        (state, renderer, heroDao, _) = quad
+        _      <- state.action(testUser, confirmRace(Race.Human), renderer)
+        _      <- ZIO.foreach(arrivalPath)(id => state.action(testUser, tap(id), renderer))
+        beat3  <- renderer.sentScreens.map(_.last)
+        result <- state.action(testUser, tap("ArrivalStand"), renderer)
+        quest  <- renderer.sentScreens.map(_.last)
+        lore   <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
+        scene  <- heroDao.readSceneData(userId)
+      } yield assertTrue(beat3.choices.map(_.id) == List("ArrivalStand")) &&
+              assertTrue(result == StateType.Dungeon) &&
+              assertTrue(quest.text.contains("📜 Новое задание: «Встать на ноги»")) &&
+              assertTrue(quest.text.contains("⬜ Окрепнуть — дойти до 5 уровня")) &&
+              assertTrue(quest.text.contains("⬜ Обзавестись логовом — купить дом")) &&
+              assertTrue(quest.text.contains("горожан (0/5)")) &&
+              assertTrue(lore.exists(_.firstSteps)) &&
+              // сцена регистрации после выхода не тянется за героем
               assertTrue(scene.contains(io.circe.Json.Null))
     },
 
-    test("полный флоу: пролог гнома → портал → раса → лабиринт") {
+    test("полный флоу: пролог гнома → портал → раса → сторожка → лабиринт") {
       val path = List("P1_Intro", "P2_Dagger", "Pick_Gnome", "Remember", "Wake_Gnome", "Gnome_Shafts",
                       "Gnome_Sass", "Gnome_Obey", "Gnome_Listen", "Portal", "Race")
       for {
@@ -226,7 +275,9 @@ object RegistrationStateSpec extends ZIOSpecDefault {
         (state, renderer, heroDao, _)    = quad
         _      <- ZIO.foreach(path)(id => state.action(testUser, tap(id), renderer))
         _      <- state.action(testUser, raceDescription(Race.Human), renderer)
-        result <- state.action(testUser, confirmRace(Race.Human), renderer)
+        _      <- state.action(testUser, confirmRace(Race.Human), renderer)
+        _      <- ZIO.foreach(arrivalPath)(id => state.action(testUser, tap(id), renderer))
+        result <- state.action(testUser, tap("ArrivalStand"), renderer)
         snap   <- heroDao.raceSnapshot
         lore   <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
       } yield assertTrue(result == StateType.Dungeon) &&
