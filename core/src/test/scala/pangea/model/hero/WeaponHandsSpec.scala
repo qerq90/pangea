@@ -48,10 +48,12 @@ object WeaponHandsSpec extends ZIOSpecDefault {
       val weapons = (1L to 2000L).map(s => generated(s))
       val two     = weapons.filter(_.twoHanded)
       val share   = two.size.toDouble / weapons.size
+      // Лук и арбалет тоже двуручные, но слова хвата им не нужно (см. BowSpec).
+      val melee   = two.filter(_.grip.contains(Grip.TwoHanded))
       // «🔵 Хороший Двуручный Меч Рыцаря»: хват — третьим словом, сразу перед оружием
-      val wordThird = two.forall(_.name.split(" ")(2).startsWith("Двуручн"))
+      val wordThird = melee.forall(_.name.split(" ")(2).startsWith("Двуручн"))
       val noDagger  = two.forall(!_.name.contains("Кинжал"))
-      val spear     = two.exists(_.name.contains("Двуручное Копьё"))
+      val spear     = melee.exists(_.name.contains("Двуручное Копьё"))
       val oneClean  = weapons.filterNot(_.twoHanded).forall(!_.name.contains("Двуруч"))
       assertTrue(share > 0.45 && share < 0.55) &&
       assertTrue(weapons.forall(_.grip.isDefined)) &&

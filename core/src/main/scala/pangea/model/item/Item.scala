@@ -38,6 +38,9 @@ case class Item(
   /** Двуручное оружие: его держат обеими руками, и левая занята им же. */
   def twoHanded: Boolean = grip.exists(_.twoHanded)
 
+  /** Стрелковое оружие — лук или арбалет: бьёт дальше, вблизи слабее. */
+  def ranged: Boolean = grip.exists(_.ranged)
+
   def withName(name: String): Item = copy(name = name)
 
   def withLvl(lvl: Long): Item = copy(lvl = lvl)
@@ -197,6 +200,9 @@ case class Item(
       Option.when(hp > 0)(s"❤ +$hp")
     ).flatten
     val setLine = set.map(s => s"Набор: «${s.label}»").toList
+    // Чем лук отличается от меча, видно только в бою — скажем сразу.
+    val rangedLine = Option.when(ranged)(
+      s"🏹 Бьёт на ${GripRates.RangedReach} места в обе стороны; вблизи — на ${GripRates.RangedClosePenaltyPct}% слабее").toList
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
@@ -239,7 +245,7 @@ case class Item(
         pangea.model.rune.Rune.byKey(key).map(pangea.model.rune.RuneStone.describe(_, size)).getOrElse(Nil)
       case _                             => Nil
     }
-    numeric ++ setLine ++ extra ++ socketLines
+    numeric ++ setLine ++ rangedLine ++ extra ++ socketLines
   }
 
   /** Строки о гнёздах: сводка «занято/всего» и по одному камню на строку.

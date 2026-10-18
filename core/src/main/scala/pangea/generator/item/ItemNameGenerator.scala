@@ -89,12 +89,17 @@ object ItemNameGenerator {
 
   /** Существительное предмета с родом. Двуручное оружие берётся из своего пула
     * и несёт слово хвата прямо перед собой, согласованное по роду: «Хороший
-    * Двуручный Меч», «Хорошее Двуручное Копьё». */
+    * Двуручный Меч», «Хорошее Двуручное Копьё». Лук и арбалет и так держат
+    * обеими руками — слово хвата им ни к чему. */
   private def noun(itemType: ItemType, grip: Option[Grip], rng: Rng): ((String, Gender), Rng) =
-    if (itemType == ItemType.Weapon && grip.exists(_.twoHanded)) {
-      val ((base, gender), next) = rng.pick(twoHandedWeapons)
-      ((s"${inflect(TwoHandedWord, gender)} $base", gender), next)
-    } else rng.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
+    grip.filter(_ => itemType == ItemType.Weapon) match {
+      case Some(Grip.Bow)      => (("Лук", Masc), rng)
+      case Some(Grip.Crossbow) => (("Арбалет", Masc), rng)
+      case Some(g) if g.twoHanded =>
+        val ((base, gender), next) = rng.pick(twoHandedWeapons)
+        ((s"${inflect(TwoHandedWord, gender)} $base", gender), next)
+      case _ => rng.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
+    }
 
   /**
    * Конвертирует прилагательное мужского рода (`-ый`/`-ий`/`-ой`) в нужную форму.
