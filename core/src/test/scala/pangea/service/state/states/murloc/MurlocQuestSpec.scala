@@ -373,7 +373,7 @@ object MurlocQuestSpec extends ZIOSpecDefault {
         } yield assertTrue(res == StateType.GlobalMap && all.contains("в карман не сунешь")) &&
                 assertTrue(q.onStep(NpcQuest.Murloc, 3) && MurlocQuest.rewardWaits(q) && inv.snapshot.exists(_.questItem.contains(QuestItemKind.MurlocVillageMap))) &&
                 assertTrue(wait.text.contains("с клинком в лапах") && wait.choices.map(_.id) == List("TakeBlade", "ToCity")) &&
-                assertTrue(res2 == StateType.GlobalMap && roomy.snapshot.exists(_.name == MurlocQuest.BladeName) && q2.isDone(NpcQuest.Murloc)) &&
+                assertTrue(res2 == StateType.GlobalMap && roomy.snapshot.exists(i => Set(MurlocQuest.BladeName, MurlocQuest.TwoHandedBladeName).contains(i.name)) && q2.isDone(NpcQuest.Murloc)) &&
                 assertTrue(!roomy.snapshot.exists(_.questItem.contains(QuestItemKind.MurlocVillageMap)))
       }
     )

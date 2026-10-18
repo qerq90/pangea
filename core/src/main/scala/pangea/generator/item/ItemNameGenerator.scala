@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{ItemSet, ItemType, Rarity}
+import pangea.model.item.{Grip, ItemSet, ItemType, Rarity}
 
 /**
  * Генератор названий предметов: «<кружок-редкости> <качество> <тип> <титул>»,
@@ -39,6 +39,13 @@ object ItemNameGenerator {
     ItemType.NoItem           -> List("Пусто" -> Neut)
   )
 
+  /** Слово хвата перед двуручным оружием (мужская форма; род — через inflect). */
+  val TwoHandedWord: String = "Двуручный"
+
+  /** Что бывает двуручным. Двуручного кинжала не бывает — кинжал всегда в одной руке. */
+  private val twoHandedWeapons: List[(String, Gender)] =
+    List("Меч" -> Masc, "Топор" -> Masc, "Копьё" -> Neut)
+
   // Прилагательные качества по редкости (мужская форма; согласование делает inflect).
   // Violet и Purple используют один пул (в спеке они объединены как «фиолетовые/пурпурные»).
   private val purpleAdjectives = List("Превосходный", "Высококлассный", "Первоклассный", "Впечатляющий", "Выдающийся")
@@ -65,19 +72,29 @@ object ItemNameGenerator {
   /** Название предмета из набора: имя набора встаёт вместо титула — третьим
    *  словом после кружка редкости («🔵 Прочный Шлем Каменного стража»). Титул и
    *  имя набора оба в родительном падеже, поэтому фраза читается одинаково. */
-  def setName(itemType: ItemType, rarity: Rarity, set: ItemSet, rng: Rng): (String, Rng) = {
+  def setName(itemType: ItemType, rarity: Rarity, set: ItemSet, rng: Rng,
+              grip: Option[Grip] = None): (String, Rng) = {
     val (adjMasc,        rng1) = rng.pick(adjectivesByRarity.getOrElse(rarity, List("Обычный")))
-    val ((base, gender), rng2) = rng1.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
+    val ((base, gender), rng2) = noun(itemType, grip, rng1)
     (s"${rarity.emoji} ${inflect(adjMasc, gender)} $base ${set.title}", rng2)
   }
 
-  def generate(itemType: ItemType, rarity: Rarity, rng: Rng): (String, Rng) = {
+  def generate(itemType: ItemType, rarity: Rarity, rng: Rng, grip: Option[Grip] = None): (String, Rng) = {
     val (adjMasc,        rng1) = rng.pick(adjectivesByRarity.getOrElse(rarity, List("Обычный")))
-    val ((base, gender), rng2) = rng1.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
+    val ((base, gender), rng2) = noun(itemType, grip, rng1)
     val (title,          rng3) = rng2.pick(titles)
     val adj                    = inflect(adjMasc, gender)
     (s"${rarity.emoji} $adj $base $title", rng3)
   }
+
+  /** Существительное предмета с родом. Двуручное оружие берётся из своего пула
+    * и несёт слово хвата прямо перед собой, согласованное по роду: «Хороший
+    * Двуручный Меч», «Хорошее Двуручное Копьё». */
+  private def noun(itemType: ItemType, grip: Option[Grip], rng: Rng): ((String, Gender), Rng) =
+    if (itemType == ItemType.Weapon && grip.exists(_.twoHanded)) {
+      val ((base, gender), next) = rng.pick(twoHandedWeapons)
+      ((s"${inflect(TwoHandedWord, gender)} $base", gender), next)
+    } else rng.pick(baseNames.getOrElse(itemType, List("Предмет" -> Masc)))
 
   /**
    * Конвертирует прилагательное мужского рода (`-ый`/`-ий`/`-ой`) в нужную форму.

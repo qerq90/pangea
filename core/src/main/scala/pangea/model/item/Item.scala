@@ -27,9 +27,16 @@ case class Item(
   // у уже сохранённых предметов этого поля в JSON нет, а производный декодер
   // circe без него не собрал бы объект. Имя набора стоит в названии предмета
   // вместо титула (см. ItemNameGenerator.setName).
-  set: Option[ItemSet] = None
+  set: Option[ItemSet] = None,
+  // Хват оружия (см. [[Grip]]): в одну руку или в обе. Option по той же
+  // причине, что и набор: у вещей, сохранённых раньше, этого поля нет, а у
+  // прочих типов его нет вовсе. Оружие без хвата — одноручное.
+  grip: Option[Grip] = None
 ) {
   def withId(id: Long): Item = copy(id = id)
+
+  /** Двуручное оружие: его держат обеими руками, и левая занята им же. */
+  def twoHanded: Boolean = grip.exists(_.twoHanded)
 
   def withName(name: String): Item = copy(name = name)
 

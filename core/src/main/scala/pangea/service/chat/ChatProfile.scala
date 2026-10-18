@@ -37,7 +37,8 @@ object ChatProfile {
   def gear(name: String, hero: Hero): String = {
     val lines = EquipmentState.slots.map { slot =>
       val item = slot.get(hero.equipment)
-      val what = if (item.itemType == ItemType.NoItem) Empty else item.displayTitle
+      val what = if (slot.busy(hero.equipment)) EquipmentState.LeftBusyText
+                 else if (item.itemType == ItemType.NoItem) Empty else item.displayTitle
       s"${slot.name}: $what"
     }
     s"${gearHeader(name)}\n${lines.mkString("\n")}"

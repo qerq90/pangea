@@ -5,7 +5,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, MasterHornBoosts}
-import pangea.model.item.{ItemType, Rarity}
+import pangea.model.item.Rarity
 import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -136,8 +136,8 @@ case class MasterHornState(
   /** Что Горн думает об оружии героя: серое и белое — хлам, лучше — «хоть
     * что-то», без оружия — отдельная реплика. */
   private def verdict(hero: Hero): String = {
-    val weapon = hero.equipment.weapon
-    if (weapon.itemType == ItemType.NoItem) quest.text("verdictBareHands")
+    val weapon = hero.equipment.mainWeapon
+    if (hero.equipment.unarmed) quest.text("verdictBareHands")
     else if (weapon.rarity == Rarity.Gray || weapon.rarity == Rarity.White) quest.format("verdictJunk", "weapon" -> weapon.name)
     else quest.format("verdictDecent", "weapon" -> weapon.name)
   }
@@ -208,8 +208,8 @@ case class MasterHornState(
     for {
       done <- quest.complete(user, hero, identity)
       (_, expLine) = done
-      weapon = hero.equipment.weapon
-      closing = if (weapon.itemType == ItemType.NoItem) quest.text("closingBareHands")
+      weapon = hero.equipment.mainWeapon
+      closing = if (hero.equipment.unarmed) quest.text("closingBareHands")
                 else quest.format("closingWeapon", "weapon" -> weapon.name)
       outro   = quest.format("outro", "closing" -> closing)
       _    <- renderer.show(user, Screen(outro, Nil))

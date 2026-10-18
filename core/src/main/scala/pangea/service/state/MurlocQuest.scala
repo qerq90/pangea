@@ -42,6 +42,7 @@ object MurlocQuest {
 
   /** Клинок старого мурлока — легендарное оружие ровно уровня героя. */
   val BladeName: String        = "Клинок старого мурлока"
+  val TwoHandedBladeName: String = "Двуручный клинок старого мурлока"
   val BladeRarity: ItemRarity  = ItemRarity.Orange
 
   /** Герой той же крови — старейшина говорит с ним иначе. */
@@ -114,9 +115,13 @@ object MurlocQuest {
       .sortBy(i => (ItemRarity.values.indexOf(i.rarity), i.lvl))
       .take(remaining.max(0L).toInt)
 
-  /** Клинок старого мурлока: легендарное оружие ровно уровня героя, со своим именем. */
-  def blade(hero: Hero, rng: Rng): Item =
-    ItemGenerator.createItemOfType(ItemType.Weapon, hero.lvl, BladeRarity, rng)._1.copy(name = BladeName)
+  /** Клинок старого мурлока: легендарное оружие ровно уровня героя, со своим
+    * именем. Хват выпадает, как у всякого нового оружия, — двуручный клинок так
+    * и называется. */
+  def blade(hero: Hero, rng: Rng): Item = {
+    val item = ItemGenerator.createItemOfType(ItemType.Weapon, hero.lvl, BladeRarity, rng)._1
+    item.copy(name = if (item.twoHanded) TwoHandedBladeName else BladeName)
+  }
 
   // ── Налёт ───────────────────────────────────────────────────────────────────
 

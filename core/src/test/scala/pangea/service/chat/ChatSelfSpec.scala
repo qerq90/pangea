@@ -133,11 +133,11 @@ object ChatSelfSpec extends ZIOSpecDefault {
         said <- api.chatMessages
       } yield assertTrue(said.size == 1) &&
               assertTrue(said.head.startsWith(ChatProfile.gearHeader("Иван Иванов"))) &&
-              // все четырнадцать слотов на месте, каждый своей строкой
+              // все слоты на месте, каждый своей строкой
               assertTrue(EquipmentState.slots.forall(s => said.head.contains(s"${s.name}: "))) &&
               assertTrue(said.head.linesIterator.size == EquipmentState.slots.size + 1) &&
               // надетое названо, пустое помечено прочерком
-              assertTrue(said.head.contains(s"Оружие: ${blade.displayTitle}")) &&
+              assertTrue(said.head.contains(s"${EquipmentState.RightHandName}: ${blade.displayTitle}")) &&
               assertTrue(said.head.contains(s"Шлем: ${ChatProfile.Empty}")) &&
               // а характеристик нет: беседе знать их незачем
               assertTrue(!said.head.contains("⚔") && !said.head.contains("🎯"))
