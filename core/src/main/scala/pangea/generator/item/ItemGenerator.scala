@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Gem, Item, ItemDetails, ItemType, PassiveKind, Rarity}
+import pangea.model.item.{Gem, Grip, GripRates, Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -109,15 +109,19 @@ object ItemGenerator {
 
   /** Создаёт предмет заданного СЛОТА на уровень (для пересборки в кубе Азата):
    *  характеристики роллятся заново, профиль (атака/защита) — случайный, поэтому
-   *  результат может отличаться от исходного набора статов. */
-  def createItemOfType(itemType: ItemType, lvl: Long, rarity: Rarity, rng: Rng): (Item, Rng) =
-    buildAtLevel(lvl.max(1L).min(150L), rarity, rng, Some(itemType))
+   *  результат может отличаться от исходного набора статов. Хват оружия тоже
+   *  выпадает заново, если его не задали (`grip`): пересборка с прежним именем
+   *  держит прежний хват, иначе «Двуручный» в имени соврал бы. */
+  def createItemOfType(itemType: ItemType, lvl: Long, rarity: Rarity, rng: Rng,
+                       grip: Option[Grip] = None): (Item, Rng) =
+    buildAtLevel(lvl.max(1L).min(150L), rarity, rng, Some(itemType), grip)
 
   private def buildAtLevel(
       itemLvl: Long,
       rarity: Rarity,
       rng: Rng,
-      forcedType: Option[ItemType] = None
+      forcedType: Option[ItemType] = None,
+      forcedGrip: Option[Grip] = None
   ): (Item, Rng) = {
     val (numberOfExtraParams, rng2) = rarity.getNumOfExtraParams(rng)
     val (isAttack, rng3)            = rng2.nextBoolean
@@ -175,14 +179,41 @@ object ItemGenerator {
 
     val (withExtras, rng5) = updateExtraParams(numberOfExtraParams, item, rng4)
     val (withMandatory, rng5b) = applyMandatory(withExtras, rng5)
-    val (withDetails, rng5c)   = applyTypeDetails(withMandatory, rng5b)
+    val (withGrip, rng5g)      = applyGrip(withMandatory, forcedGrip, rng5b)
+    val (withDetails, rng5c)   = applyTypeDetails(withGrip, rng5g)
     val (withSockets, rng5d)   = applySockets(withDetails, rng5c)
     val (name, rng6) =
-      ItemNameGenerator.generate(withSockets.itemType, rarity, rng5d)
+      ItemNameGenerator.generate(withSockets.itemType, rarity, rng5d, withSockets.grip)
     (withSockets.withName(name), rng6)
   }
 
-  /** Максимум гнёзд на предмете (в т.ч. оружии) — 3. */
+  /** Хват оружия: в одну руку или в обе — поровну, если его не задали.
+    * Одноручное несёт 60% каждого своего стата, двуручное — все сто (см.
+    * [[Grip]]); режется итог, вместе с обязательной прибавкой к атаке. Прочим
+    * типам хвата нет. */
+  private def applyGrip(item: Item, forced: Option[Grip], rng: Rng): (Item, Rng) =
+    if (item.itemType != ItemType.Weapon) (item, rng)
+    else {
+      val (grip, next) = forced match {
+        case Some(g) => (g, rng)
+        case None =>
+          val (two, r) = rng.nextBoolean
+          (if (two) Grip.TwoHanded else Grip.OneHanded, r)
+      }
+      def cut(v: Long): Long = v * grip.statPct / 100L
+      (item.copy(
+        grip     = Some(grip),
+        attack   = cut(item.attack),
+        accuracy = cut(item.accuracy),
+        energy   = cut(item.energy),
+        armor    = cut(item.armor),
+        defence  = cut(item.defence),
+        evasion  = cut(item.evasion),
+        hp       = cut(item.hp)), next)
+    }
+
+  /** Максимум гнёзд на предмете (в т.ч. на одноручном оружии) — 3; у
+   *  двуручного — до четырёх (см. [[GripRates]]). */
   private val MaxSockets: Int = 3
 
   // Число гнёзд по редкости (пороги в %, from Rng.between [0,100)). У оружия и у
@@ -193,7 +224,10 @@ object ItemGenerator {
   //   Синяя:       0 — 20, 1 — 30, 2 — 30, 3 — 20  |  0 — 60, 1 — 40
   //   Фиолетовая:  0 — 10, 1 — 30, 2 — 30, 3 — 30  |  0 — 10, 1 — 90
   //   Пурпурная и легендарная:      2 — 50, 3 — 50  |          1 — 100
-  private def socketCount(rarity: Rarity, isWeapon: Boolean, rng: Rng): (Int, Rng) = {
+  //
+  // Двуручному оружию — на гнездо больше, чем по таблице, но не больше четырёх.
+  // Серое, белое и зелёное гнёзд не носит вовсе, в какую руку его ни бери.
+  private def socketCount(rarity: Rarity, isWeapon: Boolean, twoHanded: Boolean, rng: Rng): (Int, Rng) = {
     val (roll, next) = rng.between(0L, 100L)
     val raw =
       if (isWeapon) rarity match {
@@ -211,12 +245,18 @@ object ItemGenerator {
         case Rarity.Violet | Rarity.Orange => 1
         case _                             => 0
       }
-    (raw.min(MaxSockets), next)
+    val socketed = rarity match {
+      case Rarity.Gray | Rarity.White | Rarity.Green => false
+      case _                                         => true
+    }
+    if (isWeapon && twoHanded && socketed)
+      ((raw + GripRates.TwoHandedExtraSockets).min(GripRates.TwoHandedMaxSockets), next)
+    else (raw.min(MaxSockets), next)
   }
 
   // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу.
   private def applySockets(item: Item, rng: Rng): (Item, Rng) = {
-    val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon, rng)
+    val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon, item.twoHanded, rng)
     (item.copy(sockets = List.fill(count)(Option.empty[Gem])), next)
   }
 

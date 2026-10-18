@@ -65,8 +65,7 @@ case class EquipmentState(
       (pageSlots, totalPages, page) = ItemMenu.page(indexed, scene.page.getOrElse(0))
       header = s"🎽 ${content.text("equipment.header")}" + (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
       slotBtns = pageSlots.zipWithIndex.map { case ((slot, slotIdx), rowIdx) =>
-                   val item  = slot.get(hero.equipment)
-                   val label = ItemMenu.truncate(slotLabel(slot, item))
+                   val label = ItemMenu.truncate(slotLabel(slot, hero.equipment))
                    Choice(s"$SlotPrefix$slotIdx", label, row = Some(rowIdx))
                  }
       nav = navRow(page, totalPages, "EquipmentPrev", "EquipmentNext", "BackFromEquip")
@@ -94,7 +93,10 @@ case class EquipmentState(
       item   = slot.get(hero.equipment)
       isEmpty = item.itemType == ItemType.NoItem
       // В тексте — надетое: характеристики смотрят на то, что на герое сейчас.
-      itemLine = if (isEmpty) content.text("equipment.empty") else EquipmentState.itemStats(item)
+      // Левая рука под двуручным пуста, но занята — говорим чем.
+      itemLine = if (slot.busy(hero.equipment))
+                   s"${LeftBusyText.capitalize}: ${hero.equipment.weapon.displayTitle}"
+                 else if (isEmpty) content.text("equipment.empty") else EquipmentState.itemStats(item)
       // Рядом кнопками — всё, что подходит в этот слот и по плечу по уровню.
       fitting <- fittingItems(hero, slot)
       (pageItems, totalPages, page) = ItemMenu.page(fitting, scene.pickPage.getOrElse(0), PickPerPage)
@@ -237,24 +239,27 @@ case class EquipmentState(
           renderer.show(user, Screen(content.format("inventory.tooHighLevel",
             "required" -> it.lvl.toString, "current" -> hero.lvl.toString), Nil))
         case Some(it) =>
-          val (newEq, newFight, oldItem) = InventoryState.equip(hero, it, slot.ringSlot)
-          // Замена, снимающая последний «Тайник», ужмёт сумку — как и при снятии.
+          val (newEq, newFight, removed) = InventoryState.equip(hero, it, slot.pairSlot)
+          // Замена, снимающая последний «Тайник», ужмёт сумку — как и при снятии;
+          // двуручное поверх двух одноручных вернёт в сумку на вещь больше.
           val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
-          if (capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 0))
-            renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
-          else
-            heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-              inventoryRepo.removeItem(it.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-              ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
-              ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
-              renderer.show(user, Screen(
-                if (oldItem.itemType == ItemType.NoItem)
-                  content.format("equipment.wornNow", "name" -> it.name)
-                else
-                  content.format("equipment.wornSwapped", "name" -> it.name, "old" -> oldItem.name), Nil)) *>
-              // Двенадцатая вещь набора — за собранный набор своё достижение.
-              QuestSupport.grantFullSets(heroDao, content, user,
-                hero.copy(equipment = newEq, fightStats = newFight), renderer).unit
+          InventoryState.equipBlock(inv, capDelta, removed) match {
+            case Some(key) => renderer.show(user, Screen(content.format(key, "name" -> it.name), Nil))
+            case None =>
+              heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+                inventoryRepo.removeItem(it.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+                ZIO.foreachDiscard(removed)(old => inventoryRepo.addItem(hero.id, old).ignore) *>
+                ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
+                renderer.show(user, Screen(
+                  if (removed.isEmpty)
+                    content.format("equipment.wornNow", "name" -> it.name)
+                  else
+                    content.format("equipment.wornSwapped", "name" -> it.name,
+                      "old" -> InventoryState.removedNames(removed)), Nil)) *>
+                // Двенадцатая вещь набора — за собранный набор своё достижение.
+                QuestSupport.grantFullSets(heroDao, content, user,
+                  hero.copy(equipment = newEq, fightStats = newFight), renderer).unit
+          }
       }
       // Остаёмся в карточке: видно новые характеристики и что ещё есть примерить.
       res <- showSlot(user, slotIdx, renderer)
@@ -409,9 +414,12 @@ case class EquipmentState(
 
   // ── Хелперы ─────────────────────────────────────────────────────────────────
 
-  private def slotLabel(slot: Slot, item: Item): String =
-    if (item.itemType == ItemType.NoItem) s"${slot.name}: —"
+  private def slotLabel(slot: Slot, eq: Equipment): String = {
+    val item = slot.get(eq)
+    if (slot.busy(eq)) s"${slot.name}: $LeftBusyText"
+    else if (item.itemType == ItemType.NoItem) s"${slot.name}: —"
     else s"${slot.name}: ${item.displayTitle}"
+  }
 
   private def navRow(page: Int, totalPages: Int, prevId: String, nextId: String, backId: String): List[Choice] = {
     val row = ItemMenu.NavRow
@@ -448,6 +456,13 @@ object EquipmentState {
   /** Имя доживающего слота фляги: пустым он не показывается. */
   val FlaskSlotName = "Фляга"
 
+  /** Руки: правая держит одноручное или двуручное, левая — второе одноручное. */
+  val RightHandName = "Правая рука"
+  val LeftHandName  = "Левая рука"
+
+  /** Левая рука при двуручном в правой: пуста, но занята. */
+  val LeftBusyText = "занята двуручным"
+
   /** Сколько вещей на примерку в карточке: ряд 0 занят «Снять»/«Сломать», а
     * последний — навигацией, так что на кнопки вещей остаётся семь рядов. */
   val PickPerPage: Int = 7
@@ -464,14 +479,17 @@ object EquipmentState {
   }
 
   /** Слот снаряжения: как достать надетое, как освободить, что в него встаёт
-    * (`accepts`) и, для колец, какой это из двух слотов (`ringSlot` — чтобы
-    * примерка меняла именно открытое кольцо, а не первое свободное). */
+    * (`accepts`) и, для колец и рук, какой это из двух слотов (`pairSlot` —
+    * чтобы примерка меняла именно открытое кольцо или руку, а не первое
+    * свободное). `busy` — слот пуст, но занят чужой вещью: левая рука при
+    * двуручном в правой. */
   case class Slot(
     name:     String,
     get:      Equipment => Item,
     clear:    Equipment => Equipment,
     accepts:  Set[ItemType],
-    ringSlot: Option[Int] = None
+    pairSlot: Option[Int]          = None,
+    busy:     Equipment => Boolean = _ => false
   )
 
   val slots: List[Slot] = List(
@@ -490,7 +508,11 @@ object EquipmentState {
     // Фляги теперь носят на поясе: в слот их больше не надеть, а занятый слот
     // доживает до того, как игрок сам переложит флягу (см. FlaskSlotName).
     Slot(FlaskSlotName, _.flask,        _.copy(flask        = Item.NoItem), Set.empty),
-    Slot("Оружие",      _.weapon,       _.copy(weapon       = Item.NoItem), Set(ItemType.Weapon)),
+    // Руки — пара слотов, как кольца (см. InventoryState.equip): двуручное
+    // встаёт в правую и занимает обе.
+    Slot(RightHandName, _.weapon,       _.copy(weapon       = Item.NoItem), Set(ItemType.Weapon), Some(1)),
+    Slot(LeftHandName,  _.leftHand,     _.copy(leftHand     = Item.NoItem), Set(ItemType.Weapon), Some(2),
+         busy = _.leftBusy),
     Slot("Доп. оружие", _.additionalWeapon, _.copy(additionalWeapon = Item.NoItem), Set(ItemType.AdditionalWeapon))
   )
 

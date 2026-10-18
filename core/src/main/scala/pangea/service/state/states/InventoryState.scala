@@ -51,7 +51,8 @@ case class InventoryState(
       "InventoryPrev"     -> Target.Run { (u, _, r) => navigate(u, r, -1) },
       "InventoryNext"     -> Target.Run { (u, _, r) => navigate(u, r, +1) },
       "Equip"             -> Target.Run { (u, _, r) => equipSelected(u, r) },
-      "EquipRing"         -> Target.Run { (u, ua, r) => equipChosenRing(u, ua, r) },
+      "EquipRing"         -> Target.Run { (u, ua, r) => equipChosenSlot(u, ua, r) },
+      "EquipHand"         -> Target.Run { (u, ua, r) => equipChosenSlot(u, ua, r) },
       "Drop"              -> Target.Run { (u, _, r) => dropSelected(u, r) },
       "CombineMap"        -> Target.Run { (u, _, r) => combineSelected(u, r) },
       "CombineRune"       -> Target.Run { (u, _, r) => combineRuneSelected(u, r) },
@@ -254,12 +255,12 @@ case class InventoryState(
   private def coatWeapon(user: User, renderer: Renderer): Task[StateType] =
     withSelected(user, renderer) { (item, hero) =>
       item.brew.map(_.effect) match {
-        case Some(BrewEffect.Coat(coat, _)) if hero.equipment.weapon.itemType == ItemType.NoItem =>
+        case Some(BrewEffect.Coat(coat, _)) if hero.equipment.unarmed =>
           renderer.show(user, Screen(content.text("brew.noWeapon"), Nil)) *> showItem(user, item.id, renderer)
         case Some(BrewEffect.Coat(coat, _)) =>
           val key = coat match { case WeaponCoat.Poison => "brew.coatedPoison"; case WeaponCoat.Bleed => "brew.coatedBleed" }
           heroDao.updateWeaponDust(user.userId, hero.weaponDust.copy(coat = Some(coat))) *>
-            consume(user, item, hero, content.format(key, "weapon" -> hero.equipment.weapon.name), renderer)
+            consume(user, item, hero, content.format(key, "weapon" -> hero.equipment.mainWeapon.name), renderer)
         case _ => showItem(user, item.id, renderer)
       }
     }
@@ -522,14 +523,15 @@ case class InventoryState(
       scene <- readScene(user)
       res <- scene.selectedId match {
         case None => showList(user, renderer)
-        case Some(id) => equipById(user, id, renderer, ringSlot = None)
+        case Some(id) => equipById(user, id, renderer, pairSlot = None)
       }
     } yield res
 
-  // Игрок выбрал, какое из двух надетых колец снять (кнопки экрана выбора).
-  private def equipChosenRing(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+  // Игрок выбрал, какое из двух надетых колец снять или вместо какого оружия
+  // взять новое (кнопки экранов выбора).
+  private def equipChosenSlot(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     (payloadField(ua, "id").flatMap(_.toLongOption), payloadField(ua, "slot").flatMap(_.toIntOption)) match {
-      case (Some(id), Some(slot)) => equipById(user, id, renderer, ringSlot = Some(slot))
+      case (Some(id), Some(slot)) => equipById(user, id, renderer, pairSlot = Some(slot))
       case _                      => showList(user, renderer)
     }
 
@@ -555,7 +557,30 @@ case class InventoryState(
     )
   }
 
-  private def equipById(user: User, itemId: Long, renderer: Renderer, ringSlot: Option[Int]): Task[StateType] =
+  /** Экран выбора руки: обе заняты одноручным, и новое одноручное встаёт вместо
+    * одного из них — как кольцо. */
+  private def handChoiceScreen(weapon: Item, eq: Equipment, itemId: Long): Screen = {
+    def handButton(hand: Int, name: String, worn: Item) =
+      Choice(
+        id    = "EquipHand",
+        label = ItemMenu.truncate(content.format("inventory.handSlot",
+                  "hand" -> name, "name" -> worn.displayTitle)),
+        data  = Map("id" -> itemId.toString, "slot" -> hand.toString),
+        row   = Some(hand - 1)
+      )
+    Screen(
+      content.format("inventory.handChoice", "name" -> weapon.displayTitle) + "\n\n" +
+        eq.weapon.equippedComparison(EquipmentState.RightHandName) + "\n" + Item.ComparisonSeparator + "\n" +
+        eq.leftHand.equippedComparison(EquipmentState.LeftHandName),
+      List(
+        handButton(1, EquipmentState.RightHandName, eq.weapon),
+        handButton(2, EquipmentState.LeftHandName, eq.leftHand),
+        content.choice("InventoryList", "inventory.exit").copy(row = Some(2))
+      )
+    )
+  }
+
+  private def equipById(user: User, itemId: Long, renderer: Renderer, pairSlot: Option[Int]): Task[StateType] =
     for {
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
@@ -575,27 +600,34 @@ case class InventoryState(
                 "required" -> item.lvl.toString,
                 "current"  -> hero.lvl.toString), Nil)).as(false)
           // Оба слота колец заняты и слот ещё не выбран — спрашиваем, какое снять.
-          else if (item.itemType == ItemType.Ring && ringSlot.isEmpty &&
+          else if (item.itemType == ItemType.Ring && pairSlot.isEmpty &&
                    InventoryState.ringSlotsFull(hero.equipment))
             renderer.show(user, ringChoiceScreen(item, hero.equipment, itemId)).as(true)
+          // Обе руки заняты одноручным, а берут ещё одно — спрашиваем, вместо чего.
+          else if (item.itemType == ItemType.Weapon && !item.twoHanded && pairSlot.isEmpty &&
+                   hero.equipment.handsFull)
+            renderer.show(user, handChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
-            val (newEq, newFight, oldItem) = InventoryState.equip(hero, item, ringSlot)
+            val (newEq, newFight, removed) = InventoryState.equip(hero, item, pairSlot)
             val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
-            // Замена, снимающая последний «Тайник» в экипировке (делта < 0), переполнит сумку → блокируем.
-            if (capDelta < 0 && !InventoryState.fitsAfterCapacityChange(inv, capDelta, returningItems = 0))
-              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil)).as(false)
-            else
-              (heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-                inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-                ZIO.when(oldItem.itemType != ItemType.NoItem)(inventoryRepo.addItem(hero.id, oldItem).ignore) *>
-                ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
-                renderer.show(user, Screen(
-                  content.format("inventory.equipped",
-                    "name" -> item.name,
-                    "old"  -> (if (oldItem.itemType == ItemType.NoItem) "ничего" else oldItem.name)), Nil)) *>
-                // Двенадцатая вещь набора — за собранный набор своё достижение.
-                QuestSupport.grantFullSets(heroDao, content, user,
-                  hero.copy(equipment = newEq, fightStats = newFight), renderer)).as(false)
+            InventoryState.equipBlock(inv, capDelta, removed) match {
+              // Замена, снимающая последний «Тайник», или двуручное поверх двух
+              // одноручных переполнят сумку → блокируем.
+              case Some(key) =>
+                renderer.show(user, Screen(content.format(key, "name" -> item.name), Nil)).as(false)
+              case None =>
+                (heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+                  inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
+                  ZIO.foreachDiscard(removed)(old => inventoryRepo.addItem(hero.id, old).ignore) *>
+                  ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
+                  renderer.show(user, Screen(
+                    content.format("inventory.equipped",
+                      "name" -> item.name,
+                      "old"  -> InventoryState.removedNames(removed)), Nil)) *>
+                  // Двенадцатая вещь набора — за собранный набор своё достижение.
+                  QuestSupport.grantFullSets(heroDao, content, user,
+                    hero.copy(equipment = newEq, fightStats = newFight), renderer)).as(false)
+            }
           }
       }
       res <- if (keepScreen) ZIO.succeed(StateType.Inventory) else showList(user, renderer)
@@ -883,16 +915,16 @@ case class InventoryState(
     withSelected(user, renderer) { (item, hero) =>
       item.material.filter(_.gem.isDefined) match {
         case None => showList(user, renderer)
-        case Some(_) if hero.equipment.weapon.itemType == ItemType.NoItem =>
+        case Some(_) if hero.equipment.unarmed =>
           renderer.show(user, Screen(content.text("inventory.dustNoWeapon"), Nil)) *> backToCard(user, renderer)
         case Some(dust) =>
-          val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
+          val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.handGems)
           val line = outcome match {
             // Сколько слоёв уже на оружии, игрок держит в голове сам — не считаем за него.
             case WeaponDust.Outcome.Applied(_) =>
               content.format("inventory.dustApplied",
                 "dust"   -> dust.displayName,
-                "weapon" -> hero.equipment.weapon.name)
+                "weapon" -> hero.equipment.mainWeapon.name)
             case WeaponDust.Outcome.Clash(_) =>
               content.format("inventory.dustClash", "dust" -> dust.displayName,
                 "pct" -> WeaponDust.PenaltyPct.toString)
@@ -1072,19 +1104,58 @@ object InventoryState {
   def ringSlotsFull(eq: Equipment): Boolean =
     eq.firstRing.itemType != ItemType.NoItem && eq.secondRing.itemType != ItemType.NoItem
 
-  /** `ringSlot` — выбранный игроком слот кольца (1 или 2); имеет смысл только
-    * когда оба слота заняты. None — обычное правило слотов: первый свободный,
-    * а если свободных нет, второй. */
-  def equip(hero: Hero, item: Item, ringSlot: Option[Int]): (Equipment, FightStats, Item) = {
+  /** Надеть `item`. `pairSlot` — какой из двух парных слотов выбрал игрок:
+    * кольцо 1 или 2, правая (1) или левая (2) рука; имеет смысл, когда оба
+    * заняты. None — обычное правило слотов: первый свободный, а если свободных
+    * нет, второй (у рук — правая). Возвращает снаряжение, боевые статы и всё,
+    * что ушло в сумку: двуручное снимает оба одноручных разом. */
+  def equip(hero: Hero, item: Item, pairSlot: Option[Int]): (Equipment, FightStats, List[Item]) = {
     val eq = hero.equipment
-    val (newEq, oldItem) = (item.itemType, ringSlot) match {
-      case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), eq.firstRing)
-      case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), eq.secondRing)
-      case _                        => (withSlot(eq, item), equippedIn(eq, item.itemType))
+    val (newEq, out) = (item.itemType, pairSlot) match {
+      case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), List(eq.firstRing))
+      case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), List(eq.secondRing))
+      case (ItemType.Weapon, hand)  => wield(eq, item, hand)
+      case _                        => (withSlot(eq, item), List(equippedIn(eq, item.itemType)))
     }
-    val newFight = applyDelta(hero.fightStats, item, oldItem)
-    (newEq, newFight, oldItem)
+    val removed  = out.filter(_.itemType != ItemType.NoItem)
+    val newFight = removed.foldLeft(applyDelta(hero.fightStats, item, Item.NoItem))((f, old) =>
+      applyDelta(f, Item.NoItem, old))
+    (newEq, newFight, removed)
   }
+
+  /** Оружие в руки. Двуручное встаёт в правую и снимает всё, что было в обеих.
+    * Одноручное поверх двуручного снимает двуручное и встаёт в выбранную руку
+    * (по умолчанию в правую). Иначе — в выбранную руку, а без выбора в
+    * свободную, сперва правую; обе заняты — меняется правая (руку у игрока
+    * спрашивают раньше, см. `Equipment.handsFull`). */
+  private def wield(eq: Equipment, item: Item, hand: Option[Int]): (Equipment, List[Item]) =
+    if (item.twoHanded) (eq.copy(weapon = item, leftHand = Item.NoItem), List(eq.weapon, eq.leftHand))
+    else if (eq.leftBusy) {
+      if (hand.contains(2)) (eq.copy(weapon = Item.NoItem, leftHand = item), List(eq.weapon))
+      else (eq.copy(weapon = item), List(eq.weapon))
+    } else hand match {
+      case Some(2)                                         => (eq.copy(leftHand = item), List(eq.leftHand))
+      case Some(_)                                         => (eq.copy(weapon = item), List(eq.weapon))
+      case None if eq.weapon.itemType == ItemType.NoItem   => (eq.copy(weapon = item), Nil)
+      case None if eq.leftHand.itemType == ItemType.NoItem => (eq.copy(leftHand = item), Nil)
+      case None                                            => (eq.copy(weapon = item), List(eq.weapon))
+    }
+
+  /** Почему надеть нельзя — ключ текста, или None, если можно. Вещь уходит из
+    * сумки, снятое возвращается: двуручное поверх двух одноручных кладёт в сумку
+    * на вещь больше, чем забирает, и второму может не найтись места. Замена,
+    * снимающая последний «Тайник», сумку ужимает. */
+  def equipBlock(inv: Inventory, capDelta: Long, removed: List[Item]): Option[String] = {
+    val returning = (removed.size - 1).max(0)
+    if (capDelta >= 0 && returning == 0) None
+    else if (fitsAfterCapacityChange(inv, capDelta, returning)) None
+    else if (returning > 0) Some("inventory.handsNoRoom")
+    else Some("equipment.stashBlocked")
+  }
+
+  /** Что ушло в сумку при надевании — для строки «Прежний: …». */
+  def removedNames(removed: List[Item]): String =
+    if (removed.isEmpty) "ничего" else removed.map(_.name).mkString(", ")
 
   /** Бонус вместимости сумки от пассивки «Тайник» на предмете (0, если её нет).
    *  Хелпер для одного предмета — для итогового изменения вместимости при
@@ -1133,9 +1204,17 @@ object InventoryState {
       else cur.equippedComparison(prefix)
     // Разделитель между сравниваемым предметом и тем, что уже надето.
     val sep = Item.ComparisonSeparator
+    // У рук род женский: «Правая рука: свободна».
+    def hand(prefix: String, cur: Item): String =
+      if (cur.itemType == ItemType.NoItem) s"$prefix: свободна" else cur.equippedComparison(prefix)
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring   => s"\n$sep\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
+      case ItemType.Weapon =>
+        val left =
+          if (eq.leftBusy) s"${EquipmentState.LeftHandName}: ${EquipmentState.LeftBusyText}"
+          else hand(EquipmentState.LeftHandName, eq.leftHand)
+        s"\n$sep\n${hand(EquipmentState.RightHandName, eq.weapon)}\n$left"
       case _ =>
         val cur = equippedIn(eq, item.itemType)
         if (cur.itemType == ItemType.NoItem) ""

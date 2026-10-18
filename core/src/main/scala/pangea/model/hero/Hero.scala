@@ -212,13 +212,13 @@ case class Hero(
     )
   }
 
-  /** Слоты активных навыков героя для боя: снимаются с надетых оружия и
+  /** Слоты активных навыков героя для боя: снимаются с оружия в обеих руках и
    *  нагрудника (у каждого может быть `activeSkill`) — ключ слота id предмета,
    *  поэтому два предмета с «одним» навыком катаются независимо, — плюс клейма
    *  на теле, которых нет на вещах (та же руна на вещи и на теле — одна кнопка;
    *  id клейма отрицательный, см. `Rune.bodySlotId`). */
   def activeSkillSlots: List[SkillSlotState] = {
-    val worn = List(equipment.weapon, equipment.chestPlate).flatMap { it =>
+    val worn = List(equipment.weapon, equipment.leftHand, equipment.chestPlate).flatMap { it =>
       it.details match {
         case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
         case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))

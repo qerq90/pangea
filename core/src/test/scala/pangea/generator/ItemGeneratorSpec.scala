@@ -2,7 +2,7 @@ package pangea.generator
 
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
-import pangea.model.item.{Item, ItemDetails, ItemType, PassiveKind, Rarity}
+import pangea.model.item.{Grip, Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.skill.Skill
 import zio.test._
 
@@ -24,10 +24,12 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
 
   // Распределение числа гнёзд (число гнёзд -> доля выборки) для конкретного
   // слота и редкости. Слот форсируем, чтобы набрать выборку по оружию/броне
-  // отдельно — таблицы гнёзд у них разные.
-  private def socketDist(itemType: ItemType, rarity: Rarity, samples: Long = 3000L): Map[Int, Double] =
+  // отдельно — таблицы гнёзд у них разные. Хват оружия тоже можно задать:
+  // двуручному гнездо сверх таблицы.
+  private def socketDist(itemType: ItemType, rarity: Rarity, samples: Long = 3000L,
+                         grip: Option[Grip] = None): Map[Int, Double] =
     (1L to samples)
-      .map(s => ItemGenerator.createItemOfType(itemType, 10L, rarity, Rng(s))._1.sockets.size)
+      .map(s => ItemGenerator.createItemOfType(itemType, 10L, rarity, Rng(s), grip)._1.sockets.size)
       .groupBy(identity)
       .map { case (n, xs) => n -> xs.size.toDouble / samples }
 
@@ -191,27 +193,38 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(gearSlots.forall(t => rarities.forall(r => socketDist(t, r, 300L).keys.forall(_ <= 1))))
     },
 
-    test("синее ОРУЖИЕ: 20% ноль / 30% одно / 30% два / 20% три") {
-      val d = socketDist(ItemType.Weapon, Rarity.Blue)
+    test("синее одноручное ОРУЖИЕ: 20% ноль / 30% одно / 30% два / 20% три") {
+      val d = socketDist(ItemType.Weapon, Rarity.Blue, grip = Some(Grip.OneHanded))
       assertTrue(near(d.getOrElse(0, 0.0), 0.20)) &&
       assertTrue(near(d.getOrElse(1, 0.0), 0.30)) &&
       assertTrue(near(d.getOrElse(2, 0.0), 0.30)) &&
       assertTrue(near(d.getOrElse(3, 0.0), 0.20))
     },
 
-    test("фиолетовое ОРУЖИЕ: 10% ноль / 30% одно / 30% два / 30% три") {
-      val d = socketDist(ItemType.Weapon, Rarity.Purple)
+    test("фиолетовое одноручное ОРУЖИЕ: 10% ноль / 30% одно / 30% два / 30% три") {
+      val d = socketDist(ItemType.Weapon, Rarity.Purple, grip = Some(Grip.OneHanded))
       assertTrue(near(d.getOrElse(0, 0.0), 0.10)) &&
       assertTrue(near(d.getOrElse(1, 0.0), 0.30)) &&
       assertTrue(near(d.getOrElse(2, 0.0), 0.30)) &&
       assertTrue(near(d.getOrElse(3, 0.0), 0.30))
     },
 
-    test("пурпурное и легендарное ОРУЖИЕ: только 2 или 3 гнезда, поровну") {
-      val dists = List(Rarity.Violet, Rarity.Orange).map(socketDist(ItemType.Weapon, _))
+    test("пурпурное и легендарное одноручное ОРУЖИЕ: только 2 или 3 гнезда, поровну") {
+      val dists = List(Rarity.Violet, Rarity.Orange).map(socketDist(ItemType.Weapon, _, grip = Some(Grip.OneHanded)))
       assertTrue(dists.forall(_.keySet == Set(2, 3))) &&
       assertTrue(dists.forall(d => near(d(2), 0.50))) &&
       assertTrue(dists.forall(d => near(d(3), 0.50)))
+    },
+
+    test("двуручному — гнездо сверх таблицы, до четырёх; серое, белое и зелёное — без гнёзд") {
+      val blue   = socketDist(ItemType.Weapon, Rarity.Blue, grip = Some(Grip.TwoHanded))
+      val purple = socketDist(ItemType.Weapon, Rarity.Purple, grip = Some(Grip.TwoHanded))
+      val top    = List(Rarity.Violet, Rarity.Orange).map(socketDist(ItemType.Weapon, _, grip = Some(Grip.TwoHanded)))
+      val low    = List(Rarity.Gray, Rarity.White, Rarity.Green).map(socketDist(ItemType.Weapon, _, 300L, Some(Grip.TwoHanded)))
+      assertTrue(blue.keySet == Set(1, 2, 3, 4) && near(blue(1), 0.20) && near(blue(4), 0.20)) &&
+      assertTrue(purple.keySet == Set(1, 2, 3, 4) && near(purple(1), 0.10) && near(purple(4), 0.30)) &&
+      assertTrue(top.forall(_.keySet == Set(3, 4)) && top.forall(d => near(d(4), 0.50))) &&
+      assertTrue(low.forall(_.keySet == Set(0)))
     },
 
     test("синее не-оружие: 60% ноль / 40% одно") {

@@ -1002,8 +1002,8 @@ case class BattleState(
         if (hitRoll > mobDodge) {
           for {
             spread <- Random.nextLongBetween(80L, 121L)
-            noWeapon =
-              hero.equipment.weapon.itemType == pangea.model.item.ItemType.NoItem
+            // Без оружия — когда пусты обе руки.
+            noWeapon = hero.equipment.unarmed
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
             // «Разбойник» (+5%) множит итоговый урон. Усиление стихии сюда НЕ
             // входит: оно сдвигает грани урона по броне/HP в splitElementalDamage.
@@ -3562,7 +3562,7 @@ case class BattleState(
         if (active.isEmpty) Some(content.text("battle.belt.noTrauma"))
         else if (active.forall(_.severity == Trauma.Heavy)) Some(content.text("battle.belt.onlyHeavy"))
         else None
-      case BrewEffect.Coat(_, _) if hero.equipment.weapon.itemType == ItemType.NoItem =>
+      case BrewEffect.Coat(_, _) if hero.equipment.unarmed =>
         Some(content.text("battle.belt.noWeapon"))
       case BrewEffect.RefillFlask(sources) if refillableFlask(hero, sources).isEmpty =>
         Some(content.text("battle.belt.noFlask"))
@@ -3620,7 +3620,7 @@ case class BattleState(
           case WeaponCoat.Bleed  => "battle.belt.coatBleed"
         }
         done(hero.copy(weaponDust = hero.weaponDust.copy(coat = Some(coat))), battle,
-          Vector(content.format(key, "weapon" -> hero.equipment.weapon.name)))
+          Vector(content.format(key, "weapon" -> hero.equipment.mainWeapon.name)))
 
       // Костоправный отвар: названную травму снимает прямо в сече.
       case BrewEffect.CureTrauma =>
@@ -3760,7 +3760,7 @@ case class BattleState(
     * слой ложится, противоположная стихия даёт всполох, четвёртая горсть
     * сбивает покрытие (см. [[WeaponDust.sprinkle]]). */
   private def sprinkleInBattle(hero: Hero, dust: pangea.model.item.MaterialKind): (Hero, String) = {
-    val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.weapon.socketedGems)
+    val outcome = WeaponDust.sprinkle(dust, hero.weaponDust, hero.equipment.handGems)
     val line = outcome match {
       case _: WeaponDust.Outcome.Applied  => content.format("battle.belt.dustApplied", "dust" -> dust.displayName)
       case _: WeaponDust.Outcome.Clash    => content.format("battle.belt.dustClash", "dust" -> dust.displayName)

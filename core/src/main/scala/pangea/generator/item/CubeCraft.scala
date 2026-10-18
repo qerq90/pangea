@@ -1,7 +1,7 @@
 package pangea.generator.item
 
 import pangea.domain.Rng
-import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, RoseKind, TrophyKind}
+import pangea.model.item.{BrewKind, BrewRates, Gem, GemKind, Grip, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity, DivineKind, RoseKind, TrophyKind}
 import pangea.model.monster.MiniBoss
 import pangea.model.rune.{Rune, RuneStone, RuneStoneSize}
 
@@ -141,7 +141,11 @@ object CubeCraft {
         case Some(leg) if mithrils.size >= mithril =>
           val consumed      = leg :: mithrils.take(mithril)
           val newLvl        = (leg.lvl + levelDelta).max(1L).min(150L)
-          val (rebuilt, r2) = ItemGenerator.createItemOfType(leg.itemType, newLvl, Rarity.Orange, rng)
+          // С прежним именем — и прежний хват: «Двуручный» в имени не должен
+          // врать. Старое оружие без хвата — одноручное.
+          val grip          = Option.when(keepName && leg.itemType == ItemType.Weapon)(
+                                leg.grip.getOrElse(Grip.OneHanded))
+          val (rebuilt, r2) = ItemGenerator.createItemOfType(leg.itemType, newLvl, Rarity.Orange, rng, grip)
           val result        = if (keepName) rebuilt.withName(leg.name) else rebuilt
           Some((consumed, result, r2))
         case _ => None
@@ -171,7 +175,7 @@ object CubeCraft {
         target     <- pool.find(i =>
                         i != ingredient && ItemType.equippable.contains(i.itemType) && !i.set.contains(set) && i.divine.isEmpty)
       } yield {
-        val (name, r2) = ItemNameGenerator.setName(target.itemType, target.rarity, set, rng)
+        val (name, r2) = ItemNameGenerator.setName(target.itemType, target.rarity, set, rng, target.grip)
         (List(target, ingredient), target.copy(name = name, set = Some(set)), r2)
       }
   }

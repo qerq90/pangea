@@ -5,7 +5,7 @@ import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.Hero
 import pangea.engine.ChoiceColor
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
-import pangea.model.item.{Gem, GemKind, Item, ItemType, MapZone, MaterialKind, Rarity}
+import pangea.model.item.{Gem, GemKind, Grip, Item, ItemType, MapZone, MaterialKind, Rarity}
 import pangea.model.artifact.ArtifactKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -58,6 +58,10 @@ object InventoryStateSpec extends ZIOSpecDefault {
   private val wornRing1 = ring(41L, "Перстень", 1L)
   private val wornRing2 = ring(42L, "Печатка", 2L)
   private val newRing   = ring(43L, "Оникс", 5L)
+
+  /** Нажатие на кнопку выбора руки на экране замены оружия. */
+  private def chooseHand(itemId: Long, hand: Int): UserAction =
+    UserAction("", Some(s"""{"action":"EquipHand","id":"$itemId","slot":"$hand"}"""))
 
   /** Нажатие на кнопку выбора слота кольца на экране замены. */
   private def chooseRingSlot(itemId: Long, slot: Int): UserAction =
@@ -561,8 +565,9 @@ object InventoryStateSpec extends ZIOSpecDefault {
     },
 
     test("Equip с заменой старого → старое попадает обратно в инвентарь") {
+      // Двуручное занимает обе руки: одноручное встаёт вместо него, а не рядом.
       val heroWithWeapon = baseHero.copy(
-        equipment  = TestFixtures.emptyEquipment.copy(weapon = oldSword),
+        equipment  = TestFixtures.emptyEquipment.copy(weapon = oldSword.copy(grip = Some(Grip.TwoHanded))),
         fightStats = baseHero.fightStats.copy(atk = baseHero.fightStats.atk + oldSword.attack)
       )
       for {
@@ -576,6 +581,64 @@ object InventoryStateSpec extends ZIOSpecDefault {
       } yield assertTrue(updatedHero.exists(_.equipment.weapon.name == sword.name)) &&
               assertTrue(items.exists(_.id == oldSword.id)) &&
               assertTrue(updatedHero.exists(_.fightStats.atk == baseHero.fightStats.atk + sword.attack))
+    },
+
+    // ── Руки: свободная, выбор руки, двуручное ───────────────────────────────
+    test("свободная левая рука: второе одноручное встаёт в неё, первое остаётся") {
+      val heroWithWeapon = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = oldSword))
+      for {
+        quad                                <- makeState(heroWithWeapon, List(sword))
+        (state, heroDao, invRepo, renderer)  = quad
+        _    <- state.action(testUser, selectItem(sword.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(h => h.equipment.weapon.id == oldSword.id && h.equipment.leftHand.id == sword.id)) &&
+              assertTrue(invRepo.snapshot.isEmpty)
+    },
+
+    test("обе руки заняты одноручным → экран выбора руки; выбор левой меняет левую") {
+      val third = sword.copy(id = 11L, name = "Кинжал")
+      val armed = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = oldSword, leftHand = sword))
+      for {
+        quad                                <- makeState(armed, List(third))
+        (state, heroDao, invRepo, renderer)  = quad
+        _       <- state.action(testUser, selectItem(third.id), renderer)
+        _       <- state.action(testUser, tap("Equip"), renderer)
+        screens <- renderer.sentScreens
+        before  <- heroDao.getHeroByUserId(userId)
+        _       <- state.action(testUser, chooseHand(third.id, 2), renderer)
+        after   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(screens.last.choices.count(_.id == "EquipHand") == 2) &&
+              assertTrue(screens.last.choices.exists(_.label.contains(EquipmentState.LeftHandName))) &&
+              // пока руку не выбрали, ничего не поменялось
+              assertTrue(before.exists(_.equipment.leftHand.id == sword.id)) &&
+              assertTrue(after.exists(h => h.equipment.weapon.id == oldSword.id && h.equipment.leftHand.id == third.id)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(sword.id))
+    },
+
+    test("двуручное снимает оба одноручных; в полную сумку его не надеть") {
+      val big   = Item(12L, "Секира", 1L, Rarity.Gray, ItemType.Weapon,
+        attack = 9, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0, grip = Some(Grip.TwoHanded))
+      val armed = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(weapon = oldSword, leftHand = sword))
+      // Сумка на двадцать мест: секира и девятнадцать шлемов — второму снятому некуда.
+      val junk  = (1L to 19L).toList.map(i => helm.copy(id = 100L + i))
+      for {
+        roomy                               <- makeState(armed, List(big))
+        (state, heroDao, invRepo, renderer)  = roomy
+        _     <- state.action(testUser, selectItem(big.id), renderer)
+        _     <- state.action(testUser, tap("Equip"), renderer)
+        hero  <- heroDao.getHeroByUserId(userId)
+        full                                <- makeState(armed, big :: junk)
+        (state2, heroDao2, invRepo2, r2)     = full
+        _     <- state2.action(testUser, selectItem(big.id), r2)
+        _     <- state2.action(testUser, tap("Equip"), r2)
+        said  <- r2.sentScreens.map(_.map(_.text).mkString("\n"))
+        hero2 <- heroDao2.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(h => h.equipment.weapon.id == big.id && h.equipment.leftHand.itemType == ItemType.NoItem)) &&
+              assertTrue(invRepo.snapshot.map(_.id).toSet == Set(oldSword.id, sword.id)) &&
+              assertTrue(said.contains("второму в сумке нет места")) &&
+              assertTrue(hero2.exists(h => h.equipment.weapon.id == oldSword.id && h.equipment.leftHand.id == sword.id)) &&
+              assertTrue(invRepo2.snapshot.exists(_.id == big.id))
     },
 
     // ── Кольца: выбор слота при двух занятых ──────────────────────────────────

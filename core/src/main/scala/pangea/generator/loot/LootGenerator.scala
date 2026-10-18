@@ -485,7 +485,7 @@ object LootGenerator {
         val (delta, r2) = rng.between(-1L, 2L)
         val lvl         = (heroLvl + delta).max(1L).min(Hero.MaxLevel)
         val (item, r3)  = ItemGenerator.createItemAtLevel(lvl, rarity, r2)
-        val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, set, r3)
+        val (name, r4)  = ItemNameGenerator.setName(item.itemType, item.rarity, set, r3, item.grip)
         (LootDrop.Gear(item.copy(name = name, set = Some(set))), r4)
     }
 
