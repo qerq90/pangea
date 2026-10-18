@@ -1,7 +1,7 @@
 package pangea.dao.arena
 
 import doobie.util.transactor
-import pangea.model.arena.ArenaFight
+import pangea.model.arena.{ArenaFight, ArenaMode}
 import pangea.model.user.UserId
 import zio.{Task, ZLayer}
 
@@ -19,9 +19,9 @@ trait ArenaDao {
   /** Бой, в котором этот игрок сейчас участвует, — ждущий или идущий. */
   def ofUser(userId: UserId): Task[Option[ArenaFight]]
 
-  /** Кто ждёт соперника в общей очереди, раньше записавшиеся первыми.
-    * Записи по коду сюда не попадают: их зовут кодом, а не из списка. */
-  def waiting(limit: Int): Task[List[ArenaFight]]
+  /** Кто ждёт соперника в общей очереди этого режима, раньше записавшиеся
+    * первыми. Записи по коду сюда не попадают: их зовут кодом, а не из списка. */
+  def waiting(limit: Int, mode: ArenaMode): Task[List[ArenaFight]]
 
   def update(fight: ArenaFight, now: Long): Task[Unit]
 

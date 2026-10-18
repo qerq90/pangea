@@ -5,7 +5,7 @@ import doobie.postgres.circe.json.implicits._
 import doobie.util.transactor.Transactor
 import io.circe.Json
 import io.circe.syntax.EncoderOps
-import pangea.model.arena.{ArenaFight, ArenaStatus}
+import pangea.model.arena.{ArenaFight, ArenaMode, ArenaStatus}
 import pangea.model.user.UserId
 import zio.Task
 import zio.interop.catz._
@@ -48,9 +48,10 @@ class ArenaDaoLive(xa: Transactor[Task]) extends ArenaDao {
       .query[(Long, String, Json)].option.transact(xa)
       .map(_.flatMap { case (i, c, d) => parse(i, c, d) })
 
-  override def waiting(limit: Int): Task[List[ArenaFight]] =
+  override def waiting(limit: Int, mode: ArenaMode): Task[List[ArenaFight]] =
     sql"""select id, code, data from arena_fights
           where status = ${waitingStatus.entryName} and (data ->> 'open') = 'true'
+            and coalesce(data ->> 'mode', ${ArenaMode.Solo.entryName}) = ${mode.entryName}
           order by updated_at limit $limit"""
       .query[(Long, String, Json)].to[List].transact(xa)
       .map(_.flatMap { case (i, c, d) => parse(i, c, d) })

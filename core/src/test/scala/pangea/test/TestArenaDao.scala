@@ -1,7 +1,7 @@
 package pangea.test
 
 import pangea.dao.arena.ArenaDao
-import pangea.model.arena.ArenaFight
+import pangea.model.arena.{ArenaFight, ArenaMode}
 import pangea.model.user.UserId
 import zio.{Task, ZIO}
 
@@ -26,8 +26,8 @@ class TestArenaDao(private var fights: List[ArenaFight] = Nil, private var nextI
 
   override def ofUser(userId: UserId): Task[Option[ArenaFight]] = ZIO.succeed(fights.find(_.has(userId)))
 
-  override def waiting(limit: Int): Task[List[ArenaFight]] =
-    ZIO.succeed(fights.filter(f => f.waiting && f.open).take(limit))
+  override def waiting(limit: Int, mode: ArenaMode): Task[List[ArenaFight]] =
+    ZIO.succeed(fights.filter(f => f.waiting && f.open && f.mode == mode).take(limit))
 
   override def update(fight: ArenaFight, now: Long): Task[Unit] =
     ZIO.succeed { fights = fights.map(f => if (f.id == fight.id) fight else f) }
