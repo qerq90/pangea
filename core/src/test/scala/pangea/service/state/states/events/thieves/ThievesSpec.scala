@@ -6,7 +6,7 @@ import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.{Hero, KillLog}
 import pangea.model.item.{Item, MaterialKind, TrophyKind}
 import pangea.model.monster.Race
-import pangea.model.quest.{BoardData, BoardKind, BoardSlot}
+import pangea.model.quest.{BoardData, BoardDesk, BoardKind, BoardSlot}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.states.LootState.LootData
@@ -121,7 +121,7 @@ object ThievesSpec extends ZIOSpecDefault {
         fightStats = FightStats(atk = 10, hp = 1, armor = 0, defence = 0,
                                 evasion = 0, accuracy = 9999, energy = 0))
       def boardOf(dao: TestHeroDao) =
-        dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
       for {
         fled <- fight(tough, thiefAtk = 1).flatMap { case (state, dao, r) =>
                   for {
@@ -161,7 +161,7 @@ object ThievesSpec extends ZIOSpecDefault {
         _     <- state.enter(testUser, r)
         out    = state.autoAdvance.getOrElse(StateType.GlobalMap)
         loot  <- dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
-        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
         log   <- dao.readKillLog(userId).map(_.flatMap(_.as[KillLog].toOption).get)
         said  <- texts(r)
       } yield assertTrue(out == StateType.Loot) &&

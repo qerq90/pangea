@@ -449,7 +449,7 @@ object CaravanSpec extends ZIOSpecDefault {
     },
 
     test("уход от каравана по объявлению валит задание: оно пропадает с доски") {
-      import pangea.model.quest.{BoardData, BoardKind, BoardSlot}
+      import pangea.model.quest.{BoardData, BoardDesk, BoardKind, BoardSlot}
       /** Объявление на столе и сцена каравана; `done` — охрану уже перебили. */
       def go(action: String, done: Boolean) =
         for {
@@ -462,7 +462,7 @@ object CaravanSpec extends ZIOSpecDefault {
           _    <- TestRandom.feedInts(1, 1)
           _    <- state.action(testUser, tap(action), r)
           said <- texts(r)
-          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
         } yield (said, data)
       for {
         left   <- go("CaravanLeave", done = false)

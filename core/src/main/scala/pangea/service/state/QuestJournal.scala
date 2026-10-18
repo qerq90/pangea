@@ -3,7 +3,7 @@ package pangea.service.state
 import pangea.dao.hero.HeroDao
 import pangea.engine.SceneContent
 import pangea.model.hero.{Hero, LoreData}
-import pangea.model.quest.{BoardData, DailyNpc, DailyQuests, DailyRates, FirstSteps, NpcQuest, NpcQuests}
+import pangea.model.quest.{BoardDesk, DailyNpc, DailyQuests, DailyRates, FirstSteps, NpcQuest, NpcQuests}
 import pangea.service.state.states.guild.QuestBoardState
 import zio.Task
 
@@ -17,13 +17,13 @@ object QuestJournal {
       lore   <- heroDao.readLoreData(hero.userId).map(_.flatMap(_.as[LoreData].toOption).getOrElse(LoreData.empty))
       quests <- NpcQuestLog.load(heroDao, hero.userId)
       daily  <- DailyQuestLog.load(heroDao, hero.userId)
-      board  <- heroDao.readQuestData(hero.userId).map(_.flatMap(_.as[BoardData].toOption))
+      board  <- heroDao.readQuestData(hero.userId).map(_.flatMap(_.as[BoardDesk].toOption))
     } yield render(content, hero, lore, quests, daily, board, nowMs)
 
   /** Разделы — через пустую строку: сюжет, горожане, поручения, доска. Пусто
     * везде — так и говорим. */
   def render(content: SceneContent, hero: Hero, lore: LoreData, quests: NpcQuests, daily: DailyQuests,
-             board: Option[BoardData], nowMs: Long): String = {
+             board: Option[BoardDesk], nowMs: Long): String = {
     val story = Option.when(lore.firstSteps && !FirstSteps.progress(hero, quests).done)(
       content.format("journal.story",
         "title"      -> content.text("firstSteps.title"),
@@ -38,9 +38,9 @@ object QuestJournal {
                       "goal" -> t.need.toString, "have" -> t.progress.toString, "what" -> t.what))
       }
     }
-    // Доска переписывается по понедельникам вместе со взятым, и перерос раздел —
-    // тоже новая: со старой доски в работе ничего не числится.
-    val boards = board.filter(_.fresh(nowMs, hero.lvl)).toList.flatMap { data =>
+    // Доска переписывается по понедельникам вместе со взятым, а ушёл на два
+    // раздела вперёд — доска уже не открыта: с таких в работе ничего не числится.
+    val boards = board.toList.flatMap(_.fresh(nowMs, hero.lvl).boards).flatMap { data =>
       data.slots.filter(_.taken).map { slot =>
         content.format("journal.board",
           "board" -> data.board.title,

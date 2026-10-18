@@ -26,7 +26,10 @@ import java.util.concurrent.TimeUnit
 /** Доска заданий Гильдии Искателей.
   *
   * Гильдия держит по доске на каждые двадцать пять уровней ([[BoardTier]]).
-  * Видны все, берут только со своей: к чужой не пускают, и у каждой свой отказ.
+  * Герою открыты своя и предыдущая — брать можно с обеих разом; к старшим не
+  * пускают, и у каждой свой отказ, а на младших отвечают, что пора уступить
+  * дорогу молодым. Одно и то же дело, что отмечается в пути, на двух досках
+  * разом не держат.
   *
   * Доска переписывается в понедельник в полночь по Москве — целиком, вместе со
   * взятым и не сданным: неделя и есть срок. На экране видно, сколько до неё
@@ -51,7 +54,8 @@ case class QuestBoardState(
     routes = Map(
       "QuestBoard"    -> Target.Run { (u, _, r) => showTiers(u, r) },
       "BoardTier"     -> Target.Run { (u, ua, r) => openTier(u, ua, r) },
-      "BoardMine"     -> Target.Run { (u, _, r) => showBoard(u, r) },
+      // Старая кнопка своей доски — со стены, сохранившейся в чате.
+      "BoardMine"     -> Target.Run { (u, _, r) => getHero(u).flatMap(h => showBoard(u, BoardTier.of(h.lvl), r)) },
       "BackFromQuest" -> Target.Goto(StateType.Guild),
       CityExit.route
     ),
@@ -67,24 +71,24 @@ case class QuestBoardState(
 
   // ── Разделы доски ──────────────────────────────────────────────────────────
 
-  /** Стена с досками: своя открыта, остальные видны и закрыты. */
+  /** Стена с досками: своя и предыдущая открыты, остальные видны и закрыты. */
   private def showTiers(user: User, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
-      mine  = BoardTier.of(hero.lvl)
+      open  = BoardTier.open(hero.lvl)
       lines = BoardTier.values.toList.map(t =>
-                content.format(if (t == mine) "questBoard.tierMine" else "questBoard.tierOther",
+                content.format(if (open.contains(t)) "questBoard.tierMine" else "questBoard.tierOther",
                   "title" -> t.title))
       text  = content.format("questBoard.wall",
                 "tiers" -> lines.mkString("\n"),
                 "left"  -> left(now))
       keys  = BoardTier.values.toList.zipWithIndex.map { case (t, i) =>
-                Choice(if (t == mine) "BoardMine" else "BoardTier",
-                  content.format(if (t == mine) "questBoard.tierMineLabel" else "questBoard.tierOtherLabel",
+                Choice("BoardTier",
+                  content.format(if (open.contains(t)) "questBoard.tierMineLabel" else "questBoard.tierOtherLabel",
                     "title" -> t.title),
                   data = Map("tier" -> t.key),
-                  color = if (t == mine) ChoiceColor.Positive else ChoiceColor.Secondary,
+                  color = if (open.contains(t)) ChoiceColor.Positive else ChoiceColor.Secondary,
                   row = Some(i / 2))
               }
       nav   = List(
@@ -93,30 +97,34 @@ case class QuestBoardState(
       _    <- renderer.show(user, Screen(text, keys ++ nav))
     } yield StateType.QuestBoard
 
-  /** Чужая доска: к ней не пускают, и у каждой свой отказ. */
+  /** Открытая доска — своя или предыдущая — показывается. К старшим не пускают,
+    * и у каждой свой отказ; на младших отвечают, что пора уступить дорогу. */
   private def openTier(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     payload(ua, "tier").flatMap(BoardTier.byKey) match {
       case None       => showTiers(user, renderer)
       case Some(tier) =>
         getHero(user).flatMap { hero =>
-          if (BoardTier.of(hero.lvl) == tier) showBoard(user, renderer)
-          else renderer.show(user, Screen(content.text(s"questBoard.locked.${tier.key}"), Nil)) *>
+          if (BoardTier.open(hero.lvl).contains(tier)) showBoard(user, tier, renderer)
+          else renderer.show(user, Screen(content.text(
+                 if (tier.from > BoardTier.of(hero.lvl).to) s"questBoard.locked.${tier.key}"
+                 else "questBoard.tooOld"), Nil)) *>
                  showTiers(user, renderer)
         }
     }
 
-  // ── Своя доска ─────────────────────────────────────────────────────────────
+  // ── Открытая доска ─────────────────────────────────────────────────────────
 
-  private def showBoard(user: User, renderer: Renderer): Task[StateType] =
+  private def showBoard(user: User, tier: BoardTier, renderer: Renderer): Task[StateType] =
     for {
       now   <- nowMs
       hero  <- getHero(user)
-      data  <- load(user, hero, now)
+      desk  <- load(user, hero, now, tier)
+      data   = desk.of(tier).getOrElse(BoardData.empty)
       stash <- QuestStash.findAll(inventoryRepo, artifactRepo, hero)
       lines  = data.slots.zipWithIndex.map { case (s, i) => line(s, i, stash.map(_.item)) }
       text   = content.format("questBoard.board",
-                 "title" -> data.board.title, "quests" -> lines.mkString("\n\n"), "left" -> left(now))
-      keys   = data.slots.zipWithIndex.flatMap { case (s, i) => button(s, i) } ++ List(
+                 "title" -> tier.title, "quests" -> lines.mkString("\n\n"), "left" -> left(now))
+      keys   = data.slots.zipWithIndex.flatMap { case (s, i) => button(tier, s, i) } ++ List(
                  content.choice("QuestBoard", "questBoard.toWall").copy(row = Some(ExitRow)),
                  CityExit.button(content, Some(ExitRow)))
       _     <- renderer.show(user, Screen(text, keys))
@@ -144,15 +152,14 @@ case class QuestBoardState(
   }
 
   /** Кнопка объявления: взять, выдвинуться снова, сдать — или ничего, пока
-    * герой в пути. */
-  private def button(slot: BoardSlot, idx: Int): Option[Choice] = {
+    * герой в пути. В кнопке — раздел и номер: досок открыто две. */
+  private def button(tier: BoardTier, slot: BoardSlot, idx: Int): Option[Choice] = {
     val row = Some(idx / 2)
     def btn(prefix: String, key: String): Option[Choice] =
-      Some(Choice(s"$prefix$idx", ItemMenu.truncate(content.format(key, "n" -> (idx + 1).toString)),
+      Some(Choice(s"$prefix${tier.key}_$idx", ItemMenu.truncate(content.format(key, "n" -> (idx + 1).toString)),
         color = ChoiceColor.Positive, row = row))
     if (!slot.taken) btn(TakePrefix, "questBoard.takeLabel")
-    else if (slot.ready || slot.kind == BoardKind.Trophy || slot.kind == BoardKind.DwarfSupply)
-      btn(HandPrefix, "questBoard.handLabel")
+    else if (slot.ready || slot.kind.handedIn) btn(HandPrefix, "questBoard.handLabel")
     // С выездного можно уйти, не доделав, — тогда к нему возвращаются той же дорогой.
     else if (slot.kind.away) btn(GoPrefix, "questBoard.goLabel")
     else None
@@ -160,31 +167,39 @@ case class QuestBoardState(
 
   // ── Взять и сдать ──────────────────────────────────────────────────────────
 
-  private def take(user: User, idx: Int, renderer: Renderer): Task[StateType] =
+  private def take(user: User, tier: BoardTier, idx: Int, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
-      data <- load(user, hero, now)
+      desk <- load(user, hero, now, tier)
+      data  = desk.of(tier).getOrElse(BoardData.empty)
+      // Одно и то же дело, что отмечается в пути (караван, пещера, выездные), на
+      // двух досках разом не держат: отметка из дела не знала бы, на какую лечь.
+      busy  = (s: BoardSlot) => desk.boards.find(b => b.board != tier && b.hunting(s.kind))
       out <- data.slot(idx) match {
+        case Some(s) if !s.taken && !s.kind.handedIn && busy(s).isDefined =>
+          renderer.show(user, Screen(content.format("questBoard.sameKindTaken",
+            "title" -> busy(s).map(_.board.title).getOrElse("")), Nil)) *>
+            showBoard(user, tier, renderer)
         case Some(s) if !s.taken =>
-          save(user, data.updated(idx)(_.copy(taken = true))) *>
+          save(user, desk.withBoard(data.updated(idx)(_.copy(taken = true)))) *>
             renderer.show(user, Screen(content.text("questBoard.taken"), Nil)) *>
             // Выездное не ждёт в лабиринте: с ним уходят прямо от доски.
-            (if (s.kind.away) depart(user, s, renderer) else showBoard(user, renderer))
-        case _ => showBoard(user, renderer)
+            (if (s.kind.away) depart(user, s, renderer) else showBoard(user, tier, renderer))
+        case _ => showBoard(user, tier, renderer)
       }
     } yield out
 
   /** Снова в путь по уже взятому выездному: герой с него ушёл, не доделав, и
     * возвращается той же дорогой. */
-  private def goAgain(user: User, idx: Int, renderer: Renderer): Task[StateType] =
+  private def goAgain(user: User, tier: BoardTier, idx: Int, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
-      data <- load(user, hero, now)
-      out <- data.slot(idx).filter(s => s.taken && !s.done && s.kind.away) match {
+      desk <- load(user, hero, now, tier)
+      out <- desk.of(tier).flatMap(_.slot(idx)).filter(s => s.taken && !s.done && s.kind.away) match {
         case Some(slot) => depart(user, slot, renderer)
-        case None       => showBoard(user, renderer)
+        case None       => showBoard(user, tier, renderer)
       }
     } yield out
 
@@ -200,11 +215,14 @@ case class QuestBoardState(
     } yield StateType.QuestRoad
 
   /** Сдача: трофей уходит с рук, тяжёлое просто оплачивается. */
-  private def hand(user: User, idx: Int, renderer: Renderer): Task[StateType] =
+  private def hand(user: User, tier: BoardTier, idx: Int, renderer: Renderer): Task[StateType] =
     for {
       now  <- nowMs
       hero <- getHero(user)
-      data <- load(user, hero, now)
+      desk <- load(user, hero, now, tier)
+      data  = desk.of(tier).getOrElse(BoardData.empty)
+      // Сданное объявление уходит с доски; стол — с остальными досками как был.
+      drop  = save(user, desk.withBoard(data.copy(slots = data.slots.patch(idx, Nil, 1))))
       stash <- QuestStash.findAll(inventoryRepo, artifactRepo, hero)
       inv   = stash.map(_.item)
       _ <- data.slot(idx).filter(_.taken) match {
@@ -217,7 +235,7 @@ case class QuestBoardState(
               // Трофей уходит оттуда, где лежал: из сумки, из ларца или из живой сумки.
               QuestStash.take(inventoryRepo, artifactRepo, hero, stash.filter(_.item.id == trophy.id)) *>
                 pay(user, hero, exp, BoardRates.TrophyDoubloons) *>
-                save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
+                drop *>
                 renderer.show(user, Screen(content.format("questBoard.paidTrophy",
                   "item" -> trophy.displayTitle, "exp" -> exp.toString,
                   "doubloons" -> BoardRates.TrophyDoubloons.toString), Nil))
@@ -234,7 +252,7 @@ case class QuestBoardState(
               // Ящик уходит целиком: ровно десять склянок, остальное остаётся при герое.
               QuestStash.take(inventoryRepo, artifactRepo, hero, have.take(BoardRates.BrewsWanted)) *>
                 pay(user, hero, exp, BoardRates.Doubloons) *>
-                save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
+                drop *>
                 renderer.show(user, Screen(content.format("questBoard.paidBrews",
                   "count" -> BoardRates.BrewsWanted.toString,
                   "brew" -> wanted.map(_.label).getOrElse(""),
@@ -245,12 +263,12 @@ case class QuestBoardState(
           case _ =>
             val exp = BoardRates.exp(hero.lvl)
             pay(user, hero, exp, BoardRates.Doubloons) *>
-              save(user, data.copy(slots = data.slots.patch(idx, Nil, 1))) *>
+              drop *>
               renderer.show(user, Screen(content.format("questBoard.paid",
                 "exp" -> exp.toString, "doubloons" -> BoardRates.Doubloons.toString), Nil))
         }
       }
-      out <- showBoard(user, renderer)
+      out <- showBoard(user, tier, renderer)
     } yield out
 
   private def pay(user: User, hero: Hero, exp: Long, doubloons: Long): Task[Unit] = {
@@ -261,24 +279,28 @@ case class QuestBoardState(
 
   // ── Доска в базе ───────────────────────────────────────────────────────────
 
-  /** Доска на эту неделю: не та неделя или герой перерос раздел — пишем новую. */
-  private def load(user: User, hero: Hero, now: Long): Task[BoardData] =
-    heroDao.readQuestData(user.userId).map(_.flatMap(_.as[BoardData].toOption).getOrElse(BoardData.empty)).flatMap {
-      // Пустая доска — не повод вывесить новые: всё сдал — жди понедельника.
-      case d if d.fresh(now, hero.lvl) => ZIO.succeed(d)
-      case _                           => regenerate(user, hero, now)
-    }
+  /** Стол досок на эту неделю — и на нём доска раздела `tier`. Прошлонедельные
+    * и уже закрытые герою доски уходят со стола, недостающая пишется заново.
+    * Пустая доска — не повод вывесить новые: всё сдал — жди понедельника. */
+  private def load(user: User, hero: Hero, now: Long, tier: BoardTier): Task[BoardDesk] =
+    heroDao.readQuestData(user.userId)
+      .map(_.flatMap(_.as[BoardDesk].toOption).getOrElse(BoardDesk.empty))
+      .flatMap { stored =>
+        val desk = stored.fresh(now, hero.lvl)
+        if (desk.of(tier).isEmpty) regenerate(user, desk, tier, now)
+        else if (desk == stored) ZIO.succeed(desk)
+        else save(user, desk).as(desk)
+      }
 
-  private def regenerate(user: User, hero: Hero, now: Long): Task[BoardData] =
+  private def regenerate(user: User, desk: BoardDesk, tier: BoardTier, now: Long): Task[BoardDesk] =
     for {
       seed <- Random.nextLong
-      slots = QuestBoardState.roll(BoardTier.of(hero.lvl), Rng(seed))
-      data  = BoardData(BoardRates.weekOf(now), BoardTier.of(hero.lvl).key, slots)
-      _    <- save(user, data)
-    } yield data
+      next  = desk.withBoard(BoardData(BoardRates.weekOf(now), tier.key, QuestBoardState.roll(tier, Rng(seed))))
+      _    <- save(user, next)
+    } yield next
 
-  private def save(user: User, data: BoardData): Task[Unit] =
-    heroDao.writeQuestData(user.userId, data.asJson)
+  private def save(user: User, desk: BoardDesk): Task[Unit] =
+    heroDao.writeQuestData(user.userId, desk.asJson)
 
   // ── Вспомогательное ────────────────────────────────────────────────────────
 
@@ -297,13 +319,26 @@ case class QuestBoardState(
 
   private def handleFallback(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     parseAction(ua.payload) match {
-      case Some(a) if a.startsWith(TakePrefix) =>
-        a.drop(TakePrefix.length).toIntOption.fold(showBoard(user, renderer))(take(user, _, renderer))
-      case Some(a) if a.startsWith(HandPrefix) =>
-        a.drop(HandPrefix.length).toIntOption.fold(showBoard(user, renderer))(hand(user, _, renderer))
-      case Some(a) if a.startsWith(GoPrefix) =>
-        a.drop(GoPrefix.length).toIntOption.fold(showBoard(user, renderer))(goAgain(user, _, renderer))
+      case Some(a) if a.startsWith(TakePrefix) => onSlot(user, a.drop(TakePrefix.length), renderer)(take)
+      case Some(a) if a.startsWith(HandPrefix) => onSlot(user, a.drop(HandPrefix.length), renderer)(hand)
+      case Some(a) if a.startsWith(GoPrefix)   => onSlot(user, a.drop(GoPrefix.length), renderer)(goAgain)
       case _ => showTiers(user, renderer)
+    }
+
+  /** Объявление по кнопке: `<раздел>_<номер>`, а со старых кнопок — просто номер
+    * на своей доске. Раздел, который герою уже не открыт, ведёт к стене. */
+  private def onSlot(user: User, ref: String, renderer: Renderer)(
+      f: (User, BoardTier, Int, Renderer) => Task[StateType]): Task[StateType] =
+    getHero(user).flatMap { hero =>
+      val parsed = ref.split('_') match {
+        case Array(key, idx) => BoardTier.byKey(key).zip(idx.toIntOption)
+        case Array(idx)      => idx.toIntOption.map(BoardTier.of(hero.lvl) -> _)
+        case _               => None
+      }
+      parsed.filter { case (tier, _) => BoardTier.open(hero.lvl).contains(tier) } match {
+        case Some((tier, idx)) => f(user, tier, idx, renderer)
+        case None              => showTiers(user, renderer)
+      }
     }
 
   private def payload(ua: UserAction, key: String): Option[String] =

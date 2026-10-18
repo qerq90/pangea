@@ -6,8 +6,9 @@ import io.circe.{Decoder, Encoder, HCursor, Json}
 import pangea.model.hero.Hero
 
 /** Раздел доски заданий: гильдия держит отдельную доску на каждые двадцать пять
-  * уровней. Герой берёт только со своей; остальные видны, но закрыты, и у
-  * каждой свой отказ (`questBoard.locked.<key>`).
+  * уровней. Герою открыты своя и предыдущая ([[BoardTier.open]]); старшие видны,
+  * но закрыты, и у каждой свой отказ (`questBoard.locked.<key>`), а на младших
+  * отвечают, что пора уступить дорогу молодым (`questBoard.tooOld`).
   *
   * @param from первый уровень раздела
   * @param to   последний уровень раздела
@@ -31,6 +32,14 @@ object BoardTier extends Enum[BoardTier] {
   def of(lvl: Long): BoardTier = values.find(_.holds(lvl)).getOrElse(Legend)
 
   def byKey(key: String): Option[BoardTier] = values.find(_.key == key)
+
+  /** Какие доски открыты герою этого уровня: своя и предыдущая (у новичков
+    * предыдущей нет). Двадцать шестой берёт и с 1–25, и с 26–50; пятьдесят
+    * первый — с 26–50 и 51–75. */
+  def open(lvl: Long): List[BoardTier] = {
+    val mine = of(lvl)
+    values.lift(values.indexOf(mine) - 1).toList :+ mine
+  }
 }
 
 /** Вид задания с доски. Сложность показывается знаками [[Difficulty.render]]. */
@@ -50,6 +59,10 @@ sealed abstract class BoardKind(val key: String, val difficulty: Int) extends En
   /** Своя сложность у каждого объявления: у выездных она катается вместе с
     * уровнем задания, у остальных одна на весь вид. */
   def rolledLvl: Boolean = false
+
+  /** Сдаётся прямо на доске — трофей, ящик склянок. Прочие отмечаются там, где
+    * дело и делается (см. `BoardProgress`), — по виду, на той доске, где взяты. */
+  def handedIn: Boolean = false
 }
 
 object BoardKind extends Enum[BoardKind] {
@@ -58,6 +71,7 @@ object BoardKind extends Enum[BoardKind] {
   /** «Принести трофей расы X» — то, что доска просила и раньше. */
   case object Trophy extends BoardKind("trophy", 1) {
     override def needsRace: Boolean = true
+    override def handedIn: Boolean  = true
   }
 
   /** «Найти караван и перебить охрану» — тихая кража не в счёт. */
@@ -70,6 +84,7 @@ object BoardKind extends Enum[BoardKind] {
     * толка — и только все разом. Сдаётся на доске, ходить никуда не надо. */
   case object DwarfSupply extends BoardKind("dwarves", 5) {
     override def needsBrew: Boolean = true
+    override def handedIn: Boolean  = true
   }
 
   /** «Разбойники в городе» — выездное: герой уходит ждать их в подворотне.
@@ -145,11 +160,12 @@ object BoardSlot {
     } yield BoardSlot(kind, race, taken, done, lvl, brew, band)
 }
 
-/** Доска героя на эту неделю: номер недели, раздел и восемь объявлений.
-  * Живёт в `heroes.quest_data`.
+/** Доска одного раздела на эту неделю: номер недели, раздел и восемь
+  * объявлений. Доски героя лежат вместе ([[BoardDesk]]).
   *
-  * Неделя кончилась или герой перерос раздел — доска переписывается целиком, и
-  * взятое, но не сданное сгорает вместе с ней: неделя и есть срок. */
+  * Неделя кончилась — доска переписывается целиком, и взятое, но не сданное
+  * сгорает вместе с ней: неделя и есть срок. Герой ушёл на два раздела вперёд —
+  * доска ему больше не открыта и уходит со стола. */
 final case class BoardData(
   week:  Long            = -1L,
   tier:  String          = BoardTier.Novice.key,
@@ -158,7 +174,7 @@ final case class BoardData(
   def board: BoardTier = BoardTier.byKey(tier).getOrElse(BoardTier.Novice)
 
   def fresh(nowMs: Long, lvl: Long): Boolean =
-    week == BoardRates.weekOf(nowMs) && board == BoardTier.of(lvl)
+    week == BoardRates.weekOf(nowMs) && BoardTier.open(lvl).contains(board)
 
   def slot(idx: Int): Option[BoardSlot] = slots.lift(idx)
 
@@ -200,6 +216,47 @@ object BoardData {
       tier  <- c.getOrElse[String]("tier")(BoardTier.Novice.key)
       slots <- c.getOrElse[List[BoardSlot]]("slots")(Nil)
     } yield BoardData(week, tier, slots)
+}
+
+/** Доски героя (`heroes.quest_data`): своя и предыдущая, у каждой свои восемь
+  * объявлений и своя неделя. Брать можно с обеих разом.
+  *
+  * Отметки из дела (караван разбит, пещера зачищена) ищут взятое объявление
+  * такого вида на любой из досок: поэтому одно и то же такое дело на двух
+  * досках разом не берут (см. `QuestBoardState.take`). */
+final case class BoardDesk(boards: List[BoardData] = Nil) {
+
+  def of(tier: BoardTier): Option[BoardData] = boards.find(_.board == tier)
+
+  /** Положить доску на стол вместо прежней доски того же раздела. */
+  def withBoard(data: BoardData): BoardDesk =
+    copy(boards = (boards.filterNot(_.board == data.board) :+ data).sortBy(b => BoardTier.values.indexOf(b.board)))
+
+  /** Только то, что ещё в ходу: доски этой недели и открытые герою. */
+  def fresh(nowMs: Long, lvl: Long): BoardDesk = copy(boards = boards.filter(_.fresh(nowMs, lvl)))
+
+  /** Взято ли сейчас задание такого вида (и ещё не закрыто) — на любой доске. */
+  def hunting(kind: BoardKind): Boolean = boards.exists(_.hunting(kind))
+
+  /** Отметить сделанным взятое задание такого вида — на той доске, где оно взято. */
+  def markDone(kind: BoardKind): BoardDesk =
+    boards.find(_.hunting(kind)).fold(this)(b => withBoard(b.markDone(kind)))
+
+  /** Убрать с доски взятое задание такого вида: цель потеряна. */
+  def markFailed(kind: BoardKind): BoardDesk =
+    boards.find(_.hunting(kind)).fold(this)(b => withBoard(b.markFailed(kind)))
+}
+
+object BoardDesk {
+  val empty: BoardDesk = BoardDesk()
+
+  implicit val encoder: Encoder[BoardDesk] = (d: BoardDesk) => Json.obj("boards" -> d.boards.asJson)
+
+  /** Запись прежнего вида — одна доска без обёртки — читается как стол с этой
+    * одной доской. */
+  implicit val decoder: Decoder[BoardDesk] = (c: HCursor) =>
+    if (c.downField("boards").succeeded) c.getOrElse[List[BoardData]]("boards")(Nil).map(BoardDesk(_))
+    else c.as[BoardData].map(d => BoardDesk(List(d)))
 }
 
 /** Трофеи в счёт доски. */
