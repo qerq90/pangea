@@ -5,8 +5,9 @@ import io.circe.{Decoder, Encoder}
 import pangea.model.hero.Hero
 
 /** Активный навык — кнопка в бою, заканчивающая ход. Падает на оружие и на
-  * нагрудник (см. [[Skill.weaponSkills]] / [[Skill.armorSkills]]) в виде ровно
-  * одного навыка на предмет. Все формулы аддитивные по статам героя; ±20%
+  * нагрудник (см. [[Skill.weaponSkills]] / [[Skill.armorSkills]]), на лук и
+  * арбалет — свои ([[Skill.rangedSkills]]), в виде ровно одного навыка на
+  * предмет. Все формулы аддитивные по статам героя; ±20%
   * разброс применяется в момент броска снаружи (см. BattleState).
   *
   * `effect` (sealed ADT [[Skill.Effect]]) задаёт, ЧТО делает навык —
@@ -43,7 +44,7 @@ sealed abstract class Skill(
     * навыка, чтобы формат был единым. */
   def describe(hero: Hero): String = {
     val understanding = hero.runes.understandingOf(pangea.model.rune.Rune.Active(this))
-    description.replace("{}", energyCost(hero).toString) +
+    description.replace("{}", energyCost(hero).toString) + Skill.requirement(this) +
       s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}." +
       (if (understanding > 0L) s" Понимание: $understanding." else "")
   }
@@ -127,6 +128,17 @@ object Skill extends Enum[Skill] {
       * промаха (Контрудар). Ход на этом кончается.
       */
     case object Counter extends Effect
+
+    /** Урон по цели, срезанный её защитой; цель `rootTurns` раундов не сходит с
+      * места — ни к герою, ни при перемешивании (Пригвоздить).
+      */
+    final case class Pin(rootTurns: Int) extends Effect
+
+    /** Урон по цели, срезанный её защитой, и тот же бросок каждому другому
+      * врагу в пределах дальности оружия — срезанный уже его защитой; все
+      * задетые `rootTurns` раундов не шагают (Заградительный залп).
+      */
+    final case class Volley(rootTurns: Int) extends Effect
   }
 
   // Процент текущего HP, который тратит Кровавая жатва, и сколько процентов
@@ -469,6 +481,46 @@ object Skill extends Enum[Skill] {
     def baseEnergyCost(hero: Hero): Long = 13L + hero.lvl / 2L
   }
 
+  // ── Умения лука и арбалета ──────────────────────────────────────────────────
+  // Держат поле боя, а не просто бьют. Бьют на всю дальность оружия — сколько
+  // бы её ни было (см. BattleState.skillReach): числа «три» в них нет.
+
+  case object PinningShot
+      extends Skill(
+        label = "Пригвоздить",
+        cooldown = 3,
+        initialCooldown = 1,
+        effect = Effect.Pin(rootTurns = 2),
+        hitTemplate = "📌 Стрела пригвождает цель к земле: {} урона! Два раунда ей не сойти с места.",
+        description =
+          "Тяжёлая стрела с широким наконечником: такой не добивают — такой держат. Цель два раунда не сходит с места: не подходит к вам и не меняет место при перемешивании. Бьёт на всю дальность оружия. Среднее влияние на урон от Ловкости, Точности и Интеллекта. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      2.0 * b.agi + 0.4 * f.accuracy + 3.0 * b.int + 0.2 * f.atk
+    }
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl
+  }
+
+  case object Barrage
+      extends Skill(
+        label = "Заградительный залп",
+        cooldown = 4,
+        initialCooldown = 2,
+        effect = Effect.Volley(rootTurns = 1),
+        hitTemplate = "🏹 Залп ложится частоколом перед вражеским строем: {} урона цели — достаётся и остальным. Раунд никто из задетых не сделает ни шагу.",
+        description =
+          "Стрелы ложатся частоколом перед вражеским строем, и шагнуть сквозь него не решается никто. Задевает каждого врага в пределах дальности оружия: урон, срезанный его защитой, и раунд без единого шага. Слабое влияние на урон от Ловкости и Интеллекта. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      1.0 * b.agi + 2.0 * b.int + 0.2 * f.accuracy
+    }
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
+  }
+
   // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.
   // Нагрудник: 4,5,7,9,11 + Боевой клич, Отбросить.
   val weaponSkills: List[Skill] = List(
@@ -488,6 +540,24 @@ object Skill extends Enum[Skill] {
     * кинжал): приходят с самой вещью и рунами не бывают — ни на камнях, ни у
     * Казимира (см. `ItemDetails.HandSkill`). */
   val handSkills: List[Skill] = List(Block, Counterstrike)
+
+  /** Умения лука и арбалета: выпадают только на них. Это руны, но применить
+    * их можно, лишь когда в руках лук или арбалет (см. [[usableWith]]). */
+  val rangedSkills: List[Skill] = List(PinningShot, Barrage)
+
+  /** Можно ли применить умение с тем, что в руках: умения стрелка — только с
+    * луком или арбалетом, прочие умения оружия — только без них. Умения
+    * нагрудника и щита с кинжалом от оружия не зависят. */
+  def usableWith(skill: Skill, ranged: Boolean): Boolean =
+    if (rangedSkills.contains(skill)) ranged
+    else if (weaponSkills.contains(skill)) !ranged
+    else true
+
+  /** Хвост описания про то, с чем умение работает (см. [[usableWith]]). */
+  def requirement(skill: Skill): String =
+    if (rangedSkills.contains(skill)) " Только с луком или арбалетом."
+    else if (weaponSkills.contains(skill)) " С луком и арбалетом не работает."
+    else ""
 
   implicit val encoder: Encoder[Skill] =
     Encoder.encodeString.contramap(_.entryName)

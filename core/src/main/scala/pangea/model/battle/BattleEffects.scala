@@ -199,7 +199,12 @@ case class BattleEffects(
   // Зеркальный настой: столько ударов по герою ещё уйдёт в призрачные копии.
   // Приходит с героя при сборке боя (см. SoloPveBattle.from) и тратится
   // ударами, а не временем.
-  heroMirrors:          Int                        = 0
+  heroMirrors:          Int                        = 0,
+  // Сколько раундов моб не сходит с места: не идёт к герою, не встаёт в пару и
+  // не участвует в перемешивании (Пригвоздить, Заградительный залп). Ставится с
+  // запасом в один тик, как monsterSkillBlockedTurns: тикает в начале хода моба,
+  // а шаги — в конце раунда.
+  monsterRootedTurns:   Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы. Геройская
@@ -219,7 +224,8 @@ case class BattleEffects(
     monsterWeakenedPct       = monsterWeakenedPct,
     monsterMaxArmorCut       = monsterMaxArmorCut,
     monsterSkillBlockedTurns = monsterSkillBlockedTurns,
-    mobInstinctTurns         = mobInstinctTurns
+    mobInstinctTurns         = mobInstinctTurns,
+    monsterRootedTurns       = monsterRootedTurns
   )
 
   /** Геройская половина: реген, горение и яд на герое, срезы, флаги наборов. Она
@@ -258,7 +264,8 @@ case class BattleEffects(
       monsterWeakenedPct       = mp.monsterWeakenedPct,
       monsterMaxArmorCut       = mp.monsterMaxArmorCut,
       monsterSkillBlockedTurns = mp.monsterSkillBlockedTurns,
-      mobInstinctTurns         = mp.mobInstinctTurns
+      mobInstinctTurns         = mp.mobInstinctTurns,
+      monsterRootedTurns       = mp.monsterRootedTurns
     )
   }
 
@@ -283,6 +290,9 @@ case class BattleEffects(
 
   /** Прячет ли дым героя от мобов вне пары. */
   def heroInSmoke: Boolean = heroSmokeTurns > 0
+
+  /** Пригвождён ли моб: с места он сейчас не сходит. */
+  def monsterRooted: Boolean = monsterRootedTurns > 0
 }
 
 object BattleEffects {

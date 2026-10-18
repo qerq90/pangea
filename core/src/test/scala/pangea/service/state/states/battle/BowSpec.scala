@@ -164,8 +164,8 @@ object BowSpec extends ZIOSpecDefault {
               assertTrue(close < far && close >= far * 3 / 4 && close <= far * 85 / 100)
     },
 
-    test("умение оружия из лука целится на три места, Таран с кирасы — только вблизи") {
-      val h = hero(weapon(Grip.Bow, Some(Skill.QuickStrike)))
+    test("умение лука целится на всю дальность оружия, Таран с кирасы — только вблизи") {
+      val h = hero(weapon(Grip.Bow, Some(Skill.PinningShot)))
       for {
         t <- makeState(h, group(h, 5))
         (state, _, r) = t

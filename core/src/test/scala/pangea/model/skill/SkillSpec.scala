@@ -14,16 +14,19 @@ object SkillSpec extends ZIOSpecDefault {
   override def spec =
     suite("SkillSpec")(
       test(
-        "Все навыки распределены между оружием, доспехом и тем, что в руке, без пересечений"
+        "Все навыки распределены между оружием, луком, доспехом и тем, что в руке, без пересечений"
       ) {
         val weapon = Skill.weaponSkills.toSet
+        val ranged = Skill.rangedSkills.toSet
         val armor  = Skill.armorSkills.toSet
         val hand   = Skill.handSkills.toSet
         assertTrue(weapon.size == 8) &&
         assertTrue(armor.size == 7) &&
         assertTrue(hand == Set[Skill](Skill.Block, Skill.Counterstrike)) &&
+        assertTrue(ranged == Set[Skill](Skill.PinningShot, Skill.Barrage)) &&
         assertTrue((weapon intersect armor).isEmpty && (hand intersect (weapon union armor)).isEmpty) &&
-        assertTrue((weapon union armor union hand) == Skill.values.toSet) &&
+        assertTrue((ranged intersect (weapon union armor union hand)).isEmpty) &&
+        assertTrue((weapon union ranged union armor union hand) == Skill.values.toSet) &&
         // оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез
         assertTrue(
           weapon == Set[Skill](

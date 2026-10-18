@@ -1433,6 +1433,7 @@ case class BattleState(
       case 1 =>
         val cost = necro.StepCostPerLvl * lvl
         if (battle.necromancerCovered) ZIO.succeed((next, hero, ""))
+        else if (battle.effects.monsterRooted) ZIO.succeed((next, hero, content.text("battle.necro.pinned")))
         else battle.necromancerHideaway match {
           case None       => ZIO.succeed((next, hero, content.text("battle.necro.noHide")))
           case Some(_) if energy < cost => ZIO.succeed((next, hero, ""))
@@ -3081,6 +3082,22 @@ case class BattleState(
             }
           dealSkillDamage(hero, bumped, raw, line, thrown)
 
+        case Skill.Effect.Pin(turns) =>
+          // Урон, срезанный защитой, — и цель не сходит с места.
+          dealSkillDamage(hero, rooted(bumped, turns), reduced, dealt => tmpl.replace("{}", dealt.toString), next)
+
+        case Skill.Effect.Volley(turns) =>
+          // По цели — как удар, срезанный защитой; каждому другому в пределах
+          // дальности оружия — тот же бросок, срезанный уже его защитой. Все
+          // задетые раунд не шагают.
+          val reach = BattleState.skillReach(hero, slot.skill)
+          dealSkillDamage(hero, rooted(bumped, turns), reduced, dealt => tmpl.replace("{}", dealt.toString), next,
+            splash = (b, _) => strikeOthers(b, (b.group.heroPos - reach) to (b.group.heroPos + reach)) { tmp =>
+              val amount = (raw * (1.0 - monsterDefenceCut(hero, tmp, effWithAir(hero, tmp, nowMs), nowMs))).toLong.max(1L)
+              (rooted(plainHit(tmp, amount), turns),
+               content.format("battle.group.barrageHit", "monster" -> tmp.monsterName, "damage" -> amount.toString))
+            })
+
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
           val stacked  = bumped.effects.monsterBleed.map(_.stackedWith(pct)).getOrElse(Bleed(pct))
@@ -3259,6 +3276,12 @@ case class BattleState(
     tmp.copy(monsterCurrentArmor = tmp.monsterCurrentArmor - armorDmg,
              monsterCurrentHp    = (tmp.monsterCurrentHp - (amount - armorDmg)).max(0L))
   }
+
+  /** Моб в полях не сходит с места `turns` раундов. Счётчик ставится с запасом
+    * в один тик: он тикает в начале хода моба, а шаги — в конце раунда (см.
+    * `BattleEffects.monsterRootedTurns`). Новое не укорачивает уже наложенное. */
+  private def rooted(b: SoloPveBattle, turns: Int): SoloPveBattle =
+    b.withEffects(b.effects.copy(monsterRootedTurns = b.effects.monsterRootedTurns.max(turns + 1)))
 
   /** «Отбросить»: активный моб отлетает на последнее занятое место строя, а тот,
     * кто там стоял, выходит на его место — и в поля. Активный и так последний
@@ -4500,6 +4523,7 @@ case class BattleState(
     mobAirBoostTurns         = (e.mobAirBoostTurns - 1).max(0),
     monsterSkillBlockedTurns = (e.monsterSkillBlockedTurns - 1).max(0),
     monsterWeakenedTurns     = (e.monsterWeakenedTurns - 1).max(0),
+    monsterRootedTurns       = (e.monsterRootedTurns - 1).max(0),
     monsterDefenceDebuff     = e.monsterDefenceDebuff.flatMap(_.ticked)
   )
 
@@ -4676,12 +4700,16 @@ case class BattleState(
     formationLines(battle) ++ queued
   }
 
+  /** Имя моба в строю — с булавкой, пока он пригвождён. */
+  private def mobLabel(m: MonsterSlot): String =
+    if (m.effects.monsterRooted) m.name + content.text("battle.group.pinnedMark") else m.name
+
   private def formationLines(battle: SoloPveBattle): Vector[String] =
     if (battle.group.allies.isEmpty && battle.group.paired)
       battle.placesInOrder.map {
         case (pos, Some(m)) =>
           val key = if (pos == battle.group.heroPos) "battle.group.lineHero" else "battle.group.lineFree"
-          content.format(key, "n" -> pos.toString, "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
+          content.format(key, "n" -> pos.toString, "monster" -> mobLabel(m), "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString)
         case (pos, None) =>
           content.format("battle.group.lineEmpty", "n" -> pos.toString)
       }.toVector
@@ -4694,7 +4722,7 @@ case class BattleState(
                  "dots" -> allyDots(a)))
             .getOrElse(content.text("battle.group.sideNone"))
         val right = battle.monsterAt(pos).map(m => content.format("battle.group.sideMonster",
-            "monster" -> m.name, "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString))
+            "monster" -> mobLabel(m), "hp" -> m.hpPct.toString, "armor" -> m.armorPct.toString))
           .getOrElse(content.text("battle.group.sideNone"))
         content.format("battle.group.lineRow", "n" -> pos.toString, "left" -> left, "right" -> right)
       }
@@ -5657,7 +5685,8 @@ object BattleState {
   /** Бьёт ли умение по врагу — таким в группе нужна цель. */
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {
     case Skill.Effect.Damage(_) | Skill.Effect.Sweep(_) | Skill.Effect.Whirl | Skill.Effect.FanBleed(_) | Skill.Effect.Knockback |
-         Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
+         Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest |
+         Skill.Effect.Pin(_) | Skill.Effect.Volley(_) => true
     case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) |
          Skill.Effect.Block | Skill.Effect.Counter => false
   }

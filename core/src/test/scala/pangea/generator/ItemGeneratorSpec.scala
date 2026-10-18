@@ -107,13 +107,15 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(items.filter(_.itemType == ItemType.ChestPlate).forall(_.hp > 0L))
     },
 
-    test("Weapon всегда имеет activeSkill из weaponSkills, а парирующий кинжал — Контрудар") {
+    test("Weapon всегда имеет activeSkill из weaponSkills, лук и арбалет — из rangedSkills, а парирующий кинжал — Контрудар") {
       val weapons = (1L to 2000L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.Weapon)
-      val (parrying, rest) = weapons.partition(_.grip.contains(Grip.Parrying))
-      assertTrue(rest.nonEmpty && parrying.nonEmpty) &&
+      val (parrying, others) = weapons.partition(_.grip.contains(Grip.Parrying))
+      val (ranged, rest)     = others.partition(_.ranged)
+      assertTrue(rest.nonEmpty && parrying.nonEmpty && ranged.nonEmpty) &&
       assertTrue(rest.forall(i => skillOf(i).exists(Skill.weaponSkills.contains))) &&
+      assertTrue(ranged.forall(i => skillOf(i).exists(Skill.rangedSkills.contains))) &&
       assertTrue(parrying.forall(_.details == ItemDetails.HandSkill(Counterstrike)))
     },
 

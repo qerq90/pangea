@@ -307,7 +307,8 @@ object ItemGenerator {
   }
 
   // Спец-данные типа при генерации:
-  //  - оружию — активный навык (один из weaponSkills) → ItemDetails.Weapon;
+  //  - оружию — активный навык (один из weaponSkills, у лука и арбалета — из
+  //    rangedSkills) → ItemDetails.Weapon;
   //  - нагруднику — активный навык (один из armorSkills) → ItemDetails.Armor;
   //  - поясу — пустые ячейки под расходники, числом по редкости
   //    (ItemDetails.Belt): фляги, пыль, отвары и цветки игрок укладывает сам;
@@ -318,7 +319,7 @@ object ItemGenerator {
       case ItemType.Weapon if item.grip.contains(Grip.Parrying) =>
         (item.copy(details = ItemDetails.HandSkill(Skill.Counterstrike)), rng)
       case ItemType.Weapon =>
-        val (skill, next) = rng.pick(Skill.weaponSkills)
+        val (skill, next) = rng.pick(if (item.ranged) Skill.rangedSkills else Skill.weaponSkills)
         (item.copy(details = ItemDetails.Weapon(skill)), next)
       case ItemType.ChestPlate =>
         val (skill, next) = rng.pick(Skill.armorSkills)
