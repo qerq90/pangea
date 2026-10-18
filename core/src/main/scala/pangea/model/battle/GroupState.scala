@@ -231,8 +231,14 @@ final case class GroupState(
   def freeAt(pos: Int): Boolean = allyAt(pos).forall(!_.alive)
 
   /** По кому герой может ударить: моб в паре и соседи, слева направо. */
-  def attackTargets: List[Int] =
-    ((if (paired) List(heroPos) else Nil) ++ neighbourPositions).sorted
+  def attackTargets: List[Int] = targetsWithin(GroupState.Reach)
+
+  /** По кому герой может ударить оружием, которое бьёт на `reach` мест в обе
+    * стороны: моб в паре и все, кто стоит в досягаемости, слева направо. Мечом
+    * это соседи ([[GroupState.Reach]]), из лука — дальше. */
+  def targetsWithin(reach: Int): List[Int] =
+    ((if (paired) List(heroPos) else Nil) ++
+      (1 to reach).toList.flatMap(d => List(heroPos - d, heroPos + d)).filter(hasMonster)).sorted
 
   /** Союзник на позиции `pos`. */
   def allyAt(pos: Int): Option[BattleAlly] = allies.find(_.position == pos)
@@ -295,7 +301,11 @@ final case class GroupState(
 
   /** Достаёт ли герой до моба на месте `pos`: соседнее место, и там кто-то
     * есть — моб вне пары или активный, стоящий не напротив героя. */
-  def inReach(pos: Int): Boolean = pos != heroPos && math.abs(pos - heroPos) <= GroupState.Reach && hasMonster(pos)
+  def inReach(pos: Int): Boolean = inReachOf(pos, GroupState.Reach)
+
+  /** То же для оружия, которое бьёт на `reach` мест (лук — на три). */
+  def inReachOf(pos: Int, reach: Int): Boolean =
+    pos != heroPos && math.abs(pos - heroPos) <= reach && hasMonster(pos)
 
   /** Занятые мобами места по соседству с героем, слева направо. */
   def neighbourPositions: List[Int] = List(heroPos - 1, heroPos + 1).filter(hasMonster)

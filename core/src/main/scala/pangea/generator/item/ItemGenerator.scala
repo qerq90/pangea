@@ -187,10 +187,16 @@ object ItemGenerator {
     (withSockets.withName(name), rng6)
   }
 
-  /** Хват оружия: в одну руку или в обе — поровну, если его не задали.
-    * Одноручное несёт 60% каждого своего стата, двуручное — все сто (см.
-    * [[Grip]]); режется итог, вместе с обязательной прибавкой к атаке. Прочим
-    * типам хвата нет. */
+  /** Двуручное — поровну меч, топор, копьё, лук или арбалет. У трёх первых хват
+    * один, двуручный, поэтому в пуле он стоит трижды: лук или арбалет выходит
+    * каждым пятым оружием. */
+  private val TwoHandedPool: List[Grip] =
+    List(Grip.TwoHanded, Grip.TwoHanded, Grip.TwoHanded, Grip.Bow, Grip.Crossbow)
+
+  /** Хват оружия: в одну руку или в обе — поровну, если его не задали; в обе —
+    * см. [[TwoHandedPool]]. Одноручное несёт 60% каждого своего стата,
+    * двуручное (и лук с арбалетом) — все сто (см. [[Grip]]); режется итог,
+    * вместе с обязательной прибавкой к атаке. Прочим типам хвата нет. */
   private def applyGrip(item: Item, forced: Option[Grip], rng: Rng): (Item, Rng) =
     if (item.itemType != ItemType.Weapon) (item, rng)
     else {
@@ -198,7 +204,7 @@ object ItemGenerator {
         case Some(g) => (g, rng)
         case None =>
           val (two, r) = rng.nextBoolean
-          (if (two) Grip.TwoHanded else Grip.OneHanded, r)
+          if (two) r.pick(TwoHandedPool) else (Grip.OneHanded, r)
       }
       def cut(v: Long): Long = v * grip.statPct / 100L
       (item.copy(

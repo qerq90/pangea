@@ -14,7 +14,7 @@ import pangea.model.squad.AllySkill
 import pangea.model.hero.{Achievement, AzatState, CubeStatus, Hero, WeaponCoat, WeaponDust}
 import pangea.model.item.QuestItemKind
 import pangea.model.quest.{BoardKind, NpcQuest}
-import pangea.model.item.{BeltSlot, BrewEffect, BrewKind, BrewRates, FlaskEffect, FlaskRates, Item, ItemDetails, ItemType, PassiveKind, PotionKind, RefillSource, DivineKind, DivineRates}
+import pangea.model.item.{BeltSlot, BrewEffect, BrewKind, BrewRates, FlaskEffect, FlaskRates, GripRates, Item, ItemDetails, ItemType, PassiveKind, PotionKind, RefillSource, DivineKind, DivineRates}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
 import pangea.model.stats.FightStats
 import pangea.model.stats.{ParamsBuff, StatBoost}
@@ -759,8 +759,8 @@ case class BattleState(
       hero   <- getHero(user)
       battle <- getBattle(user)
       state  <-
-        if (target.isEmpty && battle.group.attackTargets.size > 1)
-          renderer.show(user, attackTargetScreen(battle)).as(StateType.Battle)
+        if (target.isEmpty && heroTargets(hero, battle).size > 1)
+          renderer.show(user, attackTargetScreen(hero, battle)).as(StateType.Battle)
         else resolveLoaded(user, renderer, hero, battle, now, content.text("arena.turn.attack"))(attackTurn(target))
     } yield state
 
@@ -769,7 +769,7 @@ case class BattleState(
     * чего отвечает моб в паре, а если пара пуста — ход тихо кончается и мобы
     * ходят сами. Бить некого — ход не тратится. */
   private def attackTurn(target: Option[Int])(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
-    val targets = battle.group.attackTargets
+    val targets = heroTargets(hero, battle)
     target.orElse(targets.headOption) match {
       case None                                 => cont(hero, battle, content.text("battle.group.noTarget"))
       case Some(pos) if !targets.contains(pos)  => cont(hero, battle, content.text("battle.group.targetGone"))
@@ -967,7 +967,7 @@ case class BattleState(
   /** Базовая атака после умения, когда пары нет: по ближайшей досягаемой
     * цели, а если бить некого — ход кончается тихо. */
   private def followUp(hero: Hero, battle: SoloPveBattle, nowMs: Long, log: Vector[String], skip: Set[Long]): Task[TurnResult] =
-    battle.group.attackTargets.headOption match {
+    heroTargets(hero, battle).sortBy(p => math.abs(p - battle.group.heroPos)).headOption match {
       case None      => quietPhase(hero, battle, nowMs, log, skip)
       case Some(pos) => strikeSide(hero, battle, pos, nowMs, log, skip).flatMap(closeTurn(_, nowMs, skip))
     }
@@ -1005,6 +1005,8 @@ case class BattleState(
             // Без оружия — когда пусты обе руки.
             noWeapon = hero.equipment.unarmed
             weaponMod: Double = if (noWeapon) 0.5 else 1.0
+            // Из лука вблизи — на пятую часть слабее (см. rangedCloseMod).
+            closeMod = BattleState.rangedCloseMod(hero, battle)
             // «Разбойник» (+5%) множит итоговый урон. Усиление стихии сюда НЕ
             // входит: оно сдвигает грани урона по броне/HP в splitElementalDamage.
             // Пыль, севшая неудачно (всполох магии или четвёртая горсть), режет
@@ -1012,7 +1014,7 @@ case class BattleState(
             // «Мерзавец» бьёт на 5% сильнее — и получает на 5% больше (см. mobStrike).
             damage =
               (((hero.effectiveBaseStats(nowMs).str * 3L + buffedEff.atk) * spread / 100L) *
-                weaponMod * hero.passives.finalDamageMult * hero.weaponDust.damageMult *
+                weaponMod * closeMod * hero.passives.finalDamageMult * hero.weaponDust.damageMult *
                 Achievement.damagePct(hero) / 100.0).toLong
                 .max(1L)
             // Стихии оружия модифицируют раздельно урон по броне и по HP
@@ -2798,11 +2800,13 @@ case class BattleState(
       battle <- getBattle(user)
       state  <-
         if (target.isEmpty && needsTarget(hero, battle, itemId))
-          renderer.show(user, targetScreen(battle, itemId)).as(StateType.Battle)
+          renderer.show(user, targetScreen(hero, battle, itemId)).as(StateType.Battle)
         else resolveLoaded(user, renderer, hero, battle, now,
           // Соперник увидит название умения, а не его рассказ от первого лица.
           battle.slotByItem(itemId).map(_.skill.label).getOrElse(""))(
-          skillTurn(itemId, target.orElse(battle.group.attackTargets.headOption).getOrElse(battle.group.heroPos)))
+          skillTurn(itemId, target
+            .orElse(battle.slotByItem(itemId).flatMap(s => skillTargets(hero, battle, s.skill).headOption))
+            .getOrElse(battle.group.heroPos)))
     } yield state
 
   /** Спрашивать ли цель: рядом с героем кто-то стоит, умение готово и бьёт. */
@@ -2810,27 +2814,40 @@ case class BattleState(
     battle.slotByItem(itemId).exists { slot =>
       val ready = slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero)
       ready && (
-        (BattleState.dealsDamage(slot.skill.effect) && battle.group.attackTargets.size > 1) ||
+        (BattleState.dealsDamage(slot.skill.effect) && skillTargets(hero, battle, slot.skill).size > 1) ||
         (BattleState.supports(slot.skill.effect) && battle.group.allies.exists(_.alive)))
     }
 
   /** Экран выбора цели для базовой атаки: те же кнопки, что у умения с уроном. */
-  private def attackTargetScreen(battle: SoloPveBattle): Screen =
-    targetChoices(battle, "Attack", content.text("battle.group.attackLabel"), support = false)
+  private def attackTargetScreen(hero: Hero, battle: SoloPveBattle): Screen =
+    targetChoices(battle, "Attack", content.text("battle.group.attackLabel"), support = false,
+      heroTargets(hero, battle))
 
   /** Экран выбора цели: моб напротив и соседи по местам, с их полосками.
     * Подпись кнопки ограничена по длине, поэтому имя — короткое (у отмеченного
     * тьмой — только раса), а что всё равно не влезло, срезается. */
-  private def targetScreen(battle: SoloPveBattle, itemId: Long): Screen = {
+  private def targetScreen(hero: Hero, battle: SoloPveBattle, itemId: Long): Screen = {
     val slot       = battle.slotByItem(itemId)
     val skillLabel = slot.map(_.skill.label).getOrElse("")
     val support    = slot.exists(s => BattleState.supports(s.skill.effect))
-    targetChoices(battle, s"Skill_$itemId", skillLabel, support)
+    targetChoices(battle, s"Skill_$itemId", skillLabel, support,
+      slot.fold(battle.group.attackTargets)(s => skillTargets(hero, battle, s.skill)))
   }
 
+  /** По кому герой может ударить оружием: мечом — соседей, из лука — дальше
+    * (см. [[BattleState.heroReach]]). */
+  private def heroTargets(hero: Hero, battle: SoloPveBattle): List[Int] =
+    battle.group.targetsWithin(BattleState.heroReach(hero))
+
+  /** По кому достаёт умение (см. [[BattleState.skillReach]]). */
+  private def skillTargets(hero: Hero, battle: SoloPveBattle, skill: Skill): List[Int] =
+    battle.group.targetsWithin(BattleState.skillReach(hero, skill))
+
   /** Кнопки целей под действие `choiceId`: лечение и броня — себе или
-    * союзнику по позициям отряда; урон — моб в паре и соседи по местам. */
-  private def targetChoices(battle: SoloPveBattle, choiceId: String, label: String, support: Boolean): Screen = {
+    * союзнику по позициям отряда; урон — `enemies`, моб в паре и все, до кого
+    * достаёт оружие (см. [[heroTargets]]). */
+  private def targetChoices(battle: SoloPveBattle, choiceId: String, label: String, support: Boolean,
+                            enemies: List[Int]): Screen = {
     val targets =
       if (support) {
         val me = pangea.engine.Choice(choiceId, content.text("battle.group.targetSelf"),
@@ -2842,7 +2859,7 @@ case class BattleState(
             data = Map("target" -> a.position.toString), row = Some(1 + i / BattleState.AlliesPerRow))
         }
       } else
-        battle.group.attackTargets.zipWithIndex.flatMap { case (pos, i) =>
+        enemies.zipWithIndex.flatMap { case (pos, i) =>
           battle.monsterAt(pos).map(m => pangea.engine.Choice(
             id    = choiceId,
             label = pangea.engine.Choice.fit(
@@ -2876,7 +2893,7 @@ case class BattleState(
             "energy" -> hero.fightStats.energy.toString
           )
         )
-      case Some(slot) if BattleState.needsEnemy(slot.skill.effect) && battle.group.attackTargets.isEmpty =>
+      case Some(slot) if BattleState.needsEnemy(slot.skill.effect) && skillTargets(hero, battle, slot.skill).isEmpty =>
         cont(hero, battle, content.text("battle.group.noTarget"))
       case Some(slot) =>
         val cost      = slot.skill.energyCost(hero)
@@ -2911,8 +2928,10 @@ case class BattleState(
     val home        = battle.group.activePos
     val paired      = battle.group.paired
     val damageSkill = BattleState.dealsDamage(slot.skill.effect)
-    // Цель не в полях (сосед в досягаемости) — разворачиваем её туда на время.
-    val aimSide = damageSkill && target != home && battle.group.inReach(target)
+    // Цель не в полях (сосед в досягаемости, а из лука — и дальше) — разворачиваем
+    // её туда на время.
+    val aimSide = damageSkill && target != home &&
+                    battle.group.inReachOf(target, BattleState.skillReach(hero, slot.skill))
     val aimed   = if (aimSide) battle.engage(target) else battle
     val skip    = Set(slot.itemId)
     // Таран по мобу не из пары помечает место, куда герой шагнёт в конце раунда.
@@ -2961,7 +2980,11 @@ case class BattleState(
     for {
       spread <- Random.nextLongBetween(80L, 121L)
       // Понимание руны множит число умения — и с вещи, и с клейма (см. Hero.runeMult).
-      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult * hero.runeMult(slot.skill)).toLong.max(1L)
+      // Умение оружия из лука вблизи — на пятую часть слабее, как и удар; удары
+      // телом и щитом лук не трогает.
+      closeMod = if (Skill.armorSkills.contains(slot.skill)) 1.0 else BattleState.rangedCloseMod(hero, aimed)
+      raw = (slot.skill.baseValue(hero, nowMs) * spread / 100.0 * hero.weaponDust.damageMult * hero.runeMult(slot.skill) *
+               closeMod).toLong.max(1L)
       bumped = aimed.updateSlot(slot.itemId)(s => s.copy(cooldown = s.skill.cooldown, uses = s.uses + 1))
       tmpl = slot.skill.hitTemplate
       // Урон, срезанный защитой моба (для эффектов, которые «упираются» в защиту).
@@ -5197,7 +5220,7 @@ case class BattleState(
     // выждать: шаг ход тратит, а выжидание копит энергию, и подменять одно
     // другим неправильно.
     val actionButtons =
-      if (battle0.group.attackTargets.nonEmpty) List(pangea.engine.Choice("Attack", "Атака", row = Some(1)))
+      if (heroTargets(hero, battle0).nonEmpty) List(pangea.engine.Choice("Attack", "Атака", row = Some(1)))
       else
         List(
           Option.when(BattleState.stepTargets(battle0).nonEmpty)(
@@ -5556,6 +5579,25 @@ object BattleState {
     case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) => true
     case _                                                                             => false
   }
+
+  /** На сколько мест в обе стороны достаёт оружие героя: лук и арбалет — на
+    * три, прочее — только соседей (см. [[GripRates.RangedReach]]). Стрелковое
+    * всегда двуручное, поэтому лежит в правой руке. */
+  def heroReach(hero: Hero): Int =
+    if (hero.equipment.weapon.ranged) GripRates.RangedReach else GroupState.Reach
+
+  /** Досягаемость умения: умения оружия бьют как оружие героя, а умения
+    * нагрудника — Таран и «Отбросить», удары телом и щитом, — только вблизи. */
+  def skillReach(hero: Hero, skill: Skill): Int =
+    if (Skill.armorSkills.contains(skill)) GroupState.Reach else heroReach(hero)
+
+  /** Стрелковое вблизи бьёт слабее: по цели напротив героя и по соседям — на
+    * пятую часть (см. [[GripRates.RangedClosePenaltyPct]]). Цель — тот, кто
+    * стоит в полях боя: удар по соседу или дальней цели идёт через подмену. */
+  def rangedCloseMod(hero: Hero, battle: SoloPveBattle): Double =
+    if (hero.equipment.weapon.ranged && math.abs(battle.group.activePos - battle.group.heroPos) <= GroupState.Reach)
+      (100L - GripRates.RangedClosePenaltyPct) / 100.0
+    else 1.0
 
   /** Бьёт ли умение по врагу — таким в группе нужна цель. */
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {
