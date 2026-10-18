@@ -124,18 +124,7 @@ case class QuestBoardState(
 
   /** Строка объявления: сложность, что просят и как дела. */
   private def line(slot: BoardSlot, idx: Int, inv: List[pangea.model.item.Item]): String = {
-    val what = slot.kind match {
-      case BoardKind.Trophy => content.format("questBoard.ask.trophy",
-        "race" -> slot.race.flatMap(Race.withNameOption).map(_.genitivePlural).getOrElse(""))
-      case BoardKind.CaravanRout => content.text("questBoard.ask.caravan")
-      case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
-      case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
-      case BoardKind.NecromancerHunt => content.text("questBoard.ask.necro")
-      case BoardKind.Thieves     => content.text("questBoard.ask.thieves")
-      case BoardKind.DwarfSupply => content.format("questBoard.ask.dwarves",
-        "name" -> band(slot), "brew" -> brewOf(slot).map(_.label).getOrElse(""),
-        "count" -> BoardRates.BrewsWanted.toString)
-    }
+    val what = ask(content, slot)
     val state =
       if (!slot.taken)   content.text("questBoard.stateFree")
       else if (slot.ready) content.text("questBoard.stateReady")
@@ -249,7 +238,7 @@ case class QuestBoardState(
                 renderer.show(user, Screen(content.format("questBoard.paidBrews",
                   "count" -> BoardRates.BrewsWanted.toString,
                   "brew" -> wanted.map(_.label).getOrElse(""),
-                  "name" -> band(slot), "exp" -> exp.toString,
+                  "name" -> band(content, slot), "exp" -> exp.toString,
                   "doubloons" -> BoardRates.Doubloons.toString), Nil))
             }
           case _ if !slot.done => renderer.show(user, Screen(content.text("questBoard.notYet"), Nil))
@@ -296,18 +285,8 @@ case class QuestBoardState(
   private def trophyFor(slot: BoardSlot, inv: List[pangea.model.item.Item]): Option[pangea.model.item.Item] =
     slot.race.flatMap(r => BoardTrophy.bestFor(inv, r))
 
-  private def brewOf(slot: BoardSlot): Option[BrewKind] =
-    slot.brew.flatMap(BrewKind.withNameOption)
-
   private def brewsFor(slot: BoardSlot, inv: List[pangea.model.item.Item]): Int =
     brewOf(slot).fold(0)(k => inv.count(_.brew.contains(k)))
-
-  /** Имя дружины на этом заказе: бросок слота по списку. Список можно править
-    * — уже вывешенные объявления от этого не рассыплются. */
-  private def band(slot: BoardSlot): String = {
-    val names = content.list("questBoard.bands")
-    names(math.floorMod(slot.band, names.size))
-  }
 
   private def left(now: Long): String = {
     val mins = (BoardRates.untilNextWeek(now) / 60000L).max(1L)
@@ -342,6 +321,31 @@ case class QuestBoardState(
 }
 
 object QuestBoardState {
+
+  /** Что просит объявление — как оно написано на доске, без сложности и хода
+    * дел. Его же показывает журнал заданий в «Персонаже». */
+  def ask(content: SceneContent, slot: BoardSlot): String = slot.kind match {
+    case BoardKind.Trophy => content.format("questBoard.ask.trophy",
+      "race" -> slot.race.flatMap(Race.withNameOption).map(_.genitivePlural).getOrElse(""))
+    case BoardKind.CaravanRout => content.text("questBoard.ask.caravan")
+    case BoardKind.CaveClear   => content.text("questBoard.ask.cave")
+    case BoardKind.SewerRats   => content.text("questBoard.ask.sewer")
+    case BoardKind.NecromancerHunt => content.text("questBoard.ask.necro")
+    case BoardKind.Thieves     => content.text("questBoard.ask.thieves")
+    case BoardKind.DwarfSupply => content.format("questBoard.ask.dwarves",
+      "name" -> band(content, slot), "brew" -> brewOf(slot).map(_.label).getOrElse(""),
+      "count" -> BoardRates.BrewsWanted.toString)
+  }
+
+  /** Какой отвар просят гномы. */
+  def brewOf(slot: BoardSlot): Option[BrewKind] = slot.brew.flatMap(BrewKind.withNameOption)
+
+  /** Имя дружины на этом заказе: бросок слота по списку. Список можно править
+    * — уже вывешенные объявления от этого не рассыплются. */
+  def band(content: SceneContent, slot: BoardSlot): String = {
+    val names = content.list("questBoard.bands")
+    names(math.floorMod(slot.band, names.size))
+  }
 
   val TakePrefix: String = "BoardTake_"
   val HandPrefix: String = "BoardHand_"
