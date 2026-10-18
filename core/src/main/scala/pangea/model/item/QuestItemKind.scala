@@ -11,7 +11,7 @@ sealed abstract class QuestItemKind(val displayName: String, val description: St
 object QuestItemKind extends Enum[QuestItemKind] {
   val values: IndexedSeq[QuestItemKind] = findValues
 
-  /** Письмо с пятидесятого убитого моба — начало «Письма Марисе». */
+  /** Письмо с семьдесят пятого убитого моба — начало «Письма Марисе». */
   case object MarisaLetter extends QuestItemKind(
     "Старое письмо Марисе",
     "Старое заляпанное кровью письмо с восковой печатью с символом монеты, адресованное Марисе Кальдере, проживающей в городе Кинэт."

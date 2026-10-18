@@ -100,7 +100,7 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 
   /** Нажатие «Исследовать уровень»: показываем экран осмотра и сразу же
    *  выбираем и разыгрываем случайное событие. Старейшина мурлоков, которому
-   *  не досталось экрана добычи после сотого убитого, выходит здесь. */
+   *  не досталось экрана добычи после двухсотого убитого, выходит здесь. */
   private def findEvent(user: User, renderer: Renderer): Task[StateType] =
     NpcQuestLog.load(heroDao, user.userId).flatMap { quests =>
       if (MurlocQuest.elderPending(quests)) ZIO.succeed(StateType.MurlocElder) else rollEvent(user, renderer)
