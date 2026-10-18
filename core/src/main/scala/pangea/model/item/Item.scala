@@ -64,9 +64,10 @@ case class Item(
 
   /** Активный навык предмета (оружие/нагрудник), если есть. */
   def activeSkill: Option[pangea.model.skill.Skill] = details match {
-    case ItemDetails.Weapon(s) => Some(s)
-    case ItemDetails.Armor(s)  => Some(s)
-    case _                     => None
+    case ItemDetails.Weapon(s)    => Some(s)
+    case ItemDetails.Armor(s)     => Some(s)
+    case ItemDetails.HandSkill(s) => Some(s)
+    case _                        => None
   }
 
   /** Пассивный навык предмета (кольца/амулеты/шлем/плечи и т.п.), если есть. */
@@ -206,6 +207,7 @@ case class Item(
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")
+      case ItemDetails.HandSkill(skill)  => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Passive(kind)     => List(s"""Пассивный навык: «${kind.label}»""")
       // Пояс — сумка для расходников: сколько ячеек и что в них лежит.
       case ItemDetails.Belt(slots) =>

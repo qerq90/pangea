@@ -1,7 +1,6 @@
 package pangea.model.hero
 
 import pangea.model.battle.SkillSlotState
-import pangea.model.item.ItemDetails
 import pangea.model.monster.Race
 import pangea.model.rune.{Rune, RuneData}
 import pangea.model.state.StateType
@@ -212,19 +211,15 @@ case class Hero(
     )
   }
 
-  /** Слоты активных навыков героя для боя: снимаются с оружия в обеих руках и
-   *  нагрудника (у каждого может быть `activeSkill`) — ключ слота id предмета,
-   *  поэтому два предмета с «одним» навыком катаются независимо, — плюс клейма
-   *  на теле, которых нет на вещах (та же руна на вещи и на теле — одна кнопка;
-   *  id клейма отрицательный, см. `Rune.bodySlotId`). */
+  /** Слоты активных навыков героя для боя: снимаются с того, что в обеих руках
+   *  (оружие, щит), и с нагрудника — ключ слота id предмета. Одинаковые умения не
+   *  складываются: с двух вещей — одна кнопка и одна перезарядка, как будто
+   *  умение одно. Плюс клейма на теле, которых нет на вещах (та же руна на вещи и
+   *  на теле — одна кнопка; id клейма отрицательный, см. `Rune.bodySlotId`). */
   def activeSkillSlots: List[SkillSlotState] = {
-    val worn = List(equipment.weapon, equipment.leftHand, equipment.chestPlate).flatMap { it =>
-      it.details match {
-        case ItemDetails.Weapon(s) => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
-        case ItemDetails.Armor(s)  => Some(SkillSlotState(it.id, s, cooldown = s.initialCooldown))
-        case _                     => None
-      }
-    }
+    val worn = List(equipment.weapon, equipment.leftHand, equipment.chestPlate)
+      .flatMap(it => it.activeSkill.map(s => SkillSlotState(it.id, s, cooldown = s.initialCooldown)))
+      .distinctBy(_.skill)
     val wornSkills = worn.map(_.skill).toSet
     worn ++ runes.brandedActives.filterNot(wornSkills.contains).map(s =>
       SkillSlotState(Rune.bodySlotId(s), s, cooldown = s.initialCooldown))

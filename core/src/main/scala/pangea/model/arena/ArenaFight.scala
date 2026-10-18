@@ -52,7 +52,10 @@ final case class ArenaSide(
   // Сколько своих ходов сторона не сможет применить умение: её сбили с мысли
   // (Боевой клич). Считается на том, кого сбили, — в его зеркале боя этого
   // эффекта не видно, он висит в чужом.
-  blocked: Int                  = 0
+  blocked: Int                  = 0,
+  // Сторона подняла щит своим ходом (Блок): он режет удары и умения соперника
+  // в его ходе. Читается в чужом зеркале — там эта сторона «моб».
+  shieldUp: Boolean             = false
 )
 
 object ArenaSide {
@@ -67,7 +70,8 @@ object ArenaSide {
       "buffs"   -> s.buffs.asJson,
       "ready"   -> s.ready.asJson,
       "seen"    -> s.seen.asJson,
-      "blocked" -> s.blocked.asJson)
+      "blocked" -> s.blocked.asJson,
+      "shieldUp" -> s.shieldUp.asJson)
 
   implicit val decoder: Decoder[ArenaSide] = (c: HCursor) =>
     for {
@@ -81,7 +85,8 @@ object ArenaSide {
       ready   <- c.getOrElse[Boolean]("ready")(false)
       seen    <- c.getOrElse[Int]("seen")(0)
       blocked <- c.getOrElse[Int]("blocked")(0)
-    } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen, blocked)
+      shield  <- c.getOrElse[Boolean]("shieldUp")(false)
+    } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen, blocked, shield)
 }
 
 /** Бой на арене: двое, чей сейчас ход и до какой минуты он думает.

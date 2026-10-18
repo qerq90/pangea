@@ -2,7 +2,7 @@ package pangea.generator.item
 
 import pangea.domain.Rng
 import pangea.model.item.stats.Stat
-import pangea.model.item.{Gem, Grip, GripRates, Item, ItemDetails, ItemType, PassiveKind, Rarity}
+import pangea.model.item.{Gem, Grip, GripRates, Item, ItemDetails, ItemType, PassiveKind, Rarity, ShieldRates}
 import pangea.model.skill.Skill
 
 import scala.annotation.tailrec
@@ -30,7 +30,8 @@ object ItemGenerator {
   }
 
   // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(6+R3) ±20%;
-  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%. R3 = rarity.factorR3.
+  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%; щиту — к защите
+  // ровно 3×lvl (см. ShieldRates). R3 = rarity.factorR3.
   private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
     val r3 = item.rarity.factorR3
     item.itemType match {
@@ -40,6 +41,8 @@ object ItemGenerator {
       case ItemType.ChestPlate =>
         val (bonus, next) = modifySpread(item.lvl * (12.0 + r3), rng, 10L)
         (item.withHp(item.hp + bonus), next)
+      case ItemType.Shield =>
+        (item.withDefence(item.defence + ShieldRates.DefencePerLvl * item.lvl), rng)
       case _ => (item, rng)
     }
   }
@@ -260,10 +263,13 @@ object ItemGenerator {
     else (raw.min(MaxSockets), next)
   }
 
-  // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу.
+  // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу. Щит —
+  // по таблице оружия, но не больше двух гнёзд (см. ShieldRates).
   private def applySockets(item: Item, rng: Rng): (Item, Rng) = {
-    val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon, item.twoHanded, rng)
-    (item.copy(sockets = List.fill(count)(Option.empty[Gem])), next)
+    val shield        = item.itemType == ItemType.Shield
+    val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon || shield, item.twoHanded, rng)
+    val capped        = if (shield) count.min(ShieldRates.MaxSockets) else count
+    (item.copy(sockets = List.fill(capped)(Option.empty[Gem])), next)
   }
 
   // Шанс (в %) получить пассивку по редкости предмета: серый/белый — 10, зелёный —
@@ -305,6 +311,9 @@ object ItemGenerator {
       case ItemType.ChestPlate =>
         val (skill, next) = rng.pick(Skill.armorSkills)
         (item.copy(details = ItemDetails.Armor(skill)), next)
+      // Щиту — его умение, Блок: не случайное и не руна (см. Skill.handSkills).
+      case ItemType.Shield =>
+        (item.copy(details = ItemDetails.HandSkill(Skill.Block)), rng)
       case ItemType.Belt =>
         // Пояс выходит пустым: что в него положить, решает игрок.
         (item.copy(details = ItemDetails.Belt()), rng)

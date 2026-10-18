@@ -57,14 +57,18 @@ object ArenaBattle {
       monsterCurrentHp    = foeHero.fightStats.hp.max(0L),
       monsterCurrentArmor = foeHero.fightStats.armor.max(0L),
       customName          = Some(foe.name),
-      arena               = Some(ArenaRef(fight.id, foe.userId.value)))
+      arena               = Some(ArenaRef(fight.id, foe.userId.value)),
+      // Соперник поднял щит своим ходом — в этом ходе он режет удары героя.
+      monsterShieldUp     = foe.shieldUp)
   }
 
   /** Что из боя переживает ход: эффекты, кулдауны и бафы своей стороны.
-    * Свой блок к этому ходу уже отработал — снимаем. */
+    * Свой запрет на умения к этому ходу уже отработал — снимаем. Щит, поднятый
+    * этим ходом, держится весь ход соперника. */
   def harvest(side: ArenaSide, battle: SoloPveBattle): ArenaSide =
     side.copy(effects = battle.effects, slots = battle.skillSlots,
-      buffs = battle.heroBattleState, ready = true, blocked = (side.blocked - 1).max(0))
+      buffs = battle.heroBattleState, ready = true, blocked = (side.blocked - 1).max(0),
+      shieldUp = battle.heroShieldUp)
 
   /** Сколько ходов соперник не сможет колдовать после этого хода: Боевой клич
     * и комбо вешают запрет на «моба», а на арене этот моб — живой игрок. */

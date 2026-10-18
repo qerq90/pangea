@@ -36,6 +36,8 @@ object ItemNameGenerator {
     ItemType.Flask            -> List("Фляга" -> Fem, "Склянка" -> Fem),
     ItemType.Weapon           -> List("Меч" -> Masc, "Топор" -> Masc, "Кинжал" -> Masc, "Копьё" -> Neut),
     ItemType.AdditionalWeapon -> List("Кинжал" -> Masc, "Стилет" -> Masc),
+    ItemType.Shield           -> List("Круглый Щит" -> Masc, "Треугольный Щит" -> Masc, "Баклер" -> Masc,
+                                      "Башенный Щит" -> Masc, "Костяной Щит" -> Masc),
     ItemType.NoItem           -> List("Пусто" -> Neut)
   )
 

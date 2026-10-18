@@ -39,9 +39,11 @@ object RuneStone {
   /** Сколько малых рун складывается в большую. */
   val PiecesPerBig: Int = 5
 
-  /** Все руны, на которые бывают камни: боевые и пассивные. */
+  /** Все руны, на которые бывают камни: боевые и пассивные. Умения щита рунами
+    * не бывают (см. Skill.handSkills). */
   def all: List[Rune] =
-    Skill.values.toList.map(Rune.Active(_)) ++ PassiveKind.values.toList.map(Rune.Passive(_))
+    Skill.values.toList.filterNot(Skill.handSkills.contains).map(Rune.Active(_)) ++
+      PassiveKind.values.toList.map(Rune.Passive(_))
 
   private val looks: Map[String, Look] = Map(
     // ── Боевые руны: оружие ───────────────────────────────────────────────────

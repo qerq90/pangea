@@ -90,7 +90,13 @@ case class SoloPveBattle(
   lootLevel:      Option[Long] = None,
   // Святая вода разлита по полю: до конца боя жжёт мёртвых, если её не гасят
   // миазмы (см. Aura.HolyWater).
-  holyWater:      Boolean = false
+  holyWater:      Boolean = false,
+  // Щит героя поднят (Блок): до его следующего хода удары и умения врагов по
+  // нему режутся до четверти (см. Skill.Block).
+  heroShieldUp:   Boolean = false,
+  // На арене: соперник — «моб» этого зеркала — поднял щит своим ходом, и удары
+  // героя по нему режутся так же (см. ArenaBattle).
+  monsterShieldUp: Boolean = false
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -665,10 +671,12 @@ object SoloPveBattle {
       noFlee              <- c.getOrElse[Boolean]("noFlee")(false)
       lootLevel           <- c.getOrElse[Option[Long]]("lootLevel")(None)
       holyWater           <- c.getOrElse[Boolean]("holyWater")(false)
+      heroShieldUp        <- c.getOrElse[Boolean]("heroShieldUp")(false)
+      monsterShieldUp     <- c.getOrElse[Boolean]("monsterShieldUp")(false)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
-                         noFlee, lootLevel, holyWater)
+                         noFlee, lootLevel, holyWater, heroShieldUp, monsterShieldUp)
 }

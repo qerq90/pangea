@@ -116,12 +116,21 @@ object Skill extends Enum[Skill] {
 
     /** Урон с шансом (2·Инт − уровень моба)% нанести двойной урон. */
     case object WeakSpotStrike extends Effect
+
+    /** Без урона: щит поднят до конца раунда — обычные атаки и умения врагов по
+      * герою режутся до [[Skill.BlockTakenPct]]% (Блок). Ход на этом кончается.
+      */
+    case object Block extends Effect
   }
 
   // Процент текущего HP, который тратит Кровавая жатва, и сколько процентов
   // текущего HP она вкладывает в урон (см. baseValue).
   val BloodHarvestHpCostPct: Long     = 10L
   val BloodHarvestHpToDamagePct: Long = 12L
+
+  /** Сколько урона проходит сквозь поднятый щит (см. [[Skill.Block]]): три
+    * четверти щит принимает на себя. */
+  val BlockTakenPct: Long = 25L
 
   /** Русское склонение слова «ход» после числа: 1 ход, 2–4 хода, 5+ ходов
     * (с учётом 11–14 → «ходов»). */
@@ -423,6 +432,22 @@ object Skill extends Enum[Skill] {
     def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
+  /** Умение щита. Не руна: приходит с самим щитом и с него не снимается (см.
+    * [[handSkills]]). */
+  case object Block
+      extends Skill(
+        label = "Блок",
+        cooldown = 2,
+        initialCooldown = 0,
+        effect = Effect.Block,
+        hitTemplate = "🛡 Вы закрываетесь щитом: до конца раунда удары и умения врагов по вам слабее на 75%.",
+        description =
+          "Поднять щит и принять удар на него. До конца раунда обычные атаки и умения врагов наносят вам на 75% меньше урона — уже после того, как его срезала защита. Ход на этом кончается. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = 0.0
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
+  }
+
   // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.
   // Нагрудник: 4,5,7,9,11 + Боевой клич, Отбросить.
   val weaponSkills: List[Skill] = List(
@@ -437,6 +462,11 @@ object Skill extends Enum[Skill] {
   )
   val armorSkills: List[Skill] =
     List(MinorHeal, Reinforcement, Restoration, Bulwark, Ram, BattleCry, Shove)
+
+  /** Умения того, что держат в руке, кроме обычного оружия (щит): приходят с
+    * самой вещью и рунами не бывают — ни на камнях, ни у Казимира (см.
+    * `ItemDetails.HandSkill`). */
+  val handSkills: List[Skill] = List(Block)
 
   implicit val encoder: Encoder[Skill] =
     Encoder.encodeString.contramap(_.entryName)
