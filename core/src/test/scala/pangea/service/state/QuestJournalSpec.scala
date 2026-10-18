@@ -47,7 +47,7 @@ object QuestJournalSpec extends ZIOSpecDefault {
     test("всё, что в работе: сюжет, горожане на своём шаге, сегодняшние поручения, взятое с доски") {
       for {
         c <- content
-        text = QuestJournal.render(c, hero, LoreData(firstSteps = true), quests, daily, Some(board), now)
+        text = QuestJournal.render(c, hero, LoreData(firstSteps = true), quests, daily, Some(BoardDesk(List(board))), now)
       } yield assertTrue(text.startsWith("📜 Ваши задания")) &&
               assertTrue(text.contains("📌 «Встать на ноги»") && text.contains("горожан (1/5)")) &&
               assertTrue(text.contains("🧭 «Подопытный» — победить троих, пока действует зелье Густаво (1/3)")) &&
@@ -65,7 +65,7 @@ object QuestJournalSpec extends ZIOSpecDefault {
       for {
         c <- content
         stale = board.copy(week = board.week - 1L)
-        text  = QuestJournal.render(c, hero, LoreData.empty, NpcQuests.empty, DailyQuests.empty, Some(stale), now)
+        text  = QuestJournal.render(c, hero, LoreData.empty, NpcQuests.empty, DailyQuests.empty, Some(BoardDesk(List(stale))), now)
       } yield assertTrue(text == c.text("journal.empty"))
     },
 

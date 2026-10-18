@@ -2,7 +2,7 @@ package pangea.service.state
 
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
-import pangea.model.quest.{BoardData, BoardKind}
+import pangea.model.quest.{BoardDesk, BoardKind}
 import pangea.model.user.UserId
 import zio.Task
 
@@ -10,14 +10,15 @@ import zio.Task
   * делается: караван считается разгромленным у разбитого обоза, пещера —
   * зачищенной в самой пещере. Награду герой забирает сам, вернувшись в гильдию.
   *
-  * Доска живёт в `heroes.quest_data`. Если неделя сменилась, отметка ложится в
-  * уже просроченную доску и сгорит вместе с ней при первом же заходе в
-  * гильдию — так и задумано: неделя и есть срок.
+  * Доски живут в `heroes.quest_data` ([[BoardDesk]]): отметка ложится на ту
+  * доску, где задание взято. Если неделя сменилась, отметка ложится в уже
+  * просроченную доску и сгорит вместе с ней при первом же заходе в гильдию —
+  * так и задумано: неделя и есть срок.
   */
 object BoardProgress {
 
-  def load(heroDao: HeroDao, userId: UserId): Task[BoardData] =
-    heroDao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).getOrElse(BoardData.empty))
+  def load(heroDao: HeroDao, userId: UserId): Task[BoardDesk] =
+    heroDao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).getOrElse(BoardDesk.empty))
 
   /** Взято ли сейчас такое задание и не закрыто ли уже. */
   def hunting(heroDao: HeroDao, userId: UserId, kind: BoardKind): Task[Boolean] =

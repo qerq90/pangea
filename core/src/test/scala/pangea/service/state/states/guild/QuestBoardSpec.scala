@@ -53,8 +53,12 @@ object QuestBoardSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
     } yield (QuestBoardState(heroDao, inv, arts, sched, content), heroDao, inv, renderer, arts)
 
-  private def saved(dao: TestHeroDao) =
-    dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+  /** Стол досок героя целиком. */
+  private def desk(dao: TestHeroDao) =
+    dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).get)
+
+  /** Первая доска на столе — в тестах, где доска одна. */
+  private def saved(dao: TestHeroDao) = desk(dao).map(_.boards.head)
 
   override def spec = suite("Доска заданий гильдии")(
 
@@ -168,10 +172,10 @@ object QuestBoardSpec extends ZIOSpecDefault {
         _     <- dao.writeSceneData(userId, io.circe.Json.Null)
         again <- state.action(testUser, tap("BoardMine"), r)
         board <- r.sentScreens.map(_.last)
-        out   <- state.action(testUser, tap(s"${QuestBoardState.GoPrefix}$idx"), r)
+        out   <- state.action(testUser, tap(s"${QuestBoardState.GoPrefix}novice_$idx"), r)
         road  <- dao.readSceneData(userId).map(_.flatMap(_.as[RoadProgress].toOption))
       } yield assertTrue(again == StateType.QuestBoard) &&
-              assertTrue(board.choices.exists(_.id == s"${QuestBoardState.GoPrefix}$idx")) &&
+              assertTrue(board.choices.exists(_.id == s"${QuestBoardState.GoPrefix}novice_$idx")) &&
               assertTrue(out == StateType.QuestRoad && road.exists(_.kind == BoardKind.SewerRats))
     },
 
@@ -183,12 +187,83 @@ object QuestBoardSpec extends ZIOSpecDefault {
         wall   <- r.sentScreens.map(_.last)
         _      <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Veteran.key), r)
         locked <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        // старая кнопка своей доски со стены, оставшейся в чате, тоже работает
         out    <- state.action(testUser, tap("BoardMine"), r)
         mine   <- r.sentScreens.map(_.last)
-      } yield assertTrue(wall.choices.count(_.id == "BoardTier") == 5) &&
-              assertTrue(wall.choices.count(_.id == "BoardMine") == 1) &&
+        open    = wall.choices.filter(_.label.startsWith("📋")).flatMap(_.data.get("tier"))
+      } yield assertTrue(wall.choices.count(_.id == "BoardTier") == BoardTier.values.size) &&
+              // у новичка предыдущей доски нет — открыта одна своя
+              assertTrue(open == List(BoardTier.Novice.key)) &&
               assertTrue(locked.contains("Зал ветеранов")) &&
               assertTrue(out == StateType.QuestBoard && mine.text.contains(BoardTier.Novice.title))
+    },
+
+    test("открыты своя и предыдущая доска") {
+      assertTrue(BoardTier.open(10L) == List(BoardTier.Novice)) &&
+      assertTrue(BoardTier.open(26L) == List(BoardTier.Novice, BoardTier.Seasoned)) &&
+      assertTrue(BoardTier.open(51L) == List(BoardTier.Seasoned, BoardTier.Veteran)) &&
+      assertTrue(BoardTier.open(150L) == List(BoardTier.Elder, BoardTier.Legend))
+    },
+
+    test("двадцать шестой берёт и с 1–25, и с 26–50; к 51–75 не пускают") {
+      for {
+        t <- board(lvl = 26L)
+        (state, dao, _, r, _) = t
+        _        <- state.enter(testUser, r)
+        wall     <- r.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Novice.key), r)
+        novice   <- r.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}novice_0"), r)
+        _        <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Seasoned.key), r)
+        seasoned <- r.sentScreens.map(_.last)
+        _        <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Veteran.key), r)
+        all      <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        d        <- desk(dao)
+        open      = wall.choices.filter(_.label.startsWith("📋")).flatMap(_.data.get("tier"))
+      } yield assertTrue(open == List(BoardTier.Novice.key, BoardTier.Seasoned.key)) &&
+              assertTrue(novice.text.contains(BoardTier.Novice.title)) &&
+              assertTrue(novice.choices.exists(_.id.startsWith(s"${QuestBoardState.TakePrefix}novice_"))) &&
+              assertTrue(seasoned.text.contains(BoardTier.Seasoned.title)) &&
+              // взятое на доске новичков лежит там же, а у 26–50 своя доска
+              assertTrue(d.of(BoardTier.Novice).exists(_.slots.head.taken) && d.of(BoardTier.Seasoned).isDefined) &&
+              assertTrue(all.contains("Зал ветеранов"))
+    },
+
+    test("пятьдесят первому на доске 1–25 советуют уступить дорогу молодым") {
+      for {
+        t <- board(lvl = 51L)
+        (state, _, _, r, _) = t
+        _   <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Novice.key), r)
+        all <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(all.contains("дай молодым дорогу"))
+    },
+
+    test("одно и то же дело, что отмечается в пути, на двух досках разом не берут") {
+      for {
+        t <- board(lvl = 30L)
+        (state, dao, _, r, _) = t
+        _   <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Novice.key), r)
+        _   <- state.action(testUser, tap("BoardTier", "tier" -> BoardTier.Seasoned.key), r)
+        d0  <- desk(dao)
+        // на обеих досках по пещере, на 1–25 она уже взята
+        _   <- dao.writeQuestData(userId, BoardDesk(List(
+                 d0.of(BoardTier.Novice).get.copy(slots = List(BoardSlot(BoardKind.CaveClear, taken = true, lvl = 10L))),
+                 d0.of(BoardTier.Seasoned).get.copy(slots = List(BoardSlot(BoardKind.CaveClear, lvl = 30L))))).asJson)
+        out <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}seasoned_0"), r)
+        all <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        d   <- desk(dao)
+      } yield assertTrue(out == StateType.QuestBoard) &&
+              assertTrue(all.contains("уже взято на доске 1–25")) &&
+              assertTrue(d.of(BoardTier.Seasoned).exists(!_.slots.head.taken))
+    },
+
+    test("отметка из дела ложится на ту доску, где задание взято; старая запись — одна доска — читается") {
+      val novice   = BoardData(1L, BoardTier.Novice.key, List(BoardSlot(BoardKind.Thieves)))
+      val seasoned = BoardData(1L, BoardTier.Seasoned.key, List(BoardSlot(BoardKind.Thieves, taken = true)))
+      val done     = BoardDesk(List(novice, seasoned)).markDone(BoardKind.Thieves)
+      assertTrue(done.of(BoardTier.Seasoned).exists(_.slots.head.done) && done.of(BoardTier.Novice).exists(!_.slots.head.done)) &&
+      assertTrue(novice.asJson.as[BoardDesk] == Right(BoardDesk(List(novice)))) &&
+      assertTrue(done.asJson.as[BoardDesk] == Right(done))
     },
 
     test("брать можно хоть всё разом") {
@@ -283,17 +358,22 @@ object QuestBoardSpec extends ZIOSpecDefault {
               assertTrue(after.slots.forall(!_.taken))
     },
 
-    test("перерос раздел — доска меняется на новую") {
+    test("перерос раздел — прежняя доска остаётся открытой со взятым, а через раздел уходит со стола") {
       for {
         t <- board(lvl = 25L)
         (state, dao, _, r, _) = t
-        _      <- state.action(testUser, tap("BoardMine"), r)
-        novice <- saved(dao)
-        grown   = hero(26L)
-        _      <- dao.insertHero(grown)
-        _      <- state.action(testUser, tap("BoardMine"), r)
-        next   <- saved(dao)
-      } yield assertTrue(novice.board == BoardTier.Novice && next.board == BoardTier.Seasoned)
+        _     <- state.action(testUser, tap("BoardMine"), r)
+        _     <- state.action(testUser, tap(s"${QuestBoardState.TakePrefix}0"), r)
+        _     <- dao.insertHero(hero(26L))
+        _     <- state.action(testUser, tap("BoardMine"), r)
+        both  <- desk(dao)
+        _     <- dao.insertHero(hero(51L))
+        _     <- state.action(testUser, tap("BoardMine"), r)
+        later <- desk(dao)
+      } yield assertTrue(both.boards.map(_.board) == List(BoardTier.Novice, BoardTier.Seasoned)) &&
+              assertTrue(both.of(BoardTier.Novice).exists(_.slots.head.taken)) &&
+              // ушёл на два раздела вперёд — доска новичков больше не открыта
+              assertTrue(later.boards.map(_.board) == List(BoardTier.Seasoned, BoardTier.Veteran))
     },
 
     test("заказ гномов: десять склянок одного толка, и всё разом") {

@@ -9,7 +9,7 @@ import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKin
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, MaterialKind}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
-import pangea.model.quest.{BoardData, BoardKind, BoardRates, BoardSlot, Difficulty}
+import pangea.model.quest.{BoardData, BoardDesk, BoardKind, BoardRates, BoardSlot, Difficulty}
 import pangea.model.stats.FightStats
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -57,7 +57,7 @@ object NecroQuestSpec extends ZIOSpecDefault {
     dao.readSceneData(userId).map(_.flatMap(_.as[LootData].toOption))
 
   private def boardOf(dao: TestHeroDao): Task[BoardData] =
-    dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).getOrElse(BoardData.empty))
+    dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).getOrElse(BoardData.empty))
 
   /** Пещера некроманта на три комнаты: вход, к северу — мертвецы, к востоку —
     * то, что задано. Раса — орки. */

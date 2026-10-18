@@ -718,7 +718,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
     },
 
     test("уход из пещеры по объявлению валит задание: второй такой пещеры не найти") {
-      import pangea.model.quest.{BoardData, BoardKind, BoardSlot}
+      import pangea.model.quest.{BoardData, BoardDesk, BoardKind, BoardSlot}
       def go(kind: BoardKind, sewer: Boolean, done: Boolean) =
         for {
           t <- cave()
@@ -728,7 +728,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
           _    <- put(dao, smallCave().copy(sewer = sewer))
           out  <- state.action(testUser, tap("CaveOut"), r).zipRight(state.action(testUser, tap("CaveOutYes"), r))
           said <- r.sentScreens.map(_.map(_.text).mkString("\n"))
-          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+          data <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
         } yield (out, said, data)
       for {
         fromCave  <- go(BoardKind.CaveClear, sewer = false, done = false)

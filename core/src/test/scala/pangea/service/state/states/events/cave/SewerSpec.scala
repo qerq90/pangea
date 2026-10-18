@@ -12,7 +12,7 @@ import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKin
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, MaterialKind}
 import pangea.model.monster.{MiniBoss, Monster, MonsterRaceFactor, Race, Rarity}
-import pangea.model.quest.{BoardData, BoardKind, BoardSlot, Difficulty}
+import pangea.model.quest.{BoardData, BoardDesk, BoardKind, BoardSlot, Difficulty}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -352,7 +352,7 @@ object SewerSpec extends ZIOSpecDefault {
         said  <- texts(r)
         after <- dao.getHeroByUserId(userId).map(_.get)
         scene <- sceneOf(dao)
-        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
       } yield assertTrue(said.contains("ещё слышна возня")) &&
               assertTrue(after.exp == 0L && scene.exists(!_.rewarded)) &&
               assertTrue(board.slots.forall(!_.done))
@@ -368,7 +368,7 @@ object SewerSpec extends ZIOSpecDefault {
         _     <- state.enter(testUser, r)
         said  <- texts(r)
         after <- dao.getHeroByUserId(userId).map(_.get)
-        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
       } yield assertTrue(said.contains("+80 опыта") && after.exp == 80L) &&
               assertTrue(said.contains("Большая крыса больше никого не испугает")) &&
               assertTrue(said.contains("В канализации тихо")) &&
@@ -433,7 +433,7 @@ object SewerSpec extends ZIOSpecDefault {
         state  = pangea.service.state.states.battle.BattleState(
                    dao, TestInventoryRepository.accepting, TestItemRepository.make, c)
         out   <- state.action(testUser, tap("ConfirmFlee"), r)
-        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
         scene <- dao.readSceneData(userId)
         said  <- texts(r)
       } yield assertTrue(out == StateType.Dungeon) &&
@@ -471,7 +471,7 @@ object SewerSpec extends ZIOSpecDefault {
                      }
                    attack(10)
                  }
-        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardData].toOption).get)
+        board <- dao.readQuestData(userId).map(_.flatMap(_.as[BoardDesk].toOption).flatMap(_.boards.headOption).get)
         said  <- texts(r)
       } yield assertTrue(out == StateType.Death) &&
               assertTrue(board.slots.map(_.kind) == List(BoardKind.CaveClear)) &&
