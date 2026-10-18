@@ -19,7 +19,8 @@ object ItemDetails {
    *  а также NoItem). */
   case object Plain extends ItemDetails
 
-  /** Оружие с активным навыком (один из `Skill.weaponSkills`). */
+  /** Оружие с активным навыком (один из `Skill.weaponSkills`, у лука и арбалета
+    * — из `Skill.rangedSkills`). */
   case class Weapon(activeSkill: Skill) extends ItemDetails
 
   /** Нагрудник с активным навыком (один из `Skill.armorSkills`). */

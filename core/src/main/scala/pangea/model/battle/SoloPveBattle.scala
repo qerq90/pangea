@@ -236,6 +236,10 @@ case class SoloPveBattle(
     !Race.immovable(Race.withName(slot.race)) &&
       !slot.boss.flatMap(pangea.model.monster.MiniBoss.byName).exists(_.holdsPosition)
 
+  /** Шагает ли моб сам: подвижный и не пригвождён. Пригвождённый — не
+    * сооружение: сквозь него не проходят, и место в строю за ним он держит. */
+  private def walks(slot: MonsterSlot): Boolean = movable(slot) && !slot.effects.monsterRooted
+
   /** Активный моб пал, а в группе есть ещё: записать его в павшие, а в поля
     * боя развернуть ближайшего — НА ЕГО СОБСТВЕННОМ месте. Никого к герою не
     * тянем: место перед ним пустеет, и занять его враги должны сами, шаг за
@@ -351,7 +355,7 @@ case class SoloPveBattle(
     * одно место за раунд. Раньше его подставлял строй (см. [[promoteNext]]).
     * Пара цела, идти некуда, держит позицию или занят союзником — None. */
   def stepActiveTowardsHero: Option[SoloPveBattle] =
-    if (group.paired || !movable(activeSlot) || group.allyAt(group.activePos).exists(_.alive)) None
+    if (group.paired || !walks(activeSlot) || group.allyAt(group.activePos).exists(_.alive)) None
     // Кто уже достаёт героя сбоку, тот и бьёт сбоку: вставать напротив ему
     // незачем, и место павшего он не занимает.
     else if (math.abs(group.activePos - group.heroPos) <= GroupState.Reach) None
@@ -369,7 +373,7 @@ case class SoloPveBattle(
         // Сооружение стоит там, где стоит: подтягивать его к герою нечем. Те,
         // кто уже достаёт героя, тоже стоят: место павшего в паре никто не
         // занимает по принуждению (см. promoteNext).
-        if (!far || busy || !movable(b.group.others(idx))) (b, moved)
+        if (!far || busy || !walks(b.group.others(idx))) (b, moved)
         else b.stepTowardsHero(pos) match {
           case None       => (b, moved)
           case Some(next) =>
@@ -412,7 +416,7 @@ case class SoloPveBattle(
     * Возвращает бой и место, куда перешёл, если перешёл. Сооружение с места
     * не сходит, и без свободного места напротив союзника всё остаётся как есть. */
   def leaveDownedHero: (SoloPveBattle, Option[Int]) =
-    if (!group.heroDown || group.activePos != group.heroPos || monsterCurrentHp <= 0L || !movable(activeSlot))
+    if (!group.heroDown || group.activePos != group.heroPos || monsterCurrentHp <= 0L || !walks(activeSlot))
       (this, None)
     else
       group.allies
@@ -429,8 +433,8 @@ case class SoloPveBattle(
     }
 
   /** Кого перемешивание поднимает с места, по возрастанию мест: все, кроме
-    * сооружений и тех, кто держит позицию сам. */
-  def movableInOrder: List[MonsterSlot] = monstersInOrder.filter(movable)
+    * сооружений, тех, кто держит позицию сам, и пригвождённых. */
+  def movableInOrder: List[MonsterSlot] = monstersInOrder.filter(walks)
 
   /** Перемешать строй: подвижные мобы тянут жребий и встают заново — сперва на
     * все места, где напротив кто-то есть (герой, пока он на ногах, и живые
@@ -448,7 +452,7 @@ case class SoloPveBattle(
     val movers = movableInOrder
     if (order.sorted != movers.indices.toList || movers.isEmpty) this
     else {
-      val fixed  = ((group.activePos, activeSlot) :: group.entries).filterNot { case (_, s) => movable(s) }
+      val fixed  = ((group.activePos, activeSlot) :: group.entries).filterNot { case (_, s) => walks(s) }
       val locked = fixed.map(_._1).toSet
       // Места, где напротив кто-то стоит, — туда перемешивание ставит первыми:
       // от места героя и дальше по союзникам. Лежачий герой целью не считается.
@@ -558,6 +562,7 @@ case class SoloPveBattle(
       heroBleedCoatTurns   = (effects.heroBleedCoatTurns - 1).max(0),
       heroSmokeTurns       = (effects.heroSmokeTurns - 1).max(0),
       heroTrueStrikeTurns  = (effects.heroTrueStrikeTurns - 1).max(0),
+      monsterRootedTurns   = (effects.monsterRootedTurns - 1).max(0),
       monsterDefenceDebuff = effects.monsterDefenceDebuff.flatMap(_.ticked)
     )
   )
