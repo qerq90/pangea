@@ -96,7 +96,13 @@ case class SoloPveBattle(
   heroShieldUp:   Boolean = false,
   // На арене: соперник — «моб» этого зеркала — поднял щит своим ходом, и удары
   // героя по нему режутся так же (см. ArenaBattle).
-  monsterShieldUp: Boolean = false
+  monsterShieldUp: Boolean = false,
+  // Кинжал героя наизготовку (Контрудар): первый удар врага, от которого он
+  // увернётся до своего следующего хода, получит ответ наверняка.
+  heroCounterReady: Boolean = false,
+  // На арене: соперник держит парирующий кинжал наготове — промах героя, и он
+  // ответит ударом этой силы (см. ArenaBattle.counterPower). 0 — не держит.
+  monsterCounterPower: Long = 0L
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -673,10 +679,13 @@ object SoloPveBattle {
       holyWater           <- c.getOrElse[Boolean]("holyWater")(false)
       heroShieldUp        <- c.getOrElse[Boolean]("heroShieldUp")(false)
       monsterShieldUp     <- c.getOrElse[Boolean]("monsterShieldUp")(false)
+      heroCounterReady    <- c.getOrElse[Boolean]("heroCounterReady")(false)
+      monsterCounterPower <- c.getOrElse[Long]("monsterCounterPower")(0L)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
-                         noFlee, lootLevel, holyWater, heroShieldUp, monsterShieldUp)
+                         noFlee, lootLevel, holyWater, heroShieldUp, monsterShieldUp,
+                         heroCounterReady, monsterCounterPower)
 }

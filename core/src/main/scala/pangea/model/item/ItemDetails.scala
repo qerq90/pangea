@@ -25,7 +25,8 @@ object ItemDetails {
   /** Нагрудник с активным навыком (один из `Skill.armorSkills`). */
   case class Armor(activeSkill: Skill) extends ItemDetails
 
-  /** Умение того, что держат в руке, кроме обычного оружия, — щита (Блок). Это
+  /** Умение того, что держат в руке, кроме обычного оружия, — щита (Блок) или
+    * парирующего кинжала (Контрудар). Это
     * умение «оружия», но не руна: Казимир его не снимает, рунных камней на него
     * не бывает (см. `Skill.handSkills`). */
   case class HandSkill(activeSkill: Skill) extends ItemDetails

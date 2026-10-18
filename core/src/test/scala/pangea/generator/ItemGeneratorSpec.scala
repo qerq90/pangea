@@ -3,6 +3,7 @@ package pangea.generator
 import pangea.domain.Rng
 import pangea.generator.item.ItemGenerator
 import pangea.model.item.{Grip, Item, ItemDetails, ItemType, PassiveKind, Rarity}
+import pangea.model.skill.Skill.Counterstrike
 import pangea.model.skill.Skill
 import zio.test._
 
@@ -15,8 +16,9 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
   }
 
   // Доля предметов заданного типа с пассивкой при данной редкости (по выборке).
+  // Кольцо — одна вещь из двадцати, поэтому выборка большая: иначе шум.
   private def passiveRate(itemType: ItemType, rarity: Rarity): Double = {
-    val items = (1L to 1200L)
+    val items = (1L to 8000L)
       .map(s => ItemGenerator.createItemAtLevel(10L, rarity, Rng(s))._1)
       .filter(_.itemType == itemType)
     items.count(_.passive.isDefined).toDouble / items.size.max(1)
@@ -105,12 +107,14 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(items.filter(_.itemType == ItemType.ChestPlate).forall(_.hp > 0L))
     },
 
-    test("Weapon всегда имеет activeSkill из weaponSkills") {
-      val weapons = (1L to 500L)
+    test("Weapon всегда имеет activeSkill из weaponSkills, а парирующий кинжал — Контрудар") {
+      val weapons = (1L to 2000L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.Weapon)
-      assertTrue(weapons.nonEmpty) &&
-      assertTrue(weapons.forall(i => skillOf(i).exists(Skill.weaponSkills.contains)))
+      val (parrying, rest) = weapons.partition(_.grip.contains(Grip.Parrying))
+      assertTrue(rest.nonEmpty && parrying.nonEmpty) &&
+      assertTrue(rest.forall(i => skillOf(i).exists(Skill.weaponSkills.contains))) &&
+      assertTrue(parrying.forall(_.details == ItemDetails.HandSkill(Counterstrike)))
     },
 
     test("ChestPlate всегда имеет activeSkill из armorSkills") {

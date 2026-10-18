@@ -196,6 +196,12 @@ object ItemGenerator {
   private val TwoHandedPool: List[Grip] =
     List(Grip.TwoHanded, Grip.TwoHanded, Grip.TwoHanded, Grip.Bow, Grip.Crossbow)
 
+  /** Одноручное — поровну меч, топор, кинжал, копьё или парирующий кинжал. У
+    * четырёх первых хват один, поэтому в пуле он стоит четырежды: парирующий
+    * кинжал выходит каждым десятым оружием. */
+  private val OneHandedPool: List[Grip] =
+    List(Grip.OneHanded, Grip.OneHanded, Grip.OneHanded, Grip.OneHanded, Grip.Parrying)
+
   /** Хват оружия: в одну руку или в обе — поровну, если его не задали; в обе —
     * см. [[TwoHandedPool]]. Одноручное несёт 60% каждого своего стата,
     * двуручное (и лук с арбалетом) — все сто (см. [[Grip]]); режется итог,
@@ -207,7 +213,7 @@ object ItemGenerator {
         case Some(g) => (g, rng)
         case None =>
           val (two, r) = rng.nextBoolean
-          if (two) r.pick(TwoHandedPool) else (Grip.OneHanded, r)
+          if (two) r.pick(TwoHandedPool) else r.pick(OneHandedPool)
       }
       def cut(v: Long): Long = v * grip.statPct / 100L
       (item.copy(
@@ -263,12 +269,15 @@ object ItemGenerator {
     else (raw.min(MaxSockets), next)
   }
 
-  // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу. Щит —
-  // по таблице оружия, но не больше двух гнёзд (см. ShieldRates).
+  // Раскатывает пустые гнёзда (None) на предмет по его редкости/типу. Щит и
+  // парирующий кинжал — по таблице оружия, но не больше двух гнёзд.
   private def applySockets(item: Item, rng: Rng): (Item, Rng) = {
     val shield        = item.itemType == ItemType.Shield
     val (count, next) = socketCount(item.rarity, item.itemType == ItemType.Weapon || shield, item.twoHanded, rng)
-    val capped        = if (shield) count.min(ShieldRates.MaxSockets) else count
+    val capped        =
+      if (shield) count.min(ShieldRates.MaxSockets)
+      else if (item.grip.contains(Grip.Parrying)) count.min(GripRates.ParryingMaxSockets)
+      else count
     (item.copy(sockets = List.fill(capped)(Option.empty[Gem])), next)
   }
 
@@ -305,6 +314,9 @@ object ItemGenerator {
   //  - прочим носимым слотам — пассивка по шансу редкости (см. applyPassive).
   private def applyTypeDetails(item: Item, rng: Rng): (Item, Rng) =
     item.itemType match {
+      // Парирующему кинжалу — его умение, Контрудар: не случайное и не руна.
+      case ItemType.Weapon if item.grip.contains(Grip.Parrying) =>
+        (item.copy(details = ItemDetails.HandSkill(Skill.Counterstrike)), rng)
       case ItemType.Weapon =>
         val (skill, next) = rng.pick(Skill.weaponSkills)
         (item.copy(details = ItemDetails.Weapon(skill)), next)

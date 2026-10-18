@@ -1,8 +1,8 @@
 package pangea.service.state.states.arena
 
 import pangea.model.arena.{ArenaFight, ArenaSide}
-import pangea.model.battle.{ArenaRef, SoloPveBattle}
-import pangea.model.hero.Hero
+import pangea.model.battle.{ArenaRef, HeroBattleState, SoloPveBattle}
+import pangea.model.hero.{Achievement, Hero}
 import pangea.model.monster.{Monster, Rarity}
 import pangea.model.user.UserId
 
@@ -59,7 +59,20 @@ object ArenaBattle {
       customName          = Some(foe.name),
       arena               = Some(ArenaRef(fight.id, foe.userId.value)),
       // Соперник поднял щит своим ходом — в этом ходе он режет удары героя.
-      monsterShieldUp     = foe.shieldUp)
+      monsterShieldUp     = foe.shieldUp,
+      // …или держит парирующий кинжал наготове: промах героя — и он ответит.
+      monsterCounterPower = if (foe.counterUp) counterPower(foeHero, foe.buffs, nowMs) else 0L)
+  }
+
+  /** Сила удара стороны для контрудара в чужом зеркале — та же формула, что у
+    * обычного удара героя (см. BattleState.playerStrike), только без разброса,
+    * проков и стихий: (Сила·3 + атака) с бафами боя, вполсилы без оружия, с
+    * множителями пассивок, пыли и достижений. */
+  def counterPower(hero: Hero, buffs: HeroBattleState, nowMs: Long): Long = {
+    val f         = buffs.applyTo(hero.effectiveFightStats(nowMs))
+    val weaponMod = if (hero.equipment.unarmed) 0.5 else 1.0
+    ((hero.effectiveBaseStats(nowMs).str * 3L + f.atk) * weaponMod * hero.passives.finalDamageMult *
+      hero.weaponDust.damageMult * Achievement.damagePct(hero) / 100.0).toLong.max(1L)
   }
 
   /** Что из боя переживает ход: эффекты, кулдауны и бафы своей стороны.
@@ -68,7 +81,7 @@ object ArenaBattle {
   def harvest(side: ArenaSide, battle: SoloPveBattle): ArenaSide =
     side.copy(effects = battle.effects, slots = battle.skillSlots,
       buffs = battle.heroBattleState, ready = true, blocked = (side.blocked - 1).max(0),
-      shieldUp = battle.heroShieldUp)
+      shieldUp = battle.heroShieldUp, counterUp = battle.heroCounterReady)
 
   /** Сколько ходов соперник не сможет колдовать после этого хода: Боевой клич
     * и комбо вешают запрет на «моба», а на арене этот моб — живой игрок. */

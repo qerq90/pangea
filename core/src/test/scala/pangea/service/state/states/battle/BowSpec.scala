@@ -91,7 +91,9 @@ object BowSpec extends ZIOSpecDefault {
     test("двуручное — поровну меч, топор, копьё, лук и арбалет: лук или арбалет — каждое пятое") {
       val weapons = (1L to 4000L).map(s => generated(s))
       def share(g: Grip) = weapons.count(_.grip.contains(g)).toDouble / weapons.size
-      assertTrue(share(Grip.OneHanded) > 0.46 && share(Grip.OneHanded) < 0.54) &&
+      // Одноручное — половина, из неё пятая часть — парирующие кинжалы.
+      assertTrue(share(Grip.OneHanded) > 0.36 && share(Grip.OneHanded) < 0.44) &&
+      assertTrue(share(Grip.Parrying) > 0.08 && share(Grip.Parrying) < 0.12) &&
       assertTrue(share(Grip.TwoHanded) > 0.26 && share(Grip.TwoHanded) < 0.34) &&
       assertTrue(share(Grip.Bow) > 0.08 && share(Grip.Bow) < 0.12) &&
       assertTrue(share(Grip.Crossbow) > 0.08 && share(Grip.Crossbow) < 0.12)

@@ -219,6 +219,43 @@ object ArenaSpec extends ZIOSpecDefault {
               assertTrue(open._2 > 0L && shut._2 == BattleState.shieldCut(up = true, open._2))
     },
 
+    test("парирующий кинжал на арене: соперник промахнулся — и получил ответ в своём же ходе") {
+      val dagger = pangea.model.item.Item(401L, "Парирующий кинжал", 10L, pangea.model.item.Rarity.Blue,
+        pangea.model.item.ItemType.Weapon,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        grip = Some(pangea.model.item.Grip.Parrying),
+        details = pangea.model.item.ItemDetails.HandSkill(pangea.model.skill.Skill.Counterstrike))
+      val parrier = fighter(oneId, 1L, agi = 20, int = 20).copy(
+        equipment = TestFixtures.emptyEquipment.copy(weapon = dagger))
+      val foe = fighter(twoId, 2L, agi = 5, int = 5)
+      def round(foeHitRoll: Int) =
+        for {
+          t <- arena(oneId -> parrier, twoId -> foe)
+          (state, battle, dao, fights, _, r) = t
+          _      <- state.action(one, tap("ArenaByCode"), r)
+          code    = codeOf(fights)
+          _      <- state.action(two, typed(code), r)
+          _      <- state.action(one, tap("ArenaPoke"), r)
+          _      <- TestRandom.feedLongs(100L)                    // разброс умения
+          _      <- battle.action(one, tap("Skill_401"), r)
+          ready   = fights.snapshot.head.sideOf(oneId).exists(_.counterUp)
+          _      <- battle.action(two, tap("ArenaPoke"), r)
+          // бросок соперника; дальше — разброс ответа или его удара
+          _      <- TestRandom.feedInts(foeHitRoll) *> TestRandom.feedLongs(100L)
+          _      <- battle.action(two, tap("Attack"), r)
+          me     <- heroOf(dao, oneId)
+          him    <- heroOf(dao, twoId)
+        } yield (ready, parrier.fightStats.hp - me.fightStats.hp, foe.fightStats.hp - him.fightStats.hp)
+      for {
+        missed <- round(foeHitRoll = 1)
+        hit    <- round(foeHitRoll = 60)
+      } yield assertTrue(missed._1) &&
+              // промах: по мне не попали, а ответ он получил
+              assertTrue(missed._2 == 0L && missed._3 > 0L) &&
+              // попал: ответа нет
+              assertTrue(hit._2 > 0L && hit._3 == 0L)
+    },
+
     test("в чужой ход кнопки убраны с экрана, а не просто не работают") {
       val quick = fighter(oneId, 1L, agi = 20, int = 20)
       val slow  = fighter(twoId, 2L, agi = 5, int = 5)
