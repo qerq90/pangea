@@ -26,6 +26,21 @@ object ArenaStatus extends Enum[ArenaStatus] {
   implicit val decoder: Decoder[ArenaStatus] = (c: HCursor) => c.as[String].map(ArenaStatus.withName)
 }
 
+/** Режим боя на арене. Один на один отряд остаётся за оградой (на песок
+  * выходит разве что крыса из-под ног), в групповом бою каждый выходит со своим
+  * отрядом. Соперников сводят только в одном режиме. */
+sealed trait ArenaMode extends EnumEntry
+object ArenaMode extends Enum[ArenaMode] {
+  val values: IndexedSeq[ArenaMode] = findValues
+
+  case object Solo  extends ArenaMode
+  case object Group extends ArenaMode
+
+  implicit val encoder: Encoder[ArenaMode] = (m: ArenaMode) => m.entryName.asJson
+  implicit val decoder: Decoder[ArenaMode] = (c: HCursor) =>
+    c.as[String].map(s => ArenaMode.withNameOption(s).getOrElse(Solo))
+}
+
 /** Союзник стороны на песке. `id` — его номер на весь бой: по нему его узнают
   * в чужом зеркале боя, где он — «моб» (см. `MonsterSlot.arenaUnit`). Сам
   * союзник — как в лабиринте: место, раны, энергия. */
@@ -159,7 +174,9 @@ final case class ArenaFight(
   // когда его зовут к экрану.
   lastLog:  List[String]   = Nil,
   turnNo:   Int            = 0,
-  winner:   Option[UserId] = None
+  winner:   Option[UserId] = None,
+  // Один на один или группа на группу (см. ArenaMode).
+  mode:     ArenaMode      = ArenaMode.Solo
 ) {
   def sides: List[ArenaSide] = a :: b.toList
 
@@ -216,7 +233,8 @@ object ArenaFight {
       "open"     -> f.open.asJson,
       "lastLog"  -> f.lastLog.asJson,
       "turnNo"   -> f.turnNo.asJson,
-      "winner"   -> f.winner.map(_.value).asJson)
+      "winner"   -> f.winner.map(_.value).asJson,
+      "mode"     -> f.mode.asJson)
 
   implicit val decoder: Decoder[ArenaFight] = (c: HCursor) =>
     for {
@@ -232,8 +250,9 @@ object ArenaFight {
       lastLog  <- c.getOrElse[List[String]]("lastLog")(Nil)
       turnNo   <- c.getOrElse[Int]("turnNo")(0)
       winner   <- c.getOrElse[Option[Long]]("winner")(None)
+      mode     <- c.getOrElse[ArenaMode]("mode")(ArenaMode.Solo)
     } yield ArenaFight(id, code, status, a, b, turn.map(UserId(_)), deadline, round,
-                       open, lastLog, turnNo, winner.map(UserId(_)))
+                       open, lastLog, turnNo, winner.map(UserId(_)), mode)
 }
 
 /** Числа арены. Отдельно от модели: их читают и состояние, и бой, и тесты. */

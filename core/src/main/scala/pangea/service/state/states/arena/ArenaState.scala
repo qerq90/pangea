@@ -5,7 +5,7 @@ import io.circe.{Json, jawn}
 import pangea.dao.arena.ArenaDao
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Players, Renderer, SceneContent, Screen, Target}
-import pangea.model.arena.{ArenaFight, ArenaRates, ArenaSide, ArenaStatus}
+import pangea.model.arena.{ArenaFight, ArenaMode, ArenaRates, ArenaSide, ArenaStatus}
 import pangea.model.hero.Hero
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -25,8 +25,9 @@ import java.util.concurrent.TimeUnit
   * кодом: код передают тому, с кем договорились, а он пишет его в ответ.
   *
   * Первым ходит тот, у кого ловкость с интеллектом больше; поровну — решает
-  * монета. Отряд на песок не выходит, добычи и опыта здесь нет, а проигравший
-  * уходит на своих ногах с единицей HP.
+  * монета. Режим выбирается первым (см. ArenaMode): один на один отряд остаётся
+  * за оградой, в групповом бою выходит с героем. Добычи и опыта здесь нет, а
+  * проигравший уходит на своих ногах с единицей HP.
   */
 case class ArenaState(
   heroDao:   HeroDao,
@@ -39,8 +40,10 @@ case class ArenaState(
 
   private val branch = new Branch(
     routes = Map(
-      "ArenaNearest" -> Target.Run { (u, _, r) => showWaiting(u, r) },
-      "ArenaByCode"  -> Target.Run { (u, _, r) => enlist(u, r) },
+      "ArenaSolo"    -> Target.Run { (u, _, r) => showMode(u, ArenaMode.Solo, r) },
+      "ArenaGroup"   -> Target.Run { (u, _, r) => showMode(u, ArenaMode.Group, r) },
+      "ArenaNearest" -> Target.Run { (u, ua, r) => showWaiting(u, modeOf(ua), r) },
+      "ArenaByCode"  -> Target.Run { (u, ua, r) => enlist(u, modeOf(ua), r) },
       "ArenaCancel"  -> Target.Run { (u, _, r) => cancel(u, r) },
       "ArenaRest"    -> Target.Run { (u, _, r) => rest(u, r) },
       "ArenaMenu"    -> Target.Run { (u, _, r) => enter(u, r).as(StateType.Arena) },
@@ -83,47 +86,69 @@ case class ArenaState(
 
   private def showMenu(user: User, renderer: Renderer): Task[Unit] =
     renderer.show(user, Screen(content.text("arena.menu"), List(
-      content.choice("ArenaNearest", "arena.nearest").copy(color = ChoiceColor.Positive, row = Some(0)),
-      content.choice("ArenaByCode",  "arena.byCode").copy(row = Some(0)),
+      content.choice("ArenaSolo",  "arena.solo").copy(color = ChoiceColor.Positive, row = Some(0)),
+      content.choice("ArenaGroup", "arena.group").copy(color = ChoiceColor.Positive, row = Some(0)),
       content.choice("ArenaRest", "arena.rest").copy(row = Some(1)),
       content.choice("OpenCharacter", "common.character").copy(row = Some(1)),
       content.choice("LeaveArena", "arena.leave").copy(color = ChoiceColor.Negative, row = Some(2)),
       CityExit.button(content, Some(2)))))
 
+  /** Экран режима: что в нём за бой и как найти соперника. Режим едет в
+    * кнопках: по нему и очередь, и запись. */
+  private def showMode(user: User, mode: ArenaMode, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text(s"arena.mode.${mode.entryName}"), List(
+      content.choice("ArenaNearest", "arena.nearest")
+        .copy(color = ChoiceColor.Positive, row = Some(0), data = Map("mode" -> mode.entryName)),
+      content.choice("ArenaByCode", "arena.byCode").copy(row = Some(0), data = Map("mode" -> mode.entryName)),
+      backButton(1)))).as(StateType.Arena)
+
+  /** Режим из кнопки. Старые кнопки без режима — один на один, как и было. */
+  private def modeOf(ua: UserAction): ArenaMode =
+    ua.payload.flatMap(p => jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("mode")))
+      .flatMap(ArenaMode.withNameOption).getOrElse(ArenaMode.Solo)
+
   // ── Ближайший бой: кто уже ждёт ───────────────────────────────────────────
 
   /** «Ближайший бой»: герой сам встаёт в общую очередь и видит остальных,
     * кто в ней стоит. Записи по коду сюда не попадают — их зовут кодом. */
-  private def showWaiting(user: User, renderer: Renderer): Task[StateType] =
+  private def showWaiting(user: User, mode: ArenaMode, renderer: Renderer): Task[StateType] =
     for {
-      _   <- enqueue(user)
-      all <- arenaDao.waiting(ArenaRates.ListSize + 1)
+      _   <- enqueue(user, mode)
+      all <- arenaDao.waiting(ArenaRates.ListSize + 1, mode)
       free = all.filter(f => f.waiting && !f.has(user.userId)).take(ArenaRates.ListSize)
+      // В групповом бою видно, сколько бойцов выйдет с каждым: отряд считаем по
+      // герою сейчас — с ним он и выйдет.
+      sizes <- ZIO.foreach(free)(f =>
+                 if (mode != ArenaMode.Group) ZIO.succeed(0)
+                 else heroDao.getHeroById(f.a.heroId).map(_.fold(0)(ArenaBattle.squadSize)))
       _ <- if (free.isEmpty)
              renderer.show(user, Screen(content.text("arena.noneWaiting"), List(backButton(0))))
            else {
-             val buttons = free.zipWithIndex.map { case (f, i) =>
-               Choice(s"$JoinPrefix${f.code}",
-                 content.format("arena.foeLine", "name" -> f.a.name, "lvl" -> f.a.lvl.toString),
-                 color = ChoiceColor.Positive, row = Some(i))
+             val buttons = free.zip(sizes).zipWithIndex.map { case ((f, size), i) =>
+               val line =
+                 if (mode == ArenaMode.Group)
+                   content.format("arena.foeLineGroup", "name" -> f.a.name, "lvl" -> f.a.lvl.toString, "n" -> size.toString)
+                 else content.format("arena.foeLine", "name" -> f.a.name, "lvl" -> f.a.lvl.toString)
+               Choice(s"$JoinPrefix${f.code}", line, color = ChoiceColor.Positive, row = Some(i))
              }
              renderer.show(user, Screen(content.text("arena.waitingHeader"),
                buttons :+ backButton(free.size)))
            }
     } yield StateType.Arena
 
-  /** Встать в общую очередь: записи нет — заводим открытую, запись по коду —
-    * открываем её же, код при этом остаётся в силе. */
-  private def enqueue(user: User): Task[Unit] =
+  /** Встать в общую очередь режима: записи нет — заводим открытую, запись по
+    * коду — открываем её же, код при этом остаётся в силе. Ждал в другом режиме
+    * — запись переходит в этот. */
+  private def enqueue(user: User, mode: ArenaMode): Task[Unit] =
     arenaDao.ofUser(user.userId).flatMap {
-      case Some(f) if f.waiting && !f.open =>
-        nowMs.flatMap(now => arenaDao.update(f.copy(open = true), now))
+      case Some(f) if f.waiting && (!f.open || f.mode != mode) =>
+        nowMs.flatMap(now => arenaDao.update(f.copy(open = true, mode = mode), now))
       case Some(_) => ZIO.unit
       case None =>
         for {
           hero <- getHero(user)
           now  <- nowMs
-          _    <- register(user, hero, now, open = true)
+          _    <- register(user, hero, now, mode, open = true)
         } yield ()
     }
 
@@ -147,9 +172,17 @@ case class ArenaState(
 
   // ── По записи: свой код и чужой ───────────────────────────────────────────
 
-  /** Записаться и показать свой код. Уже записан — просто напоминаем код. */
-  private def enlist(user: User, renderer: Renderer): Task[StateType] =
+  /** Записаться и показать свой код. Уже записан — просто напоминаем код; в
+    * другом режиме — запись переходит в этот, код прежний. */
+  private def enlist(user: User, mode: ArenaMode, renderer: Renderer): Task[StateType] =
     arenaDao.ofUser(user.userId).flatMap {
+      case Some(fight) if fight.waiting && fight.mode != mode =>
+        for {
+          now  <- nowMs
+          moved = fight.copy(mode = mode)
+          _    <- arenaDao.update(moved, now)
+          _    <- showEnlisted(user, moved, renderer)
+        } yield StateType.Arena
       case Some(fight) if fight.waiting => showEnlisted(user, fight, renderer).as(StateType.Arena)
       case Some(_)                      => renderer.show(user, Screen(content.text("arena.alreadyFighting"), Nil))
                                              .as(StateType.Arena)
@@ -157,22 +190,23 @@ case class ArenaState(
         for {
           hero  <- getHero(user)
           now   <- nowMs
-          fight <- register(user, hero, now)
+          fight <- register(user, hero, now, mode)
           _     <- showEnlisted(user, fight, renderer)
         } yield StateType.Arena
     }
 
   /** Завести запись со свободным кодом: занятый код — не беда, катаем другой. */
-  private def register(user: User, hero: Hero, nowMs: Long, open: Boolean = false, tries: Int = 8): Task[ArenaFight] =
+  private def register(user: User, hero: Hero, nowMs: Long, mode: ArenaMode,
+                       open: Boolean = false, tries: Int = 8): Task[ArenaFight] =
     for {
       n    <- Random.nextIntBetween(0, 10000)
       code  = f"$n%04d"
       name <- nameOf(user)
       side  = ArenaSide(user.userId, hero.id, name, hero.lvl)
-      made <- arenaDao.create(ArenaFight(0L, code, ArenaStatus.Waiting, side, None, open = open), nowMs)
+      made <- arenaDao.create(ArenaFight(0L, code, ArenaStatus.Waiting, side, None, open = open, mode = mode), nowMs)
       out  <- made match {
                 case Some(fight)         => ZIO.succeed(fight)
-                case None if tries > 1   => register(user, hero, nowMs, open, tries - 1)
+                case None if tries > 1   => register(user, hero, nowMs, mode, open, tries - 1)
                 case None                => ZIO.fail(new Throwable("Arena: no free code"))
               }
     } yield out
@@ -181,7 +215,8 @@ case class ArenaState(
     * зов соперника приходит только тому, кто на арене. Уйти можно, сняв
     * запись; «Назад» отсюда вело на этот же экран и только мешало. */
   private def showEnlisted(user: User, fight: ArenaFight, renderer: Renderer): Task[Unit] =
-    renderer.show(user, Screen(content.format("arena.enlisted", "code" -> fight.code), List(
+    renderer.show(user, Screen(content.format("arena.enlisted", "code" -> fight.code,
+      "mode" -> content.text(s"arena.modeName.${fight.mode.entryName}")), List(
       content.choice("ArenaCancel", "arena.cancel").copy(color = ChoiceColor.Negative, row = Some(0)))))
 
   private def cancel(user: User, renderer: Renderer): Task[StateType] =
@@ -230,10 +265,11 @@ case class ArenaState(
       name    <- nameOf(user)
       me       = ArenaSide(user.userId, hero.id, name, hero.lvl)
       first    = ArenaBattle.firstTurn(fight.a.userId -> foeHero, user.userId -> hero, now, coin)
-      // Крыса из-под ног (набор «Крыса», порог 12) выходит на песок вместе с героем.
-      joined   = fight.copy(status = ArenaStatus.Fighting,
-                   a = ArenaBattle.withStartingRat(fight.a, foeHero),
-                   b = Some(ArenaBattle.withStartingRat(me, hero)))
+      // В групповом бою каждый выходит со своим отрядом; крыса из-под ног
+      // (набор «Крыса», порог 12) — в любом режиме, вместе с героем.
+      enter    = (side: ArenaSide, h: Hero) => ArenaBattle.withStartingRat(
+                   if (fight.mode == ArenaMode.Group) ArenaBattle.withSquad(side, h) else side, h)
+      joined   = fight.copy(status = ArenaStatus.Fighting, a = enter(fight.a, foeHero), b = Some(enter(me, hero)))
                    .passTurn(first, now).copy(round = 1)
       _       <- arenaDao.update(joined, now)
       // Соперника зовём к экрану: он ждал на арене, а теперь уже дерётся.
@@ -241,7 +277,7 @@ case class ArenaState(
                    BattleState.ArenaPokeAction)
       _       <- scheduler.schedule(first, now + ArenaRates.TurnMs, TaskKind.ArenaTurn,
                    StateType.Battle, BattleState.ArenaTurnAction)
-      _       <- renderer.show(user, Screen(content.format("arena.started",
+      _       <- renderer.show(user, Screen(content.format(startedKey(fight),
                    "name" -> fight.a.name, "who" -> whoFirst(first, user.userId)), Nil))
       out     <- toBattle(user, hero, joined, now, renderer)
     } yield out
@@ -256,7 +292,7 @@ case class ArenaState(
           now  <- nowMs
           hero <- getHero(user)
           foe   = fight.foeOf(user.userId)
-          _    <- ZIO.foreachDiscard(foe)(f => renderer.show(user, Screen(content.format("arena.started",
+          _    <- ZIO.foreachDiscard(foe)(f => renderer.show(user, Screen(content.format(startedKey(fight),
                     "name" -> f.name, "who" -> whoFirst(fight.turn.getOrElse(user.userId), user.userId)), Nil)))
           out  <- toBattle(user, hero, fight, now, renderer)
         } yield out
@@ -276,6 +312,10 @@ case class ArenaState(
         } yield StateType.Battle
       case _ => enter(user, renderer).as(StateType.Arena)
     }
+
+  /** С чего начинается бой: в групповом — со строя за спиной у каждого. */
+  private def startedKey(fight: ArenaFight): String =
+    if (fight.mode == ArenaMode.Group) "arena.startedGroup" else "arena.started"
 
   private def whoFirst(first: UserId, me: UserId): String =
     content.text(if (first == me) "arena.youFirst" else "arena.foeFirst")
