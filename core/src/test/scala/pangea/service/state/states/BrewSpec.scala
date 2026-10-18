@@ -549,7 +549,7 @@ object BrewSpec extends ZIOSpecDefault {
     },
 
     // ── Трактирщик ────────────────────────────────────────────────────────────
-    test("шнапс из красавки: у Трактирщика кнопка со счётом, продаётся весь разом по 400") {
+    test("выпивка: у Трактирщика кнопка со счётом, шнапс продаётся весь разом по 400") {
       val items = List(brew(BrewKind.Schnapps, 10L), brew(BrewKind.Schnapps, 11L), brew(BrewKind.SleepingDope, 12L))
       for {
         dao <- TestHeroDao.withHero(userId, baseHero.copy(silver = 50L))
@@ -563,11 +563,33 @@ object BrewSpec extends ZIOSpecDefault {
         h     <- dao.getHeroByUserId(userId).map(_.get)
         log   <- texts(r)
         after <- r.sentScreens.map(_.last)
-      } yield assertTrue(menu.choices.exists(ch => ch.id == "SellSchnapps" && ch.label == "Продать шнапс (2 шт)")) &&
+      } yield assertTrue(menu.choices.exists(ch => ch.id == "SellSchnapps" && ch.label == "Продать выпивку (2 шт)")) &&
               assertTrue(out == StateType.Innkeeper && h.silver == 50L + 800L) &&
               assertTrue(inv.snapshot.map(_.id) == List(12L)) &&   // дурман остался
-              assertTrue(log.contains("получено 🪙 800")) &&
+              assertTrue(log.contains("Сдано бутылок: 2 — получено 🪙 800")) &&
               assertTrue(!after.choices.exists(_.id == "SellSchnapps"))
+    },
+
+    test("самогон Трактирщик берёт по своей цене — втрое дороже шнапса, как и сказано в описании") {
+      val moonshine = BrewRates.SchnappsPrice * BrewRates.MoonshineFactor
+      val total     = BrewRates.SchnappsPrice + 2L * moonshine
+      val promised  = s"по $moonshine серебра"
+      val sold      = s"Сдано бутылок: 3 — получено 🪙 $total"
+      val items = List(brew(BrewKind.Schnapps, 10L), brew(BrewKind.Moonshine, 11L), brew(BrewKind.Moonshine, 12L))
+      for {
+        dao <- TestHeroDao.withHero(userId, baseHero.copy(silver = 50L))
+        inv  = TestInventoryRepository.withItems(items)
+        r   <- TestRenderer.make
+        c   <- ZIO.attempt(SceneContent.load())
+        state = InnkeeperState(dao, inv, c)
+        _   <- state.enter(testUser, r)
+        _   <- state.action(testUser, tap("SellSchnapps"), r)
+        h   <- dao.getHeroByUserId(userId).map(_.get)
+        log <- texts(r)
+      } yield assertTrue(moonshine == 1200L) &&
+              assertTrue(BrewKind.Moonshine.description.contains(promised)) &&
+              assertTrue(h.silver == 50L + total && inv.snapshot.isEmpty) &&
+              assertTrue(log.contains(sold))
     }
   )
 }
