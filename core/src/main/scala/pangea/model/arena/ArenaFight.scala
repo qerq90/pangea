@@ -58,7 +58,15 @@ final case class ArenaSide(
   shieldUp: Boolean             = false,
   // Сторона взяла парирующий кинжал наизготовку (Контрудар): промах соперника в
   // его ходе — и она ответит. Тоже читается в чужом зеркале.
-  counterUp: Boolean            = false
+  counterUp: Boolean            = false,
+  // Место бойца в своём ряду. В начале боя оба стоят друг напротив друга, на
+  // первом; переставляют их «Переместиться», «Отскок» и чужой «Отбрасывающий
+  // выстрел». В своём зеркале боец — герой на этом месте, в чужом — «моб».
+  pos:     Int                  = 1,
+  // Сколько своих ходов сторона не сможет двинуться: её пригвоздили
+  // («Пригвоздить», «Заградительный залп»). Считается на том, кого
+  // пригвоздили, как и `blocked`.
+  rooted:  Int                  = 0
 )
 
 object ArenaSide {
@@ -75,7 +83,9 @@ object ArenaSide {
       "seen"    -> s.seen.asJson,
       "blocked" -> s.blocked.asJson,
       "shieldUp" -> s.shieldUp.asJson,
-      "counterUp" -> s.counterUp.asJson)
+      "counterUp" -> s.counterUp.asJson,
+      "pos"     -> s.pos.asJson,
+      "rooted"  -> s.rooted.asJson)
 
   implicit val decoder: Decoder[ArenaSide] = (c: HCursor) =>
     for {
@@ -91,8 +101,10 @@ object ArenaSide {
       blocked <- c.getOrElse[Int]("blocked")(0)
       shield  <- c.getOrElse[Boolean]("shieldUp")(false)
       counter <- c.getOrElse[Boolean]("counterUp")(false)
+      pos     <- c.getOrElse[Int]("pos")(1)
+      rooted  <- c.getOrElse[Int]("rooted")(0)
     } yield ArenaSide(UserId(userId), HeroId(heroId), name, lvl, effects, slots, buffs, ready, seen, blocked, shield,
-      counter)
+      counter, pos, rooted)
 }
 
 /** Бой на арене: двое, чей сейчас ход и до какой минуты он думает.

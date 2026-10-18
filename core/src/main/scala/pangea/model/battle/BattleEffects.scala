@@ -204,7 +204,11 @@ case class BattleEffects(
   // не участвует в перемешивании (Пригвоздить, Заградительный залп). Ставится с
   // запасом в один тик, как monsterSkillBlockedTurns: тикает в начале хода моба,
   // а шаги — в конце раунда.
-  monsterRootedTurns:   Int                        = 0
+  monsterRootedTurns:   Int                        = 0,
+  // Сколько ходов не может двинуться сам герой: ни шагнуть, ни отпрыгнуть, ни
+  // сойти с места Тараном. Пока его ставит только арена — соперник пригвоздил
+  // (см. `ArenaSide.rooted`); тикает там же, на стороне боя.
+  heroRootedTurns:      Int                        = 0
 ) {
 
   /** Только то, что висит на МОБЕ: яд, кровь, огонь, дебафы. Геройская
@@ -244,7 +248,8 @@ case class BattleEffects(
     heroPoisonCoatTurns  = heroPoisonCoatTurns,
     heroBleedCoatTurns   = heroBleedCoatTurns,
     heroSmokeTurns       = heroSmokeTurns,
-    heroMirrors          = heroMirrors
+    heroMirrors          = heroMirrors,
+    heroRootedTurns      = heroRootedTurns
   )
 
   /** Своя геройская половина плюс мобовая половина другого набора. */
@@ -293,6 +298,9 @@ case class BattleEffects(
 
   /** Пригвождён ли моб: с места он сейчас не сходит. */
   def monsterRooted: Boolean = monsterRootedTurns > 0
+
+  /** Пригвождён ли герой: двинуться он сейчас не может. */
+  def heroRooted: Boolean = heroRootedTurns > 0
 }
 
 object BattleEffects {

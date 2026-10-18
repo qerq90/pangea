@@ -61,7 +61,14 @@ object ArenaBattle {
       // Соперник поднял щит своим ходом — в этом ходе он режет удары героя.
       monsterShieldUp     = foe.shieldUp,
       // …или держит парирующий кинжал наготове: промах героя — и он ответит.
-      monsterCounterPower = if (foe.counterUp) counterPower(foeHero, foe.buffs, nowMs) else 0L)
+      monsterCounterPower = if (foe.counterUp) counterPower(foeHero, foe.buffs, nowMs) else 0L,
+      // Каждый на своём месте: от расстояния зависит, кто кого достаёт. Сам
+      // соперник здесь не ходит — только своим ходом, в своём зеркале.
+      group               = gathered.group.copy(heroPos = me.pos, activePos = foe.pos),
+      // Пригвоздил соперник — правда о том на этой стороне боя.
+      effects             = gathered.effects.copy(heroRootedTurns = me.rooted),
+      // Сородичи на песок не прибегают: здесь дерутся двое.
+      noKin               = true)
   }
 
   /** Сила удара стороны для контрудара в чужом зеркале — та же формула, что у
@@ -79,9 +86,20 @@ object ArenaBattle {
     * Свой запрет на умения к этому ходу уже отработал — снимаем. Щит, поднятый
     * этим ходом, держится весь ход соперника. */
   def harvest(side: ArenaSide, battle: SoloPveBattle): ArenaSide =
-    side.copy(effects = battle.effects, slots = battle.skillSlots,
+    side.copy(
+      // Путы — и свои, и наложенные на соперника — живут на сторонах боя, а не
+      // в эффектах зеркала: иначе их считали бы дважды.
+      effects = battle.effects.copy(heroRootedTurns = 0, monsterRootedTurns = 0), slots = battle.skillSlots,
       buffs = battle.heroBattleState, ready = true, blocked = (side.blocked - 1).max(0),
-      shieldUp = battle.heroShieldUp, counterUp = battle.heroCounterReady)
+      shieldUp = battle.heroShieldUp, counterUp = battle.heroCounterReady,
+      pos = battle.group.heroPos, rooted = (side.rooted - 1).max(0))
+
+  /** Что ход сделал с соперником, кроме ран: сбил с мысли, отбросил на другое
+    * место, пригвоздил. В зеркале он — тот, кто в полях. Путы после хода — уже
+    * в его ходах: в этом ходе они оттикали свой запас (см. Skill.Effect.Pin). */
+  def foeAfterTurn(foe: ArenaSide, battle: SoloPveBattle): ArenaSide =
+    foe.copy(blocked = blockFor(battle), pos = battle.group.activePos,
+      rooted = foe.rooted.max(battle.effects.monsterRootedTurns))
 
   /** Сколько ходов соперник не сможет колдовать после этого хода: Боевой клич
     * и комбо вешают запрет на «моба», а на арене этот моб — живой игрок. */
