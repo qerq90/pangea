@@ -10,7 +10,11 @@ case class Rng(seed: Long) {
   def between(min: Long, max: Long): (Long, Rng) = {
     val (l, rng) = nextLong
     val range    = max - min
-    val value    = ((l & Long.MaxValue) % range) + min
+    // Младшие биты LCG ходят по короткому кругу (самый младший — через шаг), и
+    // остаток от деления на чётное число повторял бы чётность шага: выбор из
+    // восьми умений оружия, выпавшего на чётном шаге, брал бы только половину.
+    // Перед делением биты перемешиваются — старшие доходят до младших.
+    val value    = ((Rng.mix(l) & Long.MaxValue) % range) + min
     (value, rng)
   }
 
@@ -22,5 +26,16 @@ case class Rng(seed: Long) {
   def pick[A](list: List[A]): (A, Rng) = {
     val (i, rng) = between(0L, list.length.toLong)
     (list(i.toInt), rng)
+  }
+}
+
+object Rng {
+
+  /** Перемешать биты (финал murmur3): каждый бит результата зависит от всех
+    * битов входа. */
+  private def mix(z0: Long): Long = {
+    val z1 = (z0 ^ (z0 >>> 33)) * 0xff51afd7ed558ccdL
+    val z2 = (z1 ^ (z1 >>> 33)) * 0xc4ceb9fe1a85ec53L
+    z2 ^ (z2 >>> 33)
   }
 }

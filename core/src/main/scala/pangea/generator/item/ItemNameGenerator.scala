@@ -97,6 +97,7 @@ object ItemNameGenerator {
     grip.filter(_ => itemType == ItemType.Weapon) match {
       case Some(Grip.Bow)      => (("Лук", Masc), rng)
       case Some(Grip.Crossbow) => (("Арбалет", Masc), rng)
+      case Some(Grip.Parrying) => (("Парирующий Кинжал", Masc), rng)
       case Some(g) if g.twoHanded =>
         val ((base, gender), next) = rng.pick(twoHandedWeapons)
         ((s"${inflect(TwoHandedWord, gender)} $base", gender), next)

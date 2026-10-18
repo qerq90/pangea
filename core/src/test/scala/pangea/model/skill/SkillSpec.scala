@@ -21,7 +21,7 @@ object SkillSpec extends ZIOSpecDefault {
         val hand   = Skill.handSkills.toSet
         assertTrue(weapon.size == 8) &&
         assertTrue(armor.size == 7) &&
-        assertTrue(hand == Set[Skill](Skill.Block)) &&
+        assertTrue(hand == Set[Skill](Skill.Block, Skill.Counterstrike)) &&
         assertTrue((weapon intersect armor).isEmpty && (hand intersect (weapon union armor)).isEmpty) &&
         assertTrue((weapon union armor union hand) == Skill.values.toSet) &&
         // оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез

@@ -121,6 +121,12 @@ object Skill extends Enum[Skill] {
       * герою режутся до [[Skill.BlockTakenPct]]% (Блок). Ход на этом кончается.
       */
     case object Block extends Effect
+
+    /** Без урона: кинжал наизготовку до конца раунда — первый удар врага, от
+      * которого герой увернулся, тут же получает ответ: обычный удар героя без
+      * промаха (Контрудар). Ход на этом кончается.
+      */
+    case object Counter extends Effect
   }
 
   // Процент текущего HP, который тратит Кровавая жатва, и сколько процентов
@@ -448,6 +454,21 @@ object Skill extends Enum[Skill] {
     def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
   }
 
+  /** Умение парирующего кинжала. Не руна (см. [[handSkills]]). */
+  case object Counterstrike
+      extends Skill(
+        label = "Контрудар",
+        cooldown = 3,
+        initialCooldown = 0,
+        effect = Effect.Counter,
+        hitTemplate = "🗡 Вы берёте кинжал наизготовку: увернётесь в этом раунде — ударите в ответ наверняка.",
+        description =
+          "Встать в стойку с парирующим кинжалом. Если до конца раунда вы увернётесь от удара врага, тут же ударите его в ответ — без промаха. Один раз за раунд. Ход на этом кончается. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = 0.0
+    def baseEnergyCost(hero: Hero): Long = 13L + hero.lvl / 2L
+  }
+
   // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.
   // Нагрудник: 4,5,7,9,11 + Боевой клич, Отбросить.
   val weaponSkills: List[Skill] = List(
@@ -463,10 +484,10 @@ object Skill extends Enum[Skill] {
   val armorSkills: List[Skill] =
     List(MinorHeal, Reinforcement, Restoration, Bulwark, Ram, BattleCry, Shove)
 
-  /** Умения того, что держат в руке, кроме обычного оружия (щит): приходят с
-    * самой вещью и рунами не бывают — ни на камнях, ни у Казимира (см.
-    * `ItemDetails.HandSkill`). */
-  val handSkills: List[Skill] = List(Block)
+  /** Умения того, что держат в руке, кроме обычного оружия (щит, парирующий
+    * кинжал): приходят с самой вещью и рунами не бывают — ни на камнях, ни у
+    * Казимира (см. `ItemDetails.HandSkill`). */
+  val handSkills: List[Skill] = List(Block, Counterstrike)
 
   implicit val encoder: Encoder[Skill] =
     Encoder.encodeString.contramap(_.entryName)

@@ -171,9 +171,9 @@ case class BattleState(
   private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long,
                             note: String)(turn: Turn): Task[StateType] =
     for {
-      // Щит, поднятый прошлым ходом, своё отстоял: раунд, за который он брался,
-      // кончился (см. Skill.Block).
-      struck <- turn(hero, battle.copy(heroShieldUp = false), now)
+      // Щит, поднятый прошлым ходом, своё отстоял, и кинжал наизготовку тоже:
+      // раунд, за который они брались, кончился (см. Skill.Block, Counterstrike).
+      struck <- turn(hero, battle.copy(heroShieldUp = false, heroCounterReady = false), now)
       // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
       // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
       feasted = ghoulFeast(battle, struck, now)
@@ -990,11 +990,13 @@ case class BattleState(
       isRepeat: Boolean = false,
       // false — только удар, без ответа моба: вызывающий сам решит, кто отвечает
       // (удар по соседу возвращает героя в пару, и отвечает моб оттуда).
-      retaliate: Boolean = true
+      retaliate: Boolean = true,
+      // true — удар без промаха: броска попадания нет (Контрудар).
+      sureHit: Boolean = false
   ): Task[TurnResult] =
     for {
       buffedEff <- ZIO.succeed(effWithAir(hero, battle, nowMs))
-      hitRoll <- Random.nextIntBetween(1, 101)
+      hitRoll <- if (sureHit) ZIO.succeed(101) else Random.nextIntBetween(1, 101)
       mobDodge   = mobDodgeChance(buffedEff.accuracy, battle)
       // Попадание считается как hitRoll(1..100) > dodge, т.е. фактический шанс =
       // 100 - floor(dodge). Округляем ТАК ЖЕ, как экран боя (см. buildBattleScreen),
@@ -1146,10 +1148,32 @@ case class BattleState(
                 playerStrike(hero, battle, nowMs, missLog :+ content.text("battle.hunterRepeat"), skip,
                   isRepeat = true, retaliate = retaliate)
               else if (!retaliate) ZIO.succeed(TurnResult(hero, battle, missLog, Outcome.Continue))
-              else respond(hero, battle, nowMs, missLog, skip)
+              // На арене соперник мог ждать промаха с парирующим кинжалом.
+              else arenaCounter(hero, battle, nowMs).flatMap { case (h, b, lines) =>
+                if (h.fightStats.hp <= 0) ZIO.succeed(TurnResult(h, b, missLog ++ lines, Outcome.Death))
+                else respond(h, b, nowMs, missLog ++ lines, skip)
+              }
             }
         }
     } yield result
+
+  /** Контрудар соперника на арене: герой промахнулся, а соперник держал
+    * парирующий кинжал наготове — и тут же бьёт в ответ наверняка. Сила удара —
+    * его собственная, посчитанная при сборке зеркала (см.
+    * ArenaBattle.counterPower); защита и броня героя режут её как обычный удар.
+    * Вне арены силы нет — и броска тоже. */
+  private def arenaCounter(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[(Hero, SoloPveBattle, Vector[String])] =
+    if (battle.monsterCounterPower <= 0L) ZIO.succeed((hero, battle, Vector.empty))
+    else
+      Random.nextLongBetween(80L, 121L).map { spread =>
+        val raw       = (battle.monsterCounterPower * spread / 100L).max(1L)
+        val reduction = heroDamageReduction(hero, battle, effWithAir(hero, battle, nowMs), battle.monsterStats.atk, nowMs)
+        val damage    = (raw * (1.0 - reduction)).toLong.max(1L)
+        val (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, damage)
+        (hero.copy(fightStats = hero.fightStats.copy(hp = newHp, armor = newArmor)),
+         battle.copy(monsterCounterPower = 0L),
+         Vector(content.format("battle.counterFoe", "monster" -> battle.monsterName, "damage" -> damage.toString)))
+      }
 
   // ── Стихии оружия ───────────────────────────────────────────────────────────
 
@@ -2536,19 +2560,17 @@ case class BattleState(
             val lines = if (st.mirrored) st.extraLines else line :: st.extraLines
             (st.newHp, st.newArmor, lines.mkString("\n"), st.battle)
           }
-        else
-          ZIO.succeed(
-            (
-              hero.fightStats.hp,
-              hero.fightStats.armor,
-              content.format(
-                "battle.mobMiss",
-                "monster" -> ticked.monsterName,
-                "chance"  -> mobHitPct.toString
-              ),
-              ticked
-            )
-          )
+        else {
+          val missLine = content.format("battle.mobMiss", "monster" -> ticked.monsterName, "chance" -> mobHitPct.toString)
+          // Контрудар: герой увернулся — и тут же бьёт в ответ, наверняка. Раз за раунд.
+          if (ticked.heroCounterReady)
+            playerStrike(hero, ticked.copy(heroCounterReady = false), nowMs, Vector.empty, skip,
+              retaliate = false, sureHit = true).map { res =>
+              (res.hero.fightStats.hp, res.hero.fightStats.armor,
+                (Vector(missLine, content.text("battle.counter")) ++ res.log).mkString("\n"), res.battle)
+            }
+          else ZIO.succeed((hero.fightStats.hp, hero.fightStats.armor, missLine, ticked))
+        }
       (hpAfterAtk, armorAfterAtk, mobLine0, battleAfterAtk) = atkResult
       // Удар по HP может оставить травму — сразу за строкой удара.
       struckTrauma <- hitTrauma(hero, hero.copy(fightStats = hero.fightStats.copy(hp = hpAfterAtk, armor = armorAfterAtk)), nowMs)
@@ -3127,6 +3149,10 @@ case class BattleState(
         case Skill.Effect.Block =>
           // Щит поднят до конца раунда; на этом ход кончается — без удара.
           closeTurn(TurnResult(hero, bumped.copy(heroShieldUp = true), Vector(tmpl), Outcome.Continue), nowMs, skip)
+
+        case Skill.Effect.Counter =>
+          // Кинжал наизготовку до конца раунда; на этом ход кончается — без удара.
+          closeTurn(TurnResult(hero, bumped.copy(heroCounterReady = true), Vector(tmpl), Outcome.Continue), nowMs, skip)
       }
     } yield result
   }
@@ -4415,10 +4441,20 @@ case class BattleState(
                     (hero.copy(fightStats = hero.fightStats.copy(hp = st.newHp, armor = st.newArmor)), st.battle,
                       head ++ st.extraLines)
                   }
-                else ZIO.succeed((hero, tmp, Vector(content.format("battle.group.sideMiss", "monster" -> tmp.monsterName))))
+                else {
+                  val miss = content.format("battle.group.sideMiss", "monster" -> tmp.monsterName)
+                  // Контрудар и по соседу: увернулся от удара сбоку — бьёт в ответ, наверняка.
+                  if (tmp.heroCounterReady)
+                    playerStrike(hero, tmp.copy(heroCounterReady = false), nowMs, Vector.empty, Set.empty,
+                      retaliate = false, sureHit = true)
+                      .map(res => (res.hero, res.battle, Vector(miss, content.text("battle.counter")) ++ res.log))
+                  else ZIO.succeed((hero, tmp, Vector(miss)))
+                }
             } yield out
         }
       (h0, t1, log0) = struck
+      // Контрудар один на раунд: отработал по этому мобу — снят и с самого боя.
+      countered = tmp.heroCounterReady && !t1.heroCounterReady
       sideTrauma <- hitTrauma(hero, h0, nowMs)
       (h1, sideTraumaLine) = sideTrauma
       log1 = log0 ++ sideTraumaLine.toVector
@@ -4455,7 +4491,7 @@ case class BattleState(
       withEnergy = t2.copy(monsterCurrentEnergy = (t2.monsterCurrentEnergy + regen).min(t2.monsterStats.energy))
       (ticked, dotLine, _) = tickMonsterEffects(withEnergy, withEnergy.monsterName, h2.sets.burnGrowthMult)
       log3 = log1 ++ log2 ++ (if (dotLine.isEmpty) Vector.empty else Vector(dotLine))
-    } yield (h2, b2, ticked, log3)
+    } yield (h2, if (countered) b2.copy(heroCounterReady = false) else b2, ticked, log3)
   }
 
   /** Временные эффекты на мобе вне пары тикают сами: общий `tickBuffs` крутит
@@ -5623,7 +5659,7 @@ object BattleState {
     case Skill.Effect.Damage(_) | Skill.Effect.Sweep(_) | Skill.Effect.Whirl | Skill.Effect.FanBleed(_) | Skill.Effect.Knockback |
          Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
     case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) |
-         Skill.Effect.Block => false
+         Skill.Effect.Block | Skill.Effect.Counter => false
   }
 
   /** Нужен ли умению хоть один враг в досягаемости: удар — по цели, клич — по
