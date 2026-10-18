@@ -139,6 +139,16 @@ object Skill extends Enum[Skill] {
       * задетые `rootTurns` раундов не шагают (Заградительный залп).
       */
     final case class Volley(rootTurns: Int) extends Effect
+
+    /** Урон по цели, срезанный её защитой, — но сперва герой отпрыгивает по
+      * своему ряду и стреляет уже с нового места (Отскок).
+      */
+    case object Leap extends Effect
+
+    /** Урон по цели, срезанный её защитой; выжившая отлетает от героя по своему
+      * ряду, и пара рвётся (Отбрасывающий выстрел).
+      */
+    case object Push extends Effect
   }
 
   // Процент текущего HP, который тратит Кровавая жатва, и сколько процентов
@@ -521,6 +531,42 @@ object Skill extends Enum[Skill] {
     def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
   }
 
+  case object Disengage
+      extends Skill(
+        label = "Отскок",
+        cooldown = 3,
+        initialCooldown = 0,
+        effect = Effect.Leap,
+        hitTemplate = "🏹 Выстрел в прыжке: {} урона!",
+        description =
+          "Лёгкий шаг и тугая тетива: с таким оружием на месте не стоят. Вы отпрыгиваете по своему ряду — так, чтобы цель осталась на выстреле, а напротив никого не было, — и стреляете уже в прыжке. Чем дальше бьёт оружие, тем длиннее прыжок: на одно место меньше дальности. Среднее влияние на урон от Ловкости и Интеллекта, слабое — от Точности. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      3.0 * b.agi + 3.0 * b.int + 0.2 * f.accuracy
+    }
+    def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
+  }
+
+  case object PushShot
+      extends Skill(
+        label = "Отбрасывающий выстрел",
+        cooldown = 3,
+        initialCooldown = 1,
+        effect = Effect.Push,
+        hitTemplate = "💥 Тяжёлый выстрел: {} урона!",
+        description =
+          "Стрела с тупым наконечником или тяжёлый болт: такие не пробивают, а сносят. Цель отлетает от вас по своему ряду на одно место меньше дальности оружия — пока не упрётся в чужую спину. Минибоссов и сооружения не сдвинуть. Сильное влияние на урон от Силы. Среднее — от Атаки и Интеллекта. Использование расходует {} энергии."
+      ) {
+    def baseValue(hero: Hero, nowMs: Long): Double = {
+      val b = hero.effectiveBaseStats(nowMs)
+      val f = hero.effectiveFightStats(nowMs)
+      3.0 * b.str + 0.5 * f.atk + 3.0 * b.int
+    }
+    def baseEnergyCost(hero: Hero): Long = 12L + hero.lvl
+  }
+
   // Оружие: 1,2,3,6,8,10 + Вихрь клинка, Веерный порез.
   // Нагрудник: 4,5,7,9,11 + Боевой клич, Отбросить.
   val weaponSkills: List[Skill] = List(
@@ -543,7 +589,7 @@ object Skill extends Enum[Skill] {
 
   /** Умения лука и арбалета: выпадают только на них. Это руны, но применить
     * их можно, лишь когда в руках лук или арбалет (см. [[usableWith]]). */
-  val rangedSkills: List[Skill] = List(PinningShot, Barrage)
+  val rangedSkills: List[Skill] = List(PinningShot, Barrage, Disengage, PushShot)
 
   /** Можно ли применить умение с тем, что в руках: умения стрелка — только с
     * луком или арбалетом, прочие умения оружия — только без них. Умения
