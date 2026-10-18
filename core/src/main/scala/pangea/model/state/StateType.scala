@@ -129,7 +129,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object MarisaHunt   extends StateType // поход к тайнику Кельвина по таймеру и встреча с коллектором
 
   // «Деревня Мурлоков».
-  case object MurlocElder   extends StateType // старейшина выходит к герою после сотого убитого
+  case object MurlocElder   extends StateType // старейшина выходит к герою после двухсотого убитого
   case object MurlocVillage extends StateType // по карте: налёт на деревню или помощь снаряжением
 
   /** Городские сцены — где герой «в городе» (сюжетную карту можно открыть только

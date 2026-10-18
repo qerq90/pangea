@@ -25,7 +25,7 @@ import zio.test.{TestClock, TestRandom}
 import zio.test._
 import zio.{Duration, Task, ZIO}
 
-/** «Письмо Марисе»: сюжетные предметы, письмо с пятидесятого убитого, поиски
+/** «Письмо Марисе»: сюжетные предметы, письмо с семьдесят пятого убитого, поиски
   * адресата, тайник Кельвина и коллектор — со всеми развязками. */
 object MarisaQuestSpec extends ZIOSpecDefault {
 
@@ -95,8 +95,8 @@ object MarisaQuestSpec extends ZIOSpecDefault {
     ),
 
     suite("письмо")(
-      test("пятидесятый убитый оставляет письмо: сообщение, предмет, задание на первом шаге; второй раз — нет") {
-        val h = strong.copy(kills = 49L)
+      test("семьдесят пятый убитый оставляет письмо: сообщение, предмет, задание на первом шаге; второй раз — нет") {
+        val h = strong.copy(kills = NpcQuest.MarisaLetterKill - 1L)
         for {
           dao <- TestHeroDao.withHero(userId, h)
           _   <- dao.writeActiveBattle(userId, SoloPveBattle.from(weakMob(), h).asJson)
@@ -114,7 +114,8 @@ object MarisaQuestSpec extends ZIOSpecDefault {
           _   <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
           _   <- state.action(testUser, tap("Attack"), r)
           later <- heroOf(dao)
-        } yield assertTrue(res == StateType.Loot && after.kills == 50L && later.kills == 51L) &&
+        } yield assertTrue(res == StateType.Loot && after.kills == NpcQuest.MarisaLetterKill &&
+                           later.kills == NpcQuest.MarisaLetterKill + 1L) &&
                 assertTrue(all.contains("Мариса Кальдера") && all.contains("Старое письмо Марисе")) &&
                 assertTrue(inv.snapshot.count(_.questItem.contains(QuestItemKind.MarisaLetter)) == 1) &&
                 assertTrue(q.onStep(NpcQuest.Marisa, 1))

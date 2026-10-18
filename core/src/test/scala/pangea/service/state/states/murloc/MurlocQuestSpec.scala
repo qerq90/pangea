@@ -22,7 +22,7 @@ import zio.test.TestRandom
 import zio.test._
 import zio.{Task, ZIO}
 
-/** «Деревня Мурлоков»: старейшина после сотого убитого, карта, налёт на деревню
+/** «Деревня Мурлоков»: старейшина после двухсотого убитого, карта, налёт на деревню
   * (строй и очередь, Плюх уходит, награда как за обычный бой) и помощь
   * снаряжением (пачки по цвету, клинок за двадцатую вещь, клинок ждёт, если
   * сумка полна), достижения с плюсом к ловкости и силе. */
@@ -82,8 +82,8 @@ object MurlocQuestSpec extends ZIOSpecDefault {
             q   <- quests(dao)
           } yield (res, loot, q)
         for {
-          fresh   <- kill(strong().copy(kills = 99L))
-          veteran <- kill(strong().copy(kills = 150L))
+          fresh   <- kill(strong().copy(kills = NpcQuest.MurlocElderKill - 1L))
+          veteran <- kill(strong().copy(kills = NpcQuest.MurlocElderKill + 50L))
           early   <- kill(strong().copy(kills = 10L))
         } yield assertTrue(fresh._1 == StateType.Loot && fresh._2.returnState.contains(StateType.MurlocElder) && MurlocQuest.elderPending(fresh._3)) &&
                 assertTrue(veteran._2.returnState.contains(StateType.MurlocElder) && MurlocQuest.elderPending(veteran._3)) &&

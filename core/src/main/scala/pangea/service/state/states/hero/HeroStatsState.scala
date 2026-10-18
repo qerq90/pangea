@@ -7,7 +7,7 @@ import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
-import pangea.service.state.{AzatData, SquadDuty, State, UserAction}
+import pangea.service.state.{AzatData, QuestJournal, SquadDuty, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Меню «Персонаж». Первая кнопка ведёт в рюкзак, но только тому, кому есть что
@@ -30,6 +30,7 @@ case class HeroStatsState(
       "OpenSquad"      -> Target.Goto(StateType.Squad),
       "OpenFriendCode" -> Target.Goto(StateType.FriendCode),
       "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
+      "OpenQuests"   -> Target.Run { (user, _, renderer) => showQuests(user, renderer).as(StateType.HeroStats) },
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
       "UpgradeVit"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "vit") },
@@ -69,6 +70,18 @@ case class HeroStatsState(
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
+
+  /** «📜 Задания»: всё, что в работе, одним сообщением (см. QuestJournal), а
+    * под ним — те же кнопки «Персонажа». */
+  private def showQuests(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      now   <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero  <- getHero(user)
+      keeps <- hasStorage(hero)
+      text  <- QuestJournal.text(heroDao, content, hero, now)
+      _     <- renderer.show(user, Screen(text,
+                 buildStatsScreen(hero, now, blessed = false, instantRests = 0, keeps).choices))
+    } yield ()
 
   private def showUpgradeScreen(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -156,6 +169,7 @@ case class HeroStatsState(
         content.choice("OpenTraumas", "heroStats.traumas").copy(color = ChoiceColor.Secondary, row = Some(1))),
       Option.when(hero.upgradePoints > 0)(
         content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
+      Some(content.choice("OpenQuests", "heroStats.quests").copy(row = Some(2))),
       Some(content.choice("OpenFriendCode", "heroStats.friendCode").copy(row = Some(2))),
       Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
     ).flatten
