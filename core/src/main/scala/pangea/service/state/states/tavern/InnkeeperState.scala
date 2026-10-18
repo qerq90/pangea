@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Hero, LoreData}
-import pangea.model.item.{BrewKind, BrewRates, Item, ItemDetails, ItemType}
+import pangea.model.item.{BrewKind, Item, ItemDetails, ItemType}
 import pangea.model.quest.NpcQuest
 import pangea.model.state.StateType
 import pangea.model.user.User
@@ -280,7 +280,8 @@ case class InnkeeperState(
                 List(content.choice("BackFromLore", "innkeeper.necroLoreDone"))))
     } yield StateType.Innkeeper
 
-  /** Шнапс уходит весь разом, по цене за бутылку (см. BrewRates.SchnappsPrice). */
+  /** Выпивка уходит вся разом, и каждая бутылка — по своей цене: самогон
+    * дороже шнапса (см. [[InnkeeperState.worth]]). */
   private def sellSchnapps(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
@@ -288,7 +289,7 @@ case class InnkeeperState(
       bottles = InnkeeperState.schnapps(inv.items.data)
       _ <- if (bottles.isEmpty) showMenu(user, renderer)
            else {
-             val total = bottles.size.toLong * BrewRates.SchnappsPrice
+             val total = InnkeeperState.worth(bottles)
              ZIO.foreachDiscard(bottles)(b => inventoryRepo.removeItem(b.id, hero.id).mapError(e => new Throwable(e.toString))) *>
                heroDao.updateSilver(user.userId, hero.silver + total) *>
                renderer.show(user, Screen(content.format("innkeeper.schnappsSold",
@@ -331,6 +332,10 @@ object InnkeeperState {
     case pangea.model.item.BrewEffect.Sellable(p) => Some(p)
     case _                                        => None
   }
+
+  /** Сколько Трактирщик даст за эти бутылки: за каждую — её цену. То, чего он
+    * не берёт, ничего не стоит. */
+  def worth(bottles: List[Item]): Long = bottles.flatMap(_.brew.flatMap(price)).sum
 
   /** Сколько серебра Трактирщик даёт за первый трофей. */
   val QuestSilver: Long = 100L

@@ -559,7 +559,7 @@ while (exp >= Hero.neededExpForLevel(lvl) && lvl < 150L) {
   Джо — 1000, Белый волк — 1500, Крысиный король — 1000 (`InnkeeperState.*LorePrice`, отметки
   в `LoreData`). Про Некроманта не рассказывает: отправляет к Жрецу (`necroSent`).
 - **Скупка отваров**, которые не пьют, а продают (шнапс, самогон — `BrewEffect.Sellable`): все
-  бутылки разом.
+  бутылки разом, каждая по своей цене (`InnkeeperState.worth`).
 - **«Письмо Марисе»**, первый шаг: что Трактирщик знает об адресате (`AskMarisa`).
 - **Вернуться** (`BackFromInnkeeper`) → `Goto(Tavern)`.
 
