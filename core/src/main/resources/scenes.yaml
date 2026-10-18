@@ -2302,6 +2302,10 @@ battle:
     sweepSplash: "🌀 Дуга удара задевает {monster} — ещё {damage} урона."
     whirlHit: "🌪 Вихрь настигает {monster} — {damage} урона."
     barrageHit: "🏹 Залп задевает {monster} — {damage} урона."
+    leap: "🏹 Вы отпрыгиваете на позицию {n}."
+    leapNoRoom: "🏹 Отпрыгнуть некуда — вы стреляете с места."
+    pushed: "💥 {monster} отлетает на место {n}."
+    unpushable: "💥 {monster} даже не покачнулся: такого не сдвинуть."
     # Метка у имени пригвождённого моба в строю: с места он не сойдёт.
     pinnedMark: " 📌"
     fanCut: "🩸 Порез задевает {monster} — {damage} урона, кровь (-{pct}%)."

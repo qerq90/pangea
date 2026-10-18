@@ -193,6 +193,30 @@ case class SoloPveBattle(
     * круг способностей идёт у того, кто стоит в полях боя, где бы он ни стоял. */
   def stepActiveTo(pos: Int): SoloPveBattle = copy(group = group.copy(activePos = pos))
 
+  /** «Отбрасывающий выстрел»: тот, кто в полях, отлетает по своему ряду от
+    * героя на `dist` мест — пока места свободны: живого он не перелетает и
+    * встаёт перед ним. Стоял напротив героя — летит туда, где свободнее (при
+    * равных — дальше по строю). Минибоссов и сооружения не сдвинуть, лететь
+    * некуда — None. Возвращает бой и новое место. */
+  def pushActive(dist: Int): Option[(SoloPveBattle, Int)] =
+    if (bossKind.isDefined || Race.immovable(Race.withName(monsterRace))) None
+    else {
+      val from = group.activePos
+      def flight(step: Int): Int =
+        (1 to dist).map(from + step * _)
+          .takeWhile(p => p >= 1 && p <= Formation.MonsterPlaces && !group.hasMonster(p))
+          .lastOption.getOrElse(from)
+      val side = from - group.heroPos
+      val to =
+        if (side > 0) flight(1)
+        else if (side < 0) flight(-1)
+        else {
+          val (right, left) = (flight(1), flight(-1))
+          if (math.abs(left - from) > math.abs(right - from)) left else right
+        }
+      Option.when(to != from)((stepActiveTo(to), to))
+    }
+
   /** Пара пуста: активный моб стоит не напротив героя. */
   def unpaired: Boolean = !group.paired
 

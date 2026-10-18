@@ -254,6 +254,18 @@ final case class GroupState(
   def nearestFreeAllyPlace: Option[Int] =
     freeAllyPlaces.sortBy(p => (math.abs(p - heroPos), -p)).headOption
 
+  /** Куда отпрыгнет герой («Отскок»): по своему ряду не дальше чем на `dist`
+    * мест — на место, где нет союзника и напротив пусто, и так, чтобы цель на
+    * месте `target` осталась в досягаемости `reach`. Из таких — где рядом меньше
+    * врагов, потом подальше, потом дальше от цели. Некуда — None. */
+  def leapSpot(target: Int, dist: Int, reach: Int): Option[Int] =
+    (1 to dist).toList
+      .flatMap(d => List(heroPos - d, heroPos + d))
+      .filter(p => p >= 1 && p <= Formation.HeroPlaces && freeAt(p) && !hasMonster(p) &&
+                   math.abs(p - target) <= reach)
+      .sortBy(p => (List(p - 1, p + 1).count(hasMonster), -math.abs(p - heroPos), -math.abs(p - target)))
+      .headOption
+
   /** Есть ли при герое крыса в этом бою (набор «Крыса»). */
   def hasRatAlly: Boolean = allies.exists(_.kind == AllyKind.Rat)
 

@@ -2949,11 +2949,17 @@ case class BattleState(
     * полях после него стоит тот, кто вышел на место отброшенного. */
   private def skillHit(
       hero: Hero,
-      battle: SoloPveBattle,
+      battle0: SoloPveBattle,
       slot: SkillSlotState,
       nowMs: Long,
       target: Int
   ): Task[TurnResult] = {
+    // «Отскок»: сперва прыжок, потом выстрел — уже с нового места. На арене мест
+    // нет: там он просто стреляет.
+    val leapTo =
+      if (slot.skill.effect != Skill.Effect.Leap || battle0.arena.isDefined) None
+      else battle0.group.leapSpot(target, BattleState.displacement(hero), BattleState.skillReach(hero, slot.skill))
+    val battle      = leapTo.fold(battle0)(p => battle0.copy(group = battle0.group.copy(heroPos = p)))
     val home        = battle.group.activePos
     val paired      = battle.group.paired
     val damageSkill = BattleState.dealsDamage(slot.skill.effect)
@@ -2969,10 +2975,13 @@ case class BattleState(
     // Что делать после урона. В паре: победа или базовая атака по паре (по
     // соседу — сперва вернуть пару в поля). Пары нет: базовая атака идёт по
     // той же цели, а у лечения — по единственному соседу, если он есть; ответа
-    // пары нет — ход кончается тихо.
-    val next: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] = (h, b0, lines) => {
-      val b    = if (damageSkill) b0.rememberTarget(target) else b0
+    // пары нет — ход кончается тихо. `at` — где цель стоит сейчас:
+    // «Отбрасывающий выстрел» уносит её с того места, куда целились.
+    def nextAt(at: Int): (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] = (h, b0, lines) => {
+      val b    = if (damageSkill) b0.rememberTarget(at) else b0
       val dead = damageSkill && b.monsterCurrentHp <= 0
+      // Отброшенного базовая атака достаёт в этом же раунде, как бы далеко он ни
+      // улетел: выстрел и удар — одно движение. Дальше — по обычной дальности.
       if (!aimSide) {
         if (dead) ZIO.succeed(victoryByHero(h, b, lines, nowMs, skip))
         else if (paired) playerStrike(h, b, nowMs, lines, skip)
@@ -2987,17 +2996,18 @@ case class BattleState(
         if (dead) {
           if (homeGone) ZIO.succeed(victoryByHero(h, back, lines, nowMs, skip))
           else {
-            val fallen = back.sideFallen(back.group.idxOf(target))
+            val fallen = back.sideFallen(back.group.idxOf(at))
             val slain  = lines :+ content.format("battle.group.sideSlain", "monster" -> b.monsterName)
             if (paired) playerStrike(h, fallen, nowMs, slain, skip) else followUp(h, fallen, nowMs, slain, skip)
           }
         } else {
           val rammed = ramMark(back)
           if (paired && !homeGone) playerStrike(h, rammed, nowMs, lines, skip)
-          else strikeSide(h, rammed, target, nowMs, lines, skip).flatMap(closeTurn(_, nowMs, skip))
+          else strikeSide(h, rammed, at, nowMs, lines, skip).flatMap(closeTurn(_, nowMs, skip))
         }
       }
     }
+    val next = nextAt(target)
     // Лечение и броня, наведённые на живого союзника, достаются ему, а не герою.
     object OnAlly {
       def unapply(effect: Skill.Effect): Option[BattleAlly] = effect match {
@@ -3097,6 +3107,27 @@ case class BattleState(
               (rooted(plainHit(tmp, amount), turns),
                content.format("battle.group.barrageHit", "monster" -> tmp.monsterName, "damage" -> amount.toString))
             })
+
+        case Skill.Effect.Leap =>
+          // Прыжок уже сделан (см. начало): выстрел — как удар, срезанный защитой.
+          val jump =
+            if (battle0.arena.isDefined) ""
+            else leapTo.fold(content.text("battle.group.leapNoRoom"))(p => content.format("battle.group.leap", "n" -> p.toString)) + "\n"
+          dealSkillDamage(hero, bumped, reduced, dealt => jump + tmpl.replace("{}", dealt.toString), next)
+
+        case Skill.Effect.Push =>
+          // Урон, срезанный защитой; выживший отлетает от героя, и пара рвётся.
+          // Минибосса и сооружение не сдвинуть. На арене мест нет — просто удар.
+          val pushed: (Hero, SoloPveBattle, Vector[String]) => Task[TurnResult] = (h, b, lines) =>
+            if (b.monsterCurrentHp <= 0 || b.arena.isDefined) next(h, b, lines)
+            else b.pushActive(BattleState.displacement(hero)) match {
+              case Some((moved, to)) =>
+                nextAt(to)(h, moved, lines :+ content.format("battle.group.pushed", "monster" -> b.monsterName, "n" -> to.toString))
+              case None if b.bossKind.isDefined || Race.immovable(Race.withName(b.monsterRace)) =>
+                next(h, b, lines :+ content.format("battle.group.unpushable", "monster" -> b.monsterName))
+              case None => next(h, b, lines)
+            }
+          dealSkillDamage(hero, bumped, reduced, dealt => tmpl.replace("{}", dealt.toString), pushed)
 
         case Skill.Effect.BleedDamage(pct) =>
           // Урон сразу + наложение (стак) КРОВОТЕЧЕНИЯ на моба (отдельно от яда).
@@ -5674,6 +5705,11 @@ object BattleState {
   def skillReach(hero: Hero, skill: Skill): Int =
     if (Skill.armorSkills.contains(skill)) GroupState.Reach else heroReach(hero)
 
+  /** На сколько мест прыгает «Отскок» и отлетает цель «Отбрасывающего
+    * выстрела»: на одно меньше дальности оружия, но хоть на одно, — так цель
+    * остаётся на выстреле. Дальность станет другой — и это число вместе с ней. */
+  def displacement(hero: Hero): Int = (heroReach(hero) - 1).max(1)
+
   /** Стрелковое вблизи бьёт слабее: по цели напротив героя и по соседям — на
     * пятую часть (см. [[GripRates.RangedClosePenaltyPct]]). Цель — тот, кто
     * стоит в полях боя: удар по соседу или дальней цели идёт через подмену. */
@@ -5686,7 +5722,7 @@ object BattleState {
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {
     case Skill.Effect.Damage(_) | Skill.Effect.Sweep(_) | Skill.Effect.Whirl | Skill.Effect.FanBleed(_) | Skill.Effect.Knockback |
          Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest |
-         Skill.Effect.Pin(_) | Skill.Effect.Volley(_) => true
+         Skill.Effect.Pin(_) | Skill.Effect.Volley(_) | Skill.Effect.Leap | Skill.Effect.Push => true
     case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) |
          Skill.Effect.Block | Skill.Effect.Counter => false
   }
