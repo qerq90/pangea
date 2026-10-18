@@ -230,7 +230,10 @@ case class ArenaState(
       name    <- nameOf(user)
       me       = ArenaSide(user.userId, hero.id, name, hero.lvl)
       first    = ArenaBattle.firstTurn(fight.a.userId -> foeHero, user.userId -> hero, now, coin)
-      joined   = fight.copy(status = ArenaStatus.Fighting, b = Some(me))
+      // Крыса из-под ног (набор «Крыса», порог 12) выходит на песок вместе с героем.
+      joined   = fight.copy(status = ArenaStatus.Fighting,
+                   a = ArenaBattle.withStartingRat(fight.a, foeHero),
+                   b = Some(ArenaBattle.withStartingRat(me, hero)))
                    .passTurn(first, now).copy(round = 1)
       _       <- arenaDao.update(joined, now)
       // Соперника зовём к экрану: он ждал на арене, а теперь уже дерётся.

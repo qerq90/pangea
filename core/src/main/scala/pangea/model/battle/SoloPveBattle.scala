@@ -102,7 +102,10 @@ case class SoloPveBattle(
   heroCounterReady: Boolean = false,
   // На арене: соперник держит парирующий кинжал наготове — промах героя, и он
   // ответит ударом этой силы (см. ArenaBattle.counterPower). 0 — не держит.
-  monsterCounterPower: Long = 0L
+  monsterCounterPower: Long = 0L,
+  // На арене: кто это из бойцов соперника стоит в полях — сам он
+  // (`SoloPveBattle.ArenaHeroUnit`) или его союзник (см. MonsterSlot.arenaUnit).
+  monsterArenaUnit: Option[Int] = None
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -114,7 +117,7 @@ case class SoloPveBattle(
     lvl = monsterLvl, race = monsterRace, rarity = monsterRarity, stats = monsterStats,
     currentHp = monsterCurrentHp, currentArmor = monsterCurrentArmor, marked = monsterMarked,
     currentEnergy = monsterCurrentEnergy, effects = effects.monsterPart, boss = bossKind,
-    customName = customName, undead = monsterUndead)
+    customName = customName, undead = monsterUndead, arenaUnit = monsterArenaUnit)
 
   /** Поставить слот в пару: его состояние и эффекты — в поля активного моба,
     * геройская половина эффектов (и разовые флаги героя вроде «Крепкости»)
@@ -126,7 +129,8 @@ case class SoloPveBattle(
     monsterLvl = slot.lvl, monsterRace = slot.race, monsterRarity = slot.rarity, monsterStats = slot.stats,
     monsterCurrentHp = slot.currentHp, monsterCurrentArmor = slot.currentArmor, monsterMarked = slot.marked,
     monsterCurrentEnergy = slot.currentEnergy, effects = effects.withMonsterPart(slot.effects),
-    bossKind = slot.boss, customName = slot.customName, monsterUndead = slot.undead)
+    bossKind = slot.boss, customName = slot.customName, monsterUndead = slot.undead,
+    monsterArenaUnit = slot.arenaUnit)
 
   /** Кто на чужой стороне держит ауру и сколько у него энергии: минибосс со
     * своей аурой, где бы он ни стоял — в паре или в строю (см. [[Aura]]). Нет
@@ -216,6 +220,24 @@ case class SoloPveBattle(
         }
       Option.when(to != from)((stepActiveTo(to), to))
     }
+
+  /** Живые бойцы соперника на арене — с местами: тот, кто в полях, и строй. */
+  def arenaUnits: List[(Int, MonsterSlot)] =
+    ((group.activePos, activeSlot) :: group.entries).filter { case (_, s) => s.alive && s.arenaUnit.isDefined }
+
+  /** Боец соперника на арене с номером `id`: его место и он сам. Павшего здесь
+    * уже нет. */
+  def arenaUnit(id: Int): Option[(Int, MonsterSlot)] =
+    arenaUnits.find { case (_, s) => s.arenaUnit.contains(id) }
+
+  /** Поднят ли щит у того, кто в полях. На арене щит держит только сам
+    * соперник, а не его союзник, вставший в поля на удар. */
+  def foeShieldUp: Boolean = monsterShieldUp && monsterArenaUnit.forall(_ == SoloPveBattle.ArenaHeroUnit)
+
+  /** Сила контрудара того, кто в полях: на арене кинжал держит только сам
+    * соперник. */
+  def foeCounterPower: Long =
+    if (monsterArenaUnit.forall(_ == SoloPveBattle.ArenaHeroUnit)) monsterCounterPower else 0L
 
   /** Пара пуста: активный моб стоит не напротив героя. */
   def unpaired: Boolean = !group.paired
@@ -710,11 +732,16 @@ object SoloPveBattle {
       monsterShieldUp     <- c.getOrElse[Boolean]("monsterShieldUp")(false)
       heroCounterReady    <- c.getOrElse[Boolean]("heroCounterReady")(false)
       monsterCounterPower <- c.getOrElse[Long]("monsterCounterPower")(0L)
+      monsterArenaUnit    <- c.getOrElse[Option[Int]]("monsterArenaUnit")(None)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
                          noFlee, lootLevel, holyWater, heroShieldUp, monsterShieldUp,
-                         heroCounterReady, monsterCounterPower)
+                         heroCounterReady, monsterCounterPower, monsterArenaUnit)
+
+  /** Номер самого соперника среди «мобов» зеркала арены; его союзники — от
+    * единицы (см. `ArenaSide.allies`). */
+  val ArenaHeroUnit: Int = 0
 }
