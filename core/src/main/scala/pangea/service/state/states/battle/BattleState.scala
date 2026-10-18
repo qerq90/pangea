@@ -171,7 +171,9 @@ case class BattleState(
   private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long,
                             note: String)(turn: Turn): Task[StateType] =
     for {
-      struck <- turn(hero, battle, now)
+      // Щит, поднятый прошлым ходом, своё отстоял: раунд, за который он брался,
+      // кончился (см. Skill.Block).
+      struck <- turn(hero, battle.copy(heroShieldUp = false), now)
       // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
       // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
       feasted = ghoulFeast(battle, struck, now)
@@ -1023,7 +1025,9 @@ case class BattleState(
             resisted = (damage * bossResistance(hero, battle)).toLong.max(1L)
             // Защита моба режет удар ДО разбивки по броне/HP, иначе поехали бы
             // грани стихий (см. splitElementalDamage).
-            guarded = (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L)
+            // На арене соперник мог поднять щит своим ходом — он режет и удар героя.
+            guarded = BattleState.shieldCut(battle.monsterShieldUp,
+                        (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L))
             // Предел босса за раунд: Крысиный король отдаёт не больше пятой
             // части запаса, сколько бы герой ни вложил в удар и умение.
             capped = capBossDamage(battle, guarded)
@@ -2043,7 +2047,8 @@ case class BattleState(
   private def hurtVictim(v: Victim, hero: Hero, battle: SoloPveBattle, damage: Long): (Hero, SoloPveBattle, Long) =
     v match {
       case Victim.Hero =>
-        val (hurt, dealt) = hurtHero(hero, bossDamageTaken(hero, battle, damage))
+        // Приём босса — тоже умение: поднятый щит режет и его.
+        val (hurt, dealt) = hurtHero(hero, bossDamageTaken(hero, battle, BattleState.shieldCut(battle.heroShieldUp, damage)))
         (hurt, battle, dealt)
       case Victim.Ally(pos) =>
         battle.group.allyAt(pos).filter(_.alive) match {
@@ -2370,7 +2375,8 @@ case class BattleState(
             spread <- Random.nextLongBetween(80L, 121L)
             rawDamage = (monsterAttack(battle) * spread / 100L * Achievement.damagePct(hero) / 100L).max(1L)
             reduction = heroDamageReduction(hero, battle, buffedEff, monster.fightStats.atk, nowMs)
-            baseReduced = (rawDamage * (1.0 - reduction)).toLong.max(1L)
+            // Поднятый щит принимает три четверти того, что прошло сквозь защиту.
+            baseReduced = BattleState.shieldCut(battle.heroShieldUp, (rawDamage * (1.0 - reduction)).toLong.max(1L))
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
             impenDamage =
@@ -3117,6 +3123,10 @@ case class BattleState(
           val guarded = bumped.copy(heroBattleState = bumped.heroBattleState.add(
             Buff(0L, 0L, 0L, dodgePct = 0L, defencePct = defencePct, turnsLeft = Some(turns))))
           next(hero.copy(fightStats = newStats), guarded, Vector(tmpl.replace("{}", gained.toString)))
+
+        case Skill.Effect.Block =>
+          // Щит поднят до конца раунда; на этом ход кончается — без удара.
+          closeTurn(TurnResult(hero, bumped.copy(heroShieldUp = true), Vector(tmpl), Outcome.Continue), nowMs, skip)
       }
     } yield result
   }
@@ -3155,7 +3165,8 @@ case class BattleState(
       splash: (SoloPveBattle, Long) => (SoloPveBattle, Vector[String]),
       crit: Boolean
   ): Task[TurnResult] = {
-    val raw = if (crit) value.max(1L) * 2L else value.max(1L)
+    // На арене соперник мог поднять щит — умение по нему режется так же, как удар.
+    val raw = BattleState.shieldCut(battle.monsterShieldUp, if (crit) value.max(1L) * 2L else value.max(1L))
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
@@ -5180,9 +5191,11 @@ case class BattleState(
           color =
             if (enoughEnergy) pangea.engine.ChoiceColor.Primary
             else pangea.engine.ChoiceColor.Negative,
-          row = Some(0)
+          // Умения щита стоят в ряду действий, справа от «Атаки»; прочие — над ним.
+          row = Some(if (Skill.handSkills.contains(slot.skill)) 1 else 0)
         )
     }
+    val (handButtons, topButtons) = skillButtons.partition(_.row.contains(1))
     // Ряды кнопок: row 0 — активные навыки; row 1 — Атака; row 2 — Пояс;
     // row 3 — Сбежать. Отдельной кнопки фляги больше нет: фляги живут в поясе,
     // и он присылает их списком. Места под заглушки (доп. слот, стиль атаки,
@@ -5236,6 +5249,7 @@ case class BattleState(
         row = Some(3)))
     val mainButtons =
       actionButtons ++
+        handButtons ++
         beltButton.toList ++
         mixButton.toList ++
         divineButton.toList ++
@@ -5248,7 +5262,7 @@ case class BattleState(
             row = Some(4)
           )
         )
-    Screen(text, skillButtons ++ mainButtons)
+    Screen(text, topButtons ++ mainButtons)
   }
 
   /** Пузырьковый нектар: если герой обнулился, а плёнка на нём ещё цела —
@@ -5580,6 +5594,11 @@ object BattleState {
     case _                                                                             => false
   }
 
+  /** Поднятый щит (см. Skill.Block): сквозь него проходит четверть урона — уже
+    * срезанного защитой. Щит опущен — урон как есть. */
+  def shieldCut(up: Boolean, damage: Long): Long =
+    if (up) (damage * Skill.BlockTakenPct / 100L).max(1L) else damage
+
   /** На сколько мест в обе стороны достаёт оружие героя: лук и арбалет — на
     * три, прочее — только соседей (см. [[GripRates.RangedReach]]). Стрелковое
     * всегда двуручное, поэтому лежит в правой руке. */
@@ -5603,7 +5622,8 @@ object BattleState {
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {
     case Skill.Effect.Damage(_) | Skill.Effect.Sweep(_) | Skill.Effect.Whirl | Skill.Effect.FanBleed(_) | Skill.Effect.Knockback |
          Skill.Effect.BleedDamage(_) | Skill.Effect.WeakSpotStrike | Skill.Effect.BloodHarvest => true
-    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) => false
+    case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) | Skill.Effect.WarCry(_, _) |
+         Skill.Effect.Block => false
   }
 
   /** Нужен ли умению хоть один враг в досягаемости: удар — по цели, клич — по

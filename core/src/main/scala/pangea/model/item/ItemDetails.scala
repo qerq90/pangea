@@ -25,6 +25,11 @@ object ItemDetails {
   /** Нагрудник с активным навыком (один из `Skill.armorSkills`). */
   case class Armor(activeSkill: Skill) extends ItemDetails
 
+  /** Умение того, что держат в руке, кроме обычного оружия, — щита (Блок). Это
+    * умение «оружия», но не руна: Казимир его не снимает, рунных камней на него
+    * не бывает (см. `Skill.handSkills`). */
+  case class HandSkill(activeSkill: Skill) extends ItemDetails
+
   /** Предмет с зарядами (фляга, пояс). Операции над зарядами живут здесь —
    *  тотальные, без «тихого no-op» на неверном типе. */
   sealed trait Charged extends ItemDetails {
@@ -122,6 +127,8 @@ object ItemDetails {
   private val weaponDec: Decoder[Weapon]           = deriveDecoder
   private val armorEnc:  Encoder[Armor]            = deriveEncoder
   private val armorDec:  Decoder[Armor]            = deriveDecoder
+  private val handEnc:   Encoder[HandSkill]        = deriveEncoder
+  private val handDec:   Decoder[HandSkill]        = deriveDecoder
   private val flaskEnc:  Encoder[Flask]            = deriveEncoder
   private val flaskDec:  Decoder[Flask]            = deriveDecoder
   private val beltEnc:   Encoder[Belt]             = deriveEncoder
@@ -164,6 +171,7 @@ object ItemDetails {
     case Plain          => Json.obj("type" -> "Plain".asJson)
     case w: Weapon      => tagged("Weapon", weaponEnc(w))
     case a: Armor       => tagged("Armor", armorEnc(a))
+    case h: HandSkill   => tagged("HandSkill", handEnc(h))
     case f: Flask       => tagged("Flask", flaskEnc(f))
     case b: Belt        => tagged("Belt", beltEnc(b))
     case p: Passive     => tagged("Passive", passiveEnc(p))
@@ -183,6 +191,7 @@ object ItemDetails {
       case "Plain"       => Right(Plain)
       case "Weapon"      => weaponDec(c)
       case "Armor"       => armorDec(c)
+      case "HandSkill"   => handDec(c)
       case "Flask"       => flaskDec(c)
       case "Belt"        => beltDec(c)
       case "Passive"     => passiveDec(c)

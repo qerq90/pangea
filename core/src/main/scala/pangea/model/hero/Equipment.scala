@@ -19,10 +19,10 @@ case class Equipment(
   secondRing: Item,
   belt: Item,
   flask: Item,
-  // Правая рука: одноручное оружие — или двуручное, и тогда занята и левая.
+  // Правая рука: одноручное оружие или щит — или двуручное, и тогда занята и левая.
   weapon: Item,
   additionalWeapon: Item,
-  // Левая рука: второе одноручное. При двуручном в правой она пуста (см. leftBusy).
+  // Левая рука: второе одноручное или щит. При двуручном в правой она пуста (см. leftBusy).
   leftHand: Item = Item.NoItem
 ) {
   def allArmor: Long =
@@ -71,7 +71,7 @@ case class Equipment(
       if (firstRing.id == item.id) copy(firstRing = item) else copy(secondRing = item)
     case pangea.model.item.ItemType.Belt             => copy(belt = item)
     case pangea.model.item.ItemType.Flask            => copy(flask = item)
-    case pangea.model.item.ItemType.Weapon           =>
+    case pangea.model.item.ItemType.Weapon | pangea.model.item.ItemType.Shield =>
       if (leftHand.itemType != ItemType.NoItem && leftHand.id == item.id) copy(leftHand = item)
       else copy(weapon = item)
     case pangea.model.item.ItemType.AdditionalWeapon => copy(additionalWeapon = item)
@@ -101,8 +101,11 @@ case class Equipment(
 
   // ── Руки ───────────────────────────────────────────────────────────────────
 
-  /** Обе руки: правая и левая. */
+  /** Обе руки: правая и левая. В руке — оружие или щит, в любом сочетании. */
   def hands: List[Item] = List(weapon, leftHand)
+
+  /** Щиты в руках: они не оружие, и камни в них — «броневые». */
+  def handShields: List[Item] = hands.filter(_.itemType == ItemType.Shield)
 
   /** Оружие в руках — пустые руки не в счёт. */
   def handWeapons: List[Item] = hands.filter(_.itemType == ItemType.Weapon)
@@ -116,7 +119,7 @@ case class Equipment(
   /** Левая рука занята двуручным из правой. */
   def leftBusy: Boolean = weapon.twoHanded
 
-  /** Обе руки заняты одноручным: новое одноручное встаёт только вместо одного
+  /** Обе руки заняты одноручным или щитом: новое встаёт только вместо одного
     * из них, и руку спрашивают у игрока — как слот кольца. */
   def handsFull: Boolean =
     weapon.itemType != ItemType.NoItem && leftHand.itemType != ItemType.NoItem
@@ -124,18 +127,19 @@ case class Equipment(
   /** Камни в гнёздах оружия в руках: с ними ссорится пыль на клинке (см. WeaponDust). */
   def handGems: List[Gem] = handWeapons.flatMap(_.socketedGems)
 
-  /** Камни в гнёздах оружия (обе руки и доп. слот) — дают «оружейную» грань. */
+  /** Камни в гнёздах оружия (в руках и в доп. слоте) — дают «оружейную» грань.
+   *  Щит не оружие: его камни — в броневой грани. */
   def weaponGems: List[Gem] =
-    weapon.socketedGems ++ leftHand.socketedGems ++ additionalWeapon.socketedGems
+    handWeapons.flatMap(_.socketedGems) ++ additionalWeapon.socketedGems
 
   /** Камни в гнёздах остального снаряжения (всё, кроме оружия) — дают «броневую»
    *  грань. Стакаются (в отличие от пассивок), поэтому список, а не множество. */
   def armorGems: List[Gem] =
-    List(helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
-      firstRing, secondRing, belt, flask).flatMap(_.socketedGems)
+    (List(helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
+      firstRing, secondRing, belt, flask) ++ handShields).flatMap(_.socketedGems)
 
-  /** Какие предметы из снаряжения занимают слот данного типа. Для Ring и Weapon
-   *  возвращает оба слота (колец два, рук две); для прочих типов — один. Пустые
+  /** Какие предметы из снаряжения занимают слот данного типа. Для Ring, Weapon и
+   *  Shield возвращает оба слота (колец два, рук две); для прочих типов — один. Пустые
    *  слоты включены — фильтрацию по [[Item.itemType]] делает вызывающий. */
   def equippedFor(itemType: ItemType): List[Item] = itemType match {
     case ItemType.Helmet           => List(helmet)
@@ -151,6 +155,7 @@ case class Equipment(
     case ItemType.Belt             => List(belt)
     case ItemType.Flask            => List(flask)
     case ItemType.Weapon           => List(weapon, leftHand)
+    case ItemType.Shield           => List(weapon, leftHand)
     case ItemType.AdditionalWeapon => List(additionalWeapon)
     case ItemType.Trophy           => Nil
     case ItemType.TreasureMap      => Nil

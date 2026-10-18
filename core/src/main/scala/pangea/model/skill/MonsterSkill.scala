@@ -84,7 +84,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
                        // «Интеллект» моба в атаке = его атака (у мобов нет отдельного стата интеллекта).
                        attackerInt = battle.monsterStats.atk,
                        bonusPct    = battle.heroBattleState.reductionBonusPct)
-      val damage   = ((raw * (1.0 - reduct)).toLong).max(1L)
+      val damage   = blocked(battle, ((raw * (1.0 - reduct)).toLong).max(1L))
       val (newHp, newArmor) = MonsterSkill.applyPhysicalDamage(battle, hero, damage)
       val line     = template.replace("{name}", battle.monsterName).replace("{}", damage.toString)
       Cast(battle, newHp, newArmor, line)
@@ -102,7 +102,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
 
     def cast(battle: SoloPveBattle, hero: Hero, nowMs: Long): Cast = {
       // Игнорирует и damageReduction игрока, и его физическую броню — урон уходит сразу в HP.
-      val damage = math.max(1L, (battle.monsterStats.atk * 0.3).toLong)
+      val damage = blocked(battle, math.max(1L, (battle.monsterStats.atk * 0.3).toLong))
       val newHp  = (hero.fightStats.hp - damage).max(0L)
       val line   = template.replace("{name}", battle.monsterName).replace("{}", damage.toString)
       Cast(battle, newHp, hero.fightStats.armor, line)
@@ -184,7 +184,7 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val raw     = math.max(1L, (battle.monsterStats.atk * DamageFactor).toLong)
       val defence = hero.effectiveFightStats(nowMs).defence.max(0L)
       // «−% защиты игрока»: защита режет удар процентно, но не в ноль.
-      val damage  = (raw * (100L - defence.min(90L)) / 100L).max(1L)
+      val damage  = blocked(battle, (raw * (100L - defence.min(90L)) / 100L).max(1L))
       val (newHp, newArmor) = applyPhysicalDamage(battle, hero, damage)
       val poisoned = battle.effects.copy(heroPoison = Some(
         battle.effects.heroPoison.map(p => Poison(p.pct + PoisonPct)).getOrElse(Poison(PoisonPct))))
@@ -203,6 +203,11 @@ object MonsterSkill extends Enum[MonsterSkill] {
    *
    *  «Каменный страж» (порог 6) режет РАСХОД брони: прикрывает она по-прежнему
    *  весь поглощённый урон, но тает при этом медленнее. */
+  /** Поднятый героем щит (см. Skill.Block): урон умения после всех вычетов
+    * режется до четверти. */
+  def blocked(battle: SoloPveBattle, damage: Long): Long =
+    if (battle.heroShieldUp) (damage * Skill.BlockTakenPct / 100L).max(1L) else damage
+
   def applyPhysicalDamage(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) = {
     val buffReduct  = math.min(battle.heroBattleState.armorBonus, damage)
     val afterBuff   = damage - buffReduct

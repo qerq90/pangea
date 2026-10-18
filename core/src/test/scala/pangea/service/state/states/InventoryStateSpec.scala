@@ -636,7 +636,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
         hero2 <- heroDao2.getHeroByUserId(userId)
       } yield assertTrue(hero.exists(h => h.equipment.weapon.id == big.id && h.equipment.leftHand.itemType == ItemType.NoItem)) &&
               assertTrue(invRepo.snapshot.map(_.id).toSet == Set(oldSword.id, sword.id)) &&
-              assertTrue(said.contains("второму в сумке нет места")) &&
+              assertTrue(said.contains("второй вещи в сумке нет места")) &&
               assertTrue(hero2.exists(h => h.equipment.weapon.id == oldSword.id && h.equipment.leftHand.id == sword.id)) &&
               assertTrue(invRepo2.snapshot.exists(_.id == big.id))
     },

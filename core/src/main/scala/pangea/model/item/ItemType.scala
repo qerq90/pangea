@@ -22,7 +22,10 @@ object ItemType extends Enum[ItemType] {
       Ring,
       Amulet,
       Bracelets,
-      Leggings
+      Leggings,
+      // Щит падает так же часто, как оружие, и в том же «тяжёлом» профиле:
+      // броня и защита (см. ItemGenerator).
+      Shield
     )
   val defenceItems: List[ItemType] =
     List(Helmet, ShoulderPads, ChestPlate, Pants, Boots, Belt, Leggings)
@@ -50,6 +53,8 @@ object ItemType extends Enum[ItemType] {
   case object Flask            extends ItemType
   case object Weapon           extends ItemType
   case object AdditionalWeapon extends ItemType
+  // Щит: держат в руке, как одноручное, но это не оружие (см. ShieldRates).
+  case object Shield           extends ItemType
 
   // Трофей с убитого моба: лежит в инвентаре как обычный предмет (раса + уровень),
   // но не экипируется — не входит в attackItems/defenceItems.

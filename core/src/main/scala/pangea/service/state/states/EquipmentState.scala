@@ -463,6 +463,9 @@ object EquipmentState {
   /** Левая рука при двуручном в правой: пуста, но занята. */
   val LeftBusyText = "занята двуручным"
 
+  /** Что берут в руку: оружие или щит — в любую, в любом сочетании. */
+  val HandTypes: Set[ItemType] = Set(ItemType.Weapon, ItemType.Shield)
+
   /** Сколько вещей на примерку в карточке: ряд 0 занят «Снять»/«Сломать», а
     * последний — навигацией, так что на кнопки вещей остаётся семь рядов. */
   val PickPerPage: Int = 7
@@ -508,10 +511,10 @@ object EquipmentState {
     // Фляги теперь носят на поясе: в слот их больше не надеть, а занятый слот
     // доживает до того, как игрок сам переложит флягу (см. FlaskSlotName).
     Slot(FlaskSlotName, _.flask,        _.copy(flask        = Item.NoItem), Set.empty),
-    // Руки — пара слотов, как кольца (см. InventoryState.equip): двуручное
-    // встаёт в правую и занимает обе.
-    Slot(RightHandName, _.weapon,       _.copy(weapon       = Item.NoItem), Set(ItemType.Weapon), Some(1)),
-    Slot(LeftHandName,  _.leftHand,     _.copy(leftHand     = Item.NoItem), Set(ItemType.Weapon), Some(2),
+    // Руки — пара слотов, как кольца (см. InventoryState.equip): в каждую —
+    // оружие или щит; двуручное встаёт в правую и занимает обе.
+    Slot(RightHandName, _.weapon,       _.copy(weapon       = Item.NoItem), HandTypes, Some(1)),
+    Slot(LeftHandName,  _.leftHand,     _.copy(leftHand     = Item.NoItem), HandTypes, Some(2),
          busy = _.leftBusy),
     Slot("Доп. оружие", _.additionalWeapon, _.copy(additionalWeapon = Item.NoItem), Set(ItemType.AdditionalWeapon))
   )
