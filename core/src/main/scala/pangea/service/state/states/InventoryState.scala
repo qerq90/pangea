@@ -603,9 +603,10 @@ case class InventoryState(
           else if (item.itemType == ItemType.Ring && pairSlot.isEmpty &&
                    InventoryState.ringSlotsFull(hero.equipment))
             renderer.show(user, ringChoiceScreen(item, hero.equipment, itemId)).as(true)
-          // Обе руки заняты одноручным, а берут ещё одно — спрашиваем, вместо чего.
-          else if (item.itemType == ItemType.Weapon && !item.twoHanded && pairSlot.isEmpty &&
-                   hero.equipment.handsFull)
+          // Обе руки заняты одноручным или щитом, а берут ещё одно — спрашиваем,
+          // вместо чего.
+          else if ((item.itemType == ItemType.Weapon || item.itemType == ItemType.Shield) && !item.twoHanded &&
+                   pairSlot.isEmpty && hero.equipment.handsFull)
             renderer.show(user, handChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
             val (newEq, newFight, removed) = InventoryState.equip(hero, item, pairSlot)
@@ -1114,7 +1115,7 @@ object InventoryState {
     val (newEq, out) = (item.itemType, pairSlot) match {
       case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), List(eq.firstRing))
       case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), List(eq.secondRing))
-      case (ItemType.Weapon, hand)  => wield(eq, item, hand)
+      case (ItemType.Weapon | ItemType.Shield, hand) => wield(eq, item, hand)
       case _                        => (withSlot(eq, item), List(equippedIn(eq, item.itemType)))
     }
     val removed  = out.filter(_.itemType != ItemType.NoItem)
@@ -1123,8 +1124,9 @@ object InventoryState {
     (newEq, newFight, removed)
   }
 
-  /** Оружие в руки. Двуручное встаёт в правую и снимает всё, что было в обеих.
-    * Одноручное поверх двуручного снимает двуручное и встаёт в выбранную руку
+  /** Оружие или щит в руки. Двуручное встаёт в правую и снимает всё, что было
+    * в обеих. Одноручное или щит поверх двуручного снимает двуручное и встаёт в
+    * выбранную руку
     * (по умолчанию в правую). Иначе — в выбранную руку, а без выбора в
     * свободную, сперва правую; обе заняты — меняется правая (руку у игрока
     * спрашивают раньше, см. `Equipment.handsFull`). */
@@ -1210,7 +1212,7 @@ object InventoryState {
     val slotInfo = item.itemType match {
       case ItemType.Trophy => "\nТрофей"
       case ItemType.Ring   => s"\n$sep\n${equipped("Слот 1", eq.firstRing)}\n${equipped("Слот 2", eq.secondRing)}"
-      case ItemType.Weapon =>
+      case ItemType.Weapon | ItemType.Shield =>
         val left =
           if (eq.leftBusy) s"${EquipmentState.LeftHandName}: ${EquipmentState.LeftBusyText}"
           else hand(EquipmentState.LeftHandName, eq.leftHand)
@@ -1250,6 +1252,7 @@ object InventoryState {
     case ItemType.Belt             => eq.belt
     case ItemType.Flask            => eq.flask
     case ItemType.Weapon           => eq.weapon
+    case ItemType.Shield           => eq.weapon // руки — см. wield
     case ItemType.AdditionalWeapon => eq.additionalWeapon
     case ItemType.Trophy           => Item.NoItem // трофей не экипируется
     case ItemType.TreasureMap      => Item.NoItem // карта не экипируется
@@ -1280,6 +1283,7 @@ object InventoryState {
     case ItemType.Belt             => eq.copy(belt = item)
     case ItemType.Flask            => eq.copy(flask = item)
     case ItemType.Weapon           => eq.copy(weapon = item)
+    case ItemType.Shield           => eq.copy(weapon = item) // руки — см. wield
     case ItemType.AdditionalWeapon => eq.copy(additionalWeapon = item)
     case ItemType.Trophy           => eq // трофей не экипируется
     case ItemType.TreasureMap      => eq // карта не экипируется

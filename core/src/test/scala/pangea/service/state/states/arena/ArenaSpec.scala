@@ -187,6 +187,38 @@ object ArenaSpec extends ZIOSpecDefault {
               assertTrue(mine.exists(_.skillSlots.forall(_.cooldown > 0)))
     },
 
+    test("щит, поднятый своим ходом, режет удар соперника в его ходе на три четверти") {
+      val guard = pangea.model.item.Item(301L, "Щит", 10L, pangea.model.item.Rarity.Blue,
+        pangea.model.item.ItemType.Shield,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = pangea.model.item.ItemDetails.HandSkill(pangea.model.skill.Skill.Block))
+      val blocker = fighter(oneId, 1L, agi = 20, int = 20).copy(
+        equipment = TestFixtures.emptyEquipment.copy(leftHand = guard))
+      val foe = fighter(twoId, 2L, agi = 5, int = 5, atk = 200L)
+      def round(block: Boolean) =
+        for {
+          t <- arena(oneId -> blocker, twoId -> foe)
+          (state, battle, dao, fights, _, r) = t
+          _      <- state.action(one, tap("ArenaByCode"), r)
+          code    = codeOf(fights)
+          _      <- state.action(two, typed(code), r)
+          _      <- state.action(one, tap("ArenaPoke"), r)
+          // Блок тратит только разброс умения, удар — попадание и разброс.
+          _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+          _      <- battle.action(one, tap(if (block) "Skill_301" else "Attack"), r)
+          raised  = fights.snapshot.head.sideOf(oneId).exists(_.shieldUp)
+          _      <- battle.action(two, tap("ArenaPoke"), r)
+          _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+          _      <- battle.action(two, tap("Attack"), r)
+          me     <- heroOf(dao, oneId)
+        } yield (raised, blocker.fightStats.hp - me.fightStats.hp)
+      for {
+        open <- round(block = false)
+        shut <- round(block = true)
+      } yield assertTrue(!open._1 && shut._1) &&
+              assertTrue(open._2 > 0L && shut._2 == BattleState.shieldCut(up = true, open._2))
+    },
+
     test("в чужой ход кнопки убраны с экрана, а не просто не работают") {
       val quick = fighter(oneId, 1L, agi = 20, int = 20)
       val slow  = fighter(twoId, 2L, agi = 5, int = 5)
