@@ -14,12 +14,10 @@ import pangea.service.purse.Purse
 import pangea.service.state.{CharacterMenu, CityExit, NpcQuestDialog, NpcQuestLog, State, UserAction}
 import zio.{Task, ZIO}
 
-/** Трактирщик. Принимает квестовые предметы: из подходящих трофеев инвентаря
-  * (тип `Trophy`, нужная раса) забирает САМЫЙ ЦЕННЫЙ — с наибольшим
-  * коэффициентом вида (Реликвия 4.0 > Талисман 2.0 > Голова 1.0 > Мешок 0.5),
-  * при равных коэффициентах — старший по уровню. Опыт начисляется по формуле
-  * `5 + Ур.трофея × коэффициент(вид трофея)`, округляя вверх. Коэффициент
-  * берётся из [[pangea.model.item.TrophyKind]].
+/** Трактирщик. Вступительное задание «Плата за первую кружку»: любой трофей —
+  * Трактирщик забирает самый дешёвый и платит серебром. Ещё он продаёт рассказы
+  * о встреченных боссах, скупает отвары, которые не пьют, а продают, и знает
+  * кое-что о Марисе. Трофеи доски сдаются не ему, а на доске в Гильдии.
   */
 case class InnkeeperState(
   heroDao: HeroDao,
@@ -323,7 +321,6 @@ object InnkeeperState {
   /** Цена рассказа про Крысиного короля — как за Гнилого Джо. */
   val RatKingLorePrice: Long = 1000L
 
-  /** Бутылки шнапса из красавки в сумке. */
   /** Что Трактирщик берёт себе: любой отвар, который не пьют, а продают
     * (шнапс, самогон). Цена — на самом отваре. */
   def schnapps(items: List[Item]): List[Item] =
@@ -344,19 +341,6 @@ object InnkeeperState {
     items
       .filter(i => i.id != 0L && i.itemType == ItemType.Trophy)
       .sortBy(i => (trophyCoef(i), i.lvl))
-      .headOption
-
-  /** Трофей, который уйдёт в счёт задания по расе `raceName`: из подходящих
-    * берём с наибольшим коэффициентом вида, при равных — старший по уровню
-    * (он даёт больше опыта по формуле `5 + Ур. × коэффициент`). None, если
-    * подходящих трофеев в инвентаре нет. */
-  def bestTrophyFor(items: List[Item], raceName: String): Option[Item] =
-    items
-      .filter(_.details match {
-        case ItemDetails.Trophy(race, _, _) => race == raceName
-        case _                              => false
-      })
-      .sortBy(i => (-trophyCoef(i), -i.lvl))
       .headOption
 
   private def trophyCoef(item: Item): Double = item.details match {
