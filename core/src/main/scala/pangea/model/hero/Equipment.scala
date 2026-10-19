@@ -4,7 +4,7 @@ import doobie.Meta
 import doobie.postgres.circe.jsonb.implicits.{pgDecoderGet, pgEncoderPut}
 import io.circe.{Decoder, Encoder, HCursor}
 import io.circe.generic.semiauto.deriveEncoder
-import pangea.model.item.{Gem, Item, ItemSet, ItemType}
+import pangea.model.item.{Gem, Item, ItemSet, ItemType, ShieldRates}
 
 case class Equipment(
   helmet: Item,
@@ -106,6 +106,11 @@ case class Equipment(
 
   /** Щиты в руках: они не оружие, и камни в них — «броневые». */
   def handShields: List[Item] = hands.filter(_.itemType == ItemType.Shield)
+
+  /** Сколько урона снимает Блок: по лучшему щиту в руках (см.
+    * ShieldRates.blockPct). Без щита Блока нет, но число — как у белого. */
+  def blockPct: Long =
+    handShields.map(s => ShieldRates.blockPct(s.rarity)).maxOption.getOrElse(ShieldRates.BaseBlockPct)
 
   /** Оружие в руках — пустые руки не в счёт. */
   def handWeapons: List[Item] = hands.filter(_.itemType == ItemType.Weapon)

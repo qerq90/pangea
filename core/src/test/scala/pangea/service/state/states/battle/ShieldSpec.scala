@@ -135,7 +135,7 @@ object ShieldSpec extends ZIOSpecDefault {
               assertTrue(screen.choices.exists(c => c.id == "Skill_1" && c.row.contains(0)))
     },
 
-    test("Блок кончает ход без удара, а удар моба в этом раунде проходит на четверть; следующий — целиком") {
+    test("Блок кончает ход без удара, а удар моба в этом раунде серый щит режет вдвое; следующий — целиком") {
       val h = hero(sword(1L), shield())
       def round(block: Boolean) =
         for {
@@ -152,7 +152,7 @@ object ShieldSpec extends ZIOSpecDefault {
         plain   <- round(block = false)
         blocked <- round(block = true)
         (taken, raised) = blocked
-      } yield assertTrue(plain._1 > 0L && taken == BattleState.shieldCut(up = true, plain._1)) &&
+      } yield assertTrue(plain._1 > 0L && taken == BattleState.shieldCut(ShieldRates.blockPct(ItemRarity.Gray), plain._1)) &&
               // моб цел: удара после Блока нет
               assertTrue(raised.monsterCurrentHp == monster.fightStats.hp) &&
               assertTrue(raised.heroShieldUp && raised.skillSlots.find(_.itemId == 301L).exists(_.cooldown == 2))
@@ -161,7 +161,7 @@ object ShieldSpec extends ZIOSpecDefault {
     test("щит опускается со следующим ходом героя") {
       val h = hero(sword(1L), shield())
       for {
-        t <- makeState(h, SoloPveBattle.from(monster, h).copy(heroShieldUp = true))
+        t <- makeState(h, SoloPveBattle.from(monster, h).copy(heroBlockPct = 50L))
         (state, dao, r) = t
         _      <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
         _      <- state.action(testUser, tap("Attack"), r)
@@ -169,20 +169,48 @@ object ShieldSpec extends ZIOSpecDefault {
       } yield assertTrue(!battle.heroShieldUp)
     },
 
-    test("умение моба под поднятым щитом — тоже на четверть") {
+    test("умение моба под поднятым щитом режется тем же процентом") {
       val h     = hero(sword(1L), shield())
       val b     = SoloPveBattle.from(monster, h)
       val open  = MonsterSkill.QuickStrike.cast(b, h, 0L)
-      val shut  = MonsterSkill.QuickStrike.cast(b.copy(heroShieldUp = true), h, 0L)
-      val crush = MonsterSkill.CrushingStrike.cast(b.copy(heroShieldUp = true), h, 0L)
+      val shut  = MonsterSkill.QuickStrike.cast(b.copy(heroBlockPct = 50L), h, 0L)
+      val crush = MonsterSkill.CrushingStrike.cast(b.copy(heroBlockPct = 50L), h, 0L)
       val lost  = h.fightStats.hp - open.heroHp
-      assertTrue(lost > 0L && h.fightStats.hp - shut.heroHp == BattleState.shieldCut(up = true, lost)) &&
-      assertTrue(h.fightStats.hp - crush.heroHp == BattleState.shieldCut(up = true, (monster.fightStats.atk * 3L / 10L).max(1L)))
+      assertTrue(lost > 0L && h.fightStats.hp - shut.heroHp == BattleState.shieldCut(50L, lost)) &&
+      assertTrue(h.fightStats.hp - crush.heroHp == BattleState.shieldCut(50L, (monster.fightStats.atk * 3L / 10L).max(1L)))
     },
 
-    test("сквозь щит проходит четверть, но не меньше единицы; опущенный щит не режет") {
-      assertTrue(BattleState.shieldCut(up = true, 100L) == 25L && BattleState.shieldCut(up = false, 100L) == 100L) &&
-      assertTrue(BattleState.shieldCut(up = true, 1L) == 1L)
+    test("щит снимает свой процент, но единица проходит всегда; опущенный щит не режет") {
+      assertTrue(BattleState.shieldCut(75L, 100L) == 25L && BattleState.shieldCut(50L, 100L) == 50L) &&
+      assertTrue(BattleState.shieldCut(0L, 100L) == 100L && BattleState.shieldCut(50L, 1L) == 1L)
+    },
+
+    test("Блок по редкости: серый и белый — 50%, дальше +5% за редкость, легендарный — 75%; из двух щитов — лучший") {
+      val pcts = List(ItemRarity.Gray, ItemRarity.White, ItemRarity.Green, ItemRarity.Blue,
+                      ItemRarity.Purple, ItemRarity.Violet, ItemRarity.Orange).map(ShieldRates.blockPct)
+      val white  = shield(301L).copy(rarity = ItemRarity.White)
+      val violet = shield(302L).copy(rarity = ItemRarity.Violet)
+      val two    = TestFixtures.emptyEquipment.copy(weapon = white, leftHand = violet)
+      val blue   = shield(303L).copy(rarity = ItemRarity.Blue)
+      val green  = hero(sword(1L), shield(304L).copy(rarity = ItemRarity.Green))
+      assertTrue(pcts == List(50L, 50L, 55L, 60L, 65L, 70L, 75L)) &&
+      assertTrue(two.blockPct == 70L) &&
+      // в описании — число: на карточке щита — этого щита, в умениях — надетого
+      assertTrue(Skill.Block.describe(green, Some(blue)).contains("на 60% меньше урона")) &&
+      assertTrue(Skill.Block.describe(green).contains("на 55% меньше урона")) &&
+      assertTrue(!Skill.Block.describe(green).contains("{block}"))
+    },
+
+    test("Блок синим щитом: в бою — его процент, и он же в строке лога") {
+      val h = hero(sword(1L), shield().copy(rarity = ItemRarity.Blue))
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster, h))
+        (state, dao, r) = t
+        _      <- TestRandom.feedInts(99) *> TestRandom.feedLongs(100L, 100L)
+        _      <- state.action(testUser, tap("Skill_301"), r)
+        battle <- battleOf(dao)
+        log    <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(battle.heroBlockPct == 60L && log.contains("слабее на 60%"))
     }
   )
 }

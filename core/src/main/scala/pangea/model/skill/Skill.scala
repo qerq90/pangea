@@ -3,6 +3,7 @@ package pangea.model.skill
 import enumeratum._
 import io.circe.{Decoder, Encoder}
 import pangea.model.hero.Hero
+import pangea.model.item.{Item, ItemType, ShieldRates}
 
 /** Активный навык — кнопка в бою, заканчивающая ход. Падает на оружие и на
   * нагрудник (см. [[Skill.weaponSkills]] / [[Skill.armorSkills]]), на лук и
@@ -42,9 +43,15 @@ sealed abstract class Skill(
   /** Описание навыка для инвентаря — с подставленной стоимостью энергии и
     * перезарядкой (КД). Оба хвоста собираются здесь, а не в тексте каждого
     * навыка, чтобы формат был единым. */
-  def describe(hero: Hero): String = {
+  def describe(hero: Hero): String = describe(hero, None)
+
+  /** То же для карточки вещи. У Блока в описании — сколько снимает щит: этот,
+    * если смотрим его карточку, иначе лучший в руках героя (`{block}`). */
+  def describe(hero: Hero, item: Option[Item]): String = {
     val understanding = hero.runes.understandingOf(pangea.model.rune.Rune.Active(this))
-    description.replace("{}", energyCost(hero).toString) + Skill.requirement(this) +
+    val block = item.filter(_.itemType == ItemType.Shield).map(i => ShieldRates.blockPct(i.rarity))
+                  .getOrElse(hero.equipment.blockPct)
+    description.replace("{block}", block.toString).replace("{}", energyCost(hero).toString) + Skill.requirement(this) +
       s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}." +
       (if (understanding > 0L) s" Понимание: $understanding." else "")
   }
@@ -119,7 +126,8 @@ object Skill extends Enum[Skill] {
     case object WeakSpotStrike extends Effect
 
     /** Без урона: щит поднят до конца раунда — обычные атаки и умения врагов по
-      * герою режутся до [[Skill.BlockTakenPct]]% (Блок). Ход на этом кончается.
+      * герою режутся на процент щита, по его редкости (см. ShieldRates.blockPct).
+      * Ход на этом кончается (Блок).
       */
     case object Block extends Effect
 
@@ -155,10 +163,6 @@ object Skill extends Enum[Skill] {
   // текущего HP она вкладывает в урон (см. baseValue).
   val BloodHarvestHpCostPct: Long     = 10L
   val BloodHarvestHpToDamagePct: Long = 12L
-
-  /** Сколько урона проходит сквозь поднятый щит (см. [[Skill.Block]]): три
-    * четверти щит принимает на себя. */
-  val BlockTakenPct: Long = 25L
 
   /** Русское склонение слова «ход» после числа: 1 ход, 2–4 хода, 5+ ходов
     * (с учётом 11–14 → «ходов»). */
@@ -468,9 +472,9 @@ object Skill extends Enum[Skill] {
         cooldown = 2,
         initialCooldown = 0,
         effect = Effect.Block,
-        hitTemplate = "🛡 Вы закрываетесь щитом: до конца раунда удары и умения врагов по вам слабее на 75%.",
+        hitTemplate = "🛡 Вы закрываетесь щитом: до конца раунда удары и умения врагов по вам слабее на {}%.",
         description =
-          "Поднять щит и принять удар на него. До конца раунда обычные атаки и умения врагов наносят вам на 75% меньше урона — уже после того, как его срезала защита. Ход на этом кончается. Использование расходует {} энергии."
+          "Поднять щит и принять удар на него. До конца раунда обычные атаки и умения врагов наносят вам на {block}% меньше урона — уже после того, как его срезала защита. Ход на этом кончается. Использование расходует {} энергии."
       ) {
     def baseValue(hero: Hero, nowMs: Long): Double = 0.0
     def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L
