@@ -92,7 +92,8 @@ case class FlowerMeadowState(
 
   /** Очередной цветок: ранг 98/2, вид случайный, узнан ли — по знаниям. Каждый
     * цветок возвращает 2% от потолка энергии — поляна «лечит душу и тело».
-    * Бросок на волка идёт первым, а сам он нападает уже с цветком в руках. */
+    * Бросок на волка идёт первым, а сам он нападает уже с цветком в руках —
+    * к герою не ниже 4-го уровня (`MiniBoss.AmbushMinHeroLvl`). */
   private def findOne(user: User, renderer: Renderer): Task[StateType] =
     for {
       now   <- nowMs
@@ -103,7 +104,7 @@ case class FlowerMeadowState(
         case Some(s) =>
           for {
             wolfRoll <- Random.nextIntBetween(1, 101)
-            wolf      = wolfRoll <= WolfChancePct
+            wolf      = wolfRoll <= WolfChancePct && hero.lvl >= MiniBoss.AmbushMinHeroLvl
             rankRoll <- Random.nextIntBetween(1, 101)
             rank      = if (rankRoll <= HerbLore.RareHerbPct) 2 else 1
             pool      = MaterialKind.herbsOfRank(rank)

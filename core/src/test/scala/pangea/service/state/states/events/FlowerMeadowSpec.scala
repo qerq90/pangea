@@ -210,6 +210,21 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(last.exists(_.returnState.isEmpty))                          // цветов не осталось — после добычи в лабиринт
     },
 
+    test("герою ниже 4-го уровня волк на поляне не попадается: тот же бросок — просто цветок") {
+      for {
+        t <- meadow(hero().copy(lvl = 3L, dungeonLevel = 7), LoreData.empty)
+        (state, dao, inv, _, r) = t
+        _      <- dao.writeSceneData(userId, MeadowScene(left = 3, nextAt = 0L).asJson)
+        _      <- TestRandom.feedInts(3, 50, 1, 50) *> TestRandom.feedLongs(120000L) // бросок волка как в бою выше
+        res    <- state.action(testUser, tap("FlowerFind"), r)
+        battle <- dao.readActiveBattle(userId)
+        all    <- texts(r)
+      } yield assertTrue(res == StateType.FlowerMeadow) &&
+              assertTrue(battle.isEmpty) &&
+              assertTrue(inv.snapshot.size == 1) &&
+              assertTrue(!all.contains("услышал сзади шум"))
+    },
+
     test("возврат на поляну после волка: таймер ставится заново, цветок сразу не выдаётся") {
       for {
         t <- meadow(hero())
