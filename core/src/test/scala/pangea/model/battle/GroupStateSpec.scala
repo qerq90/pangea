@@ -312,7 +312,8 @@ object GroupStateSpec extends ZIOSpecDefault {
     test("за башнями не топчутся: моб перешагивает её и встаёт сразу за ней") {
       // Герой на первом месте, моб на шестнадцатом, башни на четырнадцатом и
       // пятнадцатом. Шаг в сторону героя — сразу на тринадцатое.
-      val mob   = monster(Race.Orc, 100L)
+      // Люди, не орки: орк прошёл бы за раунд два места (см. RaceTactics).
+      val mob   = monster(Race.Human, 100L)
       val tower = monster(Race.Construct, 500L, Rarity.Rare)
       val b0    = SoloPveBattle.fromGroup(List(mob, tower, tower, mob), hero, Nil)
       val b     = b0.copy(group = b0.group.copy(heroPos = 1, activePos = 1, places = List(14, 15, 16)))

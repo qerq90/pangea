@@ -202,7 +202,8 @@ object NecromancerCaveSpec extends ZIOSpecDefault {
     },
 
     test("павший перед героем не подставляет замену: соседи стоят, дальние идут сами") {
-      val mob = Monster(0L, 10L, Race.Orc, Rarity.Common,
+      // Люди, не орки: орк прошёл бы за раунд два места (см. RaceTactics).
+      val mob = Monster(0L, 10L, Race.Human, Rarity.Common,
         FightStats(atk = 1, hp = 100, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
       // Трое: герой на 1, мобы на 1 (в паре), 2 и 3. Первый пал.
       val fell = SoloPveBattle.fromGroup(List.fill(3)(mob), hero, Nil).copy(monsterCurrentHp = 0L)

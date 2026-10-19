@@ -54,8 +54,9 @@ object BowSkillsSpec extends ZIOSpecDefault {
 
   private val full = 100000L
 
+  // Люди, не орки и не эльфы: шагают по месту за раунд и бьют соседей (см. RaceTactics).
   private def monster: Monster =
-    Monster(0L, lvl, Race.Orc, Rarity.Common,
+    Monster(0L, lvl, Race.Human, Rarity.Common,
       FightStats(atk = 1, hp = full, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
 
   /** Строй: первый моб в паре с героем на первом месте, остальные — на `places`. */
