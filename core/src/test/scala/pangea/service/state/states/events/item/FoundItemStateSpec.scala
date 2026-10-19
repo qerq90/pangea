@@ -34,16 +34,26 @@ object FoundItemStateSpec extends ZIOSpecDefault {
     Item(77L, "Найденный шлем", lvl, Rarity.White, ItemType.Helmet,
       attack = 0, accuracy = 0, energy = 0, armor = 4, defence = 0, evasion = 0)
 
-  private def withFound(item: Item, hero: Hero = TestFixtures.hero(userId), canAddItem: Boolean = true) =
+  private def withFound(item: Item, hero: Hero = TestFixtures.hero(userId), canAddItem: Boolean = true,
+                        bag: List[Item] = Nil) =
     for {
       renderer <- TestRenderer.make
       heroDao  <- TestHeroDao.withHero(userId, hero)
       _        <- heroDao.writeSceneData(userId, FoundItemData(item).asJson)
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
-      invRepo   = if (canAddItem) TestInventoryRepository.accepting else TestInventoryRepository.full
+      invRepo   = if (canAddItem) TestInventoryRepository.withItems(bag) else TestInventoryRepository.full
       state     = FoundItemState(heroDao, invRepo, TestItemRepository.make, journal, content)
     } yield (state, renderer, heroDao, invRepo)
+
+  private def tapSlot(key: String, slot: Int): UserAction =
+    UserAction("", Some(s"""{"action":"$key","slot":"$slot"}"""))
+
+  // Герой в старом шлеме — находке остаётся встать вместо него.
+  private def busy: Hero = {
+    val h = TestFixtures.hero(userId)
+    h.copy(equipment = h.equipment.copy(helmet = helmet().copy(id = 5L, name = "Старый шлем")))
+  }
 
   override def spec = suite("FoundItemState")(
 
@@ -84,18 +94,54 @@ object FoundItemStateSpec extends ZIOSpecDefault {
       } yield assertTrue(hero.exists(_.equipment.helmet.id == 77L))
     },
 
-    test("«Забрать и надеть», а слот уже занят → находка просто ложится в сумку") {
-      val worn = TestFixtures.hero(userId)
-      val busy = worn.copy(equipment = worn.equipment.copy(helmet = helmet().copy(id = 5L, name = "Старый шлем")))
+    test("слот занят → «Забрать и надеть» есть; нажатие — находка вместо старого шлема, старый в сумке") {
       for {
         t <- withFound(helmet(), hero = busy)
         (state, renderer, heroDao, invRepo) = t
-        _    <- state.action(testUser, tap("TakeWearItem"), renderer)
-        hero <- heroDao.getHeroByUserId(userId)
-        text <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
-      } yield assertTrue(hero.exists(_.equipment.helmet.id == 5L)) &&
-              assertTrue(invRepo.snapshot.map(_.id) == List(77L)) &&
-              assertTrue(text.contains("Вы получили Найденный шлем") && !text.contains("сразу надели"))
+        _      <- state.action(testUser, UserAction("что угодно", None), renderer)
+        ids    <- renderer.sentScreens.map(_.last.choices.map(_.id))
+        result <- state.action(testUser, tap("TakeWearItem"), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+        text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(ids.headOption.contains("TakeWearItem")) &&
+              assertTrue(result == StateType.Dungeon) &&
+              assertTrue(hero.exists(_.equipment.helmet.id == 77L)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(5L)) &&
+              assertTrue(text.contains("сразу надели") && text.contains("🎒 Снято в сумку: Старый шлем"))
+    },
+
+    test("слот занят, сумка полна → отказ, находка остаётся на экране, шлем прежний") {
+      val full = (1L to 20L).toList.map(i => helmet().copy(id = 100L + i, itemType = ItemType.Boots))
+      for {
+        t <- withFound(helmet(), hero = busy, bag = full)
+        (state, renderer, heroDao, invRepo) = t
+        result <- state.action(testUser, tap("TakeWearItem"), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+        text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(result == StateType.FoundItem) &&
+              assertTrue(text.contains("Сумка полна — снятой вещи некуда деться")) &&
+              assertTrue(hero.exists(_.equipment.helmet.id == 5L)) &&
+              assertTrue(invRepo.snapshot.size == 20)
+    },
+
+    test("два кольца надеты → спрашиваем, какое снять; выбор первого — меняется первое") {
+      val h     = TestFixtures.hero(userId)
+      val found = helmet().copy(itemType = ItemType.Ring, name = "Найденное кольцо")
+      val rings = h.copy(equipment = h.equipment.copy(
+                    firstRing  = helmet().copy(id = 6L, itemType = ItemType.Ring, name = "Кольцо раз"),
+                    secondRing = helmet().copy(id = 7L, itemType = ItemType.Ring, name = "Кольцо два")))
+      for {
+        t <- withFound(found, hero = rings)
+        (state, renderer, heroDao, invRepo) = t
+        asked  <- state.action(testUser, tap("TakeWearItem"), renderer)
+        choice <- renderer.sentScreens.map(_.last)
+        result <- state.action(testUser, tapSlot("TakeWearItem", 1), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(asked == StateType.FoundItem) &&
+              assertTrue(choice.choices.map(_.id) == List("TakeWearItem", "TakeWearItem", "FoundBack")) &&
+              assertTrue(result == StateType.Dungeon) &&
+              assertTrue(hero.exists(h => h.equipment.firstRing.id == 77L && h.equipment.secondRing.id == 7L)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(6L))
     },
 
     test("enter → сохраняет предмет в scene_data, показывает экран находки") {

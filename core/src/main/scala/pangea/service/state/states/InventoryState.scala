@@ -25,7 +25,7 @@ import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.states.marisa.MarisaHuntState
 import pangea.service.state.states.murloc.MurlocVillageState
-import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, QuestSupport, State, UiScene, UserAction}
+import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, QuestSupport, SlotChoice, State, UiScene, UserAction}
 import zio.{Random, Task, ZIO}
 
 case class InventoryState(
@@ -535,50 +535,13 @@ case class InventoryState(
       case _                      => showList(user, renderer)
     }
 
-  /** Экран выбора кольца: какое из двух надетых снять ради нового. */
-  private def ringChoiceScreen(newRing: Item, eq: Equipment, itemId: Long): Screen = {
-    def slotButton(slot: Int, worn: Item) =
-      Choice(
-        id    = "EquipRing",
-        label = ItemMenu.truncate(content.format("inventory.ringSlot",
-                  "slot" -> slot.toString, "name" -> worn.displayTitle)),
-        data  = Map("id" -> itemId.toString, "slot" -> slot.toString),
-        row   = Some(slot - 1)
-      )
-    Screen(
-      content.format("inventory.ringChoice", "name" -> newRing.displayTitle) + "\n\n" +
-        eq.firstRing.equippedComparison("Слот 1") + "\n" + Item.ComparisonSeparator + "\n" +
-        eq.secondRing.equippedComparison("Слот 2"),
-      List(
-        slotButton(1, eq.firstRing),
-        slotButton(2, eq.secondRing),
-        content.choice("InventoryList", "inventory.exit").copy(row = Some(2))
-      )
-    )
-  }
-
-  /** Экран выбора руки: обе заняты одноручным, и новое одноручное встаёт вместо
-    * одного из них — как кольцо. */
-  private def handChoiceScreen(weapon: Item, eq: Equipment, itemId: Long): Screen = {
-    def handButton(hand: Int, name: String, worn: Item) =
-      Choice(
-        id    = "EquipHand",
-        label = ItemMenu.truncate(content.format("inventory.handSlot",
-                  "hand" -> name, "name" -> worn.displayTitle)),
-        data  = Map("id" -> itemId.toString, "slot" -> hand.toString),
-        row   = Some(hand - 1)
-      )
-    Screen(
-      content.format("inventory.handChoice", "name" -> weapon.displayTitle) + "\n\n" +
-        eq.weapon.equippedComparison(EquipmentState.RightHandName) + "\n" + Item.ComparisonSeparator + "\n" +
-        eq.leftHand.equippedComparison(EquipmentState.LeftHandName),
-      List(
-        handButton(1, EquipmentState.RightHandName, eq.weapon),
-        handButton(2, EquipmentState.LeftHandName, eq.leftHand),
-        content.choice("InventoryList", "inventory.exit").copy(row = Some(2))
-      )
-    )
-  }
+  /** Экран выбора кольца или руки: что из двух надетых снять ради новой вещи
+    * (общий с «Забрать и надеть», см. [[SlotChoice]]). */
+  private def slotChoiceScreen(item: Item, eq: Equipment, itemId: Long): Screen =
+    SlotChoice.screen(content, item, eq,
+      action = if (item.itemType == ItemType.Ring) "EquipRing" else "EquipHand",
+      data   = Map("id" -> itemId.toString),
+      back   = content.choice("InventoryList", "inventory.exit"))
 
   private def equipById(user: User, itemId: Long, renderer: Renderer, pairSlot: Option[Int]): Task[StateType] =
     for {
@@ -599,15 +562,10 @@ case class InventoryState(
               content.format("inventory.tooHighLevel",
                 "required" -> item.lvl.toString,
                 "current"  -> hero.lvl.toString), Nil)).as(false)
-          // Оба слота колец заняты и слот ещё не выбран — спрашиваем, какое снять.
-          else if (item.itemType == ItemType.Ring && pairSlot.isEmpty &&
-                   InventoryState.ringSlotsFull(hero.equipment))
-            renderer.show(user, ringChoiceScreen(item, hero.equipment, itemId)).as(true)
-          // Обе руки заняты одноручным или щитом, а берут ещё одно — спрашиваем,
-          // вместо чего.
-          else if ((item.itemType == ItemType.Weapon || item.itemType == ItemType.Shield) && !item.twoHanded &&
-                   pairSlot.isEmpty && hero.equipment.handsFull)
-            renderer.show(user, handChoiceScreen(item, hero.equipment, itemId)).as(true)
+          // Оба слота колец заняты, или обе руки заняты одноручным или щитом, а
+          // берут ещё одно, и слот ещё не выбран — спрашиваем, что снять.
+          else if (pairSlot.isEmpty && SlotChoice.needed(hero.equipment, item))
+            renderer.show(user, slotChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
             val (newEq, newFight, removed) = InventoryState.equip(hero, item, pairSlot)
             val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)

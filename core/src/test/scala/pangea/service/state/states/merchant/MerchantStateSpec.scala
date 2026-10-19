@@ -38,6 +38,8 @@ object MerchantStateSpec extends ZIOSpecDefault {
       details = ItemDetails.Trophy("Human", TrophyKind.Head))
 
   private def richHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 1000000L)
+  // Тот же герой в шлеме «Предмет 5» — товару-шлему остаётся встать вместо него.
+  private def busyHero = richHero.copy(equipment = richHero.equipment.copy(helmet = gear(5L, Rarity.White)))
   private def poorHero = TestFixtures.hero(userId).copy(lvl = 10L, silver = 0L)
 
   private def makeState(hero: pangea.model.hero.Hero, items: List[Item] = Nil) =
@@ -52,12 +54,13 @@ object MerchantStateSpec extends ZIOSpecDefault {
   private val StockPrice = 500L
 
   // Лавка с известным товаром: шлем 1-го уровня (герою по силам).
-  private def stocked(hero: pangea.model.hero.Hero, invRepo: TestInventoryRepository = TestInventoryRepository.accepting) =
+  private def stocked(hero: pangea.model.hero.Hero, invRepo: TestInventoryRepository = TestInventoryRepository.accepting,
+                      ware: Item = gear(0L, Rarity.Green)) =
     for {
       heroDao  <- TestHeroDao.withHero(userId, hero)
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
-      stock     = MerchantData(List(MerchantItem(gear(0L, Rarity.Green), StockPrice, bought = false)), refreshedAt = 0L)
+      stock     = MerchantData(List(MerchantItem(ware, StockPrice, bought = false)), refreshedAt = 0L)
       _        <- heroDao.writeMerchantData(userId, stock.asJson)
     } yield (MerchantState(heroDao, invRepo, TestItemRepository.make, content), heroDao, invRepo, renderer)
 
@@ -127,19 +130,74 @@ object MerchantStateSpec extends ZIOSpecDefault {
               assertTrue(Set("ConfirmBuy", "CancelBuy").subsetOf(screens.last.choices.map(_.id).toSet))
     },
 
-    test("товар встаёт в пустой слот → «Да, и надеть» между «Да» и «Нет»; слот занят — кнопки нет") {
-      val busy = richHero.copy(equipment = richHero.equipment.copy(helmet = gear(5L, Rarity.White)))
+    test("«Да, и надеть» между «Да» и «Нет» — и в пустой слот, и вместо надетого; не по уровню — кнопки нет") {
       for {
         free    <- stocked(richHero)
         (fs, _, _, fr) = free
         _       <- fs.action(testUser, tapIdx("Buy", 0), fr)
         freeIds <- fr.sentScreens.map(_.last.choices.map(_.id))
-        taken   <- stocked(busy)
+        taken   <- stocked(busyHero)
         (ts, _, _, tr) = taken
         _       <- ts.action(testUser, tapIdx("Buy", 0), tr)
         busyIds <- tr.sentScreens.map(_.last.choices.map(_.id))
+        high    <- stocked(richHero, ware = gear(0L, Rarity.Green).copy(lvl = 11L))
+        (hs, _, _, hr) = high
+        _       <- hs.action(testUser, tapIdx("Buy", 0), hr)
+        highIds <- hr.sentScreens.map(_.last.choices.map(_.id))
       } yield assertTrue(freeIds == List("ConfirmBuy", "ConfirmBuyWear", "CancelBuy")) &&
-              assertTrue(busyIds == List("ConfirmBuy", "CancelBuy"))
+              assertTrue(busyIds == List("ConfirmBuy", "ConfirmBuyWear", "CancelBuy")) &&
+              assertTrue(highIds == List("ConfirmBuy", "CancelBuy"))
+    },
+
+    test("«Да, и надеть» вместо надетого → новый шлем на герое, старый в сумке, цена списана") {
+      for {
+        t <- stocked(busyHero)
+        (state, heroDao, invRepo, renderer) = t
+        _    <- state.action(testUser, tapIdx("ConfirmBuyWear", 0), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+        data <- readMerchant(heroDao)
+        text <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(hero.exists(_.equipment.helmet.name == "Предмет 0")) &&
+              assertTrue(hero.exists(_.silver == 1000000L - StockPrice)) &&
+              assertTrue(invRepo.snapshot.map(_.name) == List("Предмет 5")) &&
+              assertTrue(data.items.head.bought) &&
+              assertTrue(text.contains("сразу надели") && text.contains("🎒 Снято в сумку: Предмет 5"))
+    },
+
+    test("«Да, и надеть» вместо надетого при полной сумке → отказ, серебро не списано, товар не продан") {
+      val full = TestInventoryRepository.withItems((1L to 20L).toList.map(i => gear(100L + i, Rarity.White, itemType = ItemType.Boots)))
+      for {
+        t <- stocked(busyHero, full)
+        (state, heroDao, invRepo, renderer) = t
+        _    <- state.action(testUser, tapIdx("ConfirmBuyWear", 0), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+        data <- readMerchant(heroDao)
+        text <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(text.contains("Сумка полна — снятой вещи некуда деться")) &&
+              assertTrue(hero.exists(h => h.silver == 1000000L && h.equipment.helmet.name == "Предмет 5")) &&
+              assertTrue(!data.items.head.bought) &&
+              assertTrue(invRepo.snapshot.size == 20)
+    },
+
+    test("два кольца надеты → спрашиваем, какое снять (серебро ещё не списано); выбор — меняется это кольцо") {
+      val rings = richHero.copy(equipment = richHero.equipment.copy(
+                    firstRing  = gear(6L, Rarity.White, itemType = ItemType.Ring),
+                    secondRing = gear(7L, Rarity.White, itemType = ItemType.Ring)))
+      for {
+        t <- stocked(rings, ware = gear(0L, Rarity.Green, itemType = ItemType.Ring))
+        (state, heroDao, invRepo, renderer) = t
+        _      <- state.action(testUser, tapIdx("ConfirmBuyWear", 0), renderer)
+        choice <- renderer.sentScreens.map(_.last)
+        before <- heroDao.getHeroByUserId(userId)
+        _      <- state.action(testUser, UserAction("", Some("""{"action":"ConfirmBuyWear","idx":"0","slot":"1"}""")), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(choice.choices.map(_.id) == List("ConfirmBuyWear", "ConfirmBuyWear", "CancelBuy")) &&
+              assertTrue(choice.choices.take(2).map(_.data) ==
+                List(Map("idx" -> "0", "slot" -> "1"), Map("idx" -> "0", "slot" -> "2"))) &&
+              assertTrue(before.exists(_.silver == 1000000L)) &&
+              assertTrue(hero.exists(h => h.equipment.firstRing.name == "Предмет 0" && h.equipment.secondRing.id == 7L)) &&
+              assertTrue(hero.exists(_.silver == 1000000L - StockPrice)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(6L))
     },
 
     test("«Да, и надеть» → товар на герое, сумка пуста, цена списана, товар помечен купленным") {

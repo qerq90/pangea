@@ -15,7 +15,7 @@ import pangea.repository.item.ItemRepository
 import pangea.repository.artifact.ArtifactRepository
 import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.state.states.LootState.LootData
-import pangea.service.state.{InventoryFeedback, QuestSupport, State, TakeAndEquip, UserAction}
+import pangea.service.state.{InventoryFeedback, QuestSupport, SlotChoice, State, TakeAndEquip, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -25,7 +25,9 @@ import zio.{Task, ZIO}
  * «Забрать»/«Оставить». Забрать → серебро в кошелёк, предметы в инвентарь (переполнен →
  * предмет теряется). Оставить → добыча выбрасывается. Оба исхода ведут в Dungeon.
  * Если что-то из добычи встаёт в пустой слот, есть и третья кнопка — «Забрать и
- * надеть»: такие вещи сразу на героя, мимо сумки (см. [[TakeAndEquip]]).
+ * надеть»: такие вещи сразу на героя, мимо сумки (см. [[TakeAndEquip]]). На
+ * каждую вещь, которая встанет вместо надетой, — своя кнопка «Надеть: …»: всё
+ * забирается, эта вещь надевается, снятое уходит в сумку.
  *
  * После группового боя добыча идёт по одному павшему за экран (`queue`): каждый
  * исход показывает следующего, пока очередь не опустеет, и только тогда — уход.
@@ -43,6 +45,9 @@ case class LootState(
     routes = Map(
       "Take"     -> Target.Run { (user, _, renderer) => claimLoot(user, renderer, wear = false) },
       "TakeWear" -> Target.Run { (user, _, renderer) => claimLoot(user, renderer, wear = true) },
+      // «Надеть: …» — и кнопки выбора кольца или руки после него
+      "TakeSwap" -> Target.Run { (user, ua, renderer) => swapLoot(user, ua, renderer) },
+      "SwapBack" -> Target.Run { (user, _, renderer) => showPreview(user, renderer) },
       "Leave"    -> Target.Run { (user, _, renderer) => leaveLoot(user, renderer) },
       "Continue" -> Target.Run { (user, _, renderer) => readLoot(user).flatMap(finish(user, _, renderer)) }
     ),
@@ -76,48 +81,72 @@ case class LootState(
       hero <- getHero(user)
       loot <- readLoot(user)
 
-      // серебро и дублоны забираются всегда и сразу, без выбора; «Спаситель
-      // Марисы» получает серебра на десятую больше.
-      silvers     = loot.silvers.map(_ * Achievement.silverPct(hero) / 100L)
-      silverTotal = silvers.sum
+      // серебро и дублоны забираются всегда и сразу, без выбора
+      silverTotal = silvers(hero, loot).sum
       _        <- ZIO.when(silverTotal > 0L)(heroDao.updateSilver(user.userId, hero.silver + silverTotal))
       _        <- ZIO.when(loot.doubloons > 0L)(heroDao.updateDoubloons(user.userId, hero.doubloons + loot.doubloons))
-      silverLines = silvers.map { s => content.format("loot.silver", "amount" -> s.toString) }
-      currencyLines = silverLines ++
-        (if (loot.doubloons > 0L) List(content.format("loot.doubloons", "amount" -> loot.doubloons.toString)) else Nil)
+      currency  = currencyLines(hero, loot)
 
-      // В группе над добычей стоит имя павшего — чтобы было видно, чья она.
-      header = loot.monsterName match {
-        case Some(name) => content.format("loot.groupHeader", "monster" -> name)
-        case None       => content.text("loot.header")
-      }
       empty = loot.monsterName match {
         case Some(name) => content.format("loot.groupEmpty", "monster" -> name)
         case None       => content.text("loot.empty")
       }
       _ <- if (loot.items.isEmpty) {
              // выбирать нечего — только серебро/дублоны (или совсем пусто)
-             val text = if (currencyLines.isEmpty) empty
-                        else header + "\n\n" + currencyLines.mkString("\n")
+             val text = if (currency.isEmpty) empty
+                        else header(loot) + "\n\n" + currency.mkString("\n")
              journal.append(GameEvent(user.userId, "loot_claimed",
                Json.obj("silver" -> silverTotal.asJson, "items" -> loot.items.map(_.name).asJson))) *>
                // В группе, пока павшие ещё есть, решать нечего — сообщение и сразу следующий.
                (if (loot.queue.nonEmpty) renderer.show(user, Screen(text, Nil)) *> finish(user, loot, renderer).unit
                 else renderer.show(user, Screen(text, content.screen("loot.enter").choices)))
-           } else {
-             // серебро/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»,
-             // а если что-то встаёт в пустой слот — ещё и «Забрать и надеть»
-             val preview = currencyLines ++ loot.items.map(it => itemLineWithEquipped(it, hero))
-             val text    = header + "\n\n" + preview.mkString("\n")
-             val choices =
-               Option.when(TakeAndEquip.pick(hero, loot.items).nonEmpty)(content.choice("TakeWear", "loot.takeWearLabel")).toList ++
-               List(
-                 content.choice("Take", "loot.takeLabel"),
-                 content.choice("Leave", "loot.leaveLabel")
-               )
-             renderer.show(user, Screen(text, choices))
-           }
+           } else
+             // серебро/дублоны уже в кошельке; по предметам спрашиваем
+             renderer.show(user, previewScreen(hero, loot))
     } yield ()
+
+  /** Серебро с добычи: «Спаситель Марисы» получает на десятую больше. */
+  private def silvers(hero: Hero, loot: LootData): List[Long] =
+    loot.silvers.map(_ * Achievement.silverPct(hero) / 100L)
+
+  private def currencyLines(hero: Hero, loot: LootData): List[String] =
+    silvers(hero, loot).map(s => content.format("loot.silver", "amount" -> s.toString)) ++
+      (if (loot.doubloons > 0L) List(content.format("loot.doubloons", "amount" -> loot.doubloons.toString)) else Nil)
+
+  // В группе над добычей стоит имя павшего — чтобы было видно, чья она.
+  private def header(loot: LootData): String = loot.monsterName match {
+    case Some(name) => content.format("loot.groupHeader", "monster" -> name)
+    case None       => content.text("loot.header")
+  }
+
+  /** Превью добычи: валюта, вещи с надетым для сравнения и кнопки. Валюта уже в
+    * кошельке, строки о ней — только для глаз, поэтому превью можно показать ещё
+    * раз ([[showPreview]]): после «Назад» с выбора кольца или отказа «сумка полна».
+    * «Забрать и надеть» — если что-то встаёт в пустой слот; «Надеть: …» — на
+    * каждую вещь, которая встанет вместо надетой. */
+  private def previewScreen(hero: Hero, loot: LootData): Screen = {
+    val preview = currencyLines(hero, loot) ++ loot.items.map(it => itemLineWithEquipped(it, hero))
+    val wearAll = Option.when(TakeAndEquip.pick(hero, loot.items).nonEmpty)(content.choice("TakeWear", "loot.takeWearLabel"))
+    val swaps   = loot.items.zipWithIndex.collect { case (item, i) if TakeAndEquip.replaces(hero, item) =>
+      content.choice("TakeSwap", "loot.swapLabel", "name" -> item.name).copy(data = swapData(i, item))
+    }
+    Screen(header(loot) + "\n\n" + preview.mkString("\n"),
+      wearAll.toList ++ swaps ++ List(content.choice("Take", "loot.takeLabel"), content.choice("Leave", "loot.leaveLabel")))
+  }
+
+  /** Показать превью ещё раз — без начисления серебра. Вещей уже нет — выбирать
+    * нечего, идём дальше. */
+  private def showPreview(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      loot <- readLoot(user)
+      next <- if (loot.items.isEmpty) finish(user, loot, renderer)
+              else renderer.show(user, previewScreen(hero, loot)).as(StateType.Loot)
+    } yield next
+
+  /** Данные кнопки «Надеть: …»: номер вещи и её имя — старая кнопка не наденет
+    * чужую вещь, если добыча на экране уже другая. */
+  private def swapData(i: Int, item: Item): Map[String, String] = Map("i" -> i.toString, "n" -> item.name)
 
   override def action(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     branch.act(user, ua, renderer)
@@ -128,13 +157,46 @@ case class LootState(
     for {
       hero <- getHero(user)
       loot <- readLoot(user)
+      next <- claim(user, renderer, hero, loot, if (wear) TakeAndEquip.pick(hero, loot.items) else Nil, slot = None)
+    } yield next
 
-      wearIdx    = if (wear) TakeAndEquip.pick(hero, loot.items) else Nil
+  // «Надеть: X»: всё забираем, а X — вместо надетой. Оба кольца или обе руки
+  // заняты — сперва спрашиваем, что снять (та же кнопка, но с номером слота);
+  // снятому нет места в сумке — не надеваем и показываем добычу снова. Кнопка со
+  // старого экрана, где вещь уже другая, тоже просто показывает добычу.
+  private def swapLoot(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      loot  <- readLoot(user)
+      inv   <- inventoryRepository.get(hero.id).mapError(e => new Throwable(e.toString))
+      slot   = payload(ua, "slot").flatMap(_.toIntOption).filter(s => s == 1 || s == 2)
+      chosen = payload(ua, "i").flatMap(_.toIntOption).flatMap(i => loot.items.lift(i).map(i -> _))
+                 .filter { case (_, item) => payload(ua, "n").contains(item.name) && TakeAndEquip.replaces(hero, item) }
+      next  <- chosen match {
+                 case None => showPreview(user, renderer)
+                 case Some((i, item)) if slot.isEmpty && SlotChoice.needed(hero.equipment, item) =>
+                   renderer.show(user, SlotChoice.screen(content, item, hero.equipment, "TakeSwap", swapData(i, item),
+                     content.choice("SwapBack", "common.back"))).as(StateType.Loot)
+                 case Some((i, item)) =>
+                   TakeAndEquip.noRoom(hero, inv, item, slot) match {
+                     case Some(key) =>
+                       renderer.show(user, Screen(content.format(key, "name" -> item.name), Nil)) *> showPreview(user, renderer)
+                     case None => claim(user, renderer, hero, loot, List(i), slot)
+                   }
+               }
+    } yield next
+
+  /** Забрать добычу: вещи с номерами `wearIdx` — сразу на героя (`slot` — для
+    * одной вещи, см. `TakeAndEquip.wear`), остальное — в артефакты и сумку. */
+  private def claim(user: User, renderer: Renderer, hero: Hero, loot: LootData,
+                    wearIdx: List[Int], slot: Option[Int]): Task[StateType] =
+    for {
       persisted <- ZIO.foreach(loot.items)(itemRepository.persist(hero.id, _))
       wornItems  = wearIdx.flatMap(persisted.lift)
       // Сперва надеваем: «Тайник» на надетом прибавит сумке места до того, как
-      // в неё ляжет остальное.
-      worn      <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, wornItems)
+      // в неё ляжет остальное, а снятое ляжет раньше добычи — место под него
+      // проверено заранее.
+      worn      <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, wornItems, slot)
 
       // Камни летят в Ларец Азата, травы и отвары — в Живую сумку; что не
       // взяли артефакты, идёт в сумку героя, как и раньше.
@@ -145,7 +207,7 @@ case class LootState(
 
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
              Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson,
-                      "worn" -> wornItems.map(_.name).asJson)))
+                      "worn" -> wornItems.map(_.name).asJson, "removed" -> worn.removed.map(_.name).asJson)))
 
       takenLines = wornItems.map(itemLine) ++ results.collect {
         case (item, Intake.ToInventory)             => itemLine(item)
@@ -157,13 +219,17 @@ case class LootState(
       taken      = if (takenLines.isEmpty) content.text("loot.empty")
                    else content.text("loot.claimed") + "\n\n" + takenLines.mkString("\n")
       wornLine   = if (wornItems.isEmpty) ""
-                   else "\n\n" + content.format("loot.worn", "names" -> wornItems.map(_.name).mkString(", "))
+                   else "\n\n" + content.format("loot.worn", "names" -> wornItems.map(_.name).mkString(", ")) +
+                     TakeAndEquip.takenOffLine(content, worn)
       full       = if (lostLines.isEmpty) "" else "\n\n" + lostLines.mkString("\n")
       _ <- renderer.show(user, Screen(taken + wornLine + full + "\n\n" + slots, Nil))
       // Двенадцатая вещь набора — за собранный набор своё достижение.
-      _ <- QuestSupport.grantFullSets(heroDao, content, user, worn, renderer)
+      _ <- QuestSupport.grantFullSets(heroDao, content, user, worn.hero, renderer)
       next <- finish(user, loot, renderer)
     } yield next
+
+  private def payload(ua: UserAction, key: String): Option[String] =
+    ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get(key)))
 
   // «Оставить»: предметы выбрасываются (серебро уже забрано в enter).
   private def leaveLoot(user: User, renderer: Renderer): Task[StateType] =
