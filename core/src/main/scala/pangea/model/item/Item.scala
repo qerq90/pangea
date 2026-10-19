@@ -203,7 +203,10 @@ case class Item(
     val setLine = set.map(s => s"Набор: «${s.label}»").toList
     // Чем лук отличается от меча, видно только в бою — скажем сразу.
     val rangedLine = Option.when(ranged)(
-      s"🏹 Бьёт на ${GripRates.RangedReach} места в обе стороны; вблизи — на ${GripRates.RangedClosePenaltyPct}% слабее").toList
+      s"🏹 Бьёт на ${GripRates.RangedReach} места в обе стороны; вблизи — на ${GripRates.RangedClosePenaltyPct}% слабее").toList ++
+      // Сколько снимает Блок, зависит от редкости — скажем на самом щите.
+      Option.when(itemType == ItemType.Shield)(
+        s"🛡 Блок снимает ${ShieldRates.blockPct(rarity)}% урона").toList
     val extra = details match {
       case ItemDetails.Weapon(skill)     => List(s"""Активный навык: «${skill.label}»""")
       case ItemDetails.Armor(skill)      => List(s"""Активный навык: «${skill.label}»""")

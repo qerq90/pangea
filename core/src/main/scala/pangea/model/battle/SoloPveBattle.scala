@@ -91,12 +91,13 @@ case class SoloPveBattle(
   // Святая вода разлита по полю: до конца боя жжёт мёртвых, если её не гасят
   // миазмы (см. Aura.HolyWater).
   holyWater:      Boolean = false,
-  // Щит героя поднят (Блок): до его следующего хода удары и умения врагов по
-  // нему режутся до четверти (см. Skill.Block).
-  heroShieldUp:   Boolean = false,
+  // Щит героя поднят (Блок): на сколько процентов до его следующего хода
+  // режутся удары и умения врагов по нему — по редкости щита (см. Skill.Block,
+  // Equipment.blockPct). 0 — щит опущен.
+  heroBlockPct:   Long = 0L,
   // На арене: соперник — «моб» этого зеркала — поднял щит своим ходом, и удары
-  // героя по нему режутся так же (см. ArenaBattle).
-  monsterShieldUp: Boolean = false,
+  // героя по нему режутся на столько процентов (см. ArenaBattle). 0 — опущен.
+  monsterBlockPct: Long = 0L,
   // Кинжал героя наизготовку (Контрудар): первый удар врага, от которого он
   // увернётся до своего следующего хода, получит ответ наверняка.
   heroCounterReady: Boolean = false,
@@ -230,9 +231,18 @@ case class SoloPveBattle(
   def arenaUnit(id: Int): Option[(Int, MonsterSlot)] =
     arenaUnits.find { case (_, s) => s.arenaUnit.contains(id) }
 
+  /** Поднят ли щит героя (Блок). */
+  def heroShieldUp: Boolean = heroBlockPct > 0L
+
+  /** Поднят ли щит у соперника на арене. */
+  def monsterShieldUp: Boolean = monsterBlockPct > 0L
+
   /** Поднят ли щит у того, кто в полях. На арене щит держит только сам
     * соперник, а не его союзник, вставший в поля на удар. */
   def foeShieldUp: Boolean = monsterShieldUp && monsterArenaUnit.forall(_ == SoloPveBattle.ArenaHeroUnit)
+
+  /** На сколько процентов щит того, кто в полях, режет удар героя (0 — не режет). */
+  def foeBlockPct: Long = if (foeShieldUp) monsterBlockPct else 0L
 
   /** Сила контрудара того, кто в полях: на арене кинжал держит только сам
     * соперник. */
@@ -749,8 +759,8 @@ object SoloPveBattle {
       noFlee              <- c.getOrElse[Boolean]("noFlee")(false)
       lootLevel           <- c.getOrElse[Option[Long]]("lootLevel")(None)
       holyWater           <- c.getOrElse[Boolean]("holyWater")(false)
-      heroShieldUp        <- c.getOrElse[Boolean]("heroShieldUp")(false)
-      monsterShieldUp     <- c.getOrElse[Boolean]("monsterShieldUp")(false)
+      heroBlockPct        <- c.getOrElse[Long]("heroBlockPct")(0L)
+      monsterBlockPct     <- c.getOrElse[Long]("monsterBlockPct")(0L)
       heroCounterReady    <- c.getOrElse[Boolean]("heroCounterReady")(false)
       monsterCounterPower <- c.getOrElse[Long]("monsterCounterPower")(0L)
       monsterArenaUnit    <- c.getOrElse[Option[Int]]("monsterArenaUnit")(None)
@@ -759,7 +769,7 @@ object SoloPveBattle {
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
-                         noFlee, lootLevel, holyWater, heroShieldUp, monsterShieldUp,
+                         noFlee, lootLevel, holyWater, heroBlockPct, monsterBlockPct,
                          heroCounterReady, monsterCounterPower, monsterArenaUnit)
 
   /** Номер самого соперника среди «мобов» зеркала арены; его союзники — от

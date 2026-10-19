@@ -216,7 +216,8 @@ object ArenaSpec extends ZIOSpecDefault {
         open <- round(block = false)
         shut <- round(block = true)
       } yield assertTrue(!open._1 && shut._1) &&
-              assertTrue(open._2 > 0L && shut._2 == BattleState.shieldCut(up = true, open._2))
+              assertTrue(open._2 > 0L &&
+                shut._2 == BattleState.shieldCut(pangea.model.item.ShieldRates.blockPct(pangea.model.item.Rarity.Blue), open._2))
     },
 
     test("парирующий кинжал на арене: соперник промахнулся — и получил ответ в своём же ходе") {

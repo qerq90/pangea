@@ -78,7 +78,7 @@ object ArenaBattle {
       monsterArenaUnit    = Some(HeroUnit),
       arena               = Some(ArenaRef(fight.id, foe.userId.value)),
       // Соперник поднял щит своим ходом — в этом ходе он режет удары героя.
-      monsterShieldUp     = foe.shieldUp,
+      monsterBlockPct     = if (foe.shieldUp) foeHero.equipment.blockPct else 0L,
       // …или держит парирующий кинжал наготове: промах героя — и он ответит.
       monsterCounterPower = if (foe.counterUp) counterPower(foeHero, foe.buffs, nowMs) else 0L,
       // Каждый на своём месте: от расстояния зависит, кто кого достаёт. Сами

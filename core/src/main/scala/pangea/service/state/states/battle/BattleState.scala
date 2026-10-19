@@ -174,7 +174,7 @@ case class BattleState(
     for {
       // Щит, поднятый прошлым ходом, своё отстоял, и кинжал наизготовку тоже:
       // раунд, за который они брались, кончился (см. Skill.Block, Counterstrike).
-      struck <- turn(hero, battle.copy(heroShieldUp = false, heroCounterReady = false), now)
+      struck <- turn(hero, battle.copy(heroBlockPct = 0L, heroCounterReady = false), now)
       // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
       // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
       feasted = ghoulFeast(battle, struck, now)
@@ -1086,7 +1086,7 @@ case class BattleState(
             // Защита моба режет удар ДО разбивки по броне/HP, иначе поехали бы
             // грани стихий (см. splitElementalDamage).
             // На арене соперник мог поднять щит своим ходом — он режет и удар героя.
-            guarded = BattleState.shieldCut(battle.foeShieldUp,
+            guarded = BattleState.shieldCut(battle.foeBlockPct,
                         (resisted * (1.0 - monsterDefenceCut(hero, battle, buffedEff, nowMs))).toLong.max(1L))
             // Предел босса за раунд: Крысиный король отдаёт не больше пятой
             // части запаса, сколько бы герой ни вложил в удар и умение.
@@ -2138,7 +2138,7 @@ case class BattleState(
     v match {
       case Victim.Hero =>
         // Приём босса — тоже умение: поднятый щит режет и его.
-        val (hurt, dealt) = hurtHero(hero, bossDamageTaken(hero, battle, BattleState.shieldCut(battle.heroShieldUp, damage)))
+        val (hurt, dealt) = hurtHero(hero, bossDamageTaken(hero, battle, BattleState.shieldCut(battle.heroBlockPct, damage)))
         (hurt, battle, dealt)
       case Victim.Ally(pos) =>
         battle.group.allyAt(pos).filter(_.alive) match {
@@ -2489,7 +2489,7 @@ case class BattleState(
             rawDamage = (monsterAttack(battle) * spread / 100L * Achievement.damagePct(hero) / 100L).max(1L)
             reduction = heroDamageReduction(hero, battle, buffedEff, monster.fightStats.atk, nowMs)
             // Поднятый щит принимает три четверти того, что прошло сквозь защиту.
-            baseReduced = BattleState.shieldCut(battle.heroShieldUp, (rawDamage * (1.0 - reduction)).toLong.max(1L))
+            baseReduced = BattleState.shieldCut(battle.heroBlockPct, (rawDamage * (1.0 - reduction)).toLong.max(1L))
             // «Непробиваемый»: 20% шанс срезать полученный урон обычной атаки вдвое.
             impenTriggered <- chanceRoll(hero.passives.hasImpenetrable, PassiveKind.Impenetrable.TriggerPct)
             impenDamage =
@@ -3294,7 +3294,10 @@ case class BattleState(
 
         case Skill.Effect.Block =>
           // Щит поднят до конца раунда; на этом ход кончается — без удара.
-          closeTurn(TurnResult(hero, bumped.copy(heroShieldUp = true), Vector(tmpl), Outcome.Continue), nowMs, skip)
+          // Сколько снимет щит — по редкости лучшего в руках.
+          val pct = hero.equipment.blockPct
+          closeTurn(TurnResult(hero, bumped.copy(heroBlockPct = pct), Vector(tmpl.replace("{}", pct.toString)),
+            Outcome.Continue), nowMs, skip)
 
         case Skill.Effect.Counter =>
           // Кинжал наизготовку до конца раунда; на этом ход кончается — без удара.
@@ -3338,7 +3341,7 @@ case class BattleState(
       crit: Boolean
   ): Task[TurnResult] = {
     // На арене соперник мог поднять щит — умение по нему режется так же, как удар.
-    val raw = BattleState.shieldCut(battle.foeShieldUp, if (crit) value.max(1L) * 2L else value.max(1L))
+    val raw = BattleState.shieldCut(battle.foeBlockPct, if (crit) value.max(1L) * 2L else value.max(1L))
     // Урон навыка тоже несёт стихию оружия — раздельный урон по броне/HP с тем же
     // усилением. Проки стихий роллятся отдельным броском (как и на обычной атаке).
     val resisted          = (raw * bossResistance(hero, battle)).toLong.max(1L)
@@ -5821,10 +5824,10 @@ object BattleState {
     case _                                                                             => false
   }
 
-  /** Поднятый щит (см. Skill.Block): сквозь него проходит четверть урона — уже
-    * срезанного защитой. Щит опущен — урон как есть. */
-  def shieldCut(up: Boolean, damage: Long): Long =
-    if (up) (damage * Skill.BlockTakenPct / 100L).max(1L) else damage
+  /** Поднятый щит (см. Skill.Block): снимает `blockPct`% урона — уже срезанного
+    * защитой, — но единица проходит всегда. Щит опущен (0) — урон как есть. */
+  def shieldCut(blockPct: Long, damage: Long): Long =
+    if (blockPct > 0L) (damage * (100L - blockPct) / 100L).max(1L) else damage
 
   /** На сколько мест в обе стороны достаёт оружие героя: лук и арбалет — на
     * три, прочее — только соседей (см. [[GripRates.RangedReach]]). Стрелковое

@@ -204,9 +204,9 @@ object MonsterSkill extends Enum[MonsterSkill] {
    *  «Каменный страж» (порог 6) режет РАСХОД брони: прикрывает она по-прежнему
    *  весь поглощённый урон, но тает при этом медленнее. */
   /** Поднятый героем щит (см. Skill.Block): урон умения после всех вычетов
-    * режется до четверти. */
+    * режется на процент щита — по его редкости. */
   def blocked(battle: SoloPveBattle, damage: Long): Long =
-    if (battle.heroShieldUp) (damage * Skill.BlockTakenPct / 100L).max(1L) else damage
+    if (battle.heroShieldUp) (damage * (100L - battle.heroBlockPct) / 100L).max(1L) else damage
 
   def applyPhysicalDamage(battle: SoloPveBattle, hero: Hero, damage: Long): (Long, Long) = {
     val buffReduct  = math.min(battle.heroBattleState.armorBonus, damage)

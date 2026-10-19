@@ -11,4 +11,16 @@ object ShieldRates {
 
   /** Гнёзд у щита — по таблице оружия, но не больше двух. */
   val MaxSockets: Int = 2
+
+  /** Сколько урона снимает Блок у серого и белого щита, %. */
+  val BaseBlockPct: Long = 50L
+
+  /** И сколько добавляет каждая редкость выше белой, %. */
+  val BlockPctPerRarity: Long = 5L
+
+  /** Сколько урона снимает Блок у щита этой редкости: серый и белый — половину,
+    * дальше по пять процентов за каждую редкость выше белой. Фиолетовая и
+    * пурпурная — разные редкости, так что легендарный снимает 75%. */
+  def blockPct(rarity: Rarity): Long =
+    BaseBlockPct + BlockPctPerRarity * (Rarity.values.indexOf(rarity) - Rarity.values.indexOf(Rarity.White)).max(0)
 }

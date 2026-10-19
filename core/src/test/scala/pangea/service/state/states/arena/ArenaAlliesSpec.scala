@@ -170,7 +170,7 @@ object ArenaAlliesSpec extends ZIOSpecDefault {
     test("щит и кинжал держит только сам соперник: его союзник, вставший в поля, ими не прикрыт") {
       val b0  = SoloPveBattle.fromGroup(List.fill(2)(pangea.model.monster.Monster(0L, 10L,
                   pangea.model.monster.Race.Orc, pangea.model.monster.Rarity.Common, slow.fightStats)), quick, Nil)
-      val b   = b0.copy(monsterShieldUp = true, monsterCounterPower = 50L,
+      val b   = b0.copy(monsterBlockPct = 50L, monsterCounterPower = 50L,
                   monsterArenaUnit = Some(ArenaBattle.HeroUnit),
                   group = b0.group.copy(others = b0.group.others.map(_.copy(arenaUnit = Some(1)))))
       val ally = b.engage(b.group.places.head)
