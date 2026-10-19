@@ -1405,9 +1405,14 @@ case class BattleState(
       case Some(MiniBoss.FireElemental) if armorBeforeHit > 0 && !battle.effects.chilled =>
         val thorns = bossDamageTaken(hero, battle, (damageDealt * MiniBoss.FireElemental.ThornsPct / 100L).max(1L))
         val (hurt, _) = hurtHero(hero, thorns)
-        val burned = battle.copy(effects = battle.effects.copy(heroBurn = Some(
-          battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct)))))
-        (hurt, burned, content.format("battle.elemental.thorns", "damage" -> thorns.toString))
+        // Пламя шипов по герою под холодом: лёд тает, огонь не занимается.
+        val thawed = battle.effects.coldOnHero
+        val burned =
+          if (thawed) battle.copy(effects = battle.effects.copy(heroColdDefenceCut = 0))
+          else battle.copy(effects = battle.effects.copy(heroBurn = Some(
+            battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(MiniBoss.FireElemental.ThornsBurnPct)))))
+        (hurt, burned, content.format("battle.elemental.thorns", "damage" -> thorns.toString) +
+          (if (thawed) "\n" + content.text("battle.elements.thawHero") else ""))
       case _ => (hero, battle, "")
     }
 
@@ -1635,9 +1640,10 @@ case class BattleState(
           val (h, b1, l) = hurtVictim(victim, hero, spend(cost, next), raw)
           // Пламя не складывается, а разгорается заново — и на герое, и на том,
           // кто стоит перед элементалем вместо него.
-          val burned     = reigniteVictim(victim, b1, MiniBoss.FireElemental.SplashBurnPct)
+          val (burned, thawed) = reigniteVictim(victim, b1, MiniBoss.FireElemental.SplashBurnPct)
           ZIO.succeed((burned, h,
-            content.format("battle.elemental.fireSplash", "damage" -> l.toString)))
+            content.format("battle.elemental.fireSplash", "damage" -> l.toString) +
+              (if (thawed) "\n" + content.text("battle.elements.thawHero") else "")))
         }
 
       // 2) Сфера огня: копится до трёх, третья сразу срывается в смерч.
@@ -2169,15 +2175,18 @@ case class BattleState(
           a.copy(bleed = Some(a.bleed.map(b => Bleed(b.pct + pct)).getOrElse(Bleed(pct))))))
     }
 
-  /** Поджечь цель: уже горящее пламя разгорается заново, непогашенное — зажигается. */
-  private def reigniteVictim(v: Victim, battle: SoloPveBattle, pct: Int): SoloPveBattle =
+  /** Поджечь цель: уже горящее пламя разгорается заново, непогашенное — зажигается.
+    * Герой под холодом не загорается: лёд тает (второе в ответе — так и вышло). */
+  private def reigniteVictim(v: Victim, battle: SoloPveBattle, pct: Int): (SoloPveBattle, Boolean) =
     v match {
+      case Victim.Hero if battle.effects.coldOnHero =>
+        (battle.copy(effects = battle.effects.copy(heroColdDefenceCut = 0)), true)
       case Victim.Hero =>
         val fire = battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(pct))
-        battle.copy(effects = battle.effects.copy(heroBurn = Some(fire)))
+        (battle.copy(effects = battle.effects.copy(heroBurn = Some(fire))), false)
       case Victim.Ally(pos) =>
-        battle.copy(group = battle.group.updateAlly(pos)(a =>
-          a.copy(burn = Some(a.burn.map(_.reignited).getOrElse(Burn(pct))))))
+        (battle.copy(group = battle.group.updateAlly(pos)(a =>
+          a.copy(burn = Some(a.burn.map(_.reignited).getOrElse(Burn(pct)))))), false)
     }
 
   /** Тик ран союзников в конце раунда — те же три, что у героя и у мобов: яд
@@ -2291,19 +2300,33 @@ case class BattleState(
     val maxArmor   = MonsterSkill.monsterMaxArmor(battle)
     val fireAir    = fired(Element.Fire) && fired(Element.Air)
     val lightCold  = fired(Element.Lightning) && fired(Element.Cold)
+    // Огонь и холод гасят друг друга. Сработали оба в одном ударе — ни пламя, ни
+    // мороз на цель не ложатся, а что на ней было, то и остаётся. Поодиночке:
+    // холод по горящему гасит огонь и сам не ложится, огонь по замёрзшему
+    // растапливает лёд и сам не занимается.
+    val steam      = fired(Element.Fire) && fired(Element.Cold)
 
     var b   = battle
     var log = Vector.empty[String]
+    if (steam) log = log :+ content.text("battle.elements.steam")
+
+    // Огонь по цели: под холодом — лёд тает и пламя не занимается.
+    def thaw(): Unit = {
+      b = b.copy(effects = b.effects.copy(monsterColdDefenceCut = 0, chilledTurns = 0))
+      log = log :+ content.format("battle.elements.thaw", "monster" -> b.monsterName)
+    }
 
     // Комбо Огонь+Воздух: мгновенный урон 30% макс.HP + текущий % горения, горение → 2%.
     if (fireAir) {
       val burnPct = b.effects.monsterBurn.map(_.pct).getOrElse(0)
       val dmg     = (maxHp.toDouble * (30 + burnPct) / 100.0).toLong.max(0L)
-      b = b.copy(
-        monsterCurrentHp = (b.monsterCurrentHp - dmg).max(0L),
-        effects = b.effects.copy(monsterBurn = Some(Burn(Burn.Initial)))
-      )
+      b = b.copy(monsterCurrentHp = (b.monsterCurrentHp - dmg).max(0L))
       log = log :+ content.format("battle.comboFireAir", "damage" -> dmg.toString)
+      // Горение после взрыва — по тем же правилам огня и холода.
+      if (!steam) {
+        if (b.effects.coldOnMonster) thaw()
+        else b = b.copy(effects = b.effects.copy(monsterBurn = Some(Burn(Burn.Initial))))
+      }
     }
 
     // Комбо Молния+Холод: -10% макс.брони (не переходит в HP) и застрявшее
@@ -2319,7 +2342,12 @@ case class BattleState(
     }
 
     // Одиночные проки стихий — идут своим чередом, в том числе после комбо.
-    if (fired(Element.Cold)) {
+    // Холод по горящему: пламя гаснет, мороз не ложится.
+    if (fired(Element.Cold) && !steam && b.effects.monsterBurn.isDefined) {
+      b = b.copy(effects = b.effects.copy(monsterBurn = None))
+      log = log :+ content.format("battle.elements.quench", "monster" -> b.monsterName)
+    }
+    else if (fired(Element.Cold) && !steam) {
       b = b.copy(effects = b.effects.copy(
         monsterColdDefenceCut = b.effects.monsterColdDefenceCut + Element.Cold.DefenceReductionCut))
       log = log :+ Element.Cold.procText
@@ -2335,7 +2363,8 @@ case class BattleState(
           effects          = b.effects.copy(chilledTurns = MiniBoss.FireElemental.ChilledTurns))
       }
     }
-    if (fired(Element.Fire) && !fireAir) {
+    if (fired(Element.Fire) && !fireAir && !steam && b.effects.coldOnMonster) thaw()
+    else if (fired(Element.Fire) && !fireAir && !steam) {
       val burn = b.effects.monsterBurn.map(_.reignited).getOrElse(Burn.onIgnite)
       b = b.copy(effects = b.effects.copy(monsterBurn = Some(burn)))
       log = log :+ Element.Fire.procText
@@ -2500,9 +2529,16 @@ case class BattleState(
             poisonedBlade = battle.effects.monsterPoisonsOnHit ||
                               Race.withNameOption(battle.monsterRace).exists(_.weaponPoison)
             poisons = poisonedBlade && newHp < hero.fightStats.hp
+            // Огонь и холод гасят друг друга и на герое: огонь по замёрзшему
+            // растапливает лёд и не занимается, холод по горящему гасит пламя и
+            // не ложится.
+            thawed   = ignites && battle.effects.coldOnHero
+            quenched = mobProc && procElement.contains(Element.Cold) &&
+                         (battle.effects.heroBurn.isDefined || (ignites && !thawed))
             effectsAfterHit = {
               val burned =
                 if (!ignites) battle.effects
+                else if (thawed) battle.effects.copy(heroColdDefenceCut = 0)
                 else battle.effects.copy(heroBurn = Some(
                   battle.effects.heroBurn.map(_.reignited).getOrElse(Burn(burnPct))))
               val poisonedE =
@@ -2512,6 +2548,7 @@ case class BattleState(
               // Холод обгрызает защиту героя (накопительно, не затухает), воздух
               // поднимает мобу точность и уклонение на несколько ходов.
               (if (mobProc) procElement else None) match {
+                case Some(Element.Cold) if quenched => poisonedE.copy(heroBurn = None)
                 case Some(Element.Cold) =>
                   poisonedE.copy(heroColdDefenceCut =
                     poisonedE.heroColdDefenceCut + Element.Cold.DefenceReductionCut)
@@ -2529,9 +2566,11 @@ case class BattleState(
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
               Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> battle.monsterName)),
-              Option.when(ignites)(content.text("battle.elemental.ignites")),
+              Option.when(ignites && !thawed)(content.text("battle.elemental.ignites")),
+              Option.when(thawed)(content.text("battle.elements.thawHero")),
               Option.when(poisons)(content.text("battle.mobPoisons")),
-              Option.when(mobProc && procElement.contains(Element.Cold))(content.text("battle.mobColdBite")),
+              Option.when(mobProc && procElement.contains(Element.Cold) && !quenched)(content.text("battle.mobColdBite")),
+              Option.when(quenched)(content.text("battle.elements.quenchHero")),
               Option.when(mobProc && procElement.contains(Element.Air))(content.text("battle.mobAirBoost"))
             ).flatten
           } yield MobStrike(newHp, newArmor + restoredArmor, reducedDamage, lines, battleAfterAtk)

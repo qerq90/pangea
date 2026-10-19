@@ -18,7 +18,7 @@ import pangea.service.state.{CityExit, InventoryFeedback, State, UserAction}
 import zio.{Task, ZIO}
 
 /** Неприметная бочка в Портовом квартале — личное хранилище игрока: до
- *  [[Barrel.MaxItems]] предметов и до [[Barrel.MaxSilver]] серебра (по 100/100 000), отдельно от
+ *  [[Barrel.MaxItems]] предметов и до [[Barrel.MaxSilver]] серебра (по 10/10 000), отдельно от
  *  инвентаря и кошелька. Текстовый ввод суммы серебра: режим (`deposit` /
  *  `withdraw`) хранится в `heroes.scene_data`, fallback Branch'а парсит число. */
 case class UnassumingBarrelState(

@@ -129,11 +129,13 @@ object UnassumingBarrelStateSpec extends ZIOSpecDefault {
 
     test("Положить серебро больше, чем влезает в бочку → отказ") {
       for {
-        t <- makeState(Nil, heroSilver = 100000L, barrelSilver = 99999L)
+        // в бочке без одной монеты до предела — пятьсот уже не влезут
+        t <- makeState(Nil, heroSilver = 100000L, barrelSilver = pangea.model.barrel.Barrel.MaxSilver - 1L)
         (state, _, _, barrelRepo, renderer) = t
         _ <- state.action(testUser, tap("DepositSilverMenu"), renderer)
         _ <- state.action(testUser, text("500"), renderer)
-      } yield assertTrue(barrelRepo.silverSnapshot == 99999L)
+      } yield assertTrue(pangea.model.barrel.Barrel.MaxSilver == 10000L && pangea.model.barrel.Barrel.MaxItems == 10L) &&
+              assertTrue(barrelRepo.silverSnapshot == pangea.model.barrel.Barrel.MaxSilver - 1L)
     },
 
     test("Не число в режиме ввода → ошибка, режим сохраняется") {

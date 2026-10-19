@@ -78,7 +78,7 @@ case class RegistrationState(
 
   /** Маршруты поверх пробуждения: обыск выдаёт тайник, «Встать» — задание. */
   private lazy val arrivalRoutes: Map[String, Target] = Map(
-    "ArrivalSearch" -> Target.Run { (user, ua, renderer) => search(user, ua, renderer) },
+    "ArrivalSearch" -> Target.Run { (user, _, renderer) => search(user, renderer) },
     "ArrivalStand"  -> Target.Run { (user, _, renderer)  => stand(user, renderer) }
   )
 
@@ -109,20 +109,37 @@ case class RegistrationState(
     } yield res
 
   /** Обыск сторожки: тайник искателя — меч и щит в руки, пояс с флягой целителя
-    * на себя, двуручный топор в сумку (см. [[RegistrationState.kit]]). Выдаётся
-    * один раз: ВК, бывает, шлёт кнопку дважды, и второй обыск только покажет
-    * сцену. */
-  private def search(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    * на себя, двуручный топор и лук или арбалет в сумку (см.
+    * [[RegistrationState.kit]]). Выдаётся один раз: ВК, бывает, шлёт кнопку
+    * дважды, и второй обыск только покажет сцену — с тем же луком или арбалетом,
+    * что лежит в сумке. */
+  private def search(user: User, renderer: Renderer): Task[StateType] =
     for {
-      scene <- heroDao.readSceneData(user.userId)
-      found  = scene.exists(_.hcursor.get[Boolean](RegistrationState.KitKey).contains(true))
-      _     <- ZIO.unless(found)(grantKit(user))
-      res   <- showArrival("ArrivalSearch", user, ua, renderer)
+      scene  <- heroDao.readSceneData(user.userId)
+      found   = scene.exists(_.hcursor.get[Boolean](RegistrationState.KitKey).contains(true))
+      noun   <- if (found) ZIO.succeed(scene.flatMap(_.hcursor.get[String](RegistrationState.KitRangedKey).toOption)
+                                   .getOrElse(RegistrationState.BowNoun))
+                else grantKit(user)
+      res    <- showSearch(user, noun, renderer)
     } yield res
 
-  private def grantKit(user: User): Task[Unit] =
+  /** Сцена обыска: в тексте — тот стрелковый, что выпал (`{ranged}` — с большой
+    * буквы, в перечне; `{rangedLower}` — в последней фразе). */
+  private def showSearch(user: User, noun: String, renderer: Renderer): Task[StateType] =
+    content.beats("registration.arrival").collectFirst { case ("ArrivalSearch", beat) => beat } match {
+      case None => ZIO.succeed(Registration)
+      case Some(beat) =>
+        for {
+          choices <- beat.buildChoices(user)
+          text     = beat.text.replace("{ranged}", noun).replace("{rangedLower}", noun.toLowerCase)
+          _       <- renderer.show(user, Screen(text, choices))
+        } yield Registration
+    }
+
+  /** Выдать тайник; возвращает, что из стрелкового в нём оказалось. */
+  private def grantKit(user: User): Task[String] =
     heroDao.getHeroByUserId(user.userId).flatMap {
-      case None => ZIO.unit
+      case None => ZIO.succeed(RegistrationState.BowNoun)
       case Some(h) =>
         for {
           seed   <- Random.nextLong
@@ -131,13 +148,17 @@ case class RegistrationState(
           shield <- itemRepo.persist(h.id, kit.shield)
           belt   <- itemRepo.persist(h.id, kit.belt)
           axe    <- itemRepo.persist(h.id, kit.axe)
+          ranged <- itemRepo.persist(h.id, kit.ranged)
           worn    = List(sword, shield, belt)
           eq      = h.equipment.copy(weapon = sword, leftHand = shield, belt = belt)
           fight   = worn.foldLeft(h.fightStats)((f, it) => InventoryState.applyDelta(f, it, Item.NoItem))
           _      <- heroDao.updateEquipmentAndFightStats(user.userId, eq, fight)
           _      <- inventoryRepo.addItem(h.id, axe).orElse(ZIO.unit)
-          _      <- heroDao.writeSceneData(user.userId, Json.obj(RegistrationState.KitKey -> true.asJson))
-        } yield ()
+          _      <- inventoryRepo.addItem(h.id, ranged).orElse(ZIO.unit)
+          _      <- heroDao.writeSceneData(user.userId, Json.obj(
+                      RegistrationState.KitKey       -> true.asJson,
+                      RegistrationState.KitRangedKey -> kit.rangedNoun.asJson))
+        } yield kit.rangedNoun
     }
 
   /** «Встать»: герой ставит себе задание «Встать на ноги» (см.
@@ -201,24 +222,37 @@ object RegistrationState {
   /** Отметка в scene_data: тайник в сторожке уже обыскан. */
   val KitKey: String = "kitFound"
 
-  /** Тайник искателя в сторожке, куда герой падает после портала. */
-  final case class Kit(sword: Item, shield: Item, axe: Item, belt: Item)
+  /** Что из стрелкового нашлось в тайнике — для повторного показа сцены. */
+  val KitRangedKey: String = "kitRanged"
+
+  val BowNoun: String      = "Лук"
+  val CrossbowNoun: String = "Арбалет"
+
+  /** Тайник искателя в сторожке, куда герой падает после портала. `rangedNoun` —
+    * что из стрелкового выпало: лук или арбалет. */
+  final case class Kit(sword: Item, shield: Item, axe: Item, belt: Item, ranged: Item, rangedNoun: String)
 
   /** Всё белое и первого уровня, статы — как у обычной добычи, а имена свои:
     * хозяин тайника — искатель. На поясе — фляга целителя: у белой как раз
-    * четыре глотка, а у белого пояса одна ячейка — под неё. */
+    * четыре глотка, а у белого пояса одна ячейка — под неё. Из стрелкового —
+    * поровну лук или арбалет. */
   def kit(rng: Rng): Kit = {
     val white = Rarity.White
     def named(item: Item, noun: String): Item = item.copy(name = s"${white.emoji} Простой $noun Искателя")
     val (sword, r1)  = ItemGenerator.createItemOfType(ItemType.Weapon, 1L, white, rng, Some(Grip.OneHanded))
     val (shield, r2) = ItemGenerator.createItemOfType(ItemType.Shield, 1L, white, r1)
     val (axe, r3)    = ItemGenerator.createItemOfType(ItemType.Weapon, 1L, white, r2, Some(Grip.TwoHanded))
-    val (belt, _)    = ItemGenerator.createItemOfType(ItemType.Belt, 1L, white, r3)
+    val (belt, r4)   = ItemGenerator.createItemOfType(ItemType.Belt, 1L, white, r3)
+    val (bow, r5)    = r4.nextBoolean
+    val (grip, noun) = if (bow) (Grip.Bow, BowNoun) else (Grip.Crossbow, CrossbowNoun)
+    val (ranged, _)  = ItemGenerator.createItemOfType(ItemType.Weapon, 1L, white, r5, Some(grip))
     val flask        = BeltSlot.Flask(FlaskKind.Healer, white, FlaskKind.chargesFor(white))
     Kit(
-      sword  = named(sword, "Меч"),
-      shield = named(shield, "Круглый Щит"),
-      axe    = named(axe, "Двуручный Топор"),
-      belt   = named(belt, "Пояс").copy(details = ItemDetails.Belt(List(flask))))
+      sword      = named(sword, "Меч"),
+      shield     = named(shield, "Круглый Щит"),
+      axe        = named(axe, "Двуручный Топор"),
+      belt       = named(belt, "Пояс").copy(details = ItemDetails.Belt(List(flask))),
+      ranged     = named(ranged, noun),
+      rangedNoun = noun)
   }
 }
