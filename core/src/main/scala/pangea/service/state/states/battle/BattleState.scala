@@ -7,7 +7,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{Aura, AuraRates, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Aura, AuraRates, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, RaceTactics, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
@@ -4535,9 +4535,10 @@ case class BattleState(
       if (smoke) None
       else if (tower) BattleState.towerTarget(battle, pos)
       else battle.group.allyAt(pos).filter(_.alive)
-    // Лежащего героя мобы не добивают — его смерть решится исходом боя.
+    // Лежащего героя мобы не добивают — его смерть решится исходом боя. Эльф —
+    // стрелок: достаёт героя на три места (см. RaceTactics), прочие — соседа.
     val reachesHero = !smoke && facing.isEmpty && !battle.group.heroDown &&
-                        (tower || battle.group.inReach(pos))
+                        (tower || battle.group.inReachOf(pos, RaceTactics.reach(Race.withName(tmp.monsterRace))))
     for {
       // 1) удар сбоку — только если достаёт; союзника напротив — вместо героя
       struck <-

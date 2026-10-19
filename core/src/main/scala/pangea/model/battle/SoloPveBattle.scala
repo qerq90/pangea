@@ -385,9 +385,10 @@ case class SoloPveBattle(
   def admit(slot: MonsterSlot): SoloPveBattle =
     if (hasRoom) withReinforcement(slot) else copy(group = group.copy(queue = group.queue :+ slot))
 
-  /** Конец раунда: мобы вне досягаемости героя подтягиваются к нему на одно
-    * место, если оно свободно, — ближние первыми, чтобы следом двинулись и
-    * дальние. Не двигаются: те, кто уже достаёт героя, кто занят союзником
+  /** Конец раунда: мобы вне досягаемости героя подтягиваются к нему — по месту
+    * за раунд, орки по два (см. [[RaceTactics]]), если места свободны, — ближние
+    * первыми, чтобы следом двинулись и дальние. Досягаемость у каждого своя:
+    * эльф-стрелок останавливается, как только достаёт героя. Не двигаются: те, кто уже достаёт героя, кто занят союзником
     * напротив, и моб в полях (за него — `pullFree`). На место героя никто не
     * шагает: к пустой паре ведёт `pullFree`. В дыму герой не виден — все стоят.
     * Возвращает бой и кто куда шагнул. */
@@ -397,35 +398,55 @@ case class SoloPveBattle(
       closeInSlots
     }
 
-  /** Шаг того, кто стоит в полях боя: он такой же моб и к герою идёт сам — на
-    * одно место за раунд. Раньше его подставлял строй (см. [[promoteNext]]).
-    * Пара цела, идти некуда, держит позицию или занят союзником — None. */
+  /** Шаг того, кто стоит в полях боя: он такой же моб и к герою идёт сам — по
+    * месту за раунд, орк по два (см. [[RaceTactics]]). Раньше его подставлял
+    * строй (см. [[promoteNext]]). Пара цела, идти некуда, держит позицию или
+    * занят союзником — None. */
   def stepActiveTowardsHero: Option[SoloPveBattle] =
     if (group.paired || !walks(activeSlot) || group.allyAt(group.activePos).exists(_.alive)) None
-    // Кто уже достаёт героя сбоку, тот и бьёт сбоку: вставать напротив ему
-    // незачем, и место павшего он не занимает.
-    else if (math.abs(group.activePos - group.heroPos) <= GroupState.Reach) None
-    else stepTowardsHero(group.activePos).map(next => copy(group = group.copy(activePos = next)))
+    else {
+      val race  = Race.withName(monsterRace)
+      val reach = RaceTactics.reach(race)
+      // Кто уже достаёт героя, тот и бьёт оттуда: вставать напротив ему незачем,
+      // и место павшего он не занимает. Встал напротив союзника — занят им.
+      @annotation.tailrec
+      def walk(at: Int, left: Int): Int =
+        if (left <= 0 || math.abs(at - group.heroPos) <= reach ||
+            (at != group.activePos && group.allyAt(at).exists(_.alive))) at
+        else copy(group = group.copy(activePos = at)).stepTowardsHero(at) match {
+          case None       => at
+          case Some(next) => walk(next, left - 1)
+        }
+      val to = walk(group.activePos, RaceTactics.speed(race))
+      Option.when(to != group.activePos)(copy(group = group.copy(activePos = to)))
+    }
 
   /** Та же ходьба, но только для слотов строя: активный шагает отдельно. */
   private def closeInSlots: (SoloPveBattle, List[(MonsterSlot, Int)]) =
     {
       val order = group.places.indices.toList.sortBy(i => math.abs(group.places(i) - group.heroPos))
       order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), idx) =>
-        val pos  = b.group.places(idx)
-        val dist = pos - b.group.heroPos
-        val far  = math.abs(dist) > GroupState.Reach
-        val busy = b.group.allyAt(pos).exists(_.alive)
-        // Сооружение стоит там, где стоит: подтягивать его к герою нечем. Те,
-        // кто уже достаёт героя, тоже стоят: место павшего в паре никто не
-        // занимает по принуждению (см. promoteNext).
-        if (!far || busy || !walks(b.group.others(idx))) (b, moved)
-        else b.stepTowardsHero(pos) match {
-          case None       => (b, moved)
-          case Some(next) =>
-            (b.copy(group = b.group.copy(places = b.group.places.updated(idx, next))),
-             moved :+ (b.group.others(idx) -> next))
+        val slot  = b.group.others(idx)
+        val race  = Race.withName(slot.race)
+        val reach = RaceTactics.reach(race)
+        // Шаг за шагом, сколько позволяет скорость. Сооружение стоит там, где
+        // стоит: подтягивать его к герою нечем. Те, кто уже достаёт героя, тоже
+        // стоят: место павшего в паре никто не занимает по принуждению (см.
+        // promoteNext). Встал напротив союзника — занят им.
+        @annotation.tailrec
+        def walk(bb: SoloPveBattle, left: Int): SoloPveBattle = {
+          val pos  = bb.group.places(idx)
+          val far  = math.abs(pos - bb.group.heroPos) > reach
+          val busy = bb.group.allyAt(pos).exists(_.alive)
+          if (left <= 0 || !far || busy || !walks(slot)) bb
+          else bb.stepTowardsHero(pos) match {
+            case None       => bb
+            case Some(next) => walk(bb.copy(group = bb.group.copy(places = bb.group.places.updated(idx, next))), left - 1)
+          }
         }
+        val after = walk(b, RaceTactics.speed(race))
+        if (after.group.places(idx) == b.group.places(idx)) (b, moved)
+        else (after, moved :+ (slot -> after.group.places(idx)))
       }
     }
 
