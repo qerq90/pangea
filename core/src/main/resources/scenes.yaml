@@ -1933,8 +1933,11 @@ merchant:
     color: "negative"
   confirmBuy: "Вы уверены что хотите купить предмет {name} за {price} серебра?"
   confirmYes: "Да"
+  # Товар встаёт в пустой слот — можно купить и сразу надеть.
+  confirmWear: "Да, и надеть"
   confirmNo: "Нет"
   bought: "Вы купили предмет {name}."
+  boughtWorn: "Вы купили предмет {name} и сразу надели."
   notEnoughSilver: "Ага конечно, как будет достаточно звонких монет тогда и продам."
   refreshCooldown: "Ришелье уже недавно обновлял товар. Загляните примерно через {mins} мин."
   sellHeader: "Продажа ({page}/{total}) | 🪙 {silver}"
@@ -3523,6 +3526,9 @@ foundItem:
         label: "Оставить"
         color: "negative"
   taken: "Вы получили {name}"
+  # Находка встаёт в пустой слот — кнопка и ответ (см. TakeAndEquip).
+  takeWearLabel: "Забрать и надеть"
+  takenWorn: "Вы получили {name} и сразу надели."
   left: "Вы уходите, так и не забрав найденный предмет"
 
 loot:
@@ -3533,6 +3539,9 @@ loot:
   silver: "🪙 Вы нашли {amount} серебра"
   doubloons: "🟡 Вы нашли {amount} дублона(ов)"
   takeLabel: "Забрать"
+  # Что-то из добычи встаёт в пустой слот: забрать всё, а это сразу надеть.
+  takeWearLabel: "Забрать и надеть"
+  worn: "✅ Надето: {names}"
   leaveLabel:
     label: "Оставить"
     color: "negative"
