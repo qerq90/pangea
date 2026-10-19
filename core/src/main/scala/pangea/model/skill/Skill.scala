@@ -3,6 +3,7 @@ package pangea.model.skill
 import enumeratum._
 import io.circe.{Decoder, Encoder}
 import pangea.model.hero.Hero
+import pangea.model.item.{Item, ItemType, ShieldRates}
 
 /** Активный навык — кнопка в бою, заканчивающая ход. Падает на оружие и на
   * нагрудник (см. [[Skill.weaponSkills]] / [[Skill.armorSkills]]), на лук и
@@ -42,9 +43,15 @@ sealed abstract class Skill(
   /** Описание навыка для инвентаря — с подставленной стоимостью энергии и
     * перезарядкой (КД). Оба хвоста собираются здесь, а не в тексте каждого
     * навыка, чтобы формат был единым. */
-  def describe(hero: Hero): String = {
+  def describe(hero: Hero): String = describe(hero, None)
+
+  /** То же для карточки вещи. У Блока в описании — сколько снимает щит: этот,
+    * если смотрим его карточку, иначе лучший в руках героя (`{block}`). */
+  def describe(hero: Hero, item: Option[Item]): String = {
     val understanding = hero.runes.understandingOf(pangea.model.rune.Rune.Active(this))
-    description.replace("{}", energyCost(hero).toString) + Skill.requirement(this) +
+    val block = item.filter(_.itemType == ItemType.Shield).map(i => ShieldRates.blockPct(i.rarity))
+                  .getOrElse(hero.equipment.blockPct)
+    description.replace("{block}", block.toString).replace("{}", energyCost(hero).toString) + Skill.requirement(this) +
       s" Перезарядка: $cooldown ${Skill.turnsWord(cooldown)}." +
       (if (understanding > 0L) s" Понимание: $understanding." else "")
   }
@@ -467,7 +474,7 @@ object Skill extends Enum[Skill] {
         effect = Effect.Block,
         hitTemplate = "🛡 Вы закрываетесь щитом: до конца раунда удары и умения врагов по вам слабее на {}%.",
         description =
-          "Поднять щит и принять удар на него. До конца раунда обычные атаки и умения врагов наносят вам меньше урона — уже после того, как его срезала защита. Серый и белый щит снимает половину, каждая редкость выше — ещё по 5%, легендарный — три четверти. Ход на этом кончается. Использование расходует {} энергии."
+          "Поднять щит и принять удар на него. До конца раунда обычные атаки и умения врагов наносят вам на {block}% меньше урона — уже после того, как его срезала защита. Ход на этом кончается. Использование расходует {} энергии."
       ) {
     def baseValue(hero: Hero, nowMs: Long): Double = 0.0
     def baseEnergyCost(hero: Hero): Long = 10L + hero.lvl / 2L

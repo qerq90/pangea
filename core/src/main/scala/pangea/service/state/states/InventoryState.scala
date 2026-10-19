@@ -1226,7 +1226,7 @@ object InventoryState {
     val statsStr = if (stats.isEmpty) "Нет характеристик" else stats.mkString("\n")
     // Описание активного навыка (с подставленной стоимостью энергии от уровня героя).
     val skillStr = (hero, item.activeSkill) match {
-      case (Some(h), Some(s)) => s"\n\n${s.describe(h)}"
+      case (Some(h), Some(s)) => s"\n\n${s.describe(h, Some(item))}"
       case _                  => ""
     }
     // Описание пассивного навыка (статичный текст — без стоимости/кулдауна).

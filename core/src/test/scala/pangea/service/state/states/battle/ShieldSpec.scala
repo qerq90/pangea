@@ -192,10 +192,13 @@ object ShieldSpec extends ZIOSpecDefault {
       val violet = shield(302L).copy(rarity = ItemRarity.Violet)
       val two    = TestFixtures.emptyEquipment.copy(weapon = white, leftHand = violet)
       val blue   = shield(303L).copy(rarity = ItemRarity.Blue)
+      val green  = hero(sword(1L), shield(304L).copy(rarity = ItemRarity.Green))
       assertTrue(pcts == List(50L, 50L, 55L, 60L, 65L, 70L, 75L)) &&
       assertTrue(two.blockPct == 70L) &&
-      // на карточке щита видно, сколько он снимает
-      assertTrue(blue.statsLines.exists(_.contains("Блок снимает 60%")))
+      // в описании — число: на карточке щита — этого щита, в умениях — надетого
+      assertTrue(Skill.Block.describe(green, Some(blue)).contains("на 60% меньше урона")) &&
+      assertTrue(Skill.Block.describe(green).contains("на 55% меньше урона")) &&
+      assertTrue(!Skill.Block.describe(green).contains("{block}"))
     },
 
     test("Блок синим щитом: в бою — его процент, и он же в строке лога") {
