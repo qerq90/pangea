@@ -127,6 +127,15 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(chests.forall(i => skillOf(i).exists(Skill.armorSkills.contains)))
     },
 
+    test("пустых вещей не бывает: даже серая первого уровня несёт хоть одну характеристику") {
+      val items = (1L to 3000L).map(s => ItemGenerator.createItemAtLevel(1L, Rarity.Gray, Rng(s))._1)
+      val empty = items.filter(i => i.attack + i.accuracy + i.energy + i.armor + i.defence + i.evasion + i.hp <= 0L)
+      // и лёгкие (меткость), и тяжёлые (броня) — главный стат не ниже единицы
+      val light = items.filter(i => i.accuracy > 0L && i.armor == 0L)
+      val heavy = items.filter(i => i.armor > 0L)
+      assertTrue(empty.isEmpty && light.nonEmpty && heavy.nonEmpty)
+    },
+
     test("Остальные слоты не получают activeSkill") {
       val others = (1L to 500L)
         .map(s => ItemGenerator.createItemAtLevel(10L, Rarity.Blue, Rng(s))._1)
