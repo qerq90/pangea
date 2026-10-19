@@ -122,8 +122,9 @@ case class LootState(
   /** Превью добычи: валюта, вещи с надетым для сравнения и кнопки. Валюта уже в
     * кошельке, строки о ней — только для глаз, поэтому превью можно показать ещё
     * раз ([[showPreview]]): после «Назад» с выбора кольца или отказа «сумка полна».
-    * «Забрать и надеть» — если что-то встаёт в пустой слот; «Надеть: …» — на
-    * каждую вещь, которая встанет вместо надетой. */
+    * Сверху «Забрать», под ним «Забрать и надеть» — если что-то встаёт в пустой
+    * слот — и «Надеть: …» на каждую вещь, которая встанет вместо надетой;
+    * последней — «Оставить». */
   private def previewScreen(hero: Hero, loot: LootData): Screen = {
     val preview = currencyLines(hero, loot) ++ loot.items.map(it => itemLineWithEquipped(it, hero))
     val wearAll = Option.when(TakeAndEquip.pick(hero, loot.items).nonEmpty)(content.choice("TakeWear", "loot.takeWearLabel"))
@@ -131,7 +132,7 @@ case class LootState(
       content.choice("TakeSwap", "loot.swapLabel", "name" -> item.name).copy(data = swapData(i, item))
     }
     Screen(header(loot) + "\n\n" + preview.mkString("\n"),
-      wearAll.toList ++ swaps ++ List(content.choice("Take", "loot.takeLabel"), content.choice("Leave", "loot.leaveLabel")))
+      List(content.choice("Take", "loot.takeLabel")) ++ wearAll.toList ++ swaps ++ List(content.choice("Leave", "loot.leaveLabel")))
   }
 
   /** Показать превью ещё раз — без начисления серебра. Вещей уже нет — выбирать

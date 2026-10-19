@@ -232,7 +232,7 @@ object LootStateSpec extends ZIOSpecDefault {
               assertTrue(last.choices.map(_.id).toSet == Set("Take", "Leave"))
     },
 
-    test("вещь встаёт в пустой слот → первой кнопкой «Забрать и надеть»; не по уровню — кнопки нет") {
+    test("вещь встаёт в пустой слот → «Забрать и надеть» второй кнопкой, под «Забрать»; не по уровню — кнопки нет") {
       for {
         fit     <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L), trophy), silvers = Nil))
         (fs, fr, _, _) = fit
@@ -243,7 +243,7 @@ object LootStateSpec extends ZIOSpecDefault {
         (hs, hr, _, _) = high
         _       <- hs.enter(testUser, hr)
         highIds <- hr.sentScreens.map(_.last.choices.map(_.id))
-      } yield assertTrue(fitIds == List("TakeWear", "Take", "Leave")) &&
+      } yield assertTrue(fitIds == List("Take", "TakeWear", "Leave")) &&
               assertTrue(highIds == List("Take", "Leave"))
     },
 
@@ -304,9 +304,9 @@ object LootStateSpec extends ZIOSpecDefault {
         (state, renderer, _, _) = t
         _       <- state.enter(testUser, renderer)
         choices <- renderer.sentScreens.map(_.last.choices)
-      } yield assertTrue(choices.map(_.id) == List("TakeSwap", "Take", "Leave")) &&
-              assertTrue(choices.head.label == "Надеть: Шлем") &&
-              assertTrue(choices.head.data == Map("i" -> "0", "n" -> "Шлем"))
+      } yield assertTrue(choices.map(_.id) == List("Take", "TakeSwap", "Leave")) &&
+              assertTrue(choices(1).label == "Надеть: Шлем") &&
+              assertTrue(choices(1).data == Map("i" -> "0", "n" -> "Шлем"))
     },
 
     test("«Надеть: …» → новый шлем на герое, старый и трофей в сумке, строки «Надето» и «Снято в сумку»") {
@@ -373,7 +373,7 @@ object LootStateSpec extends ZIOSpecDefault {
       } yield assertTrue(stale == StateType.Loot && back == StateType.Loot) &&
               assertTrue(hero.exists(h => h.equipment.helmet.name == "Старый шлем" && h.silver == 130L)) &&
               assertTrue(invRepo.snapshot.isEmpty) &&
-              assertTrue(last.choices.map(_.id) == List("TakeSwap", "Take", "Leave"))
+              assertTrue(last.choices.map(_.id) == List("Take", "TakeSwap", "Leave"))
     },
 
     test("старая запись добычи без полей группы читается как одиночная") {

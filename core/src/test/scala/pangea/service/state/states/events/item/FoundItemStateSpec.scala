@@ -57,7 +57,7 @@ object FoundItemStateSpec extends ZIOSpecDefault {
 
   override def spec = suite("FoundItemState")(
 
-    test("находка встаёт в пустой слот → первой кнопкой «Забрать и надеть»; не по уровню — кнопки нет") {
+    test("находка встаёт в пустой слот → «Забрать и надеть» второй кнопкой, под «Забрать»; не по уровню — кнопки нет") {
       for {
         fit     <- withFound(helmet())
         (fs, fr, _, _) = fit
@@ -67,7 +67,7 @@ object FoundItemStateSpec extends ZIOSpecDefault {
         (hs, hr, _, _) = high
         _       <- hs.action(testUser, UserAction("что угодно", None), hr)
         highIds <- hr.sentScreens.map(_.last.choices.map(_.id))
-      } yield assertTrue(fitIds == List("TakeWearItem", "TakeItem", "DontTakeItem")) &&
+      } yield assertTrue(fitIds == List("TakeItem", "TakeWearItem", "DontTakeItem")) &&
               assertTrue(highIds == List("TakeItem", "DontTakeItem"))
     },
 
@@ -103,7 +103,7 @@ object FoundItemStateSpec extends ZIOSpecDefault {
         result <- state.action(testUser, tap("TakeWearItem"), renderer)
         hero   <- heroDao.getHeroByUserId(userId)
         text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
-      } yield assertTrue(ids.headOption.contains("TakeWearItem")) &&
+      } yield assertTrue(ids == List("TakeItem", "TakeWearItem", "DontTakeItem")) &&
               assertTrue(result == StateType.Dungeon) &&
               assertTrue(hero.exists(_.equipment.helmet.id == 77L)) &&
               assertTrue(invRepo.snapshot.map(_.id) == List(5L)) &&

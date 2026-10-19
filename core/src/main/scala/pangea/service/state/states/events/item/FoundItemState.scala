@@ -74,9 +74,11 @@ case class FoundItemState(
       text  = item.fold(content.text("foundItem.header")) { i =>
         content.text("foundItem.header") + "\n\n" + InventoryState.itemText(i, hero.equipment, Some(hero))
       }
-      // Надеть можно — в пустой слот или вместо надетого — первой кнопкой «Забрать и надеть».
+      // Надеть можно — в пустой слот или вместо надетого — «Забрать и надеть»
+      // второй кнопкой, под «Забрать».
       wearBtn = item.filter(TakeAndEquip.canWear(hero, _)).map(_ => content.choice("TakeWearItem", "foundItem.takeWearLabel"))
-      _    <- renderer.show(user, Screen(text, wearBtn.toList ++ content.screen("foundItem.enter").choices))
+      (take, rest) = content.screen("foundItem.enter").choices.partition(_.id == "TakeItem")
+      _    <- renderer.show(user, Screen(text, take ++ wearBtn.toList ++ rest))
     } yield ()
 
   private def takeItem(user: User, ua: UserAction, renderer: Renderer, wear: Boolean): Task[StateType] =
