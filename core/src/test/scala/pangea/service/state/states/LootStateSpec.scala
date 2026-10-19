@@ -225,6 +225,71 @@ object LootStateSpec extends ZIOSpecDefault {
               assertTrue(last.choices.map(_.id).toSet == Set("Take", "Leave"))
     },
 
+    test("вещь встаёт в пустой слот → первой кнопкой «Забрать и надеть»; не по уровню — кнопки нет") {
+      for {
+        fit     <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L), trophy), silvers = Nil))
+        (fs, fr, _, _) = fit
+        _       <- fs.enter(testUser, fr)
+        fitIds  <- fr.sentScreens.map(_.last.choices.map(_.id))
+        // шлем 5-го уровня, а герой 1-го — надеть нельзя
+        high    <- makeState(LootData(items = List(gear("Шлем")), silvers = Nil))
+        (hs, hr, _, _) = high
+        _       <- hs.enter(testUser, hr)
+        highIds <- hr.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(fitIds == List("TakeWear", "Take", "Leave")) &&
+              assertTrue(highIds == List("Take", "Leave"))
+    },
+
+    test("«Забрать и надеть» → шлем на герое, мимо сумки; трофей в сумке; строка «Надето»") {
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L), trophy), silvers = Nil))
+        (state, renderer, heroDao, invRepo) = t
+        result <- state.action(testUser, tap("TakeWear"), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+        text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(hero.exists(h => h.equipment.helmet.name == "Шлем" && h.equipment.helmet.id > 0L)) &&
+              assertTrue(hero.exists(_.fightStats.armor == 7L)) && // броня шлема — в статах
+              assertTrue(invRepo.snapshot.map(_.itemType) == List(ItemType.Trophy)) &&
+              assertTrue(text.contains("Вы забираете добычу") && text.contains("✅ Надето: Шлем"))
+    },
+
+    test("«Забрать и надеть» при полной сумке → шлем всё равно надет, трофей теряется как раньше") {
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L), trophy), silvers = Nil), canAdd = false)
+        (state, renderer, heroDao, invRepo) = t
+        _    <- state.action(testUser, tap("TakeWear"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+        text <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(hero.exists(_.equipment.helmet.name == "Шлем")) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(text.contains("Сумка странника переполнена"))
+    },
+
+    test("«Забрать и надеть» с двумя шлемами → надет более редкий, второй в сумке") {
+      val gray  = gear("Серый шлем").copy(lvl = 1L, rarity = Rarity.Gray)
+      val green = gear("Зелёный шлем").copy(lvl = 1L)
+      for {
+        t <- makeState(LootData(items = List(gray, green), silvers = Nil))
+        (state, renderer, heroDao, invRepo) = t
+        _    <- state.action(testUser, tap("TakeWear"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(hero.exists(_.equipment.helmet.name == "Зелёный шлем")) &&
+              assertTrue(invRepo.snapshot.map(_.name) == List("Серый шлем"))
+    },
+
+    test("«Забрать и надеть» со старой кнопки, когда надеть уже нечего → всё в сумку, без строки «Надето»") {
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем")), silvers = Nil))
+        (state, renderer, heroDao, invRepo) = t
+        _    <- state.action(testUser, tap("TakeWear"), renderer)
+        hero <- heroDao.getHeroByUserId(userId)
+        text <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(invRepo.snapshot.map(_.name) == List("Шлем")) &&
+              assertTrue(hero.exists(_.equipment.helmet.itemType == ItemType.NoItem)) &&
+              assertTrue(!text.contains("Надето"))
+    },
+
     test("старая запись добычи без полей группы читается как одиночная") {
       val json = io.circe.parser.parse("""{"items":[],"silvers":[3]}""").toOption.get
       val loot = json.as[LootData].toOption

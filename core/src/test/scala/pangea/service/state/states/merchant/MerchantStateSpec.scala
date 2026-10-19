@@ -1,5 +1,6 @@
 package pangea.service.state.states.merchant
 
+import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
 import pangea.model.item.{Item, ItemDetails, ItemType, GemKind, MaterialKind, PassiveKind, Rarity, TrophyKind}
@@ -8,7 +9,7 @@ import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
 import pangea.model.skill.Skill
-import pangea.service.state.states.merchant.MerchantState.{JunkRarityGroups, JunkSaleSettings, MerchantData}
+import pangea.service.state.states.merchant.MerchantState.{JunkRarityGroups, JunkSaleSettings, MerchantData, MerchantItem}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.{durationInt, Task, ZIO}
 import zio.test._
@@ -47,6 +48,18 @@ object MerchantStateSpec extends ZIOSpecDefault {
       renderer <- TestRenderer.make
       content  <- ZIO.attempt(SceneContent.load())
     } yield (MerchantState(heroDao, invRepo, itemRepo, content), heroDao, invRepo, renderer)
+
+  private val StockPrice = 500L
+
+  // Лавка с известным товаром: шлем 1-го уровня (герою по силам).
+  private def stocked(hero: pangea.model.hero.Hero, invRepo: TestInventoryRepository = TestInventoryRepository.accepting) =
+    for {
+      heroDao  <- TestHeroDao.withHero(userId, hero)
+      renderer <- TestRenderer.make
+      content  <- ZIO.attempt(SceneContent.load())
+      stock     = MerchantData(List(MerchantItem(gear(0L, Rarity.Green), StockPrice, bought = false)), refreshedAt = 0L)
+      _        <- heroDao.writeMerchantData(userId, stock.asJson)
+    } yield (MerchantState(heroDao, invRepo, TestItemRepository.make, content), heroDao, invRepo, renderer)
 
   private def readMerchant(heroDao: TestHeroDao): Task[MerchantData] =
     heroDao.readMerchantData(userId)
@@ -110,7 +123,55 @@ object MerchantStateSpec extends ZIOSpecDefault {
         screens <- renderer.sentScreens
       } yield assertTrue(screens.last.text.contains("уверены")) &&
               assertTrue(screens.last.text.contains(data.items.head.price.toString)) &&
-              assertTrue(screens.last.choices.map(_.id).toSet == Set("ConfirmBuy", "CancelBuy"))
+              // «Да, и надеть» — только если товар встаёт в пустой слот (см. тесты ниже)
+              assertTrue(Set("ConfirmBuy", "CancelBuy").subsetOf(screens.last.choices.map(_.id).toSet))
+    },
+
+    test("товар встаёт в пустой слот → «Да, и надеть» между «Да» и «Нет»; слот занят — кнопки нет") {
+      val busy = richHero.copy(equipment = richHero.equipment.copy(helmet = gear(5L, Rarity.White)))
+      for {
+        free    <- stocked(richHero)
+        (fs, _, _, fr) = free
+        _       <- fs.action(testUser, tapIdx("Buy", 0), fr)
+        freeIds <- fr.sentScreens.map(_.last.choices.map(_.id))
+        taken   <- stocked(busy)
+        (ts, _, _, tr) = taken
+        _       <- ts.action(testUser, tapIdx("Buy", 0), tr)
+        busyIds <- tr.sentScreens.map(_.last.choices.map(_.id))
+      } yield assertTrue(freeIds == List("ConfirmBuy", "ConfirmBuyWear", "CancelBuy")) &&
+              assertTrue(busyIds == List("ConfirmBuy", "CancelBuy"))
+    },
+
+    test("«Да, и надеть» → товар на герое, сумка пуста, цена списана, товар помечен купленным") {
+      for {
+        t <- stocked(richHero)
+        (state, heroDao, invRepo, renderer) = t
+        _     <- state.action(testUser, tapIdx("ConfirmBuyWear", 0), renderer)
+        hero  <- heroDao.getHeroByUserId(userId)
+        data  <- readMerchant(heroDao)
+        text  <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(hero.exists(h => h.equipment.helmet.name == "Предмет 0" && h.equipment.helmet.id > 0L)) &&
+              assertTrue(hero.exists(_.silver == 1000000L - StockPrice)) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(data.items.head.bought) &&
+              assertTrue(text.contains("Вы купили предмет Предмет 0 и сразу надели."))
+    },
+
+    test("«Да, и надеть» с полной сумкой → покупка проходит, товар надет; просто «Да» — сумка полна") {
+      for {
+        t <- stocked(richHero, TestInventoryRepository.full)
+        (state, heroDao, _, renderer) = t
+        _     <- state.action(testUser, tapIdx("ConfirmBuyWear", 0), renderer)
+        hero  <- heroDao.getHeroByUserId(userId)
+        plain <- stocked(richHero, TestInventoryRepository.full)
+        (ps, pDao, _, pr) = plain
+        _     <- ps.action(testUser, tapIdx("ConfirmBuy", 0), pr)
+        pHero <- pDao.getHeroByUserId(userId)
+        pText <- pr.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(hero.exists(_.equipment.helmet.name == "Предмет 0")) &&
+              assertTrue(hero.exists(_.silver == 1000000L - StockPrice)) &&
+              assertTrue(pHero.exists(h => h.silver == 1000000L && h.equipment.helmet.itemType == ItemType.NoItem)) &&
+              assertTrue(pText.contains("Сумка странника переполнена"))
     },
 
     test("ConfirmBuy с достаточным серебром → списывает цену, кладёт предмет, помечает купленным") {

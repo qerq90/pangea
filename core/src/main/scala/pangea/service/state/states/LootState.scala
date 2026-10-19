@@ -15,7 +15,7 @@ import pangea.repository.item.ItemRepository
 import pangea.repository.artifact.ArtifactRepository
 import pangea.service.artifact.{ArtifactIntake, Intake}
 import pangea.service.state.states.LootState.LootData
-import pangea.service.state.{InventoryFeedback, State, UserAction}
+import pangea.service.state.{InventoryFeedback, QuestSupport, State, TakeAndEquip, UserAction}
 import zio.{Task, ZIO}
 
 /**
@@ -24,6 +24,8 @@ import zio.{Task, ZIO}
  * показываем, что выпало, и двумя кнопками спрашиваем
  * «Забрать»/«Оставить». Забрать → серебро в кошелёк, предметы в инвентарь (переполнен →
  * предмет теряется). Оставить → добыча выбрасывается. Оба исхода ведут в Dungeon.
+ * Если что-то из добычи встаёт в пустой слот, есть и третья кнопка — «Забрать и
+ * надеть»: такие вещи сразу на героя, мимо сумки (см. [[TakeAndEquip]]).
  *
  * После группового боя добыча идёт по одному павшему за экран (`queue`): каждый
  * исход показывает следующего, пока очередь не опустеет, и только тогда — уход.
@@ -39,7 +41,8 @@ case class LootState(
 
   private val branch = new Branch(
     routes = Map(
-      "Take"     -> Target.Run { (user, _, renderer) => claimLoot(user, renderer) },
+      "Take"     -> Target.Run { (user, _, renderer) => claimLoot(user, renderer, wear = false) },
+      "TakeWear" -> Target.Run { (user, _, renderer) => claimLoot(user, renderer, wear = true) },
       "Leave"    -> Target.Run { (user, _, renderer) => leaveLoot(user, renderer) },
       "Continue" -> Target.Run { (user, _, renderer) => readLoot(user).flatMap(finish(user, _, renderer)) }
     ),
@@ -102,13 +105,16 @@ case class LootState(
                (if (loot.queue.nonEmpty) renderer.show(user, Screen(text, Nil)) *> finish(user, loot, renderer).unit
                 else renderer.show(user, Screen(text, content.screen("loot.enter").choices)))
            } else {
-             // серебро/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»
+             // серебро/дублоны уже в кошельке; по предметам спрашиваем «Забрать»/«Оставить»,
+             // а если что-то встаёт в пустой слот — ещё и «Забрать и надеть»
              val preview = currencyLines ++ loot.items.map(it => itemLineWithEquipped(it, hero))
              val text    = header + "\n\n" + preview.mkString("\n")
-             val choices = List(
-               content.choice("Take", "loot.takeLabel"),
-               content.choice("Leave", "loot.leaveLabel")
-             )
+             val choices =
+               Option.when(TakeAndEquip.pick(hero, loot.items).nonEmpty)(content.choice("TakeWear", "loot.takeWearLabel")).toList ++
+               List(
+                 content.choice("Take", "loot.takeLabel"),
+                 content.choice("Leave", "loot.leaveLabel")
+               )
              renderer.show(user, Screen(text, choices))
            }
     } yield ()
@@ -117,24 +123,31 @@ case class LootState(
     branch.act(user, ua, renderer)
 
   // «Забрать»: предметы в инвентарь (переполнен → предмет теряется). Серебро уже забрано в enter.
-  private def claimLoot(user: User, renderer: Renderer): Task[StateType] =
+  // «Забрать и надеть» (`wear`): что встаёт в пустой слот, сразу на героя, мимо сумки.
+  private def claimLoot(user: User, renderer: Renderer, wear: Boolean): Task[StateType] =
     for {
       hero <- getHero(user)
       loot <- readLoot(user)
 
+      wearIdx    = if (wear) TakeAndEquip.pick(hero, loot.items) else Nil
+      persisted <- ZIO.foreach(loot.items)(itemRepository.persist(hero.id, _))
+      wornItems  = wearIdx.flatMap(persisted.lift)
+      // Сперва надеваем: «Тайник» на надетом прибавит сумке места до того, как
+      // в неё ляжет остальное.
+      worn      <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, wornItems)
+
       // Камни летят в Ларец Азата, травы и отвары — в Живую сумку; что не
       // взяли артефакты, идёт в сумку героя, как и раньше.
-      results <- ZIO.foreach(loot.items) { item =>
-                   for {
-                     persisted <- itemRepository.persist(hero.id, item)
-                     intake    <- ArtifactIntake.accept(artifacts, inventoryRepository, hero.id, persisted)
-                   } yield (persisted, intake)
+      kept     = persisted.zipWithIndex.collect { case (item, i) if !wearIdx.contains(i) => item }
+      results <- ZIO.foreach(kept) { item =>
+                   ArtifactIntake.accept(artifacts, inventoryRepository, hero.id, item).map(item -> _)
                  }
 
       _ <- journal.append(GameEvent(user.userId, "loot_claimed",
-             Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson)))
+             Json.obj("silver" -> loot.silvers.sum.asJson, "items" -> loot.items.map(_.name).asJson,
+                      "worn" -> wornItems.map(_.name).asJson)))
 
-      takenLines = results.collect {
+      takenLines = wornItems.map(itemLine) ++ results.collect {
         case (item, Intake.ToInventory)             => itemLine(item)
         case (item, Intake.ToArtifact(kind, free))  => ArtifactIntake.line(content, item, kind, free)
       }
@@ -143,8 +156,12 @@ case class LootState(
       slots     <- InventoryFeedback.freeSlotsLine(inventoryRepository, content, hero.id)
       taken      = if (takenLines.isEmpty) content.text("loot.empty")
                    else content.text("loot.claimed") + "\n\n" + takenLines.mkString("\n")
+      wornLine   = if (wornItems.isEmpty) ""
+                   else "\n\n" + content.format("loot.worn", "names" -> wornItems.map(_.name).mkString(", "))
       full       = if (lostLines.isEmpty) "" else "\n\n" + lostLines.mkString("\n")
-      _ <- renderer.show(user, Screen(taken + full + "\n\n" + slots, Nil))
+      _ <- renderer.show(user, Screen(taken + wornLine + full + "\n\n" + slots, Nil))
+      // Двенадцатая вещь набора — за собранный набор своё достижение.
+      _ <- QuestSupport.grantFullSets(heroDao, content, user, worn, renderer)
       next <- finish(user, loot, renderer)
     } yield next
 

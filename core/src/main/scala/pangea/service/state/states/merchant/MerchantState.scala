@@ -18,7 +18,7 @@ import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.merchant.MerchantState._
 import pangea.model.quest.{DailyKind, DailyNpc, DailyRates}
-import pangea.service.state.{CharacterMenu, CityExit, DailyDialog, DailyQuestLog, InventoryFeedback, ItemMenu, NpcQuestDialog, State, UserAction}
+import pangea.service.state.{CharacterMenu, CityExit, DailyDialog, DailyQuestLog, InventoryFeedback, ItemMenu, NpcQuestDialog, QuestSupport, State, TakeAndEquip, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -53,7 +53,8 @@ case class MerchantState(
       quest.acceptAction  -> Target.Run { (u, _, r) => quest.accept(u, r) *> showMenu(u, r).as(StateType.Merchant) },
       quest.declineAction -> Target.Run { (u, _, r) => showMenu(u, r).as(StateType.Merchant) },
       "Buy"             -> Target.Run { (u, ua, r) => confirmBuy(u, ua, r) },
-      "ConfirmBuy"      -> Target.Run { (u, ua, r) => doBuy(u, ua, r) },
+      "ConfirmBuy"      -> Target.Run { (u, ua, r) => doBuy(u, ua, r, wear = false) },
+      "ConfirmBuyWear"  -> Target.Run { (u, ua, r) => doBuy(u, ua, r, wear = true) },
       "CancelBuy"       -> Target.Run { (u, _,  r) => showMenu(u, r).as(StateType.Merchant) },
       "Refresh"         -> Target.Run { (u, _,  r) => refresh(u, r) },
       "Sell"            -> Target.Run { (u, _,  r) => showSellList(u, r, 0) },
@@ -110,12 +111,17 @@ case class MerchantState(
     for {
       now  <- nowMs
       data <- loadOrInit(user, now)
+      hero <- getHero(user)
       _ <- payloadIdx(ua).flatMap(idx => data.items.lift(idx).map(idx -> _)) match {
              case Some((idx, mi)) if !mi.bought =>
+               val payload = Map("idx" -> idx.toString)
+               // Вещь встаёт в пустой слот — можно купить и сразу надеть.
                val choices = List(
-                 content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = Map("idx" -> idx.toString)),
-                 content.choice("CancelBuy", "merchant.confirmNo")
-               )
+                 Some(content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = payload)),
+                 Option.when(TakeAndEquip.fits(hero, mi.item))(
+                   content.choice("ConfirmBuyWear", "merchant.confirmWear").copy(data = payload)),
+                 Some(content.choice("CancelBuy", "merchant.confirmNo"))
+               ).flatten
                renderer.show(user, Screen(
                  content.format("merchant.confirmBuy", "name" -> mi.item.name, "price" -> mi.price.toString),
                  choices, inline = true))
@@ -123,7 +129,9 @@ case class MerchantState(
            }
     } yield StateType.Merchant
 
-  private def doBuy(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+  // «Да, и надеть» (`wear`): вещь в пустой слот — сразу на героя, мимо сумки,
+  // так что купить её можно и с полной сумкой. Слот успел заняться — обычная покупка.
+  private def doBuy(user: User, ua: UserAction, renderer: Renderer, wear: Boolean): Task[StateType] =
     for {
       now    <- nowMs
       hero   <- getHero(user)
@@ -137,15 +145,26 @@ case class MerchantState(
                else
                  for {
                    persisted <- itemRepo.persist(hero.id, mi.item)
-                   added     <- inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
+                   worn      <- if (wear && TakeAndEquip.fits(hero, persisted))
+                                  TakeAndEquip.wear(heroDao, inventoryRepo, user, hero, List(persisted)).asSome
+                                else ZIO.none
+                   added     <- if (worn.isDefined) ZIO.succeed(true)
+                                else inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
                    _ <- if (added) {
                           val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
                           purse.charge(user.userId, hero, mi.price) *>
                             heroDao.writeMerchantData(user.userId, newData.asJson) *>
                             // «У прилавка должен кто-то стоять» — покупка в счёт уговора.
                             DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.BuyFromMerchant, 1L) *>
-                            InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
-                              renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil))) *>
+                            (worn match {
+                              case Some(h) =>
+                                renderer.show(user, Screen(content.format("merchant.boughtWorn", "name" -> mi.item.name), Nil)) *>
+                                  // Двенадцатая вещь набора — за собранный набор своё достижение.
+                                  QuestSupport.grantFullSets(heroDao, content, user, h, renderer).unit
+                              case None =>
+                                InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
+                                  renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil)))
+                            }) *>
                             showMenu(user, renderer)
                         } else
                           renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showMenu(user, renderer)
