@@ -3,6 +3,7 @@ package pangea.service.state.states
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.GemGenerator
+import pangea.model.hero.Equipment
 import pangea.model.item.{GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -27,10 +28,16 @@ object LootStateSpec extends ZIOSpecDefault {
          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
          details = ItemDetails.Trophy("Human", TrophyKind.Head))
 
-  private def makeState(loot: LootData, canAdd: Boolean = true, bag: List[Item] = Nil) =
+  // Нажатие с данными — как кнопки «Надеть: …» и выбора слота.
+  private def tapWith(key: String, data: (String, String)*): UserAction =
+    UserAction("", Some((Map("action" -> key) ++ data).asJson.noSpaces))
+
+  private def makeState(loot: LootData, canAdd: Boolean = true, bag: List[Item] = Nil,
+                        eq: Equipment => Equipment = identity) =
     for {
       renderer <- TestRenderer.make
-      heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(silver = 100L))
+      base      = TestFixtures.hero(userId).copy(silver = 100L)
+      heroDao  <- TestHeroDao.withHero(userId, base.copy(equipment = eq(base.equipment)))
       _        <- heroDao.writeSceneData(userId, loot.asJson)
       journal  <- TestJournal.make
       content  <- ZIO.attempt(SceneContent.load())
@@ -288,6 +295,85 @@ object LootStateSpec extends ZIOSpecDefault {
       } yield assertTrue(invRepo.snapshot.map(_.name) == List("Шлем")) &&
               assertTrue(hero.exists(_.equipment.helmet.itemType == ItemType.NoItem)) &&
               assertTrue(!text.contains("Надето"))
+    },
+
+    test("вещь встанет вместо надетой → кнопка «Надеть: …» с номером и именем; «Забрать и надеть» нет") {
+      val old = gear("Старый шлем").copy(id = 9L, lvl = 1L)
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L)), silvers = Nil), eq = _.copy(helmet = old))
+        (state, renderer, _, _) = t
+        _       <- state.enter(testUser, renderer)
+        choices <- renderer.sentScreens.map(_.last.choices)
+      } yield assertTrue(choices.map(_.id) == List("TakeSwap", "Take", "Leave")) &&
+              assertTrue(choices.head.label == "Надеть: Шлем") &&
+              assertTrue(choices.head.data == Map("i" -> "0", "n" -> "Шлем"))
+    },
+
+    test("«Надеть: …» → новый шлем на герое, старый и трофей в сумке, строки «Надето» и «Снято в сумку»") {
+      val old = gear("Старый шлем").copy(id = 9L, lvl = 1L, armor = 2L)
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L), trophy), silvers = Nil), eq = _.copy(helmet = old))
+        (state, renderer, heroDao, invRepo) = t
+        result <- state.action(testUser, tapWith("TakeSwap", "i" -> "0", "n" -> "Шлем"), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+        text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(result == StateType.Dungeon) &&
+              assertTrue(hero.exists(_.equipment.helmet.name == "Шлем")) &&
+              assertTrue(invRepo.snapshot.map(_.name).toSet == Set("Старый шлем", "Голова (Человек)")) &&
+              assertTrue(text.contains("✅ Надето: Шлем") && text.contains("🎒 Снято в сумку: Старый шлем"))
+    },
+
+    test("«Надеть: …» при полной сумке → отказ, ничего не взято, добыча снова на экране, серебро не задвоилось") {
+      val old  = gear("Старый шлем").copy(id = 9L, lvl = 1L)
+      val full = (1L to 20L).toList.map(i => gear(s"Сапог $i").copy(id = 100L + i, itemType = ItemType.Boots))
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L)), silvers = List(30L)), bag = full,
+                       eq = _.copy(helmet = old))
+        (state, renderer, heroDao, invRepo) = t
+        _      <- state.enter(testUser, renderer)
+        result <- state.action(testUser, tapWith("TakeSwap", "i" -> "0", "n" -> "Шлем"), renderer)
+        hero   <- heroDao.getHeroByUserId(userId)
+        last   <- renderer.sentScreens.map(_.last)
+        text   <- renderer.sentScreens.map(_.map(_.text).mkString(" | "))
+      } yield assertTrue(result == StateType.Loot) &&
+              assertTrue(text.contains("Сумка полна — снятой вещи некуда деться")) &&
+              assertTrue(hero.exists(h => h.equipment.helmet.name == "Старый шлем" && h.silver == 130L)) &&
+              assertTrue(invRepo.snapshot.size == 20) &&
+              assertTrue(last.choices.map(_.id).contains("TakeSwap"))
+    },
+
+    test("два кольца надеты → «Надеть: кольцо» спрашивает, какое снять; выбор второго — меняется второе") {
+      def ring(id: Long, name: String) = gear(name).copy(id = id, lvl = 1L, itemType = ItemType.Ring)
+      val loot = LootData(items = List(ring(-1L, "Новое кольцо")), silvers = Nil)
+      for {
+        t <- makeState(loot, eq = _.copy(firstRing = ring(7L, "Кольцо раз"), secondRing = ring(8L, "Кольцо два")))
+        (state, renderer, heroDao, invRepo) = t
+        asked   <- state.action(testUser, tapWith("TakeSwap", "i" -> "0", "n" -> "Новое кольцо"), renderer)
+        choice  <- renderer.sentScreens.map(_.last)
+        result  <- state.action(testUser, tapWith("TakeSwap", "i" -> "0", "n" -> "Новое кольцо", "slot" -> "2"), renderer)
+        hero    <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(asked == StateType.Loot) &&
+              assertTrue(choice.choices.map(_.id) == List("TakeSwap", "TakeSwap", "SwapBack")) &&
+              assertTrue(choice.choices.flatMap(_.data.get("slot")) == List("1", "2")) &&
+              assertTrue(result == StateType.Dungeon) &&
+              assertTrue(hero.exists(h => h.equipment.firstRing.id == 7L && h.equipment.secondRing.name == "Новое кольцо")) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(8L))
+    },
+
+    test("«Надеть: …» со старой кнопки (имя не то) и «Назад» → только превью, без начисления серебра") {
+      val old = gear("Старый шлем").copy(id = 9L, lvl = 1L)
+      for {
+        t <- makeState(LootData(items = List(gear("Шлем").copy(lvl = 1L)), silvers = List(30L)), eq = _.copy(helmet = old))
+        (state, renderer, heroDao, invRepo) = t
+        _     <- state.enter(testUser, renderer)
+        stale <- state.action(testUser, tapWith("TakeSwap", "i" -> "0", "n" -> "Чужой шлем"), renderer)
+        back  <- state.action(testUser, tap("SwapBack"), renderer)
+        hero  <- heroDao.getHeroByUserId(userId)
+        last  <- renderer.sentScreens.map(_.last)
+      } yield assertTrue(stale == StateType.Loot && back == StateType.Loot) &&
+              assertTrue(hero.exists(h => h.equipment.helmet.name == "Старый шлем" && h.silver == 130L)) &&
+              assertTrue(invRepo.snapshot.isEmpty) &&
+              assertTrue(last.choices.map(_.id) == List("TakeSwap", "Take", "Leave"))
     },
 
     test("старая запись добычи без полей группы читается как одиночная") {

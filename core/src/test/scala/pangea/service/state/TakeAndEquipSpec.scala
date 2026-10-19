@@ -1,8 +1,11 @@
 package pangea.service.state
 
+import pangea.engine.SceneContent
+import pangea.model.inventory.Inventory
 import pangea.model.item.{Grip, Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository}
+import zio.ZIO
 import zio.test._
 
 object TakeAndEquipSpec extends ZIOSpecDefault {
@@ -85,6 +88,71 @@ object TakeAndEquipSpec extends ZIOSpecDefault {
       assertTrue(TakeAndEquip.pick(swordInRight, List(shield(1L), sword(2L).copy(rarity = Rarity.Green))) == List(1))
     },
 
+    test("replaces: слот занят — встаёт вместо надетой; пустой слот, уровень выше или фляга — нет") {
+      val helmet = item(1L, ItemType.Helmet)
+      val busy   = wearing(_.copy(helmet = item(2L, ItemType.Helmet)))
+      assertTrue(TakeAndEquip.replaces(busy, helmet) && !TakeAndEquip.fits(busy, helmet)) &&
+      assertTrue(!TakeAndEquip.replaces(hero, helmet)) &&
+      assertTrue(!TakeAndEquip.replaces(busy, helmet.copy(lvl = 2L))) &&
+      assertTrue(!TakeAndEquip.replaces(wearing(_.copy(flask = item(3L, ItemType.Flask))), item(4L, ItemType.Flask))) &&
+      // и так, и так — «можно надеть сразу»
+      assertTrue(TakeAndEquip.canWear(busy, helmet) && TakeAndEquip.canWear(hero, helmet))
+    },
+
+    test("noRoom: снятому нужно место в сумке; двуручное поверх двух одноручных — на обе вещи") {
+      def bag(n: Int, cap: Long = 20L) =
+        Inventory(1L, hero.id, cap, Inventory.Items((1 to n).toList.map(i => item(100L + i, ItemType.Boots))))
+      val busy  = wearing(_.copy(helmet = item(2L, ItemType.Helmet)))
+      val armed = wearing(_.copy(weapon = sword(2L), leftHand = shield(3L)))
+      assertTrue(TakeAndEquip.noRoom(busy, bag(19), item(1L, ItemType.Helmet), None).isEmpty) &&
+      assertTrue(TakeAndEquip.noRoom(busy, bag(20), item(1L, ItemType.Helmet), None).contains("common.swapNoRoom")) &&
+      assertTrue(TakeAndEquip.noRoom(armed, bag(18), twoHand(1L), None).isEmpty) &&
+      assertTrue(TakeAndEquip.noRoom(armed, bag(19), twoHand(1L), None).contains("common.swapNoRoom"))
+    },
+
+    test("noRoom: замена снимает последний «Тайник» и ужимает сумку — свой отказ") {
+      val stash = wearing(_.copy(boots = item(2L, ItemType.Boots, details = ItemDetails.Passive(PassiveKind.Stash))))
+      val inv   = Inventory(1L, hero.id, 30L, Inventory.Items((1 to 25).toList.map(i => item(100L + i, ItemType.Gloves))))
+      assertTrue(TakeAndEquip.noRoom(stash, inv, item(1L, ItemType.Boots), None).contains("equipment.stashBlocked"))
+    },
+
+    test("SlotChoice: спрашиваем при двух кольцах и двух занятых руках, но не про двуручное") {
+      val rings     = wearing(_.copy(firstRing = ring(2L), secondRing = ring(3L)))
+      val oneRing   = wearing(_.copy(firstRing = ring(2L)))
+      val handsFull = wearing(_.copy(weapon = sword(2L), leftHand = shield(3L)))
+      val twoHanded = wearing(_.copy(weapon = twoHand(2L)))
+      assertTrue(SlotChoice.needed(rings.equipment, ring(1L))) &&
+      assertTrue(!SlotChoice.needed(oneRing.equipment, ring(1L))) &&
+      assertTrue(SlotChoice.needed(handsFull.equipment, shield(1L))) &&
+      assertTrue(!SlotChoice.needed(handsFull.equipment, twoHand(1L))) &&
+      assertTrue(!SlotChoice.needed(twoHanded.equipment, shield(1L)))
+    },
+
+    test("SlotChoice.screen: по кнопке на слот с номером в данных, последней — «Назад»") {
+      val rings = wearing(_.copy(firstRing = ring(2L), secondRing = ring(3L)))
+      for {
+        content <- ZIO.attempt(SceneContent.load())
+        screen   = SlotChoice.screen(content, ring(1L), rings.equipment, "Pick", Map("i" -> "0"),
+                     content.choice("Back", "common.back"))
+      } yield assertTrue(screen.choices.map(_.id) == List("Pick", "Pick", "Back")) &&
+              assertTrue(screen.choices.take(2).map(_.data) == List(Map("i" -> "0", "slot" -> "1"), Map("i" -> "0", "slot" -> "2"))) &&
+              assertTrue(screen.text.contains("Вещь 2") && screen.text.contains("Вещь 3"))
+    },
+
+    test("wear со слотом: второе кольцо сменилось, снятое — в сумке и в Worn.removed") {
+      val rings = wearing(_.copy(firstRing = ring(2L), secondRing = ring(3L)))
+      for {
+        heroDao <- TestHeroDao.withHero(userId, rings)
+        invRepo  = TestInventoryRepository.accepting
+        worn    <- TakeAndEquip.wear(heroDao, invRepo, testUser, rings, List(ring(1L)), Some(2))
+        saved   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(saved.exists(h => h.equipment.firstRing.id == 2L && h.equipment.secondRing.id == 1L)) &&
+              assertTrue(worn.removed.map(_.id) == List(3L)) &&
+              assertTrue(invRepo.snapshot.map(_.id) == List(3L)) &&
+              // броня снятого кольца ушла, новое дало свою
+              assertTrue(saved.exists(_.fightStats.armor == rings.fightStats.armor))
+    },
+
     test("wear: снаряжение и статы сохранены, «Тайник» прибавил сумке места, в сумку ничего не легло") {
       val stash  = item(7L, ItemType.Boots, details = ItemDetails.Passive(PassiveKind.Stash))
       val helmet = item(8L, ItemType.Helmet)
@@ -97,7 +165,8 @@ object TakeAndEquipSpec extends ZIOSpecDefault {
       } yield assertTrue(saved.exists(_.equipment.boots.id == 7L)) &&
               assertTrue(saved.exists(_.equipment.helmet.id == 8L)) &&
               assertTrue(saved.exists(_.fightStats.armor == hero.fightStats.armor + 6L)) &&
-              assertTrue(worn.equipment == saved.map(_.equipment).getOrElse(hero.equipment)) &&
+              assertTrue(worn.hero.equipment == saved.map(_.equipment).getOrElse(hero.equipment)) &&
+              assertTrue(worn.removed.isEmpty) &&
               assertTrue(inv.maxItems == 20L + PassiveKind.Stash.ExtraSlots) &&
               assertTrue(invRepo.snapshot.isEmpty)
     }

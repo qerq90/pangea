@@ -18,7 +18,7 @@ import pangea.repository.bank.BankRepository
 import pangea.service.purse.Purse
 import pangea.service.state.states.merchant.MerchantState._
 import pangea.model.quest.{DailyKind, DailyNpc, DailyRates}
-import pangea.service.state.{CharacterMenu, CityExit, DailyDialog, DailyQuestLog, InventoryFeedback, ItemMenu, NpcQuestDialog, QuestSupport, State, TakeAndEquip, UserAction}
+import pangea.service.state.{CharacterMenu, CityExit, DailyDialog, DailyQuestLog, InventoryFeedback, ItemMenu, NpcQuestDialog, QuestSupport, SlotChoice, State, TakeAndEquip, UserAction}
 import zio.{Random, Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -115,10 +115,10 @@ case class MerchantState(
       _ <- payloadIdx(ua).flatMap(idx => data.items.lift(idx).map(idx -> _)) match {
              case Some((idx, mi)) if !mi.bought =>
                val payload = Map("idx" -> idx.toString)
-               // Вещь встаёт в пустой слот — можно купить и сразу надеть.
+               // Вещь можно надеть — в пустой слот или вместо надетой: купить и сразу надеть.
                val choices = List(
                  Some(content.choice("ConfirmBuy", "merchant.confirmYes").copy(data = payload)),
-                 Option.when(TakeAndEquip.fits(hero, mi.item))(
+                 Option.when(TakeAndEquip.canWear(hero, mi.item))(
                    content.choice("ConfirmBuyWear", "merchant.confirmWear").copy(data = payload)),
                  Some(content.choice("CancelBuy", "merchant.confirmNo"))
                ).flatten
@@ -129,8 +129,8 @@ case class MerchantState(
            }
     } yield StateType.Merchant
 
-  // «Да, и надеть» (`wear`): вещь в пустой слот — сразу на героя, мимо сумки,
-  // так что купить её можно и с полной сумкой. Слот успел заняться — обычная покупка.
+  // «Да, и надеть» (`wear`): вещь сразу на героя, мимо сумки — в пустой слот её
+  // можно купить и с полной сумкой. Надеть уже нельзя — обычная покупка.
   private def doBuy(user: User, ua: UserAction, renderer: Renderer, wear: Boolean): Task[StateType] =
     for {
       now    <- nowMs
@@ -138,40 +138,67 @@ case class MerchantState(
       data   <- loadOrInit(user, now)
       wallet <- purse.wallet(hero)
       idx     = payloadIdx(ua).getOrElse(-1)
+      slot    = payloadStr(ua, "slot").flatMap(_.toIntOption).filter(s => s == 1 || s == 2)
       _ <- data.items.lift(idx) match {
              case Some(mi) if !mi.bought =>
                if (!wallet.canAfford(mi.price))
                  renderer.show(user, Screen(content.text("merchant.notEnoughSilver"), Nil)) *> showMenu(user, renderer)
-               else
-                 for {
-                   persisted <- itemRepo.persist(hero.id, mi.item)
-                   worn      <- if (wear && TakeAndEquip.fits(hero, persisted))
-                                  TakeAndEquip.wear(heroDao, inventoryRepo, user, hero, List(persisted)).asSome
-                                else ZIO.none
-                   added     <- if (worn.isDefined) ZIO.succeed(true)
-                                else inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
-                   _ <- if (added) {
-                          val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
-                          purse.charge(user.userId, hero, mi.price) *>
-                            heroDao.writeMerchantData(user.userId, newData.asJson) *>
-                            // «У прилавка должен кто-то стоять» — покупка в счёт уговора.
-                            DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.BuyFromMerchant, 1L) *>
-                            (worn match {
-                              case Some(h) =>
-                                renderer.show(user, Screen(content.format("merchant.boughtWorn", "name" -> mi.item.name), Nil)) *>
-                                  // Двенадцатая вещь набора — за собранный набор своё достижение.
-                                  QuestSupport.grantFullSets(heroDao, content, user, h, renderer).unit
-                              case None =>
-                                InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
-                                  renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil)))
-                            }) *>
-                            showMenu(user, renderer)
-                        } else
-                          renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showMenu(user, renderer)
-                 } yield ()
+               else if (wear && TakeAndEquip.replaces(hero, mi.item)) swapBuy(user, renderer, hero, data, idx, mi, slot)
+               else buy(user, renderer, hero, data, idx, mi, wear = wear && TakeAndEquip.fits(hero, mi.item), slot = None)
              case _ => showMenu(user, renderer)
            }
     } yield StateType.Merchant
+
+  // «Да, и надеть» вместо надетого: оба кольца или обе руки заняты — сперва
+  // спрашиваем, что снять (та же кнопка, но с номером слота; серебро ещё не
+  // списано); снятому нет места в сумке — не продаём.
+  private def swapBuy(user: User, renderer: Renderer, hero: Hero, data: MerchantData, idx: Int,
+                      mi: MerchantItem, slot: Option[Int]): Task[Unit] =
+    if (slot.isEmpty && SlotChoice.needed(hero.equipment, mi.item))
+      renderer.show(user, SlotChoice.screen(content, mi.item, hero.equipment, "ConfirmBuyWear",
+        Map("idx" -> idx.toString), content.choice("CancelBuy", "common.back")))
+    else
+      inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).flatMap { inv =>
+        TakeAndEquip.noRoom(hero, inv, mi.item, slot) match {
+          case Some(key) =>
+            renderer.show(user, Screen(content.format(key, "name" -> mi.item.name), Nil)) *> showMenu(user, renderer)
+          case None => buy(user, renderer, hero, data, idx, mi, wear = true, slot)
+        }
+      }
+
+  /** Продать товар: на героя (`wear`; `slot` — как в `TakeAndEquip.wear`) или в
+    * сумку. В сумку не лёг — не продаём, серебро не списываем. */
+  private def buy(user: User, renderer: Renderer, hero: Hero, data: MerchantData, idx: Int,
+                  mi: MerchantItem, wear: Boolean, slot: Option[Int]): Task[Unit] =
+    for {
+      persisted <- itemRepo.persist(hero.id, mi.item)
+      worn      <- if (wear) TakeAndEquip.wear(heroDao, inventoryRepo, user, hero, List(persisted), slot).asSome
+                   else ZIO.none
+      added     <- if (worn.isDefined) ZIO.succeed(true)
+                   else inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))
+      _ <- if (added) {
+             val newData = data.copy(items = data.items.updated(idx, mi.copy(bought = true)))
+             purse.charge(user.userId, hero, mi.price) *>
+               heroDao.writeMerchantData(user.userId, newData.asJson) *>
+               // «У прилавка должен кто-то стоять» — покупка в счёт уговора.
+               DailyQuestLog.add(heroDao, user.userId, DailyNpc.Richelieu, DailyKind.BuyFromMerchant, 1L) *>
+               (worn match {
+                 case Some(w) =>
+                   // Снятое легло в сумку — скажем, сколько в ней осталось места.
+                   (if (w.removed.isEmpty) ZIO.succeed("")
+                    else InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).map("\n" + _)).flatMap(bag =>
+                     renderer.show(user, Screen(content.format("merchant.boughtWorn", "name" -> mi.item.name) +
+                       TakeAndEquip.takenOffLine(content, w) + bag, Nil))) *>
+                     // Двенадцатая вещь набора — за собранный набор своё достижение.
+                     QuestSupport.grantFullSets(heroDao, content, user, w.hero, renderer).unit
+                 case None =>
+                   InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slots =>
+                     renderer.show(user, Screen(content.format("merchant.bought", "name" -> mi.item.name) + "\n" + slots, Nil)))
+               }) *>
+               showMenu(user, renderer)
+           } else
+             renderer.show(user, Screen(content.text("common.inventoryFull"), Nil)) *> showMenu(user, renderer)
+    } yield ()
 
   // ── Обновление стока ────────────────────────────────────────────────────────
 
