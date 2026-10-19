@@ -137,7 +137,10 @@ object ItemGenerator {
 
     val (item, rng4) =
       if (isAttack) {
-        val (armor, rng3b)    = modifyParameter(rarity.factorR * itemLvl, rng3z)
+        // Главный стат профиля — не меньше единицы: на первом уровне серая вещь
+        // иначе округлялась бы в пустую, «Нет характеристик».
+        val (armor0, rng3b)   = modifyParameter(rarity.factorR * itemLvl, rng3z)
+        val armor             = armor0.max(1L)
         val (defence, rng3c) = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
@@ -160,7 +163,9 @@ object ItemGenerator {
         // только оружие (см. applyMandatory и Stat.Attack в updateExtraParams).
         // Меткости — половина ставки: в попадании она весит вдвое больше
         // (см. BattleState.dodgeChance).
-        val (accuracy, rng3b) = modifyParameter(rarity.factorR * 0.5 * itemLvl, rng3z)
+        // Главный стат профиля — не меньше единицы (см. броню выше).
+        val (accuracy0, rng3b) = modifyParameter(rarity.factorR * 0.5 * itemLvl, rng3z)
+        val accuracy           = accuracy0.max(1L)
         val (evasion, rng3c)  = modifyParameter(rarity.factorR1 * itemLvl, rng3b)
         (
           Item(
