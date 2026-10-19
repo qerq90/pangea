@@ -136,6 +136,25 @@ object TreasureDigStateSpec extends ZIOSpecDefault {
               assertTrue(loot.exists(_.items.exists(_.gem.exists(_.kind == pangea.model.item.GemKind.Skull))))
     },
 
+    test("DigDone в доле Джо: герою 4-го уровня — Гнилой Джо, герою 3-го — «свежая могила»") {
+      val base = TestFixtures.hero(userId).copy(dungeonLevel = 20)
+      for {
+        old    <- makeStateWith(base.copy(lvl = 4L))
+        (os, or, _) = old
+        _      <- os.enter(testUser, or)
+        _      <- TestRandom.feedInts(77)                 // в доле Джо: после 75% схрона
+        joe    <- os.action(testUser, tap("DigDone"), or)
+        young  <- makeStateWith(base.copy(lvl = 3L))
+        (ys, yr, _) = young
+        _      <- ys.enter(testUser, yr)
+        _      <- TestRandom.feedInts(77, 0, 50)          // тот же бросок, раса, черепа нет
+        grave  <- ys.action(testUser, tap("DigDone"), yr)
+        scr    <- yr.sentScreens
+      } yield assertTrue(joe == StateType.RottenJoe) &&
+              assertTrue(grave == StateType.TreasureDig) &&
+              assertTrue(scr.exists(_.text.contains("могила")))
+    },
+
     test("GraveLeave → переход в Dungeon") {
       for {
         t <- makeState

@@ -9,7 +9,7 @@ import pangea.generator.item.GemGenerator
 import pangea.generator.loot.SchronGenerator
 import pangea.model.hero.Hero
 import pangea.model.item.{Gem, GemKind, Item}
-import pangea.model.monster.Race
+import pangea.model.monster.{MiniBoss, Race}
 import pangea.model.schedule.TaskKind
 import pangea.model.squad.AllyKind
 import pangea.model.state.StateType
@@ -96,14 +96,17 @@ case class TreasureDigState(heroDao: HeroDao, scheduler: Scheduler, content: Sce
       heroDao.writeSceneData(user.userId, Json.Null) *>
       renderer.show(user, Screen(content.text("treasureDig.left"), Nil)).as(StateType.Dungeon)
 
-  // Развязка раскопок: 80% — схрон, 20% — «свежая могила».
+  // Развязка раскопок: 75% — схрон, 5% — Гнилой Джо, 20% — «свежая могила».
+  // Джо выходит только к герою 4-го уровня и выше (MiniBoss.AmbushMinHeroLvl):
+  // младшему его доля достаётся могиле, а схрон остаётся прежним.
   private def digDone(user: User, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
       _    <- scheduler.cancel(user.userId, TaskKind.SchronDig)
       roll <- Random.nextIntBetween(1, 101)
+      joePct = if (hero.lvl >= MiniBoss.AmbushMinHeroLvl) JoePct else 0
       result <- if (roll <= SchronPct)             digSuccess(user, hero, renderer)
-                else if (roll <= SchronPct + JoePct) ZIO.succeed(StateType.RottenJoe)
+                else if (roll <= SchronPct + joePct) ZIO.succeed(StateType.RottenJoe)
                 else                                digGrave(user, hero, renderer)
     } yield result
 
