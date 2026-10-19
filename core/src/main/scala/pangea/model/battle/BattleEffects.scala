@@ -277,6 +277,13 @@ case class BattleEffects(
   /** Скован ли сейчас элементаль холодом. */
   def chilled: Boolean = chilledTurns > 0
 
+  /** Лежит ли на мобе холод: срез защиты от прока или оцепенение элементаля.
+    * Огонь по такому растапливает лёд и сам не занимается. */
+  def coldOnMonster: Boolean = monsterColdDefenceCut > 0 || chilledTurns > 0
+
+  /** Лежит ли на герое холод — срез защиты от морозных ударов. */
+  def coldOnHero: Boolean = heroColdDefenceCut > 0
+
   /** Сбита ли герою защита с уклонением залпом валунов. */
   def heroStunned: Boolean = heroStunnedTurns > 0
 

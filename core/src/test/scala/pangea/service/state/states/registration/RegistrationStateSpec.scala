@@ -219,12 +219,13 @@ object RegistrationStateSpec extends ZIOSpecDefault {
               assertTrue(invRepo.snapshot.isEmpty)
     },
 
-    test("обыск сторожки: меч и щит в руках, пояс с флягой целителя на четыре глотка, топор в сумке — и только раз") {
+    test("обыск сторожки: меч и щит в руках, пояс с флягой целителя на четыре глотка, топор и лук или арбалет в сумке — и только раз") {
       for {
         quad                           <- makeStateWithHero
         (state, renderer, heroDao, invRepo) = quad
         _      <- state.action(testUser, confirmRace(Race.Human), renderer)
         _      <- state.action(testUser, tap("ArrivalSearch"), renderer)
+        first  <- renderer.sentScreens.map(_.last)
         _      <- state.action(testUser, tap("ArrivalSearch"), renderer) // ВК прислал кнопку дважды
         hero   <- heroDao.getHeroByUserId(userId).map(_.get)
         screen <- renderer.sentScreens.map(_.last)
@@ -232,12 +233,21 @@ object RegistrationStateSpec extends ZIOSpecDefault {
         val eq    = hero.equipment
         val slots = eq.belt.details match { case b: ItemDetails.Belt => b.slots; case _ => Nil }
         val gear  = List(eq.weapon, eq.leftHand, eq.belt) ++ invRepo.snapshot
+        val ranged = invRepo.snapshot.filter(_.ranged)
+        val noun   = ranged.headOption.map(_.name.split(" ")(2)).getOrElse("")
+        val shot   = ranged.flatMap(_.activeSkill).forall(s => pangea.model.skill.Skill.rangedSkills.contains(s))
         assertTrue(eq.weapon.name == "⚪ Простой Меч Искателя" && eq.weapon.grip.contains(Grip.OneHanded)) &&
         assertTrue(eq.leftHand.name == "⚪ Простой Круглый Щит Искателя" && eq.leftHand.itemType == ItemType.Shield) &&
         assertTrue(eq.belt.name == "⚪ Простой Пояс Искателя") &&
         assertTrue(slots == List(BeltSlot.Flask(FlaskKind.Healer, Rarity.White, 4))) &&
-        assertTrue(invRepo.snapshot.map(_.name) == List("⚪ Простой Двуручный Топор Искателя")) &&
-        assertTrue(invRepo.snapshot.forall(_.twoHanded)) &&
+        assertTrue(invRepo.snapshot.map(_.name).head == "⚪ Простой Двуручный Топор Искателя") &&
+        // и лук или арбалет — со своим умением стрелка
+        assertTrue(ranged.size == 1 && (noun == "Лук" || noun == "Арбалет")) &&
+        assertTrue(shot) &&
+        assertTrue(invRepo.snapshot.size == 2 && invRepo.snapshot.forall(_.twoHanded)) &&
+        // сцена называет то, что лежит в сумке, — и при повторе тоже
+        assertTrue(first.text.contains(s"Простой $noun Искателя") && screen.text.contains(s"Простой $noun Искателя")) &&
+        assertTrue(!screen.text.contains("{ranged")) &&
         assertTrue(gear.forall(i => i.rarity == Rarity.White && i.lvl == 1L)) &&
         // защита щита легла в боевые статы
         assertTrue(hero.fightStats.defence >= TestFixtures.hero(userId).fightStats.defence + 3L) &&
