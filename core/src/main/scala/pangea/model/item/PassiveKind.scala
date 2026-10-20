@@ -88,7 +88,7 @@ object PassiveKind extends Enum[PassiveKind] {
 
   case object QuickHands extends PassiveKind(
     "Быстрые руки",
-    "Быстрые руки: 25% шанс, что пояс, Блок или Контрудар не потратят бонусное действие раунда.",
+    "Быстрые руки: 25% шанс, что бонусное действие раунда не потратится.",
     Arms
   ) { val RepeatChancePct: Long = 25L }
 
