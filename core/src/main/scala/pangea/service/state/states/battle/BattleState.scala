@@ -172,9 +172,10 @@ case class BattleState(
   private def resolveLoaded(user: User, renderer: Renderer, hero: Hero, battle: SoloPveBattle, now: Long,
                             note: String)(turn: Turn): Task[StateType] =
     for {
-      // Щит, поднятый прошлым ходом, своё отстоял, и кинжал наизготовку тоже:
-      // раунд, за который они брались, кончился (см. Skill.Block, Counterstrike).
-      struck <- turn(hero, battle.copy(heroBlockPct = 0L, heroCounterReady = false), now)
+      // Щит, поднятый в прошлом раунде, своё отстоял, и кинжал наизготовку тоже:
+      // их снимает первое действие нового раунда. Посреди раунда — после пояса,
+      // Блока или Контрудара — они ещё держатся (см. Skill.Block, Counterstrike).
+      struck <- turn(hero, if (battle.midRound) battle else battle.copy(heroBlockPct = 0L, heroCounterReady = false), now)
       // «Упырь» (порог 12): пир — только за тех, кого уложил САМ герой, и тут
       // же, в бою. Считаем до хода союзников: их добычу упырь не ест.
       feasted = ghoulFeast(battle, struck, now)
@@ -219,7 +220,9 @@ case class BattleState(
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
       hinted  = plainSteelHint(hero, pulled)
-      state  <- commit(user, hinted, now, renderer, hero, note)
+      // Раунд не кончился — герой ещё в нём (см. SoloPveBattle.midRound).
+      marked   = hinted.copy(battle = hinted.battle.copy(midRound = hinted.outcome == Outcome.Continue && !hinted.endsRound))
+      state  <- commit(user, marked, now, renderer, hero, note)
     } yield state
 
   /** Крыса из-под ног героя встаёт в строй на его стороне — если там есть
@@ -3022,6 +3025,9 @@ case class BattleState(
         )
       case Some(slot) if BattleState.needsEnemy(slot.skill.effect) && skillTargets(hero, battle, slot.skill).isEmpty =>
         cont(hero, battle, content.text("battle.group.noTarget"))
+      // Блок и Контрудар тратят бонусное действие раунда — то же, что пояс.
+      case Some(slot) if BattleState.bonusAction(slot.skill.effect) && battle.consumableUsedThisRound =>
+        cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
       case Some(slot) =>
         val cost      = slot.skill.energyCost(hero)
         val heroAfter = hero.copy(fightStats =
@@ -3292,16 +3298,21 @@ case class BattleState(
             Buff(0L, 0L, 0L, dodgePct = 0L, defencePct = defencePct, turnsLeft = Some(turns))))
           next(hero.copy(fightStats = newStats), guarded, Vector(tmpl.replace("{}", gained.toString)))
 
-        case Skill.Effect.Block =>
-          // Щит поднят до конца раунда; на этом ход кончается — без удара.
-          // Сколько снимет щит — по редкости лучшего в руках.
-          val pct = hero.equipment.blockPct
-          closeTurn(TurnResult(hero, bumped.copy(heroBlockPct = pct), Vector(tmpl.replace("{}", pct.toString)),
-            Outcome.Continue), nowMs, skip)
-
-        case Skill.Effect.Counter =>
-          // Кинжал наизготовку до конца раунда; на этом ход кончается — без удара.
-          closeTurn(TurnResult(hero, bumped.copy(heroCounterReady = true), Vector(tmpl), Outcome.Continue), nowMs, skip)
+        // Щит поднят (сколько снимет — по редкости лучшего в руках) или кинжал
+        // наизготовку — до конца раунда. Это бонусное действие, как глоток с
+        // пояса: ход не кончается, можно ударить или взять умение, а «Быстрые
+        // руки» могут его и не потратить. Перезарядка в конце этого раунда не
+        // тикает (bonusSlots).
+        case Skill.Effect.Block | Skill.Effect.Counter =>
+          quickHandsRoll(hero).map { case (consumed, qhLog) =>
+            val pct    = hero.equipment.blockPct
+            val raised =
+              if (slot.skill.effect == Skill.Effect.Block) bumped.copy(heroBlockPct = pct)
+              else bumped.copy(heroCounterReady = true)
+            TurnResult(hero,
+              raised.copy(consumableUsedThisRound = consumed, bonusSlots = raised.bonusSlots :+ slot.itemId),
+              Vector(tmpl.replace("{}", pct.toString)) ++ qhLog, Outcome.Continue, endsRound = false)
+          }
       }
     } yield result
   }
@@ -5409,14 +5420,17 @@ case class BattleState(
       "flaskCharges"   -> BattleState.flaskCharges(hero).toString
     )
     // Готовый навык синий, если хватает энергии на каст, и красный — если нет.
+    // Блок и Контрудар краснеют и тогда, когда бонусное действие раунда уже
+    // потрачено (пояс или второе из них).
     val skillButtons = battle.skillSlots.collect {
       case slot if slot.cooldown <= 0 =>
         val enoughEnergy = hero.fightStats.energy >= slot.skill.energyCost(hero)
+        val bonusSpent   = BattleState.bonusAction(slot.skill.effect) && battle.consumableUsedThisRound
         pangea.engine.Choice(
           id = s"Skill_${slot.itemId}",
           label = slot.skill.label,
           color =
-            if (enoughEnergy) pangea.engine.ChoiceColor.Primary
+            if (enoughEnergy && !bonusSpent) pangea.engine.ChoiceColor.Primary
             else pangea.engine.ChoiceColor.Negative,
           // Умения щита стоят в ряду действий, справа от «Атаки»; прочие — над ним.
           row = Some(if (Skill.handSkills.contains(slot.skill)) 1 else 0)
@@ -5865,6 +5879,13 @@ object BattleState {
     if (hero.equipment.weapon.ranged && math.abs(battle.group.activePos - battle.group.heroPos) <= GroupState.Reach)
       (100L - GripRates.RangedClosePenaltyPct) / 100.0
     else 1.0
+
+  /** Умение берётся бонусным действием раунда (тем же, что пояс), а не ходом:
+    * Блок и Контрудар. */
+  def bonusAction(effect: Skill.Effect): Boolean = effect match {
+    case Skill.Effect.Block | Skill.Effect.Counter => true
+    case _                                         => false
+  }
 
   /** Бьёт ли умение по врагу — таким в группе нужна цель. */
   def dealsDamage(effect: Skill.Effect): Boolean = effect match {

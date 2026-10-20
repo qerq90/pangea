@@ -100,25 +100,31 @@ object ParryingDaggerSpec extends ZIOSpecDefault {
       } yield assertTrue(screen.choices.filter(_.row.contains(1)).map(_.id).take(2) == List("Attack", "Skill_401"))
     },
 
-    test("увернулся после Контрудара — бьёт в ответ наверняка; попали по нему — ответа нет, и сам он не бьёт") {
+    test("Контрудар — бонусное действие: после стойки ход свой; увернулся — ответ наверняка, попали — ответа нет") {
       def round(mobHitRoll: Int) =
         for {
           t <- makeState(hero, SoloPveBattle.from(monster, hero))
           (state, dao, r) = t
-          // Разброс умения, бросок моба; дальше — разброс ответного удара или удара моба.
-          _      <- TestRandom.feedInts(mobHitRoll) *> TestRandom.feedLongs(100L, 100L)
+          // Стойка — разброс умения.
+          _      <- TestRandom.feedLongs(100L)
           _      <- state.action(testUser, tap("Skill_401"), r)
+          mid    <- battleOf(dao)
+          // Удар героя — попадание и разброс; бросок моба; разброс ответа или удара моба.
+          _      <- TestRandom.feedInts(60, mobHitRoll) *> TestRandom.feedLongs(100L, 100L)
+          _      <- state.action(testUser, tap("Attack"), r)
           battle <- battleOf(dao)
           said   <- texts(r)
-        } yield (monster.fightStats.hp - battle.monsterCurrentHp, battle, said)
+        } yield (monster.fightStats.hp - battle.monsterCurrentHp, battle, said, mid)
       for {
         dodged <- round(mobHitRoll = 1)
         struck <- round(mobHitRoll = 99)
-        (dealt, after, log) = dodged
-      } yield assertTrue(dealt > 0L && log.contains("Контрудар!")) &&
-              // стойка отработала и снята; умение — на перезарядке
+        (dealt, after, log, mid) = dodged
+      } yield assertTrue(mid.heroCounterReady && mid.monsterCurrentHp == monster.fightStats.hp && mid.midRound) &&
+              // ответ — сверх своего удара
+              assertTrue(log.contains("Контрудар!") && dealt > struck._1) &&
+              // стойка отработала и снята; умение — на перезарядке, в этом раунде не тикнуло
               assertTrue(!after.heroCounterReady && after.skillSlots.find(_.itemId == 401L).exists(_.cooldown == 3)) &&
-              assertTrue(struck._1 == 0L && !struck._3.contains("Контрудар!"))
+              assertTrue(struck._1 > 0L && !struck._3.contains("Контрудар!"))
     },
 
     test("Контрудар и по соседу сбоку — но один за раунд") {
@@ -128,12 +134,16 @@ object ParryingDaggerSpec extends ZIOSpecDefault {
       for {
         t <- makeState(hero, b)
         (state, dao, r) = t
-        // моб в паре попал; первый сосед промахнулся — ответ ему; второй тоже, но ответ уже был
-        _     <- TestRandom.feedInts(99, 1, 1) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _     <- TestRandom.feedLongs(100L)
         _     <- state.action(testUser, tap("Skill_401"), r)
+        // герой бьёт свою пару; моб в паре попал; первый сосед промахнулся — ответ
+        // ему; второй тоже, но ответ уже был
+        _     <- TestRandom.feedInts(60, 99, 1, 1) *> TestRandom.feedLongs(100L, 100L, 100L)
+        // соседи тоже в досягаемости — цель называем сами: свою пару
+        _     <- state.action(testUser, UserAction("", Some("""{"action":"Attack","target":"2"}""")), r)
         after <- battleOf(dao)
         hps    = after.group.others.map(_.currentHp)
-      } yield assertTrue(after.monsterCurrentHp == monster.fightStats.hp) &&
+      } yield assertTrue(after.monsterCurrentHp < monster.fightStats.hp) &&
               assertTrue(hps.count(_ < monster.fightStats.hp) == 1 && hps.count(_ == monster.fightStats.hp) == 1) &&
               assertTrue(!after.heroCounterReady)
     }

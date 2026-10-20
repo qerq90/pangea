@@ -362,7 +362,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       for {
         r <- use(h, SoloPveBattle.from(monster(), h), "UseFlask", "UseFlask")
         (u, _, log, _, _) = r
-      } yield assertTrue(charges(u) == 5) && assertTrue(log.contains("уже брались за пояс"))
+      } yield assertTrue(charges(u) == 5) && assertTrue(log.contains("бонусное действие уже потрачено"))
     }
   )
 }

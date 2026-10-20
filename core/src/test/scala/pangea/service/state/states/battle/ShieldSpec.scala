@@ -6,7 +6,7 @@ import pangea.engine.SceneContent
 import pangea.generator.item.ItemGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
-import pangea.model.item.{Gem, GemKind, Grip, Item, ItemDetails, ItemType, ShieldRates, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Gem, GemKind, Grip, Item, ItemDetails, ItemType, PassiveKind, ShieldRates, Rarity => ItemRarity}
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.rune.{Rune, RuneStone}
 import pangea.model.skill.{MonsterSkill, Skill}
@@ -135,27 +135,68 @@ object ShieldSpec extends ZIOSpecDefault {
               assertTrue(screen.choices.exists(c => c.id == "Skill_1" && c.row.contains(0)))
     },
 
-    test("Блок кончает ход без удара, а удар моба в этом раунде серый щит режет вдвое; следующий — целиком") {
+    test("Блок — бонусное действие: ход не кончается и моб не бьёт; после атаки его удар режет щит, откат прежний") {
       val h = hero(sword(1L), shield())
       def round(block: Boolean) =
         for {
           t <- makeState(h, SoloPveBattle.from(monster, h))
           (state, dao, r) = t
-          // Удар героя — бросок попадания и разброс; Блок — только разброс умения.
-          _      <- if (block) TestRandom.feedInts(99) *> TestRandom.feedLongs(100L, 100L)
-                    else TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
-          _      <- state.action(testUser, tap(if (block) "Skill_301" else "Attack"), r)
+          // Блок — только разброс умения; удар — попадание героя, бросок моба и два разброса.
+          _      <- ZIO.when(block)(TestRandom.feedLongs(100L) *> state.action(testUser, tap("Skill_301"), r))
+          mid    <- battleOf(dao)
+          midHp  <- dao.getHeroByUserId(userId).map(_.get.fightStats.hp)
+          _      <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L, 100L)
+          _      <- state.action(testUser, tap("Attack"), r)
           after  <- dao.getHeroByUserId(userId).map(_.get)
           battle <- battleOf(dao)
-        } yield (h.fightStats.hp - after.fightStats.hp, battle)
+          shown  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        } yield (h.fightStats.hp - after.fightStats.hp, battle, mid, midHp, shown)
       for {
         plain   <- round(block = false)
         blocked <- round(block = true)
-        (taken, raised) = blocked
+        (taken, after, mid, midHp, shown) = blocked
       } yield assertTrue(plain._1 > 0L && taken == BattleState.shieldCut(ShieldRates.blockPct(ItemRarity.Gray), plain._1)) &&
-              // моб цел: удара после Блока нет
-              assertTrue(raised.monsterCurrentHp == monster.fightStats.hp) &&
-              assertTrue(raised.heroShieldUp && raised.skillSlots.find(_.itemId == 301L).exists(_.cooldown == 2))
+              // после Блока раунд идёт: моб не ударил, щит поднят, бонусное действие потрачено
+              assertTrue(midHp == h.fightStats.hp && mid.monsterCurrentHp == monster.fightStats.hp) &&
+              assertTrue(mid.heroShieldUp && mid.consumableUsedThisRound && mid.midRound) &&
+              assertTrue(shown.contains("Блок поднят")) &&
+              // и ударил герой после Блока сам; откат Блока в этом раунде не тикнул
+              assertTrue(after.monsterCurrentHp < monster.fightStats.hp) &&
+              assertTrue(after.skillSlots.find(_.itemId == 301L).exists(_.cooldown == 2)) &&
+              assertTrue(!after.consumableUsedThisRound && !after.midRound)
+    },
+
+    test("Блок тратит то же бонусное действие, что пояс: после него фляга — отказ, а «Быстрые руки» его возвращают") {
+      val belt   = Item(90L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+                     attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+                     details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Blue, 3))))
+      val gloves = Item(77L, "Перчатки ловкача", 1L, ItemRarity.Blue, ItemType.Gloves,
+                     attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+                     details = ItemDetails.Passive(PassiveKind.QuickHands))
+      val base   = hero(sword(1L), shield())
+      val girt   = base.copy(equipment = base.equipment.copy(belt = belt))
+      val quick  = girt.copy(equipment = girt.equipment.copy(gloves = gloves))
+      val drink  = UserAction("", Some("""{"action":"BeltUse","slot":"0"}"""))
+      for {
+        t1 <- makeState(girt, SoloPveBattle.from(monster, girt))
+        (s1, d1, r1) = t1
+        _  <- TestRandom.feedLongs(100L)
+        _  <- s1.action(testUser, tap("Skill_301"), r1)
+        _  <- s1.action(testUser, drink, r1)
+        l1 <- r1.sentScreens.map(_.map(_.text).mkString("\n"))
+        b1 <- battleOf(d1)
+        t2 <- makeState(quick, SoloPveBattle.from(monster, quick))
+        (s2, d2, r2) = t2
+        // Блок: разброс и «Быстрые руки» (1 — прокнули); глоток: не прокнуло (99)
+        _  <- TestRandom.feedLongs(100L) *> TestRandom.feedInts(1, 99)
+        _  <- s2.action(testUser, tap("Skill_301"), r2)
+        _  <- s2.action(testUser, drink, r2)
+        l2 <- r2.sentScreens.map(_.map(_.text).mkString("\n"))
+        b2 <- battleOf(d2)
+      } yield assertTrue(l1.contains("бонусное действие уже потрачено")) &&
+              assertTrue(b1.heroShieldUp && b1.consumableUsedThisRound) &&
+              assertTrue(l2.contains("Быстрые руки") && !l2.contains("бонусное действие уже потрачено")) &&
+              assertTrue(b2.heroShieldUp && b2.consumableUsedThisRound)
     },
 
     test("щит опускается со следующим ходом героя") {
