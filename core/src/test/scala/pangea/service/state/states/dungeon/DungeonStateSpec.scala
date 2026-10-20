@@ -97,6 +97,27 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(isValidFindOutcome(result))
     },
 
+    test("FindEvent: к сообщению про коридоры — случайное фото лабиринта из альбома группы") {
+      for {
+        quad    <- makeState()
+        (state, _, renderer, _) = quad
+        content <- ZIO.attempt(SceneContent.load())
+        photos   = content.list("dungeon.explorePhotos")
+        _       <- state.action(testUser, tap("FindEvent"), renderer)
+        first   <- renderer.sentScreens.map(_.find(_.text.contains("коридорам")))
+        _       <- TestClock.adjust(Duration.fromMillis(5L))
+        r2      <- TestRenderer.make
+        _       <- state.action(testUser, tap("FindEvent"), r2)
+        second  <- r2.sentScreens.map(_.find(_.text.contains("коридорам")))
+      } yield assertTrue(photos.size == 27) &&
+              assertTrue(photos.forall(p => pangea.model.vk.Attachment.parse(p).isDefined)) &&
+              // выбор — по миллисекунде нажатия: на часах 0 — первое фото, через 5 мс — шестое
+              assertTrue(first.flatMap(_.image) == photos.headOption) &&
+              assertTrue(second.flatMap(_.image) == photos.lift(5)) &&
+              assertTrue(DungeonState.explorePhoto(Nil, 123L).isEmpty) &&
+              assertTrue(DungeonState.explorePhoto(photos, 27L * 1000L + 26L) == photos.lastOption)
+    },
+
     test("каждое событие пула выпадает: по своему билету — своё состояние") {
       // У голого героя на десятом уровне открыто всё, и пул — ровно
       // StateType.events, а индекс в нём подаём сами. Берём по первому билету

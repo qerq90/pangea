@@ -110,7 +110,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       hero   <- getHero(user)
-      _      <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil))
+      _      <- renderer.show(user, Screen(content.text("dungeon.findEvent"), Nil,
+                  image = DungeonState.explorePhoto(content.list("dungeon.explorePhotos"), now)))
       // Волчий зов: пока от героя пахнет палёным хмелем, навстречу выходит
       // Белый волк — и запах на этом кончается.
       called  = hero.statBoosts.hasActive(BrewRates.WolfCallBoost, now)
@@ -415,6 +416,12 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
 }
 
 object DungeonState {
+
+  /** Фото лабиринта к осмотру — случайное из списка. Выбирается по миллисекунде
+    * нажатия, а не броском: для картинки это та же случайность, зато броски
+    * самих событий не сдвигаются. Список пуст — без картинки. */
+  def explorePhoto(photos: List[String], nowMs: Long): Option[String] =
+    if (photos.isEmpty) None else photos.lift((nowMs % photos.size).toInt)
 
   /** Сколько процентов своей атаки именной вкладывает в удар из засады. Герой
     * после него остаётся жив — хотя бы на единице HP. */
