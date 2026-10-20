@@ -4944,7 +4944,9 @@ case class BattleState(
                   .map { case (b, rec) => b.expReward(rec.lvl) }
                   .getOrElse(fallen.map(m => (killLevel * Rarity.withName(m.rarity).factor).toLong.max(1L)).sum)
                   .max(1L)
-      expGained = if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp
+      // Опыт остановлен зельем Фета — за бой ничего (expFrom).
+      expGained = hero.expFrom(
+                    if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp)
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong

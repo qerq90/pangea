@@ -195,7 +195,7 @@ case class ConstructionState(
           sign  <- Random.nextBoolean.map(if (_) 1 else -1)
           reward = ((base * (100L + sign * delta.toLong)) / 100L).max(1L)
           // Опыт: уровень героя × множитель работы (0.5 / 1 / 2 за 1 / 4 / 8 ч), вверх.
-          expGained = math.ceil(hero.lvl.toDouble * job.expMult).toLong
+          expGained = hero.expFrom(math.ceil(hero.lvl.toDouble * job.expMult).toLong)
           leveled   = hero.gainExp(expGained)
           _ <- heroDao.updateSilver(user.userId, hero.silver + reward)
           _ <- heroDao.updateExpAndLevel(

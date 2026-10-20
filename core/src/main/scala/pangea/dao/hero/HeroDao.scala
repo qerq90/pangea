@@ -33,6 +33,8 @@ trait HeroDao {
   def updateWeaponDust(userId: UserId, dust: pangea.model.hero.WeaponDust): Task[Unit]
   /** Счётчик убитых мобов за всю жизнь героя. */
   def updateKills(userId: UserId, kills: Long): Task[Unit]
+  /** Остановить или запустить опыт (зелья Фета, см. [[pangea.model.hero.Hero.expFrozen]]). */
+  def updateExpFrozen(userId: UserId, frozen: Boolean): Task[Unit]
   /** Достижения героя — ключи [[pangea.model.hero.Achievement]]. */
   def updateAchievements(userId: UserId, achievements: List[String]): Task[Unit]
   /** Отряд героя (см. [[pangea.model.squad.Squad]]). */

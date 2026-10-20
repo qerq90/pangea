@@ -24,8 +24,9 @@ object NpcQuestLog {
       if (next == q) ZIO.succeed(q) else save(heroDao, userId, next).as(next)
     }
 
-  /** Опыт за задание: как за пять боёв на текущем этаже. */
-  def expReward(hero: Hero): Long = NpcQuest.ExpPerDungeonLevel * hero.dungeonLevel.toLong.max(1L)
+  /** Опыт за задание: как за пять боёв на текущем этаже (опыт остановлен —
+    * ничего, см. Hero.expFrom). */
+  def expReward(hero: Hero): Long = hero.expFrom(NpcQuest.ExpPerDungeonLevel * hero.dungeonLevel.toLong.max(1L))
 
   /** Начислить опыт за задание и записать уровень. Возвращает героя после. */
   def grantExp(heroDao: HeroDao, hero: Hero): Task[Hero] = {

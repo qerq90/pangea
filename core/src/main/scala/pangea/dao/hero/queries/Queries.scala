@@ -14,9 +14,9 @@ import pangea.model.user.UserId
 
 object Queries {
   private val fields: Fragment =
-    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, silver, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts, weapon_dust, kills, achievements, squad_data, rune_data"
+    sql"id, user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, silver, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts, weapon_dust, kills, achievements, squad_data, rune_data, exp_frozen"
   private val fieldInsert: Fragment =
-    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, silver, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts, weapon_dust, kills, achievements, squad_data, rune_data"
+    sql"user_id, state, lvl, exp, upgrade_points, race, base_stats, fight_stats, equipment, dungeon_level, max_dungeon_level, silver, trauma_until, trauma_names, guild_reputation, master_horn_boosts, doubloons, stat_boosts, weapon_dust, kills, achievements, squad_data, rune_data, exp_frozen"
   private val tableName: Fragment = sql"heroes"
 
   private val selectAll = fr"select $fields from $tableName"
@@ -28,7 +28,7 @@ object Queries {
     selectAll ++ sql"where id = $heroId"
 
   def insert(hero: Hero): Fragment =
-    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.silver}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation}, ${hero.masterHornBoosts}, ${hero.doubloons}, ${hero.statBoosts.asJson}, ${hero.weaponDust.asJson}, ${hero.kills}, ${hero.achievements}, ${hero.squad.asJson}, ${hero.runes.asJson})"
+    sql"insert into $tableName($fieldInsert) values(${hero.userId}, ${hero.state}, ${hero.lvl}, ${hero.exp}, ${hero.upgradePoints}, ${hero.race}, ${hero.baseStats.asJson}, ${hero.fightStats.asJson}, ${hero.equipment.asJson}, ${hero.dungeonLevel}, ${hero.maxDungeonLevel}, ${hero.silver}, ${hero.traumaUntil}, ${hero.traumaNames}, ${hero.guildReputation}, ${hero.masterHornBoosts}, ${hero.doubloons}, ${hero.statBoosts.asJson}, ${hero.weaponDust.asJson}, ${hero.kills}, ${hero.achievements}, ${hero.squad.asJson}, ${hero.runes.asJson}, ${hero.expFrozen})"
 
   def updateGuildReputation(userId: UserId, value: Long): Fragment =
     sql"update $tableName set guild_reputation = $value where user_id = $userId"
@@ -131,6 +131,9 @@ object Queries {
 
   def updateKills(userId: UserId, kills: Long): Fragment =
     sql"update $tableName set kills = $kills where user_id = $userId"
+
+  def updateExpFrozen(userId: UserId, frozen: Boolean): Fragment =
+    sql"update $tableName set exp_frozen = $frozen where user_id = $userId"
 
   // Достижения хранятся как trauma_names — строкой через запятую.
   def updateAchievements(userId: UserId, achievements: List[String]): Fragment =

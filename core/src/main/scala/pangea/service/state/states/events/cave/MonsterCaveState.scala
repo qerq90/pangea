@@ -840,9 +840,10 @@ case class MonsterCaveState(
       val quest = questOf(scene)
       for {
         hero   <- getHero(user)
-        leveled = hero.gainExp(bonus)
+        got     = hero.expFrom(bonus)
+        leveled = hero.gainExp(got)
         _      <- heroDao.updateExpAndLevel(user.userId, leveled.exp, leveled.lvl, leveled.upgradePoints)
-        _      <- renderer.show(user, Screen(content.format(key(scene, "cleared"), "exp" -> bonus.toString), Nil))
+        _      <- renderer.show(user, Screen(content.format(key(scene, "cleared"), "exp" -> got.toString), Nil))
         _      <- ZIO.when(leveled.lvl > hero.lvl)(
                     renderer.show(user, Screen(s"Вы получили новый уровень ${leveled.lvl}!", Nil)))
         // Отдельной строкой, чтобы это не потерялось среди опыта и уровня.
