@@ -2129,10 +2129,12 @@ equipment:
 
 heroStats:
   quests: "📜 Задания"
-  # Достижения: счёт и список — полученные ✅, остальные 🔒, у каждого — что даёт.
+  # Достижения: счёт, полученные — с тем, что дают; неполученные скрыты — только их число.
   achievements: "🏆 Достижения"
   achievementsHeader: "🏆 Достижения: получено {got} из {total}"
-  achievementLine: "{mark} {title} — {bonus}"
+  achievementLine: "✅ {title} — {bonus}"
+  achievementsNone: "Пока ни одного."
+  achievementsHidden: "🔒 Ещё не получено: {count}. Что это за достижения, узнаете, когда получите."
   inventory: "Рюкзак"
   bag: "Инвентарь"
   friendCode: "🎟 Код друга"

@@ -84,8 +84,8 @@ case class HeroStatsState(
                  buildStatsScreen(hero, now, blessed = false, instantRests = 0, keeps).choices))
     } yield ()
 
-  /** «Достижения»: счёт полученных из всех и список — полученные сверху, за
-    * ними остальные, у каждого — что даёт. Кнопки «Персонажа» остаются, как у
+  /** «Достижения»: счёт полученных из всех, полученные — с тем, что дают, а
+    * неполученные скрыты: только их число. Кнопки «Персонажа» остаются, как у
     * журнала заданий. */
   private def showAchievements(user: User, renderer: Renderer): Task[Unit] =
     for {
@@ -199,14 +199,18 @@ case class HeroStatsState(
 
 object HeroStatsState {
 
-  /** Текст экрана достижений: «получено из всех», затем полученные (✅) и
-    * остальные (🔒) — в порядке, в каком они заведены, у каждого что даёт. */
+  /** Текст экрана достижений: «получено из всех», полученные (✅) — в порядке,
+    * в каком заведены, с тем, что дают. Неполученные скрыты: ни названия, ни
+    * бонуса — только сколько их ещё. */
   def achievementsText(content: SceneContent, hero: Hero): String = {
-    val (got, rest) = Achievement.values.toList.partition(hero.hasAchievement)
-    def line(a: Achievement, mark: String): String =
-      content.format("heroStats.achievementLine", "mark" -> mark, "title" -> a.title, "bonus" -> a.bonusLine)
+    val got    = Achievement.values.toList.filter(hero.hasAchievement)
+    val hidden = Achievement.values.size - got.size
+    val lines  =
+      if (got.isEmpty) List(content.text("heroStats.achievementsNone"))
+      else got.map(a => content.format("heroStats.achievementLine", "title" -> a.title, "bonus" -> a.bonusLine))
+    val locked = Option.when(hidden > 0)(content.format("heroStats.achievementsHidden", "count" -> hidden.toString))
     content.format("heroStats.achievementsHeader",
       "got" -> got.size.toString, "total" -> Achievement.values.size.toString) + "\n\n" +
-      (got.map(line(_, "✅")) ++ rest.map(line(_, "🔒"))).mkString("\n")
+      (lines ++ locked.toList).mkString("\n")
   }
 }

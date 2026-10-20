@@ -33,7 +33,7 @@ object AchievementsScreenSpec extends ZIOSpecDefault {
               assertTrue(row("Back").exists(b => main.choices.flatMap(_.row).forall(_ <= b)))
     },
 
-    test("экран: «получено 2 из всех», полученные ✅ сверху, остальные 🔒, у каждого — что даёт; кнопки остаются") {
+    test("экран: «получено 2 из всех», полученные ✅ с тем, что дают; неполученные скрыты; кнопки остаются") {
       val hero = TestFixtures.hero(userId)
                    .withAchievement(Achievement.MurlocFavorite)
                    .withAchievement(Achievement.Brewer1)
@@ -46,25 +46,31 @@ object AchievementsScreenSpec extends ZIOSpecDefault {
         main   <- r.sentScreens.map(_.last)
         result <- state.action(testUser, tap("OpenAchievements"), r)
         shown  <- r.sentScreens.map(_.last)
-        lines   = shown.text.split("\n").toList.filter(l => l.startsWith("✅") || l.startsWith("🔒"))
+        lines   = shown.text.split("\n").toList.filter(_.startsWith("✅"))
+        locked  = Achievement.values.filterNot(hero.hasAchievement)
       } yield assertTrue(result == StateType.HeroStats) &&
               assertTrue(shown.text.startsWith(s"🏆 Достижения: получено 2 из $total")) &&
-              assertTrue(lines.size == total) &&
-              // полученные — первыми, в порядке, в каком заведены достижения
-              assertTrue(lines.take(2) == List(
+              // полученные — в порядке, в каком заведены достижения, с тем, что дают
+              assertTrue(lines == List(
                 s"✅ ${Achievement.Brewer1.title} — ${Achievement.Brewer1.bonusLine}",
                 s"✅ ${Achievement.MurlocFavorite.title} — ${Achievement.MurlocFavorite.bonusLine}")) &&
-              assertTrue(lines.drop(2).forall(_.startsWith("🔒"))) &&
-              assertTrue(lines.exists(_ == s"🔒 ${Achievement.MarisaSavior.title} — ${Achievement.MarisaSavior.bonusLine}")) &&
+              // неполученные — только числом: ни названия, ни бонуса
+              assertTrue(shown.text.contains(s"🔒 Ещё не получено: ${total - 2}.")) &&
+              assertTrue(locked.forall(a => !shown.text.contains(a.title) && !shown.text.contains(a.bonusLine))) &&
               assertTrue(shown.choices.map(_.id) == main.choices.map(_.id))
     },
 
-    test("ни одного достижения — «получено 0 из всех», все под замком") {
+    test("ни одного достижения — «пока ни одного», все скрыты; все получены — строки «скрыто» нет") {
+      val all = Achievement.values.foldLeft(TestFixtures.hero(userId))(_ withAchievement _)
       for {
-        c <- ZIO.attempt(SceneContent.load())
-        text = HeroStatsState.achievementsText(c, TestFixtures.hero(userId))
-      } yield assertTrue(text.startsWith(s"🏆 Достижения: получено 0 из $total")) &&
-              assertTrue(text.split("\n").count(_.startsWith("🔒")) == total && !text.contains("✅"))
+        c    <- ZIO.attempt(SceneContent.load())
+        none  = HeroStatsState.achievementsText(c, TestFixtures.hero(userId))
+        full  = HeroStatsState.achievementsText(c, all)
+      } yield assertTrue(none.startsWith(s"🏆 Достижения: получено 0 из $total")) &&
+              assertTrue(none.contains("Пока ни одного.") && none.contains(s"🔒 Ещё не получено: $total.")) &&
+              assertTrue(Achievement.values.forall(a => !none.contains(a.title))) &&
+              assertTrue(full.startsWith(s"🏆 Достижения: получено $total из $total") && !full.contains("🔒")) &&
+              assertTrue(full.split("\n").count(_.startsWith("✅")) == total)
     }
   )
 }
