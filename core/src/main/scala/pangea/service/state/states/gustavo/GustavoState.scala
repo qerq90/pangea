@@ -7,6 +7,7 @@ import pangea.model.item.{BrewKind, Item, ItemDetails, MaterialKind}
 import pangea.model.quest.{DailyNpc, DailyRates, NpcQuest}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.{CityExit, DailyDialog, HerbLore, NpcQuestDialog, NpcQuestLog, State, UserAction}
@@ -26,11 +27,13 @@ case class GustavoState(
   inventoryRepo: InventoryRepository,
   content:       SceneContent,
   // Заказ дня Густаво платит склянкой — её нужно завести герою в сумку.
-  itemRepo:      Option[ItemRepository] = None
+  itemRepo:      Option[ItemRepository] = None,
+  // Травы для заказа могли сами лечь в Живую сумку.
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State with GustavoScene {
 
   /** Заказ Густаво: на каждый день свой. */
-  private val daily = DailyDialog(heroDao, content, DailyNpc.Gustavo, "Gustavo", Some(inventoryRepo))
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Gustavo, "Gustavo", Some(inventoryRepo), artifacts)
 
   /** «Подопытный»: выпить зелье, победить троих, пока оно действует, и
     * отчитаться — Густаво наполняет флягу и рассказывает, из чего варит. */

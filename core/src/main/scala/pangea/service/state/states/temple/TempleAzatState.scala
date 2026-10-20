@@ -9,10 +9,11 @@ import pangea.model.item.{Item, ItemSet, ItemType, MaterialKind}
 import pangea.model.quest.{NpcQuest, NpcQuests}
 import pangea.model.state.StateType
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.purse.Purse
-import pangea.service.state.{AzatData, CityExit, NpcQuestDialog, State, UserAction}
+import pangea.service.state.{AzatData, CityExit, NpcQuestDialog, QuestGoods, State, UserAction}
 import zio.{Task, ZIO}
 
 import java.util.concurrent.TimeUnit
@@ -28,7 +29,9 @@ case class TempleAzatState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
   itemRepo:      ItemRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  // Найденный камень мог сам лечь в Ларец Азата — показать можно и оттуда.
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
   import TempleAzatState._
 
@@ -144,13 +147,14 @@ case class TempleAzatState(
       else questShowGem(user, renderer)
     }.as(StateType.TempleAzat)
 
-  /** Показ камня: он остаётся у героя; Жрец отсыпает горсть такой же пыли (если
-    * есть место), записывает рецепт и платит серебром и опытом. */
+  /** Показ камня: он остаётся у героя — в сумке или в Ларце Азата; Жрец
+    * отсыпает горсть такой же пыли (если есть место), записывает рецепт и платит
+    * серебром и опытом. */
   private def questShowGem(user: User, renderer: Renderer): Task[Unit] =
     for {
-      hero <- getHero(user)
-      inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
-      _ <- inv.items.data.find(i => i.id != 0L && i.itemType == ItemType.Gem).flatMap(_.gem) match {
+      hero  <- getHero(user)
+      goods <- QuestGoods.all(inventoryRepo, artifacts, hero.id)
+      _ <- goods.map(_.item).find(_.itemType == ItemType.Gem).flatMap(_.gem) match {
         case None =>
           renderer.show(user, Screen(quest.text("step1Fail"), Nil)) *> showPriest(user, renderer)
         case Some(gem) =>

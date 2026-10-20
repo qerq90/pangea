@@ -3,6 +3,7 @@ package pangea.service.state.states
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.item.GemGenerator
+import pangea.model.artifact.ArtifactKind
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.item.{FlaskEffect, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
@@ -18,7 +19,7 @@ import pangea.service.state.states.merchant.MerchantState
 import pangea.service.state.states.tavern.InnkeeperState
 import pangea.service.state.states.temple.TempleAzatState
 import pangea.service.state.{NpcQuestLog, UserAction}
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
+import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.test.TestRandom
 import zio.test._
 import zio.{Task, ZIO}
@@ -276,6 +277,21 @@ object NpcQuestsSpec extends ZIOSpecDefault {
                 assertTrue(q.recipes == List(NpcQuests.DustAssemblyRecipe)) &&
                 assertTrue(h.silver == 1000L + TempleAzatState.QuestSilver) &&
                 assertTrue(all.contains("Ничто не пропадает"))
+      },
+      test("камень в Ларце Азата тоже годится: показать можно и оттуда, он там и остаётся") {
+        val ruby = GemGenerator.item(GemKind.Ruby, 2).copy(id = 7L)
+        val arts = TestArtifactRepository.of(casket =
+                     TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1, items = List(ruby)))
+        for {
+          dao <- TestHeroDao.withHero(userId, hero)
+          _   <- seed(dao, NpcQuest.Priest, NpcQuestProgress(step = 1))
+          r   <- TestRenderer.make
+          c   <- content
+          _   <- TempleAzatState(dao, TestInventoryRepository.accepting, TestItemRepository.make, c, Some(arts))
+                   .action(testUser, tap("PriestQuest"), r)
+          q   <- quests(dao)
+        } yield assertTrue(q.isDone(NpcQuest.Priest)) &&
+                assertTrue(arts.snapshot.casket.items.data.map(_.id) == List(7L))
       },
       test("в меню Жреца кнопка задания стоит перед «Назад» и исчезает после выполнения") {
         for {
