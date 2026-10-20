@@ -2,9 +2,9 @@ package pangea.service.state
 
 import pangea.engine.SceneContent
 import pangea.model.inventory.Inventory
-import pangea.model.item.{Grip, Item, ItemDetails, ItemType, PassiveKind, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Grip, Item, ItemDetails, ItemType, PassiveKind, Rarity}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository}
+import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository}
 import zio.ZIO
 import zio.test._
 
@@ -151,6 +151,21 @@ object TakeAndEquipSpec extends ZIOSpecDefault {
               assertTrue(invRepo.snapshot.map(_.id) == List(3L)) &&
               // броня снятого кольца ушла, новое дало свою
               assertTrue(saved.exists(_.fightStats.armor == rings.fightStats.armor))
+    },
+
+    test("пояс вместо пояса: содержимое переезжает в новый, старый пояс — пустым в сумку") {
+      val flask = BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 3)
+      val old   = item(5L, ItemType.Belt, rarity = Rarity.Green, details = ItemDetails.Belt(List(flask)))
+      val fresh = item(6L, ItemType.Belt, details = ItemDetails.Belt())
+      val girt  = wearing(_.copy(belt = old))
+      for {
+        heroDao <- TestHeroDao.withHero(userId, girt)
+        invRepo  = TestInventoryRepository.accepting
+        worn    <- TakeAndEquip.wear(heroDao, invRepo, testUser, girt, List(fresh), None, Some(TestItemRepository.make))
+        saved   <- heroDao.getHeroByUserId(userId)
+      } yield assertTrue(worn.beltMoved && worn.spilled.isEmpty) &&
+              assertTrue(saved.exists(h => h.equipment.belt.id == 6L && BeltContents.slotsOf(h.equipment.belt) == List(flask))) &&
+              assertTrue(invRepo.snapshot.map(i => i.id -> BeltContents.slotsOf(i)) == List(5L -> Nil))
     },
 
     test("wear: снаряжение и статы сохранены, «Тайник» прибавил сумке места, в сумку ничего не легло") {

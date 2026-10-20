@@ -197,7 +197,7 @@ case class LootState(
       // Сперва надеваем: «Тайник» на надетом прибавит сумке места до того, как
       // в неё ляжет остальное, а снятое ляжет раньше добычи — место под него
       // проверено заранее.
-      worn      <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, wornItems, slot)
+      worn      <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, wornItems, slot, Some(itemRepository))
 
       // Камни летят в Ларец Азата, травы и отвары — в Живую сумку; что не
       // взяли артефакты, идёт в сумку героя, как и раньше.

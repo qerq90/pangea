@@ -7,6 +7,7 @@ import pangea.model.inventory.Inventory
 import pangea.model.item.{Item, ItemType, Rarity}
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState
 import zio.{Task, ZIO}
 
@@ -18,8 +19,10 @@ import zio.{Task, ZIO}
   * [[SlotChoice]]. */
 object TakeAndEquip {
 
-  /** Что вышло из надевания: герой после него и снятое — оно ушло в сумку. */
-  final case class Worn(hero: Hero, removed: List[Item])
+  /** Что вышло из надевания: герой после него и снятое — оно ушло в сумку.
+    * Пояс поверх пояса забирает его содержимое: не поместившееся тоже уходит в
+    * сумку (`spilled`), `beltMoved` — было ли что перекладывать. */
+  final case class Worn(hero: Hero, removed: List[Item], spilled: List[Item] = Nil, beltMoved: Boolean = false)
 
   /** Встаёт ли вещь в пустой слот героя: её можно надеть, уровень по силам, и
     * слот свободен — у кольца любой из двух, у одноручного и щита свободная рука
@@ -53,7 +56,7 @@ object TakeAndEquip {
     items.zipWithIndex
       .sortBy { case (item, _) => (-Rarity.order(item.rarity), -item.lvl) }
       .foldLeft((hero, List.empty[Int])) { case ((h, picked), (item, i)) =>
-        if (fits(h, item)) (put(h, item, None)._1, picked :+ i) else (h, picked)
+        if (fits(h, item)) (put(h, item, None).hero, picked :+ i) else (h, picked)
       }._2
 
   /** Почему надеть вместо надетого нельзя — ключ текста, или None, если можно.
@@ -61,10 +64,13 @@ object TakeAndEquip {
     * снятую вещь (двуручное поверх двух одноручных снимает обе). Замена, снимающая
     * последний «Тайник», сумку ещё и ужимает. `slot` — как в [[wear]]. */
   def noRoom(hero: Hero, inv: Inventory, item: Item, slot: Option[Int]): Option[String] = {
-    val (worn, removed) = put(hero, item, slot)
-    val capDelta        = stashDelta(hero, worn)
-    if (InventoryState.fitsAfterCapacityChange(inv, capDelta, removed.size)) None
-    else if (InventoryState.fitsAfterCapacityChange(inv, 0L, removed.size)) Some("equipment.stashBlocked")
+    val worn     = put(hero, item, slot)
+    val toBag    = worn.removed.size + worn.spilled.size
+    val capDelta = stashDelta(hero, worn.hero)
+    if (InventoryState.fitsAfterCapacityChange(inv, capDelta, toBag)) None
+    else if (InventoryState.fitsAfterCapacityChange(inv, 0L, toBag)) Some("equipment.stashBlocked")
+    // Пояс меньше прежнего: не поместившемуся в него нет места в сумке.
+    else if (worn.spilled.nonEmpty) Some("inventory.beltNoRoom")
     else Some("common.swapNoRoom")
   }
 
@@ -76,32 +82,35 @@ object TakeAndEquip {
     * своей строки о получении (`QuestSupport.grantFullSets`), — как обычное
     * «Надеть». */
   def wear(heroDao: HeroDao, inventoryRepo: InventoryRepository, user: User, hero: Hero,
-           items: List[Item], slot: Option[Int] = None): Task[Worn] =
+           items: List[Item], slot: Option[Int] = None, itemRepo: Option[ItemRepository] = None): Task[Worn] =
     if (items.isEmpty) ZIO.succeed(Worn(hero, Nil))
     else {
-      val (worn, removed) = items.foldLeft((hero, List.empty[Item])) { case ((h, out), item) =>
-        val (next, gone) = put(h, item, slot)
-        (next, out ++ gone)
+      val worn = items.foldLeft(Worn(hero, Nil)) { (acc, item) =>
+        val next = put(acc.hero, item, slot)
+        Worn(next.hero, acc.removed ++ next.removed, acc.spilled ++ next.spilled, acc.beltMoved || next.beltMoved)
       }
-      val capDelta = stashDelta(hero, worn)
-      heroDao.updateEquipmentAndFightStats(user.userId, worn.equipment, worn.fightStats) *>
+      val capDelta = stashDelta(hero, worn.hero)
+      heroDao.updateEquipmentAndFightStats(user.userId, worn.hero.equipment, worn.hero.fightStats) *>
         // Места от нового «Тайника» — до того, как снятое ляжет в сумку, а
         // потеря последнего — после.
         ZIO.when(capDelta > 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
-        ZIO.foreachDiscard(removed)(old => inventoryRepo.addItem(hero.id, old).ignore) *>
+        // Не поместившееся с пояса — свежие вещи: сперва сохраняем (см. BeltContents.persist).
+        BeltContents.persist(itemRepo, hero.id, worn.spilled).flatMap(spilled =>
+          ZIO.foreachDiscard(worn.removed ++ spilled)(old => inventoryRepo.addItem(hero.id, old).ignore)) *>
         ZIO.when(capDelta < 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
-        ZIO.succeed(Worn(worn, removed))
+        ZIO.succeed(worn)
     }
 
-  /** Строка «🎒 Снято в сумку: …» с переводом строки впереди; ничего не снято —
-    * пусто. */
+  /** Строка «🎒 Снято в сумку: …» с переводом строки впереди — и строка о
+    * переезде содержимого пояса, если пояс сменили; ничего не снято — пусто. */
   def takenOffLine(content: SceneContent, worn: Worn): String =
-    if (worn.removed.isEmpty) ""
-    else "\n" + content.format("common.takenOff", "old" -> worn.removed.map(_.name).mkString(", "))
+    (if (worn.removed.isEmpty) ""
+     else "\n" + content.format("common.takenOff", "old" -> worn.removed.map(_.name).mkString(", "))) +
+      BeltContents.movedLine(content, worn.beltMoved, worn.spilled)
 
-  private def put(hero: Hero, item: Item, slot: Option[Int]): (Hero, List[Item]) = {
-    val (eq, fight, removed) = InventoryState.equip(hero, item, slot)
-    (hero.copy(equipment = eq, fightStats = fight), removed)
+  private def put(hero: Hero, item: Item, slot: Option[Int]): Worn = {
+    val done = InventoryState.equipWith(hero, item, slot)
+    Worn(hero.copy(equipment = done.equipment, fightStats = done.fightStats), done.removed, done.spilled, done.beltMoved)
   }
 
   private def stashDelta(before: Hero, after: Hero): Long =
