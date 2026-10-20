@@ -3,9 +3,9 @@ package pangea.service.state
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Choice, ChoiceColor, Renderer, SceneContent, Screen}
 import pangea.model.hero.Hero
-import pangea.model.item.Item
 import pangea.model.quest.{DailyNpc, DailyRates, DailyTask}
 import pangea.model.user.User
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.inventory.InventoryRepository
 import zio.{Task, ZIO}
 
@@ -16,8 +16,10 @@ import zio.{Task, ZIO}
   * чем платят, знает сама сцена: сюда она передаёт только награду.
   *
   * Поручения «принеси» сдаются своей кнопкой и по частям: сколько подходящего
-  * нашлось в сумке, столько и уходит горожанину, остальное — в другой заход.
-  * Сама собой сумка не пустеет: пока герой не нажал «отдать», вещи при нём.
+  * нашлось при герое, столько и уходит горожанину, остальное — в другой заход.
+  * Ищется и в сумке, и в Ларце Азата с Живой сумкой: камни и травы попадают туда
+  * сами (см. [[QuestGoods]]). Сама собой сумка не пустеет: пока герой не нажал
+  * «отдать», вещи при нём.
   *
   * Кнопки именуются `<prefix>Daily`, `<prefix>DailyTake`, `<prefix>DailyGive`,
   * `<prefix>DailyHand`.
@@ -27,7 +29,8 @@ final case class DailyDialog(
   content:   SceneContent,
   npc:       DailyNpc,
   prefix:    String,
-  inventory: Option[InventoryRepository] = None
+  inventory: Option[InventoryRepository] = None,
+  artifacts: Option[ArtifactRepository]  = None
 ) {
 
   val openAction: String = s"${prefix}Daily"
@@ -82,14 +85,16 @@ final case class DailyDialog(
   def take(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[Unit] =
     DailyQuestLog.take(heroDao, hero, npc, nowMs).flatMap(show(user, _, nowMs, renderer))
 
-  /** Отдать то, что просят: сколько нашлось в сумке, столько и уходит, но не
+  /** Отдать то, что просят: сколько нашлось при герое, столько и уходит, но не
     * больше, чем не хватает. Пусто — так и говорим, вещи при герое. */
   def give(user: User, hero: Hero, nowMs: Long, renderer: Renderer): Task[Unit] =
     today(hero, nowMs).flatMap { task =>
       if (!task.taken || task.done || task.bring.isEmpty) show(user, task, nowMs, renderer)
       else
-        bag(hero).flatMap { items =>
-          val goods = task.toGive(items)
+        stock(hero).flatMap { all =>
+          // Что отдать, решает само поручение (худшее подходящее, при равных —
+          // сперва из сумки); где лежит выбранное, помнит запас.
+          val goods = task.toGive(all.map(_.item)).flatMap(i => all.find(_.item.id == i.id))
           if (goods.isEmpty)
             renderer.show(user, Screen(content.text(npcKey("nothingToGive")), Nil)) *>
               show(user, task, nowMs, renderer)
@@ -97,7 +102,7 @@ final case class DailyDialog(
             surrender(hero, goods) *>
               DailyQuestLog.add(heroDao, user.userId, npc, task.kind, goods.size.toLong) *>
               renderer.show(user, Screen(content.format(npcKey("given"),
-                "names" -> goods.map(_.displayTitle).mkString(", ")), Nil)) *>
+                "names" -> goods.map(_.item.displayTitle).mkString(", ")), Nil)) *>
               today(hero, nowMs).flatMap(show(user, _, nowMs, renderer))
         }
     }
@@ -116,14 +121,11 @@ final case class DailyDialog(
       }
     }
 
-  private def surrender(hero: Hero, goods: List[Item]): Task[Unit] =
-    ZIO.foreachDiscard(inventory)(repo =>
-      repo.removeItems(goods.map(_.id).toSet, hero.id).mapError(e => new Throwable(e.toString)))
+  private def surrender(hero: Hero, goods: List[QuestGoods.Good]): Task[Unit] =
+    ZIO.foreachDiscard(inventory)(QuestGoods.remove(_, artifacts, hero.id, goods))
 
-  private def bag(hero: Hero): Task[List[Item]] =
-    inventory.fold[Task[List[Item]]](ZIO.succeed(Nil))(repo =>
-      repo.get(hero.id).mapError(e => new Throwable(e.toString))
-        .map(_.items.data.filter(_.id != 0L)))
+  private def stock(hero: Hero): Task[List[QuestGoods.Good]] =
+    inventory.fold[Task[List[QuestGoods.Good]]](ZIO.succeed(Nil))(QuestGoods.all(_, artifacts, hero.id))
 
   /** Строка «до новых поручений»: часы и минуты до полуночи по Москве. */
   private def hoursLeft(nowMs: Long): String = {

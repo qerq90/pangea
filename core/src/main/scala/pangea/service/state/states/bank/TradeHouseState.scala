@@ -9,6 +9,7 @@ import pangea.model.bank.BankVault
 import pangea.model.hero.Hero
 import pangea.model.state.StateType
 import pangea.model.user.{ReceiptEmail, User}
+import pangea.repository.artifact.ArtifactRepository
 import pangea.repository.bank.BankRepository
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.user.UserRepository
@@ -32,7 +33,9 @@ case class TradeHouseState(
   parcels:       Parcels,
   inventoryRepo: InventoryRepository,
   donations:     Donations,
-  content:       SceneContent
+  content:       SceneContent,
+  // Надколотый камень для поручения мог сам лечь в Ларец Азата.
+  artifacts:     Option[ArtifactRepository] = None
 ) extends State {
 
   /** Ячейку тоже можно оплатить из уже выкупленных: сперва своё, потом банк. */
@@ -42,7 +45,7 @@ case class TradeHouseState(
   private val quest = NpcQuestDialog(heroDao, content, NpcQuest.Rakhadim, "Rakh")
 
   /** Счётная книга Рахадима: сегодняшнее поручение банкира. */
-  private val daily = DailyDialog(heroDao, content, DailyNpc.Rakhadim, "Rakhadim", Some(inventoryRepo))
+  private val daily = DailyDialog(heroDao, content, DailyNpc.Rakhadim, "Rakhadim", Some(inventoryRepo), artifacts)
 
   private val branch = new Branch(
     routes = Map(

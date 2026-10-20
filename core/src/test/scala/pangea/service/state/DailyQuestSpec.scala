@@ -2,12 +2,13 @@ package pangea.service.state
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
+import pangea.model.artifact.ArtifactKind
 import pangea.model.hero.Hero
 import pangea.model.item._
 import pangea.model.monster.Race
 import pangea.model.quest._
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
+import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
 
@@ -249,6 +250,83 @@ object DailyQuestSpec extends ZIOSpecDefault {
               assertTrue(DailyKind.BankGem.accepts(stone(5L, GemKind.Ruby, 1), Some(GemKind.Ruby.entryName))) &&
               assertTrue(!DailyKind.BankGem.accepts(stone(6L, GemKind.Ruby, 3), Some(GemKind.Ruby.entryName))) &&
               assertTrue(!DailyKind.BankGem.accepts(stone(7L, GemKind.Topaz, 1), Some(GemKind.Ruby.entryName)))
+    },
+
+    test("травы из Живой сумки идут Густаво: сперва из сумки, недостающее — из артефакта") {
+      val day  = DailyRates.dayOf(noon)
+      val task = DailyTask(DailyKind.HerbNamed, day, pick = Some(MaterialKind.Nettle.entryName), taken = true)
+      val arts = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1,
+                   items = List(herb(10L, MaterialKind.Nettle), herb(11L, MaterialKind.Nettle), herb(12L, MaterialKind.Sage))))
+      for {
+        d     <- dao()
+        h     <- d.getHeroByUserId(userId).map(_.get)
+        c     <- ZIO.attempt(SceneContent.load())
+        r     <- TestRenderer.make
+        inv    = TestInventoryRepository.withItems(List(herb(1L, MaterialKind.Nettle)))
+        _     <- seed(d, DailyNpc.Gustavo, task)
+        dlg    = DailyDialog(d, c, DailyNpc.Gustavo, "Gustavo", Some(inv), Some(arts))
+        _     <- dlg.give(testUser, h, noon, r)
+        after <- dlg.today(h, noon)
+        given <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(after.count == 2L && after.ready) &&
+              // крапива из сумки и одна из Живой сумки; вторая и шалфей остались там
+              assertTrue(inv.snapshot.isEmpty) &&
+              assertTrue(arts.snapshot.bag.items.data.map(_.id) == List(11L, 12L)) &&
+              assertTrue(given.contains("Густаво забирает"))
+    },
+
+    test("надколотый камень из Ларца Азата идёт Рахадиму, целый остаётся в Ларце") {
+      val day  = DailyRates.dayOf(noon)
+      val task = DailyTask(DailyKind.BankGem, day, pick = Some(GemKind.Ruby.entryName), taken = true)
+      val arts = TestArtifactRepository.of(casket = TestArtifactRepository.artifact(ArtifactKind.Casket, tier = 1,
+                   items = List(stone(20L, GemKind.Ruby, Gem.MinGrade), stone(21L, GemKind.Ruby, 3))))
+      for {
+        d    <- dao()
+        h    <- d.getHeroByUserId(userId).map(_.get)
+        c    <- ZIO.attempt(SceneContent.load())
+        r    <- TestRenderer.make
+        dlg   = DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(TestInventoryRepository.accepting), Some(arts))
+        _    <- seed(d, DailyNpc.Rakhadim, task)
+        _    <- dlg.give(testUser, h, noon, r)
+        done <- dlg.today(h, noon)
+      } yield assertTrue(done.count == 1L && done.ready) &&
+              assertTrue(arts.snapshot.casket.items.data.map(_.id) == List(21L))
+    },
+
+    test("шкаф не в счёт: что хозяин убрал туда сам, горожанин не забирает") {
+      val day  = DailyRates.dayOf(noon)
+      val task = DailyTask(DailyKind.BankRelic, day, pick = Some(Race.Elf.entryName), taken = true)
+      val arts = TestArtifactRepository.of(wardrobe = TestArtifactRepository.artifact(ArtifactKind.Wardrobe, tier = 1,
+                   items = List(relic(30L, Race.Elf))))
+      for {
+        d     <- dao()
+        h     <- d.getHeroByUserId(userId).map(_.get)
+        c     <- ZIO.attempt(SceneContent.load())
+        r     <- TestRenderer.make
+        dlg    = DailyDialog(d, c, DailyNpc.Rakhadim, "Rakhadim", Some(TestInventoryRepository.accepting), Some(arts))
+        _     <- seed(d, DailyNpc.Rakhadim, task)
+        _     <- dlg.give(testUser, h, noon, r)
+        empty <- dlg.today(h, noon)
+        text  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(empty.count == 0L && text.contains("Пусто")) &&
+              assertTrue(arts.snapshot.wardrobe.items.data.map(_.id) == List(30L))
+    },
+
+    test("сцена Густаво передаёт Живую сумку в поручение: «Отдать» берёт травы оттуда") {
+      import pangea.service.state.states.gustavo.GustavoState
+      def tap(k: String) = UserAction("", Some(s"""{"action":"$k"}"""))
+      val arts = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1,
+                   items = (1L to 6L).toList.map(herb(_, MaterialKind.Sage))))
+      for {
+        d     <- dao()
+        r     <- TestRenderer.make
+        c     <- ZIO.attempt(SceneContent.load())
+        st     = GustavoState(d, TestInventoryRepository.accepting, c, None, Some(arts))
+        _     <- seed(d, DailyNpc.Gustavo, DailyTask(DailyKind.HerbsAny, DailyRates.dayOf(0L), taken = true))
+        _     <- st.action(testUser, tap("GustavoDailyGive"), r)
+        given <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Gustavo))
+      } yield assertTrue(given.exists(t => t.count == DailyKind.HerbsAny.goal && t.ready)) &&
+              assertTrue(arts.snapshot.bag.items.data.isEmpty)
     },
 
     test("сдача закрывает поручение: опыт идёт, завтрашнее не копится") {
