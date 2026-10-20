@@ -263,6 +263,52 @@ object FlowerMeadowSpec extends ZIOSpecDefault {
               assertTrue(!sell.choices.exists(_.id.startsWith(MerchantState.SellItemPrefix)))
     },
 
+    test("Густаво: травы из Живой сумки — своим списком и своей кнопкой; продаются только они, отвар остаётся") {
+      import pangea.model.artifact.ArtifactKind
+      import pangea.model.item.BrewKind
+      val brew = BrewKind.item(BrewKind.WolfCall).copy(id = 9L)
+      val arts = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1,
+                   items = List(herb(MaterialKind.Nettle, 5L), herb(MaterialKind.BubbleLily, 6L), brew)))
+      for {
+        c    <- content
+        dao  <- TestHeroDao.withHero(userId, hero(silver = 100L))
+        inv   = TestInventoryRepository.withItems(List(herb(MaterialKind.Nettle, 1L)))
+        r    <- TestRenderer.make
+        gus   = GustavoState(dao, inv, c, None, Some(arts))
+        _    <- gus.action(testUser, tap("Herbs"), r)
+        list <- r.sentScreens.map(_.last)
+        _    <- gus.action(testUser, tap("HerbsSellLiving"), r)
+        h    <- dao.getHeroByUserId(userId).map(_.get)
+        all  <- texts(r)
+      } yield assertTrue(list.text.contains("Из Живой сумки:") && list.text.contains("Пузырьковая лилия ×1 — 🪙 100")) &&
+              assertTrue(list.choices.map(_.id) == List("HerbsSell", "HerbsSellLiving", "Back")) &&
+              assertTrue(list.choices.map(_.label).take(2) == List("Сдать из сумки за 30 🪙", "Сдать из Живой сумки за 130 🪙")) &&
+              // ушли только травы Живой сумки: крапива в сумке и отвар в Живой сумке остались
+              assertTrue(h.silver == 100L + 130L) &&
+              assertTrue(inv.snapshot.map(_.id) == List(1L)) &&
+              assertTrue(arts.snapshot.bag.items.data.map(_.id) == List(9L)) &&
+              assertTrue(all.contains("вытряхивает травы из Живой сумки"))
+    },
+
+    test("Густаво: трав только в Живой сумке — одна её кнопка; ни там, ни там — Густаво отсылает") {
+      import pangea.model.artifact.ArtifactKind
+      val arts = TestArtifactRepository.of(bag = TestArtifactRepository.artifact(ArtifactKind.LivingBag, tier = 1,
+                   items = List(herb(MaterialKind.Nettle, 5L))))
+      for {
+        c     <- content
+        dao   <- TestHeroDao.withHero(userId, hero())
+        r     <- TestRenderer.make
+        _     <- GustavoState(dao, TestInventoryRepository.accepting, c, None, Some(arts)).action(testUser, tap("Herbs"), r)
+        only  <- r.sentScreens.map(_.last)
+        r2    <- TestRenderer.make
+        _     <- GustavoState(dao, TestInventoryRepository.accepting, c, None, Some(TestArtifactRepository.empty))
+                   .action(testUser, tap("Herbs"), r2)
+        none  <- texts(r2)
+      } yield assertTrue(only.choices.map(_.id) == List("HerbsSellLiving", "Back")) &&
+              assertTrue(only.text.contains("Из Живой сумки:") && !only.text.contains("\n\n\n")) &&
+              assertTrue(none.contains("пока трав у тебя нет"))
+    },
+
     test("«Расскажи о травах»: первый урок за 15 000 → трактат в сумке; с книгой — «дочитай»; самоучке — сразу вторая часть") {
       for {
         c   <- content

@@ -2,6 +2,7 @@ package pangea.service.state.states.gustavo
 
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
+import pangea.model.artifact.ArtifactKind
 import pangea.model.hero.Hero
 import pangea.model.item.{BrewKind, Item, ItemDetails, MaterialKind}
 import pangea.model.quest.{DailyNpc, DailyRates, NpcQuest}
@@ -48,6 +49,7 @@ case class GustavoState(
       "Boost"    -> Target.Goto(StateType.GustavoBoost),
       "Herbs"     -> Target.Run { (u, _, r) => showHerbs(u, r) },
       "HerbsSell" -> Target.Run { (u, _, r) => sellHerbs(u, r) },
+      "HerbsSellLiving" -> Target.Run { (u, _, r) => sellLivingHerbs(u, r) },
       daily.openAction -> Target.Run { (u, _, r) => showDaily(u, r) },
       daily.takeAction -> Target.Run { (u, _, r) => takeDaily(u, r) },
       daily.giveAction -> Target.Run { (u, _, r) => giveDaily(u, r) },
@@ -135,26 +137,43 @@ case class GustavoState(
   // ── Травы ───────────────────────────────────────────────────────────────
 
   /** «Сдать травы»: что в сумке и почём, одной кнопкой на всё. Странные цветки
-    * Густаво берёт по цене сена — он и не собирается объяснять, что это было. */
+    * Густаво берёт по цене сена — он и не собирается объяснять, что это было.
+    * Травы из Живой сумки — отдельным списком и своей кнопкой: их там часто
+    * берегут для варки, и разом со всем остальным они не уходят. */
   private def showHerbs(user: User, renderer: Renderer): Task[StateType] =
     for {
-      hero  <- getHero(user)
-      herbs <- herbsOf(hero)
-      _ <- if (herbs.isEmpty)
+      hero   <- getHero(user)
+      herbs  <- herbsOf(hero)
+      living <- livingHerbs(hero)
+      _ <- if (herbs.isEmpty && living.isEmpty)
              renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil)) *> renderMenu(user, renderer)
            else {
-             val lines = herbs.groupBy(_._1.name).toList.sortBy(_._1).map { case (name, same) =>
-               content.format("gustavo.herbs.line", "name" -> name, "count" -> same.size.toString,
-                 "price" -> same.map { case (_, kind) => HerbLore.price(kind) }.sum.toString)
-             }
-             val total = herbs.map { case (_, kind) => HerbLore.price(kind) }.sum
+             val livingPart =
+               if (living.isEmpty) Nil
+               else (if (herbs.isEmpty) Nil else List("")) ++
+                 (content.text("gustavo.herbs.livingHeader") :: herbLines(living))
+             // Есть трава и там, и там — у обычной кнопки своя подпись: «Сдать всё»
+             // читалось бы как «отовсюду».
+             val sellBag = Option.when(herbs.nonEmpty)(content.choice("HerbsSell",
+                             if (living.isEmpty) "gustavo.herbs.sellAll" else "gustavo.herbs.sellBag",
+                             "total" -> priceOf(herbs).toString).copy(color = ChoiceColor.Positive))
+             val sellLiving = Option.when(living.nonEmpty)(content.choice("HerbsSellLiving",
+                             "gustavo.herbs.sellLiving", "total" -> priceOf(living).toString).copy(color = ChoiceColor.Positive))
              renderer.show(user, Screen(
-               content.text("gustavo.herbs.header") + "\n\n" + lines.mkString("\n"),
-               List(
-                 content.choice("HerbsSell", "gustavo.herbs.sellAll", "total" -> total.toString).copy(color = ChoiceColor.Positive),
-                 content.choice("Back", "gustavo.back"))))
+               content.text("gustavo.herbs.header") + "\n\n" + (herbLines(herbs) ++ livingPart).mkString("\n"),
+               sellBag.toList ++ sellLiving.toList :+ content.choice("Back", "gustavo.back")))
            }
     } yield StateType.Gustavo
+
+  /** Строки списка трав: по одной на вид, с количеством и ценой. */
+  private def herbLines(herbs: List[(Item, MaterialKind)]): List[String] =
+    herbs.groupBy(_._1.name).toList.sortBy(_._1).map { case (name, same) =>
+      content.format("gustavo.herbs.line", "name" -> name, "count" -> same.size.toString,
+        "price" -> priceOf(same).toString)
+    }
+
+  private def priceOf(herbs: List[(Item, MaterialKind)]): Long =
+    herbs.map { case (_, kind) => HerbLore.price(kind) }.sum
 
   private def sellHerbs(user: User, renderer: Renderer): Task[StateType] =
     for {
@@ -171,8 +190,35 @@ case class GustavoState(
       _ <- renderMenu(user, renderer)
     } yield StateType.Gustavo
 
+  // «Сдать из Живой сумки»: только травы — отвары остаются в ней. Забираем по
+  // одной; что взять не вышло, не оплачиваем.
+  private def sellLivingHerbs(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero  <- getHero(user)
+      herbs <- livingHerbs(hero)
+      taken <- artifacts.fold(ZIO.succeed(List.empty[MaterialKind]))(repo =>
+                 ZIO.foreach(herbs) { case (item, kind) =>
+                   repo.take(hero.id, ArtifactKind.LivingBag, item.id).option.map(_.map(_ => kind))
+                 }.map(_.flatten))
+      total  = taken.map(HerbLore.price).sum
+      _ <- if (taken.isEmpty)
+             renderer.show(user, Screen(content.text("gustavo.herbsStub"), Nil))
+           else
+             heroDao.updateSilver(user.userId, hero.silver + total) *>
+               renderer.show(user, Screen(content.format("gustavo.herbs.soldLiving",
+                 "count" -> taken.size.toString, "silver" -> total.toString), Nil))
+      _ <- renderMenu(user, renderer)
+    } yield StateType.Gustavo
+
   private def herbsOf(hero: Hero): Task[List[(Item, MaterialKind)]] =
     inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).map(inv => HerbLore.herbs(inv.items.data))
+
+  /** Травы в Живой сумке — отвары в ней не в счёт. Сумки нет или она не
+    * прочиталась — трав в ней нет. */
+  private def livingHerbs(hero: Hero): Task[List[(Item, MaterialKind)]] =
+    artifacts.fold(ZIO.succeed(List.empty[(Item, MaterialKind)]))(repo =>
+      repo.get(hero.id).option.map(_.fold(List.empty[(Item, MaterialKind)])(all =>
+        HerbLore.herbs(all.of(ArtifactKind.LivingBag).items.data))))
 
   /** Кнопка задания: завязка, пока не взято; дальше — по шагу: напомнить про
     * зелье, посчитать побитых (или налить ещё, если зелье выветрилось), принять
