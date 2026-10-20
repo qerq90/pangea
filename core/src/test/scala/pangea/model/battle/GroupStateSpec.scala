@@ -413,17 +413,23 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(down.copy(group = down.group.copy(heroDown = false)).squadAdvance._2.isEmpty)
     },
 
-    test("отряд идёт на врага: кому есть кого бить, стоит; на место своего не встаёт; за свою сторону не заходит") {
+    test("отряд идёт на врага: кому есть кого бить, стоит; на место своего не встаёт; дойдёт и до хвоста чужого строя") {
       val b0    = SoloPveBattle.fromGroup(List(monster(Race.Human, 100L)), hero, Nil)
       // Моб на 4: гном на 3 его достаёт, а мурлоку на 2 пройти не через кого — ждёт.
       val queue = b0.copy(group = b0.group.copy(heroDown = true, activePos = 4,
                     allies = List(fighter(AllyKind.Murloc, 2), fighter(AllyKind.Gnome, 3))))
-      // Моб в хвосте, на 13: союзник доходит до края своей стороны и дальше не идёт.
-      val tail  = b0.copy(group = b0.group.copy(heroDown = true, activePos = 13,
+      // Моб в самом хвосте, на последнем месте схемы: союзник идёт и за край
+      // своей стороны, пока не достанет его, — на соседнее с ним место.
+      val last  = Formation.MonsterPlaces
+      val tail  = b0.copy(group = b0.group.copy(heroDown = true, activePos = last,
                     allies = List(fighter(AllyKind.Murloc, 10))))
-      val walked = Iterator.iterate(tail)(_.squadAdvance._1).take(4).toList.map(_.group.allies.head.position)
+      val steps = Iterator.iterate(tail)(_.squadAdvance._1).take(7).toList
+      val after = steps.last.group.allies.head
       assertTrue(queue.squadAdvance._2.isEmpty) &&
-      assertTrue(walked == List(10, Formation.HeroPlaces, Formation.HeroPlaces, Formation.HeroPlaces))
+      assertTrue(steps.map(_.group.allies.head.position) == List(10, 11, 12, 13, 14, 14, 14)) &&
+      assertTrue(after.position > Formation.HeroPlaces && steps.last.allyTarget(after).contains(last)) &&
+      // в отряд после боя — на своё место: там мест столько, сколько у своей стороны
+      assertTrue(after.toAlly.position == 10)
     },
 
     test("группа переживает сериализацию, а старая запись без группы читается как 1 на 1") {
