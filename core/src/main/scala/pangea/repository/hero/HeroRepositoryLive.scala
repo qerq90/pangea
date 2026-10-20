@@ -7,7 +7,7 @@ import pangea.model.item.Item.NoItem
 import pangea.model.monster.Race.Human
 import pangea.model.state.StateType
 import pangea.model.state.StateType.Registration
-import pangea.model.stats.{BaseStats, FightStats}
+import pangea.model.stats.FightStats
 import pangea.model.user.UserId
 import pangea.repository.hero.HeroRepositoryLive.newHero
 import zio.Task
@@ -42,7 +42,7 @@ object HeroRepositoryLive {
       race = Human,
       exp = 0,
       upgradePoints = 0,
-      baseStats = BaseStats(4, 4, 4, 4),
+      baseStats = Hero.StartBaseStats,
       fightStats = FightStats(
         atk = 22,
         hp = 0, // выставляется ниже из effectiveMaxHp (единый источник — формула от тела)

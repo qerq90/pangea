@@ -231,7 +231,7 @@ case class QuestBoardState(
           case BoardKind.Trophy => trophyFor(slot, inv) match {
             case None => renderer.show(user, Screen(content.text("questBoard.noTrophy"), Nil))
             case Some(trophy) =>
-              val exp = BoardRates.trophyExp(trophy.lvl, BoardTrophy.coef(trophy))
+              val exp = hero.expFrom(BoardRates.trophyExp(trophy.lvl, BoardTrophy.coef(trophy)))
               // Трофей уходит оттуда, где лежал: из сумки, из ларца или из живой сумки.
               QuestStash.take(inventoryRepo, artifactRepo, hero, stash.filter(_.item.id == trophy.id)) *>
                 pay(user, hero, exp, BoardRates.TrophyDoubloons) *>
@@ -248,7 +248,7 @@ case class QuestBoardState(
                 "brew" -> wanted.map(_.label).getOrElse(""), "have" -> have.size.toString,
                 "need" -> BoardRates.BrewsWanted.toString), Nil))
             else {
-              val exp = BoardRates.exp(hero.lvl)
+              val exp = hero.expFrom(BoardRates.exp(hero.lvl))
               // Ящик уходит целиком: ровно десять склянок, остальное остаётся при герое.
               QuestStash.take(inventoryRepo, artifactRepo, hero, have.take(BoardRates.BrewsWanted)) *>
                 pay(user, hero, exp, BoardRates.Doubloons) *>
@@ -261,7 +261,7 @@ case class QuestBoardState(
             }
           case _ if !slot.done => renderer.show(user, Screen(content.text("questBoard.notYet"), Nil))
           case _ =>
-            val exp = BoardRates.exp(hero.lvl)
+            val exp = hero.expFrom(BoardRates.exp(hero.lvl))
             pay(user, hero, exp, BoardRates.Doubloons) *>
               drop *>
               renderer.show(user, Screen(content.format("questBoard.paid",

@@ -38,7 +38,9 @@ case class Hero(
   // Отряд: наёмники-союзники и позиция героя в строю (см. Squad).
   squad: pangea.model.squad.Squad = pangea.model.squad.Squad.empty,
   // Руны: клейма на теле и понимание рун (см. RuneData).
-  runes: RuneData = RuneData.empty
+  runes: RuneData = RuneData.empty,
+  // Опыт остановлен зельем Фета: не идёт ни из боёв, ни из заданий (см. gainExp).
+  expFrozen: Boolean = false
 ) {
   def hasAchievement(a: Achievement): Boolean = achievements.contains(a.entryName)
 
@@ -293,10 +295,11 @@ case class Hero(
     val maxEn    = maxEnergy(nowMs)
     val curEn    = fightStats.energy.min(maxEn)
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
+    val frozenLine   = if (expFrozen) "\n ❄ Опыт остановлен" else ""
     val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
     import Hero.withNative
     s"""$raceName, Уровень $lvl  ☠ Убито: $kills
-       | $getLvlExp/$getNeededExp опыта$blessingLine$restsLine
+       | $getLvlExp/$getNeededExp опыта$frozenLine$blessingLine$restsLine
        |
        | 💪 СИЛ ${withNative(effB.str, natB.str)}  ТЕЛО ${withNative(effB.vit, natB.vit)}
        | 🏃 ЛОВ ${withNative(effB.agi, natB.agi)}  ИНТ ${withNative(effB.int, natB.int)}
@@ -317,10 +320,15 @@ case class Hero(
   def getNeededExp: Long = Hero.neededExpForLevel(lvl)
   def getLvlExp: Long    = exp
 
+  /** Сколько опыта герой на самом деле получит из `amount`: пока опыт
+   *  остановлен (`expFrozen`), — ничего. Этим числом и говорят игроку «+N опыта». */
+  def expFrom(amount: Long): Long = if (expFrozen) 0L else amount
+
   /** Начисление опыта с прокачкой уровней по [[Hero.neededExpForLevel]]. Возвращает героя
    *  с обновлёнными `exp`/`lvl`/`upgradePoints` (4 очка характеристик за уровень,
-   *  кап на `Hero.MaxLevel`). Единственное место расчёта прокачки. */
-  def gainExp(amount: Long): Hero = {
+   *  кап на `Hero.MaxLevel`). Единственное место расчёта прокачки. Опыт остановлен —
+   *  герой как был. */
+  def gainExp(amount: Long): Hero = if (expFrozen) this else {
     var e = exp + amount
     var l = lvl
     var p = upgradePoints
@@ -336,6 +344,24 @@ case class Hero(
 object Hero {
   val MaxLevel: Long       = 150L
   val PointsPerLevel: Long = 4L
+
+  /** С чего начинает каждый герой: по четыре в каждой характеристике. Раса,
+   *  зелья, достижения и наборы ложатся сверху при подсчёте (см.
+   *  effectiveBaseStats) — в самих характеристиках только старт и вложенные очки. */
+  val StartBaseStats: BaseStats = BaseStats(4, 4, 4, 4)
+
+  /** Сколько очков герой вложил в характеристики: всё, что выше старта. */
+  def spentPoints(hero: Hero): Long = {
+    val b = hero.baseStats
+    val s = StartBaseStats
+    ((b.str + b.vit + b.agi + b.int) - (s.str + s.vit + s.agi + s.int)).max(0L)
+  }
+
+  /** Сброс вложенных очков (зелье Фета): характеристики — к старту, вложенное —
+   *  в свободные. Прибавки от зелий и достижений в характеристиках не хранятся,
+   *  поэтому сброс их не трогает и в свободные очки они не попадут. */
+  def respec(hero: Hero): Hero =
+    hero.copy(baseStats = StartBaseStats, upgradePoints = hero.upgradePoints + spentPoints(hero))
 
   /** «Родное (со всеми прибавками)» одной строкой: сперва то, что у героя
    *  своё, в скобках — то, с чем он выходит в бой сейчас. Скобка появляется
