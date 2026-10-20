@@ -1,7 +1,7 @@
 package pangea.model.battle
 
 import io.circe.syntax.EncoderOps
-import pangea.model.monster.{Monster, Race, Rarity}
+import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
 import pangea.model.squad.{Ally, AllyKind, Squad}
 import pangea.model.stats.FightStats
 import pangea.model.user.UserId
@@ -355,6 +355,81 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(mobPlaces(last) == List(2, 3, 4, 5, 6, 7, 8, 9)) &&
       // и дальше строй стоит: ближние уже достают героя
       assertTrue(last.closeIn._1.group.places.sorted == last.group.places.sorted)
+    },
+
+    // ── Герой лежит: мобы идут к отряду, отряд — к мобам ─────────────────────
+
+    test("герой лежит: моб идёт к союзнику, напротив которого пусто, — орк за раунд на два места, прочие на одно") {
+      // Как в бою из жалобы: герой лежит на 1, союзник на 2, последний моб на 4.
+      val orc   = SoloPveBattle.fromGroup(List(monster(Race.Orc, 100L)), hero, Nil)
+      val down  = orc.copy(group = orc.group.copy(heroDown = true, activePos = 4,
+                    allies = List(fighter(AllyKind.Murloc, 2))))
+      val human = down.copy(monsterRace = Race.Human.entryName)
+      assertTrue(down.closeInOnSquad._1.group.activePos == 2) &&
+      assertTrue(human.closeInOnSquad._1.group.activePos == 3) &&
+      assertTrue(human.closeInOnSquad._1.closeInOnSquad._1.group.activePos == 2) &&
+      // пока герой на ногах, к отряду не идут: к герою их ведёт closeIn
+      assertTrue(down.copy(group = down.group.copy(heroDown = false)).closeInOnSquad._2.isEmpty) &&
+      // в дыму не видно никого
+      assertTrue(down.copy(effects = down.effects.copy(heroSmokeTurns = 2)).closeInOnSquad._2.isEmpty) &&
+      // пригвождённый и сооружение стоят
+      assertTrue(down.copy(effects = down.effects.copy(monsterRootedTurns = 2)).closeInOnSquad._2.isEmpty) &&
+      assertTrue(down.copy(monsterRace = Race.Construct.entryName).closeInOnSquad._2.isEmpty) &&
+      // Некромант держит позицию — к нему идёт отряд (см. squadAdvance)
+      assertTrue(down.copy(bossKind = Some(MiniBoss.Necromancer.entryName)).closeInOnSquad._2.isEmpty)
+    },
+
+    test("герой лежит: кто стоит напротив союзника, стоит; к свободному союзнику первым идёт ближний, второй ждёт") {
+      // Герой лежит на 1, союзники на 2 и 5. Напротив второго — моб, он занят.
+      // Люди на 7 и 8 идут к пятому: первым — тот, что ближе, второй за ним.
+      val b0   = SoloPveBattle.fromGroup(List.fill(3)(monster(Race.Human, 100L)), hero, Nil)
+      val down = b0.copy(group = b0.group.copy(heroDown = true, activePos = 2, places = List(7, 8),
+                   allies = List(fighter(AllyKind.Murloc, 2), fighter(AllyKind.Gnome, 5))))
+      val (r1, moved) = down.closeInOnSquad
+      val r2 = r1.closeInOnSquad._1
+      assertTrue(r1.group.activePos == 2) &&
+      assertTrue(r1.group.places == List(6, 7) && moved.map(_._2) == List(6, 7)) &&
+      // первый дошёл и встал напротив; второму свободных союзников не осталось — стоит
+      assertTrue(r2.group.places == List(5, 7)) &&
+      assertTrue(r2.closeInOnSquad._2.isEmpty)
+    },
+
+    test("герой лежит: отряд идёт на врага — кому некого бить, шагает к ближайшему мобу, лежащего переступает") {
+      // Некромант прячется на 6 и сам не выходит. Герой лежит на 3, союзник на 2:
+      // бить ему некого — он идёт, переступив героя, и встаёт там, откуда достанет.
+      val b0    = SoloPveBattle.fromGroup(List(monster(Race.Human, 100L)), hero, Nil)
+      val down  = b0.copy(bossKind = Some(MiniBoss.Necromancer.entryName), group = b0.group.copy(
+                    heroDown = true, heroPos = 3, activePos = 6, allies = List(fighter(AllyKind.Murloc, 2))))
+      val steps = Iterator.iterate(down)(_.squadAdvance._1).take(5).toList
+      val after = steps.last.group.allies.head
+      assertTrue(down.closeInOnSquad._2.isEmpty) &&
+      assertTrue(steps.map(_.group.allies.head.position) == List(2, 4, 5, 5, 5)) &&
+      assertTrue(steps.last.allyTarget(after).contains(6)) &&
+      // где стоял, пока не пошёл сам, — запомнено: в отряд после боя он вернётся туда
+      assertTrue(after.stood.contains(2) && after.toAlly.position == 2) &&
+      // и это переживает запись боя
+      assertTrue(steps.last.asJson.as[SoloPveBattle].toOption.exists(_.group.allies.head.stood.contains(2))) &&
+      // пока герой на ногах, союзник сам с места не сходит
+      assertTrue(down.copy(group = down.group.copy(heroDown = false)).squadAdvance._2.isEmpty)
+    },
+
+    test("отряд идёт на врага: кому есть кого бить, стоит; на место своего не встаёт; дойдёт и до хвоста чужого строя") {
+      val b0    = SoloPveBattle.fromGroup(List(monster(Race.Human, 100L)), hero, Nil)
+      // Моб на 4: гном на 3 его достаёт, а мурлоку на 2 пройти не через кого — ждёт.
+      val queue = b0.copy(group = b0.group.copy(heroDown = true, activePos = 4,
+                    allies = List(fighter(AllyKind.Murloc, 2), fighter(AllyKind.Gnome, 3))))
+      // Моб в самом хвосте, на последнем месте схемы: союзник идёт и за край
+      // своей стороны, пока не достанет его, — на соседнее с ним место.
+      val last  = Formation.MonsterPlaces
+      val tail  = b0.copy(group = b0.group.copy(heroDown = true, activePos = last,
+                    allies = List(fighter(AllyKind.Murloc, 10))))
+      val steps = Iterator.iterate(tail)(_.squadAdvance._1).take(7).toList
+      val after = steps.last.group.allies.head
+      assertTrue(queue.squadAdvance._2.isEmpty) &&
+      assertTrue(steps.map(_.group.allies.head.position) == List(10, 11, 12, 13, 14, 14, 14)) &&
+      assertTrue(after.position > Formation.HeroPlaces && steps.last.allyTarget(after).contains(last)) &&
+      // в отряд после боя — на своё место: там мест столько, сколько у своей стороны
+      assertTrue(after.toAlly.position == 10)
     },
 
     test("группа переживает сериализацию, а старая запись без группы читается как 1 на 1") {
