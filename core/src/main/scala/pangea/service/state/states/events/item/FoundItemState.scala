@@ -119,7 +119,7 @@ case class FoundItemState(
   // «Забрать и надеть»: находка сразу на героя, мимо сумки; снятое — в сумку.
   private def wearItem(user: User, hero: Hero, item: Item, slot: Option[Int], renderer: Renderer): Task[StateType] =
     for {
-      worn <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, List(item), slot)
+      worn <- TakeAndEquip.wear(heroDao, inventoryRepository, user, hero, List(item), slot, Some(itemRepository))
       _    <- journal.append(GameEvent(user.userId, "item_taken",
                 Json.obj("name" -> item.name.asJson, "worn" -> true.asJson,
                          "removed" -> worn.removed.map(_.name).asJson)))

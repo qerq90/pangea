@@ -5,11 +5,11 @@ import pangea.generator.item.TreasureMapGenerator
 import pangea.model.hero.Hero
 import pangea.engine.ChoiceColor
 import pangea.generator.item.{GemGenerator, MaterialGenerator}
-import pangea.model.item.{Gem, GemKind, Grip, Item, ItemType, MapZone, MaterialKind, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Gem, GemKind, Grip, Item, ItemDetails, ItemType, MapZone, MaterialKind, Rarity}
 import pangea.model.artifact.ArtifactKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.UserAction
+import pangea.service.state.{BeltContents, UserAction}
 import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
@@ -46,6 +46,16 @@ object InventoryStateSpec extends ZIOSpecDefault {
 
   private def dustItem(kind: MaterialKind, id: Long): Item =
     MaterialGenerator.item(kind).copy(id = id)
+
+  // Пояс с содержимым и ячейки для него.
+  private def beltItem(id: Long, name: String, rarity: Rarity, slots: List[BeltSlot] = Nil): Item =
+    Item(id, name, 1L, rarity, ItemType.Belt,
+      attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0, details = ItemDetails.Belt(slots))
+  private val healer = BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 3)
+  private val ruby   = BeltSlot.Dust(MaterialKind.RubyDust)
+  private def wearingBelt(belt: Item): Hero = baseHero.copy(equipment = baseHero.equipment.copy(belt = belt))
+  private def beltSwap(slot: Int): UserAction =
+    UserAction("", Some(s"""{"action":"BeltSwap","slot":"$slot"}"""))
 
   private def breakSlot(slot: Int): UserAction =
     UserAction("", Some(s"""{"action":"BreakGemDo","slot":"$slot"}"""))
@@ -462,6 +472,87 @@ object InventoryStateSpec extends ZIOSpecDefault {
               // фляга осталась в сумке, старый слот пуст
               assertTrue(hero.equipment.flask.itemType == ItemType.NoItem) &&
               assertTrue(invRepo.snapshot.map(_.id) == List(flask.id))
+    },
+
+    test("пояс поверх пояса: содержимое переезжает, не поместившееся — в сумку, старый пояс — пустым") {
+      val worn  = beltItem(80L, "Старый пояс", Rarity.Green, List(healer, ruby))
+      val small = beltItem(81L, "Новый пояс", Rarity.Gray)
+      for {
+        quad <- makeState(wearingBelt(worn), List(small))
+        (state, heroDao, invRepo, renderer) = quad
+        _    <- state.action(testUser, selectItem(small.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        hero <- heroDao.getHeroByUserId(userId).map(_.get)
+        said <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(hero.equipment.belt.id == 81L && BeltContents.slotsOf(hero.equipment.belt) == List(healer)) &&
+              assertTrue(invRepo.snapshot.exists(i => i.id == 80L && BeltContents.slotsOf(i).isEmpty)) &&
+              // пыль — сохранённой вещью с настоящим id, а не свежей с -1
+              assertTrue(invRepo.snapshot.exists(i => i.name == MaterialKind.RubyDust.displayName && i.id > 0L)) &&
+              assertTrue(said.contains("не поместившееся — в сумку: Рубиновая пыль"))
+    },
+
+    test("пояс меньше прежнего, а лишнему нет места в сумке → не надевается, своим отказом") {
+      val worn  = beltItem(80L, "Старый пояс", Rarity.Green, List(ruby, healer))
+      val small = beltItem(81L, "Новый пояс", Rarity.Gray)
+      val bag   = small :: (1L to 19L).toList.map(i => helm.copy(id = 200L + i))
+      for {
+        quad <- makeState(wearingBelt(worn), bag)
+        (state, heroDao, invRepo, renderer) = quad
+        _    <- state.action(testUser, selectItem(small.id), renderer)
+        _    <- state.action(testUser, tap("Equip"), renderer)
+        hero <- heroDao.getHeroByUserId(userId).map(_.get)
+        said <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(hero.equipment.belt.id == 80L && BeltContents.slotsOf(hero.equipment.belt) == List(ruby, healer)) &&
+              assertTrue(invRepo.snapshot.size == 20) &&
+              assertTrue(said.contains("Новый пояс меньше"))
+    },
+
+    test("«На пояс» при полном поясе → выбор, что снять; снятое — в сумку, новое — на его место") {
+      val dust = dustItem(MaterialKind.RubyDust, 90L)
+      for {
+        quad   <- makeState(wearingBelt(beltItem(80L, "Пояс", Rarity.Gray, List(healer))), List(dust))
+        (state, heroDao, invRepo, renderer) = quad
+        _      <- state.action(testUser, selectItem(dust.id), renderer)
+        _      <- state.action(testUser, tap("BeltPut"), renderer)
+        choice <- renderer.sentScreens.map(_.last)
+        _      <- state.action(testUser, beltSwap(0), renderer)
+        hero   <- heroDao.getHeroByUserId(userId).map(_.get)
+        said   <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(choice.text.contains("Что снять, чтобы положить Рубиновая пыль")) &&
+              assertTrue(choice.choices.map(_.id) == List("BeltSwap", "BeltSwapBack")) &&
+              assertTrue(choice.choices.headOption.map(_.label).contains(s"Вместо: ${FlaskKind.Healer.label}")) &&
+              assertTrue(BeltContents.slotsOf(hero.equipment.belt) == List(ruby)) &&
+              assertTrue(!invRepo.snapshot.exists(_.id == 90L)) &&
+              assertTrue(invRepo.snapshot.exists(i => i.name == FlaskKind.Healer.itemName(Rarity.Blue) && i.id > 0L)) &&
+              assertTrue(said.contains("на пояс, ") && said.contains("— в сумку"))
+    },
+
+    test("замена на поясе: сумке негде взять снятое → отказ; пустую ячейку меняют и при полной сумке") {
+      val dust   = dustItem(MaterialKind.RubyDust, 90L)
+      val full   = (1L to 20L).toList.map(i => helm.copy(id = 200L + i))
+      val flask  = pangea.generator.item.FlaskGenerator.item(FlaskKind.Healer, Rarity.Blue).copy(id = 95L)
+      for {
+        // пыль невесома: уйдя с полки, места не освободит, а фляге его нужно
+        q1   <- makeState(wearingBelt(beltItem(80L, "Пояс", Rarity.Gray, List(healer))), dust :: full)
+        (s1, d1, i1, r1) = q1
+        _    <- s1.action(testUser, selectItem(dust.id), r1)
+        _    <- s1.action(testUser, beltSwap(0), r1)
+        h1   <- d1.getHeroByUserId(userId).map(_.get)
+        t1   <- r1.sentScreens.map(_.map(_.text).mkString("\n"))
+        // высыпанная пыль — пустая ячейка: вернуть нечего, место в сумке не нужно
+        q2   <- makeState(wearingBelt(beltItem(80L, "Пояс", Rarity.Gray, List(ruby.poured))), flask :: full.drop(1))
+        (s2, d2, _, r2) = q2
+        _    <- s2.action(testUser, selectItem(flask.id), r2)
+        _    <- s2.action(testUser, tap("BeltPut"), r2)
+        c2   <- r2.sentScreens.map(_.last)
+        _    <- s2.action(testUser, beltSwap(0), r2)
+        h2   <- d2.getHeroByUserId(userId).map(_.get)
+        t2   <- r2.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(t1.contains("Сумка полна — снятой вещи некуда деться")) &&
+              assertTrue(BeltContents.slotsOf(h1.equipment.belt) == List(healer) && i1.snapshot.exists(_.id == 90L)) &&
+              assertTrue(c2.choices.headOption.map(_.label).contains("Вместо: Рубиновая пыль (пусто)")) &&
+              assertTrue(BeltContents.slotsOf(h2.equipment.belt).headOption.exists(_.isInstanceOf[BeltSlot.Flask])) &&
+              assertTrue(t2.contains("вместо пустой ячейки"))
     },
 
     test("Объединить две половинки одной зоны → одна целая карта, половинки удалены") {

@@ -1,10 +1,10 @@
 package pangea.service.state.states
 
 import pangea.engine.SceneContent
-import pangea.model.item.{Gem, GemKind, Item, ItemType, MaterialKind, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Gem, GemKind, Item, ItemDetails, ItemType, MaterialKind, Rarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.UserAction
+import pangea.service.state.{BeltContents, UserAction}
 import pangea.test.{TestFixtures, TestHeroDao, TestInventoryRepository, TestItemRepository, TestRenderer}
 import zio.ZIO
 import zio.test._
@@ -21,6 +21,7 @@ object EquipmentStateSpec extends ZIOSpecDefault {
 
   // Индекс слотов в [[EquipmentState.slots]]
   private val WeaponSlotIdx = 12
+  private val BeltSlotIdx   = 10
   private val Ring2SlotIdx  = 9
 
   private def wearItem(itemId: Long): UserAction =
@@ -139,6 +140,49 @@ object EquipmentStateSpec extends ZIOSpecDefault {
               assertTrue(updated.exists(_.fightStats.atk == 0L)) &&
               assertTrue(invRepo.snapshot.exists(_.id == sword.id)) &&
               assertTrue(screens.exists(_.text.contains("снят")))
+    },
+
+    test("снять пояс: он уходит пустым, содержимое — сохранёнными вещами в сумку") {
+      val slots = List(BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 3), BeltSlot.Dust(MaterialKind.RubyDust),
+                       BeltSlot.Dust(MaterialKind.RubyDust, spent = true))
+      val belt  = Item(80L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
+                    attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0,
+                    details = ItemDetails.Belt(slots))
+      for {
+        heroDao  <- TestHeroDao.withHero(userId, TestFixtures.hero(userId).copy(
+                      equipment = TestFixtures.emptyEquipment.copy(belt = belt)))
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        invRepo   = TestInventoryRepository.accepting
+        state     = EquipmentState(heroDao, invRepo, content, Some(TestItemRepository.make))
+        _        <- state.action(testUser, selectSlot(BeltSlotIdx), renderer)
+        _        <- state.action(testUser, tap("Unequip"), renderer)
+        hero     <- heroDao.getHeroByUserId(userId).map(_.get)
+        said     <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+        bag       = invRepo.snapshot
+      } yield assertTrue(hero.equipment.belt.itemType == ItemType.NoItem) &&
+              assertTrue(bag.exists(i => i.id == 80L && BeltContents.slotsOf(i).isEmpty)) &&
+              // фляга и пыль — вещами с настоящим id; высыпанная пыль вернуть нечего
+              assertTrue(bag.count(i => i.id != 80L) == 2 && bag.forall(_.id > 0L)) &&
+              assertTrue(said.contains("Содержимое пояса — в сумку: "))
+    },
+
+    test("снять пояс с флягой, когда в сумке одно место → отказ, пояс с содержимым остаётся на герое") {
+      val slots = List(BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 3))
+      val belt  = Item(80L, "Пояс", 1L, Rarity.Gray, ItemType.Belt,
+                    attack = 0, accuracy = 0, energy = 0, armor = 1, defence = 0, evasion = 0,
+                    details = ItemDetails.Belt(slots))
+      val bag   = (1L to 19L).toList.map(i => blade(200L + i, s"Клинок $i", 1L, 1))
+      for {
+        quad <- makeState(TestFixtures.hero(userId).copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt)), bag)
+        (state, heroDao, invRepo, renderer) = quad
+        _    <- state.action(testUser, selectSlot(BeltSlotIdx), renderer)
+        _    <- state.action(testUser, tap("Unequip"), renderer)
+        hero <- heroDao.getHeroByUserId(userId).map(_.get)
+        said <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(BeltContents.slotsOf(hero.equipment.belt) == slots) &&
+              assertTrue(invRepo.snapshot.size == 19) &&
+              assertTrue(said.contains("надо бы очистить место прежде чем снять с себя"))
     },
 
     test("Unequip пустого слота → у детального экрана нет кнопки Unequip") {

@@ -236,7 +236,7 @@ object StatesMap {
             content,
             artifacts
           ),
-          Equipment -> EquipmentState(heroDao, inventoryRepo, content),
+          Equipment -> EquipmentState(heroDao, inventoryRepo, content, Some(itemRepo)),
           Skills    -> SkillsState(heroDao, content),
           Knowledge -> KnowledgeState(heroDao, content),
           Squad -> SquadState(heroDao, content),

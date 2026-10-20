@@ -5,19 +5,22 @@ import io.circe.{Decoder, Encoder, jawn}
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, Choice, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.model.hero.{Equipment, Hero}
-import pangea.generator.item.{FlaskGenerator, MaterialGenerator}
-import pangea.model.item.{BeltSlot, BrewKind, GemBreaking, Item, ItemDetails, ItemType, RoseKind}
+import pangea.generator.item.MaterialGenerator
+import pangea.model.item.{GemBreaking, Item, ItemDetails, ItemType}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
+import pangea.repository.item.ItemRepository
 import pangea.service.state.states.EquipmentState._
-import pangea.service.state.{InventoryFeedback, ItemMenu, QuestSupport, State, UiScene, UserAction}
+import pangea.service.state.{BeltContents, InventoryFeedback, ItemMenu, QuestSupport, State, UiScene, UserAction}
 import zio.{Task, ZIO}
 
 case class EquipmentState(
   heroDao:       HeroDao,
   inventoryRepo: InventoryRepository,
-  content:       SceneContent
+  content:       SceneContent,
+  // Вещи с пояса сохраняются, прежде чем лечь в сумку (см. BeltContents.persist).
+  itemRepo:      Option[ItemRepository] = None
 ) extends State {
 
   private val branch = new Branch(
@@ -148,27 +151,9 @@ case class EquipmentState(
           b.at(idx) match {
             case None => showList(user, renderer)
             case Some(slot) =>
-              val item = slot match {
-                case f: BeltSlot.Flask =>
-                  val fresh = FlaskGenerator.item(f.kind, f.rarity)
-                  Some(fresh.copy(details = fresh.details match {
-                    case d: ItemDetails.Flask => d.copy(charges = f.charges)
-                    case other                => other
-                  }))
-                case d: BeltSlot.Dust => Option.unless(d.spent)(MaterialGenerator.item(d.kind))
-                case b: BeltSlot.Brew => Option.unless(b.spent)(BrewKind.item(b.kind))
-                case h: BeltSlot.HolyWater =>
-                  Option.unless(h.spent)(MaterialGenerator.item(pangea.model.item.MaterialKind.HolyWater))
-                case r: BeltSlot.Rose =>
-                  val fresh = RoseKind.item(r.kind)
-                  Option.unless(r.withered)(fresh.copy(details = fresh.details match {
-                    case d: ItemDetails.Rose => d.copy(charges = r.charges)
-                    case other               => other
-                  }))
-              }
               val freed = heroDao.updateEquipment(user.userId,
                 hero.equipment.copy(belt = belt.copy(details = b.without(idx))))
-              val taken = item match {
+              val taken = BeltContents.persist(itemRepo, hero.id, BeltContents.item(slot).toList).flatMap(_.headOption match {
                 case None =>
                   freed *> renderer.show(user, Screen(content.format("equipment.beltCleared",
                     "name" -> slot.name), Nil))
@@ -178,7 +163,7 @@ case class EquipmentState(
                     _ => freed *> renderer.show(user, Screen(content.format("equipment.beltTaken",
                            "name" -> slot.name), Nil))
                   )
-              }
+              })
               taken *> scene.selectedSlot.fold(showList(user, renderer))(showSlot(user, _, renderer))
           }
         case _ => showList(user, renderer)
@@ -239,26 +224,29 @@ case class EquipmentState(
           renderer.show(user, Screen(content.format("inventory.tooHighLevel",
             "required" -> it.lvl.toString, "current" -> hero.lvl.toString), Nil))
         case Some(it) =>
-          val (newEq, newFight, removed) = InventoryState.equip(hero, it, slot.pairSlot)
+          val done = InventoryState.equipWith(hero, it, slot.pairSlot)
           // Замена, снимающая последний «Тайник», ужмёт сумку — как и при снятии;
-          // двуручное поверх двух одноручных вернёт в сумку на вещь больше.
-          val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
-          InventoryState.equipBlock(inv, capDelta, removed) match {
+          // двуручное поверх двух одноручных вернёт в сумку на вещь больше, пояс
+          // меньше прежнего — то, что в него не поместилось.
+          val capDelta = InventoryState.equipmentStashDelta(hero.equipment, done.equipment, hero.runes.brandedPassives.toSet)
+          InventoryState.equipBlock(inv, capDelta, done.toBag, belt = it.itemType == ItemType.Belt) match {
             case Some(key) => renderer.show(user, Screen(content.format(key, "name" -> it.name), Nil))
             case None =>
-              heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+              heroDao.updateEquipmentAndFightStats(user.userId, done.equipment, done.fightStats) *>
                 inventoryRepo.removeItem(it.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-                ZIO.foreachDiscard(removed)(old => inventoryRepo.addItem(hero.id, old).ignore) *>
+                BeltContents.persist(itemRepo, hero.id, done.spilled).flatMap(spilled =>
+                  ZIO.foreachDiscard(done.removed ++ spilled)(old => inventoryRepo.addItem(hero.id, old).ignore)) *>
                 ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
                 renderer.show(user, Screen(
-                  if (removed.isEmpty)
+                  (if (done.removed.isEmpty)
                     content.format("equipment.wornNow", "name" -> it.name)
                   else
                     content.format("equipment.wornSwapped", "name" -> it.name,
-                      "old" -> InventoryState.removedNames(removed)), Nil)) *>
+                      "old" -> InventoryState.removedNames(done.removed))) +
+                    BeltContents.movedLine(content, done.beltMoved, done.spilled), Nil)) *>
                 // Двенадцатая вещь набора — за собранный набор своё достижение.
                 QuestSupport.grantFullSets(heroDao, content, user,
-                  hero.copy(equipment = newEq, fightStats = newFight), renderer).unit
+                  hero.copy(equipment = done.equipment, fightStats = done.fightStats), renderer).unit
           }
       }
       // Остаёмся в карточке: видно новые характеристики и что ещё есть примерить.
@@ -293,19 +281,38 @@ case class EquipmentState(
              renderer.show(user, Screen(content.text("equipment.slotEmpty"), Nil))
            else if (blockedByStash)
              renderer.show(user, Screen(content.text("equipment.stashBlocked"), Nil))
-           else
-             inventoryRepo.addItem(hero.id, item).foldZIO(
-               _ => renderer.show(user, Screen(content.text("equipment.unequipInventoryFull"), Nil)),
-               _ => {
-                 val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
-                 heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
-                   ZIO.when(capDelta != 0)(
-                     inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
-                   InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id).flatMap(slotsLine =>
-                     renderer.show(user, Screen(
-                       content.format("equipment.unequipped", "name" -> item.name) + "\n" + slotsLine, Nil)))
-               }
-             )
+           else {
+             // Пояс уходит пустым: содержимое — герою, в сумку отдельными вещами.
+             // Места нужно на сам пояс и на всё, что место занимает (пыль невесома).
+             val (bare, contents) =
+               if (item.itemType == ItemType.Belt) BeltContents.strip(item) else (item, Nil)
+             if (!inv.hasRoomFor(1L + contents.count(!_.weightless).toLong))
+               renderer.show(user, Screen(content.text("equipment.unequipInventoryFull"), Nil))
+             else
+               inventoryRepo.addItem(hero.id, bare).foldZIO(
+                 _ => renderer.show(user, Screen(content.text("equipment.unequipInventoryFull"), Nil)),
+                 _ => {
+                   val newFight = InventoryState.applyDelta(hero.fightStats, Item.NoItem, item)
+                   for {
+                     _      <- heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight)
+                     _      <- ZIO.when(capDelta != 0)(
+                                 inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit))
+                     // Пыли сверх сотни горстей не унести — у неё своя строка отказа.
+                     saved  <- BeltContents.persist(itemRepo, hero.id, contents)
+                     lost   <- ZIO.foreach(saved)(it => inventoryRepo.addItem(hero.id, it).either.map(it -> _))
+                                 .map(_.collect { case (it, Left(_)) => InventoryFeedback.refusalLine(content, it) }.distinct)
+                     stripped = if (contents.isEmpty) ""
+                                else "\n" + content.format("equipment.beltStripped",
+                                  "names" -> contents.map(_.name).mkString(", "))
+                     refused  = if (lost.isEmpty) "" else "\n" + lost.mkString("\n")
+                     slotsLine <- InventoryFeedback.freeSlotsLine(inventoryRepo, content, hero.id)
+                     _      <- renderer.show(user, Screen(
+                                 content.format("equipment.unequipped", "name" -> item.name) + stripped + refused +
+                                   "\n" + slotsLine, Nil))
+                   } yield ()
+                 }
+               )
+           }
       res <- showList(user, renderer)
     } yield res
 

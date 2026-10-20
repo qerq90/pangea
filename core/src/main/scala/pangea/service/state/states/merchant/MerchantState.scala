@@ -172,7 +172,7 @@ case class MerchantState(
                   mi: MerchantItem, wear: Boolean, slot: Option[Int]): Task[Unit] =
     for {
       persisted <- itemRepo.persist(hero.id, mi.item)
-      worn      <- if (wear) TakeAndEquip.wear(heroDao, inventoryRepo, user, hero, List(persisted), slot).asSome
+      worn      <- if (wear) TakeAndEquip.wear(heroDao, inventoryRepo, user, hero, List(persisted), slot, Some(itemRepo)).asSome
                    else ZIO.none
       added     <- if (worn.isDefined) ZIO.succeed(true)
                    else inventoryRepo.addItem(hero.id, persisted).as(true).catchAll(_ => ZIO.succeed(false))

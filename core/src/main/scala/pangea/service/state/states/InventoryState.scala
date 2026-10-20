@@ -25,7 +25,7 @@ import pangea.repository.item.ItemRepository
 import pangea.service.state.states.InventoryState._
 import pangea.service.state.states.marisa.MarisaHuntState
 import pangea.service.state.states.murloc.MurlocVillageState
-import pangea.service.state.{HerbLore, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, QuestSupport, SlotChoice, State, UiScene, UserAction}
+import pangea.service.state.{BeltContents, HerbLore, InventoryFeedback, ItemMenu, MarisaQuest, MurlocQuest, NpcQuestLog, QuestSupport, SlotChoice, State, UiScene, UserAction}
 import zio.{Random, Task, ZIO}
 
 case class InventoryState(
@@ -58,6 +58,9 @@ case class InventoryState(
       "CombineRune"       -> Target.Run { (u, _, r) => combineRuneSelected(u, r) },
       "SocketInsert"      -> Target.Run { (u, _, r) => startSocketing(u, r) },
       "BeltPut"           -> Target.Run { (u, _, r) => putOnBelt(u, r) },
+      // Пояс полон: что снять ради новой вещи — и «Назад» на её карточку.
+      "BeltSwap"          -> Target.Run { (u, ua, r) => swapOnBelt(u, ua, r) },
+      "BeltSwapBack"      -> Target.Run { (u, _, r) => backToCard(u, r) },
       "PurseReturn"       -> Target.Run { (u, _,  r) => returnPurse(u, r) },
       "PurseOpen"         -> Target.Run { (u, _,  r) => openPurse(u, r) },
       "BreakGem"          -> Target.Run { (u, _,  r) => offerBreak(u, r) },
@@ -567,25 +570,27 @@ case class InventoryState(
           else if (pairSlot.isEmpty && SlotChoice.needed(hero.equipment, item))
             renderer.show(user, slotChoiceScreen(item, hero.equipment, itemId)).as(true)
           else {
-            val (newEq, newFight, removed) = InventoryState.equip(hero, item, pairSlot)
-            val capDelta = InventoryState.equipmentStashDelta(hero.equipment, newEq, hero.runes.brandedPassives.toSet)
-            InventoryState.equipBlock(inv, capDelta, removed) match {
-              // Замена, снимающая последний «Тайник», или двуручное поверх двух
-              // одноручных переполнят сумку → блокируем.
+            val done     = InventoryState.equipWith(hero, item, pairSlot)
+            val capDelta = InventoryState.equipmentStashDelta(hero.equipment, done.equipment, hero.runes.brandedPassives.toSet)
+            InventoryState.equipBlock(inv, capDelta, done.toBag, belt = item.itemType == ItemType.Belt) match {
+              // Замена, снимающая последний «Тайник», двуручное поверх двух
+              // одноручных или пояс меньше прежнего переполнят сумку → блокируем.
               case Some(key) =>
                 renderer.show(user, Screen(content.format(key, "name" -> item.name), Nil)).as(false)
               case None =>
-                (heroDao.updateEquipmentAndFightStats(user.userId, newEq, newFight) *>
+                (heroDao.updateEquipmentAndFightStats(user.userId, done.equipment, done.fightStats) *>
                   inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
-                  ZIO.foreachDiscard(removed)(old => inventoryRepo.addItem(hero.id, old).ignore) *>
+                  BeltContents.persist(Some(itemRepository), hero.id, done.spilled).flatMap(spilled =>
+                    ZIO.foreachDiscard(done.removed ++ spilled)(old => inventoryRepo.addItem(hero.id, old).ignore)) *>
                   ZIO.when(capDelta != 0)(inventoryRepo.increaseCapacity(hero.id, capDelta).orElse(ZIO.unit)) *>
                   renderer.show(user, Screen(
                     content.format("inventory.equipped",
                       "name" -> item.name,
-                      "old"  -> InventoryState.removedNames(removed)), Nil)) *>
+                      "old"  -> InventoryState.removedNames(done.removed)) +
+                      BeltContents.movedLine(content, done.beltMoved, done.spilled), Nil)) *>
                   // Двенадцатая вещь набора — за собранный набор своё достижение.
                   QuestSupport.grantFullSets(heroDao, content, user,
-                    hero.copy(equipment = newEq, fightStats = newFight), renderer)).as(false)
+                    hero.copy(equipment = done.equipment, fightStats = done.fightStats), renderer)).as(false)
             }
           }
       }
@@ -899,8 +904,8 @@ case class InventoryState(
 
   /** Положить расходник на пояс: фляга — со своими зарядами, пыль — горстью.
     * Ячеек у пояса столько, сколько раньше вмещалось склянок (см.
-    * [[ItemDetails.Belt.capacityFor]]); нет пояса или нет места — вещь остаётся
-    * в сумке. */
+    * [[ItemDetails.Belt.capacityFor]]); нет пояса — вещь остаётся в сумке, нет
+    * места — спрашиваем, что снять ([[beltSwapScreen]]). */
   private def putOnBelt(user: User, renderer: Renderer): Task[StateType] =
     withSelected(user, renderer) { (item, hero) =>
       val belt = hero.equipment.belt
@@ -911,7 +916,7 @@ case class InventoryState(
         case (Some(slot), b: ItemDetails.Belt) =>
           b.put(slot, ItemDetails.Belt.capacityFor(belt.rarity)) match {
             case None =>
-              renderer.show(user, Screen(content.text("inventory.beltFull"), Nil)) *> backToCard(user, renderer)
+              renderer.show(user, beltSwapScreen(slot, b)).as(StateType.Inventory)
             case Some(filled) =>
               inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString)) *>
                 heroDao.updateEquipment(user.userId,
@@ -922,6 +927,64 @@ case class InventoryState(
                 backToCard(user, renderer)
           }
         case _ => showList(user, renderer)
+      }
+    }
+
+  /** Пояс полон: по кнопке на ячейку — что снять ради новой вещи, и «Назад».
+    * Пустая ячейка помнит, чем была полна, — так и подписана. */
+  private def beltSwapScreen(slot: BeltSlot, belt: ItemDetails.Belt): Screen =
+    Screen(content.format("inventory.beltSwapChoice", "name" -> slot.name),
+      belt.slots.zipWithIndex.map { case (s, i) =>
+        Choice(
+          id    = "BeltSwap",
+          label = ItemMenu.truncate(content.format(
+                    if (s.uses > 0) "inventory.beltSwapSlot" else "inventory.beltSwapSlotEmpty", "name" -> s.name)),
+          data  = Map("slot" -> i.toString),
+          row   = Some(i))
+      } :+ content.choice("BeltSwapBack", "common.back").copy(row = Some(belt.slots.size)))
+
+  /** Положить выбранную вещь на пояс вместо ячейки `slot`: снятое уходит в сумку
+    * вещью (пустой ячейке возвращать нечего). Сумке должно хватить места: новая
+    * вещь освобождает своё, снятая занимает; пыли — не больше сотни горстей.
+    * Ячейка успела освободиться — вещь просто ложится на пояс. */
+  private def swapOnBelt(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
+    withSelected(user, renderer) { (item, hero) =>
+      val belt = hero.equipment.belt
+      val cap  = ItemDetails.Belt.capacityFor(belt.rarity)
+      (BeltSlot.of(item), belt.details, payloadField(ua, "slot").flatMap(_.toIntOption)) match {
+        case (Some(_), b: ItemDetails.Belt, _) if belt.itemType == ItemType.Belt && b.slots.sizeIs < cap =>
+          putOnBelt(user, renderer)
+        case (Some(slot), b: ItemDetails.Belt, Some(idx)) if belt.itemType == ItemType.Belt =>
+          b.at(idx) match {
+            case None => backToCard(user, renderer)
+            case Some(old) =>
+              val back = BeltContents.item(old)
+              inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString)).flatMap { inv =>
+                val freeAfter = inv.freeSlots + (if (item.weightless) 0L else 1L)
+                val hoardFull = back.exists(r => r.hoardKey.exists(k =>
+                                  inv.hoardCount(k) - (if (item.hoardKey.contains(k)) 1 else 0) >= Item.HoardLimit))
+                if (back.exists(!_.weightless) && freeAfter < 1L)
+                  renderer.show(user, Screen(content.text("common.swapNoRoom"), Nil)) *> backToCard(user, renderer)
+                else if (hoardFull)
+                  renderer.show(user, Screen(back.map(InventoryFeedback.refusalLine(content, _)).getOrElse(""), Nil)) *>
+                    backToCard(user, renderer)
+                else
+                  for {
+                    // Место есть — теперь и сохраняем снятое (см. BeltContents.persist).
+                    saved <- BeltContents.persist(Some(itemRepository), hero.id, back.toList)
+                    _     <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
+                    _     <- heroDao.updateEquipment(user.userId,
+                               hero.equipment.copy(belt = belt.copy(details = b.updated(idx, slot))))
+                    _     <- ZIO.foreachDiscard(saved)(r => inventoryRepo.addItem(hero.id, r).mapError(e => new Throwable(e.toString)))
+                    _     <- renderer.show(user, Screen(back match {
+                               case Some(r) => content.format("inventory.beltSwapped", "name" -> slot.name, "old" -> r.name)
+                               case None    => content.format("inventory.beltSwappedEmpty", "name" -> slot.name, "old" -> old.name)
+                             }, Nil))
+                    res   <- backToCard(user, renderer)
+                  } yield res
+              }
+          }
+        case _ => backToCard(user, renderer)
       }
     }
 
@@ -1063,23 +1126,44 @@ object InventoryState {
   def ringSlotsFull(eq: Equipment): Boolean =
     eq.firstRing.itemType != ItemType.NoItem && eq.secondRing.itemType != ItemType.NoItem
 
+  /** Итог надевания: снаряжение, боевые статы, снятое (`removed`) и то, что с
+    * прежнего пояса не поместилось в новый (`spilled`, см. [[BeltContents.swap]]);
+    * `beltMoved` — было ли с пояса что перекладывать. В сумку уходит и снятое, и
+    * не поместившееся ([[toBag]]). */
+  final case class Equipped(equipment: Equipment, fightStats: FightStats, removed: List[Item],
+                            spilled: List[Item] = Nil, beltMoved: Boolean = false) {
+    def toBag: List[Item] = removed ++ spilled
+  }
+
   /** Надеть `item`. `pairSlot` — какой из двух парных слотов выбрал игрок:
     * кольцо 1 или 2, правая (1) или левая (2) рука; имеет смысл, когда оба
     * заняты. None — обычное правило слотов: первый свободный, а если свободных
-    * нет, второй (у рук — правая). Возвращает снаряжение, боевые статы и всё,
-    * что ушло в сумку: двуручное снимает оба одноручных разом. */
-  def equip(hero: Hero, item: Item, pairSlot: Option[Int]): (Equipment, FightStats, List[Item]) = {
+    * нет, второй (у рук — правая). Двуручное снимает оба одноручных разом. Пояс
+    * поверх пояса забирает содержимое прежнего, а тот уходит пустым. */
+  def equipWith(hero: Hero, item: Item, pairSlot: Option[Int]): Equipped = {
     val eq = hero.equipment
-    val (newEq, out) = (item.itemType, pairSlot) match {
-      case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), List(eq.firstRing))
-      case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), List(eq.secondRing))
-      case (ItemType.Weapon | ItemType.Shield, hand) => wield(eq, item, hand)
-      case _                        => (withSlot(eq, item), List(equippedIn(eq, item.itemType)))
+    val (newEq, out, belt) = (item.itemType, pairSlot) match {
+      case (ItemType.Ring, Some(1)) => (eq.copy(firstRing = item), List(eq.firstRing), None)
+      case (ItemType.Ring, Some(2)) => (eq.copy(secondRing = item), List(eq.secondRing), None)
+      case (ItemType.Weapon | ItemType.Shield, hand) =>
+        val (held, gone) = wield(eq, item, hand)
+        (held, gone, None)
+      case (ItemType.Belt, _) if eq.belt.itemType != ItemType.NoItem =>
+        val swap = BeltContents.swap(eq.belt, item)
+        (eq.copy(belt = swap.next), List(swap.worn), Some(swap))
+      case _ => (withSlot(eq, item), List(equippedIn(eq, item.itemType)), None)
     }
     val removed  = out.filter(_.itemType != ItemType.NoItem)
     val newFight = removed.foldLeft(applyDelta(hero.fightStats, item, Item.NoItem))((f, old) =>
       applyDelta(f, Item.NoItem, old))
-    (newEq, newFight, removed)
+    Equipped(newEq, newFight, removed, belt.fold(List.empty[Item])(_.spilled), belt.exists(_.moved))
+  }
+
+  /** То же, что [[equipWith]], одним кортежем: снаряжение, статы и всё, что
+    * уходит в сумку. */
+  def equip(hero: Hero, item: Item, pairSlot: Option[Int]): (Equipment, FightStats, List[Item]) = {
+    val done = equipWith(hero, item, pairSlot)
+    (done.equipment, done.fightStats, done.toBag)
   }
 
   /** Оружие или щит в руки. Двуручное встаёт в правую и снимает всё, что было
@@ -1103,13 +1187,14 @@ object InventoryState {
 
   /** Почему надеть нельзя — ключ текста, или None, если можно. Вещь уходит из
     * сумки, снятое возвращается: двуручное поверх двух одноручных кладёт в сумку
-    * на вещь больше, чем забирает, и второму может не найтись места. Замена,
+    * на вещь больше, чем забирает, и второму может не найтись места; так же и
+    * пояс меньше прежнего (`belt`) — с не поместившимся в него. Замена,
     * снимающая последний «Тайник», сумку ужимает. */
-  def equipBlock(inv: Inventory, capDelta: Long, removed: List[Item]): Option[String] = {
+  def equipBlock(inv: Inventory, capDelta: Long, removed: List[Item], belt: Boolean = false): Option[String] = {
     val returning = (removed.size - 1).max(0)
     if (capDelta >= 0 && returning == 0) None
     else if (fitsAfterCapacityChange(inv, capDelta, returning)) None
-    else if (returning > 0) Some("inventory.handsNoRoom")
+    else if (returning > 0) Some(if (belt) "inventory.beltNoRoom" else "inventory.handsNoRoom")
     else Some("equipment.stashBlocked")
   }
 
