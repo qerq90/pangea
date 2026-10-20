@@ -3,6 +3,7 @@ package pangea.service.sender.vk
 import io.circe.syntax.EncoderOps
 import pangea.engine.{Choice, ChoiceColor, Renderer, Screen}
 import pangea.model.user.User
+import pangea.model.vk.Attachment
 import pangea.model.vk.keyboard.{Action => VkAction, Button, ButtonColor, Keyboard}
 import pangea.service.sender.Api
 import zio.Task
@@ -35,7 +36,8 @@ class VkRenderer(api: Api) extends Renderer {
         }
         Some(kb)
       }
-    api.sendMessage(user, screen.text, List.empty, kbOpt)
+    // Картинка — уже загруженное фото из альбома группы: ВК прикрепляет его по ссылке.
+    api.sendMessage(user, screen.text, screen.image.flatMap(Attachment.parse).toList, kbOpt)
   }
 
   private def toButton(choice: Choice): Button = {
