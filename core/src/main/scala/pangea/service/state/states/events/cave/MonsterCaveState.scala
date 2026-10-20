@@ -701,7 +701,9 @@ case class MonsterCaveState(
     }
 
   /** Трава в трещине: как сорванный в поле цветок — что именно сорвано, зависит
-    * от знаний героя. Волков в пещере нет, за спину тут никто не заходит. */
+    * от знаний героя, и по странному цветку можно догадаться о травах так же, как
+    * на поляне (HerbLore.insight). Волков в пещере нет, за спину тут никто не
+    * заходит. */
   private def pickHerb(user: User, scene: CaveScene, renderer: Renderer): Task[StateType] =
     for {
       hero     <- getHero(user)
@@ -710,12 +712,15 @@ case class MonsterCaveState(
       pool      = MaterialKind.herbsOfRank(rank)
       idx      <- Random.nextIntBounded(pool.size)
       lore     <- HerbLore.readLore(heroDao, user.userId)
-      item      = MaterialGenerator.item(HerbLore.recognised(lore, pool(idx)))
+      kind      = HerbLore.recognised(lore, pool(idx))
+      item      = MaterialGenerator.item(kind)
       persisted <- itemRepo.persist(hero.id, item)
       intake    <- ArtifactIntake.accept(artifacts, inventoryRepo, hero.id, persisted)
       where     <- InventoryFeedback.intakeLine(inventoryRepo, content, hero.id, persisted, intake)
       _ <- renderer.show(user, Screen(
              content.format("cave.herb", "flower" -> persisted.name) + "\n" + where, Nil))
+      now <- nowMs
+      _   <- HerbLore.insight(heroDao, inventoryRepo, content, renderer, user, hero, lore, kind, now)
       done = scene.withRoom(scene.at, _.copy(done = true))
       res <- showRoom(user, done, renderer)
     } yield res
