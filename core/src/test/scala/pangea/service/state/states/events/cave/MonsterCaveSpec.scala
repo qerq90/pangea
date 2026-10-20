@@ -12,14 +12,14 @@ import pangea.model.cave.{CaveGenerator, CaveRates, CaveRoom, CaveScene, RoomKin
 import pangea.generator.item.GemGenerator
 import pangea.model.item.{GemKind, ItemType, TrophyKind}
 import pangea.model.squad.{AllyKind, AllyRates, Squad, UndeadForm}
-import pangea.model.hero.Hero
+import pangea.model.hero.{Hero, Knowledge, LoreData}
 import pangea.generator.loot.TreasureHuntGenerator
 import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MapZone, MaterialKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
-import pangea.service.state.UserAction
+import pangea.service.state.{HerbLore, UserAction}
 import pangea.service.state.states.LootState.LootData
 import pangea.test._
 import zio.test.{TestRandom, _}
@@ -416,6 +416,39 @@ object MonsterCaveSpec extends ZIOSpecDefault {
       } yield assertTrue(next == StateType.MonsterCave && said.contains("Вы сорвали")) &&
               assertTrue(inv.snapshot.exists(_.material.isDefined)) &&
               assertTrue(scene.exists(_.rooms(2).done))
+    },
+
+    test("трава в трещине: по странному цветку можно догадаться — о простых травах и, зная их, о редких") {
+      val clever = hero().copy(baseStats = hero().baseStats.copy(int = 40))
+      for {
+        // не знает трав: простой цветок странный, догадка удалась (10 ≤ 40 ÷ 4)
+        t1    <- cave(clever)
+        (s1, d1, _, _, r1) = t1
+        _     <- put(d1, smallCave(kind = RoomKind.Herb).copy(at = 2))
+        _     <- TestRandom.feedInts(50, 0, 10)
+        _     <- s1.action(testUser, tap("CaveSearch"), r1)
+        lore1 <- HerbLore.readLore(d1, userId)
+        said1 <- texts(r1)
+        // знает простые: редкий цветок странный, догадка удалась (5 ≤ 40 ÷ 8)
+        t2    <- cave(clever)
+        (s2, d2, _, _, r2) = t2
+        _     <- d2.writeLoreData(userId, LoreData.empty.learn(Knowledge.FlowersRank1, alone = false).asJson)
+        _     <- put(d2, smallCave(kind = RoomKind.Herb).copy(at = 2))
+        _     <- TestRandom.feedInts(2, 0, 5)
+        _     <- s2.action(testUser, tap("CaveSearch"), r2)
+        lore2 <- HerbLore.readLore(d2, userId)
+        // то же, но бросок мимо (6 > 5) — знания нет
+        t3    <- cave(clever)
+        (s3, d3, _, _, r3) = t3
+        _     <- d3.writeLoreData(userId, LoreData.empty.learn(Knowledge.FlowersRank1, alone = false).asJson)
+        _     <- put(d3, smallCave(kind = RoomKind.Herb).copy(at = 2))
+        _     <- TestRandom.feedInts(2, 0, 6)
+        _     <- s3.action(testUser, tap("CaveSearch"), r3)
+        lore3 <- HerbLore.readLore(d3, userId)
+      } yield assertTrue(lore1.knows(Knowledge.FlowersRank1) && lore1.learnedAlone(Knowledge.FlowersRank1)) &&
+              assertTrue(said1.contains("Вы сорвали") && said1.contains("стал лучше разбираться")) &&
+              assertTrue(lore2.knows(Knowledge.FlowersRank2) && lore2.learnedAlone(Knowledge.FlowersRank2)) &&
+              assertTrue(!lore3.knows(Knowledge.FlowersRank2))
     },
 
     test("у пустых комнат описания разные, но за комнатой закреплено своё") {

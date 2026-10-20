@@ -2,11 +2,12 @@ package pangea.service.state
 
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
+import pangea.engine.{Renderer, SceneContent, Screen}
 import pangea.model.hero.{Hero, Knowledge, LoreData}
 import pangea.model.item.{Item, MaterialKind, QuestItemKind}
-import pangea.model.user.UserId
+import pangea.model.user.{User, UserId}
 import pangea.repository.inventory.InventoryRepository
-import zio.{Task, ZIO}
+import zio.{Random, Task, ZIO}
 
 /** Травы и знания о них — общее для поляны, Густаво и инвентаря: что герой
   * узнаёт в сорванном цветке, почём Густаво берёт травы, как читается трактат. */
@@ -23,10 +24,12 @@ object HerbLore {
   val Treatise1Price: Long = 15000L
   val Treatise2Price: Long = 30000L
 
-  /** Догадаться самому при странном цветке: интеллект ÷ 4 процентов. По книге —
-    * интеллект ÷ 2, и каждая неудача прибавляет к следующему броску ещё 2 %. Не
-    * осилил — книгу можно открыть снова через час. */
+  /** Догадаться самому при странном цветке: о простых травах — интеллект ÷ 4
+    * процентов, о редких — вдвое реже, интеллект ÷ 8. По книге — интеллект ÷ 2, и
+    * каждая неудача прибавляет к следующему броску ещё 2 %. Не осилил — книгу
+    * можно открыть снова через час. */
   val InsightIntDivisor: Int   = 4
+  val InsightRareIntDivisor: Int = 8
   val ReadingIntDivisor: Int   = 2
   val ReadingFailureBonusPct: Int = 2
   val ReadingCooldownMs: Long  = 60L * 60L * 1000L
@@ -77,8 +80,44 @@ object HerbLore {
       _       <- ZIO.when(settled != lore)(writeLore(heroDao, userId, settled))
     } yield (settled, obsolete)
 
-  /** Порог броска (1..100) на догадку по странному цветку. */
-  def insightChance(hero: Hero, nowMs: Long): Long = hero.effectiveBaseStats(nowMs).int / InsightIntDivisor
+  /** О чём можно догадаться по странному цветку: о простых травах, пока их не
+    * знаешь; зная их, — о редких (странным тогда бывает только редкий цветок).
+    * Знаешь всё — догадываться не о чем. */
+  def insightTarget(lore: LoreData): Option[Knowledge] =
+    if (!lore.knows(Knowledge.FlowersRank1)) Some(Knowledge.FlowersRank1)
+    else if (!lore.knows(Knowledge.FlowersRank2)) Some(Knowledge.FlowersRank2)
+    else None
+
+  /** Порог броска (1..100) на догадку по странному цветку: о простых травах —
+    * интеллект ÷ 4, о редких — интеллект ÷ 8. */
+  def insightChance(hero: Hero, nowMs: Long, knowledge: Knowledge = Knowledge.FlowersRank1): Long =
+    hero.effectiveBaseStats(nowMs).int /
+      (if (knowledge == Knowledge.FlowersRank2) InsightRareIntDivisor else InsightIntDivisor)
+
+  /** Догадка по сорванному цветку — на поляне и в пещере одна и та же. Только
+    * странный цветок и только когда есть о чём догадываться (иначе броска нет и
+    * случайное число не тратится). Удача — знание «сам дошёл», купленный трактат о
+    * нём тихо уходит из сумки, игроку — строка. Возвращает знания после. */
+  def insight(heroDao: HeroDao, inventoryRepo: InventoryRepository, content: SceneContent, renderer: Renderer,
+              user: User, hero: Hero, lore: LoreData, kind: MaterialKind, nowMs: Long): Task[LoreData] =
+    insightTarget(lore).filter(_ => kind == MaterialKind.StrangeFlower) match {
+      case None => ZIO.succeed(lore)
+      case Some(knowledge) =>
+        Random.nextIntBetween(1, 101).flatMap { roll =>
+          if (roll > insightChance(hero, nowMs, knowledge)) ZIO.succeed(lore)
+          else {
+            val learned = lore.learn(knowledge, alone = true)
+            for {
+              _       <- writeLore(heroDao, user.userId, learned)
+              // Купленный трактат об этом уходит из сумки тихо — герою о нём не напоминаем.
+              settled <- settleBooks(heroDao, inventoryRepo, user.userId, hero, learned)
+              _       <- renderer.show(user, Screen(
+                           content.text(if (knowledge == Knowledge.FlowersRank2) "knowledge.insightRare" else "knowledge.insight") +
+                             "\n" + content.format("knowledge.gained", "title" -> knowledge.title), Nil))
+            } yield settled._1
+          }
+        }
+    }
 
   /** Порог броска (1..100) на освоение трактата: интеллект ÷ 2 плюс 2 % за каждую
     * прошлую неудачу с этой книгой. */

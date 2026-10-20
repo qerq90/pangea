@@ -6,7 +6,7 @@ import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
 import pangea.generator.item.MaterialGenerator
 import pangea.model.battle.SoloPveBattle
-import pangea.model.hero.{Hero, Knowledge}
+import pangea.model.hero.Hero
 import pangea.model.item.MaterialKind
 import pangea.model.monster.{MiniBoss, Monster, Rarity}
 import pangea.model.schedule.TaskKind
@@ -124,9 +124,9 @@ case class FlowerMeadowState(
             energyLine = if (regained > 0L) "\n" + content.format("flowerMeadow.energy", "energy" -> regained.toString) else ""
             _         <- renderer.show(user, Screen(
                            content.format("flowerMeadow.found", "flower" -> item.name) + energyLine + "\n" + where, Nil))
-            // Странный цветок — шанс самому понять, что к чему (только пока не знаешь простых трав).
-            _         <- ZIO.when(kind == MaterialKind.StrangeFlower && !lore.knows(Knowledge.FlowersRank1))(
-                           insight(user, hero, lore, now, renderer))
+            // Странный цветок — шанс самому понять, что к чему: о простых травах, а
+            // зная их, — о редких, вдвое реже (см. HerbLore.insight).
+            _         <- HerbLore.insight(heroDao, inventoryRepo, content, renderer, user, hero, lore, kind, now)
             left       = s.left - 1
             out <- if (wolf) wolfAmbush(user, hero, s.copy(left = left), renderer)
                    else if (left <= 0)
@@ -163,23 +163,6 @@ case class FlowerMeadowState(
                HerbLore.writeLore(heroDao, user.userId, lore.copy(metWolf = true)))
     } yield StateType.Battle
   }
-
-  /** Бросок на догадку: интеллект ÷ 4 процентов. Удача — знания первого ранга,
-    * сам; купленный трактат об этом становится лишним и тихо уходит из сумки. */
-  private def insight(user: User, hero: Hero, lore: pangea.model.hero.LoreData, now: Long, renderer: Renderer): Task[Unit] =
-    Random.nextIntBetween(1, 101).flatMap { roll =>
-      ZIO.when(roll <= HerbLore.insightChance(hero, now)) {
-        val learned = lore.learn(Knowledge.FlowersRank1, alone = true)
-        for {
-          _ <- HerbLore.writeLore(heroDao, user.userId, learned)
-          // Купленный трактат об этом уходит из сумки тихо — герою о нём не напоминаем.
-          _ <- HerbLore.settleBooks(heroDao, inventoryRepo, user.userId, hero, learned)
-          _ <- renderer.show(user, Screen(
-                 content.text("flowerMeadow.insight") + "\n" +
-                   content.format("knowledge.gained", "title" -> Knowledge.FlowersRank1.title), Nil))
-        } yield ()
-      }.unit
-    }
 
   private def leave(user: User, renderer: Renderer): Task[StateType] =
     scheduler.cancel(user.userId, TaskKind.FlowerMeadow) *>
