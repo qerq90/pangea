@@ -146,7 +146,7 @@ object RoseBattleSpec extends ZIOSpecDefault {
         hero2   <- dao.getHeroByUserId(userId).map(_.get)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
       } yield assertTrue(slots(hero2) == List(BeltSlot.Rose(RoseKind.Yellow, RoseRates.Charges - 1))) &&
-              assertTrue(screens.contains("уже брались за пояс"))
+              assertTrue(screens.contains("бонусное действие уже потрачено"))
     },
 
     test("последнее раскрытие осыпает цветок — ячейка пустеет, но помнит его") {

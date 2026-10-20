@@ -203,9 +203,11 @@ object ArenaSpec extends ZIOSpecDefault {
           code    = codeOf(fights)
           _      <- state.action(two, typed(code), r)
           _      <- state.action(one, tap("ArenaPoke"), r)
-          // Блок тратит только разброс умения, удар — попадание и разброс.
+          // Блок — бонусное действие (только разброс умения), ход после него свой:
+          // удар — попадание и разброс.
+          _      <- ZIO.when(block)(TestRandom.feedLongs(100L) *> battle.action(one, tap("Skill_301"), r))
           _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
-          _      <- battle.action(one, tap(if (block) "Skill_301" else "Attack"), r)
+          _      <- battle.action(one, tap("Attack"), r)
           raised  = fights.snapshot.head.sideOf(oneId).exists(_.shieldUp)
           _      <- battle.action(two, tap("ArenaPoke"), r)
           _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
@@ -239,6 +241,9 @@ object ArenaSpec extends ZIOSpecDefault {
           _      <- state.action(one, tap("ArenaPoke"), r)
           _      <- TestRandom.feedLongs(100L)                    // разброс умения
           _      <- battle.action(one, tap("Skill_401"), r)
+          // стойка — бонусное действие: ход свой, бьём
+          _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+          _      <- battle.action(one, tap("Attack"), r)
           ready   = fights.snapshot.head.sideOf(oneId).exists(_.counterUp)
           _      <- battle.action(two, tap("ArenaPoke"), r)
           // бросок соперника; дальше — разброс ответа или его удара
@@ -251,10 +256,10 @@ object ArenaSpec extends ZIOSpecDefault {
         missed <- round(foeHitRoll = 1)
         hit    <- round(foeHitRoll = 60)
       } yield assertTrue(missed._1) &&
-              // промах: по мне не попали, а ответ он получил
-              assertTrue(missed._2 == 0L && missed._3 > 0L) &&
+              // промах: по мне не попали, а ответ он получил — сверх моего удара
+              assertTrue(missed._2 == 0L && missed._3 > hit._3) &&
               // попал: ответа нет
-              assertTrue(hit._2 > 0L && hit._3 == 0L)
+              assertTrue(hit._2 > 0L)
     },
 
     test("в чужой ход кнопки убраны с экрана, а не просто не работают") {
@@ -372,7 +377,7 @@ object ArenaSpec extends ZIOSpecDefault {
         me     <- heroOf(dao, oneId)
       } yield assertTrue(fight1.exists(_.heroBattleState.buffs.exists(_.atk > 0L))) &&
               assertTrue(fight1.exists(_.consumableUsedThisRound)) &&
-              assertTrue(said.contains("уже брались за пояс")) &&
+              assertTrue(said.contains("бонусное действие уже потрачено")) &&
               // пыль в ячейке не тронута — ход не прошёл
               assertTrue(me.equipment.belt.details == ItemDetails.Belt(List(
                 BeltSlot.Brew(BrewKind.FuryTincture, spent = true), BeltSlot.Dust(MaterialKind.RubyDust))))

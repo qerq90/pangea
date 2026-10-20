@@ -31,7 +31,9 @@ case class SoloPveBattle(
   monsterCurrentHp:    Long,
   monsterCurrentArmor: Long,
   heroBattleState:     HeroBattleState = HeroBattleState.empty,
-  consumableUsedThisRound: Boolean = false, // за раунд можно выпить либо флягу, либо зелье пояса
+  // Бонусное действие раунда потрачено: глоток или бросок с пояса, Блок или
+  // Контрудар — что-то одно за раунд (если «Быстрые руки» не вернут его).
+  consumableUsedThisRound: Boolean = false,
   monsterMarked:       Boolean = false,
   /** Активный моб поднят некромантом: раса своя, природа могильная. */
   monsterUndead:       Boolean = false,
@@ -106,7 +108,14 @@ case class SoloPveBattle(
   monsterCounterPower: Long = 0L,
   // На арене: кто это из бойцов соперника стоит в полях — сам он
   // (`SoloPveBattle.ArenaHeroUnit`) или его союзник (см. MonsterSlot.arenaUnit).
-  monsterArenaUnit: Option[Int] = None
+  monsterArenaUnit: Option[Int] = None,
+  // Раунд героя ещё идёт: прошлое его действие раунд не закончило (пояс, Блок,
+  // Контрудар). Щит и стойку прошлого раунда снимает только первое действие
+  // нового (см. BattleState.resolveLoaded).
+  midRound: Boolean = false,
+  // Умения, взятые в этом раунде бонусным действием (Блок, Контрудар): в конце
+  // раунда их перезарядка не тикает — как у умения, которым раунд кончился.
+  bonusSlots: List[Long] = Nil
 ) {
 
   // ── Группа ────────────────────────────────────────────────────────────────
@@ -616,9 +625,10 @@ case class SoloPveBattle(
     // а расходник в руках её не блокирует.
     divineUsedThisRound      = false,
     skillSlots              = skillSlots.map(s =>
-      if (skipSlots.contains(s.itemId)) s
+      if (skipSlots.contains(s.itemId) || bonusSlots.contains(s.itemId)) s
       else s.copy(cooldown = (s.cooldown - 1).max(0))
     ),
+    bonusSlots              = Nil,
     // Временные стихийные эффекты тикают вместе с бафами: буст Воздуха и %-дебаф
     // защиты цели (комбо Молния+Холод) живут ограниченное число ходов.
     effects = effects.copy(
@@ -764,13 +774,15 @@ object SoloPveBattle {
       heroCounterReady    <- c.getOrElse[Boolean]("heroCounterReady")(false)
       monsterCounterPower <- c.getOrElse[Long]("monsterCounterPower")(0L)
       monsterArenaUnit    <- c.getOrElse[Option[Int]]("monsterArenaUnit")(None)
+      midRound            <- c.getOrElse[Boolean]("midRound")(false)
+      bonusSlots          <- c.getOrElse[List[Long]]("bonusSlots")(Nil)
     } yield SoloPveBattle(monsterLvl, monsterRace, monsterRarity, monsterStats,
                          monsterCurrentHp, monsterCurrentArmor, heroBattleState, consumableUsed, monsterMarked,
                          monsterUndead,
                          skillSlots, effects, toughnessUsed, bossKind, bossTurn, charges, revives, firstSkill, monsterEnergy, group,
                          story, customName, divineUsed, escapesAfter, noKin, arena, minionLvl, bossTaken,
                          noFlee, lootLevel, holyWater, heroBlockPct, monsterBlockPct,
-                         heroCounterReady, monsterCounterPower, monsterArenaUnit)
+                         heroCounterReady, monsterCounterPower, monsterArenaUnit, midRound, bonusSlots)
 
   /** Номер самого соперника среди «мобов» зеркала арены; его союзники — от
     * единицы (см. `ArenaSide.allies`). */

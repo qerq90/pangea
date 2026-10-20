@@ -421,7 +421,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(charges(first).contains(2)) &&      // выпит один заряд
               assertTrue(charges(second).contains(1)) &&     // и ещё один в том же раунде
               assertTrue(charges(third).contains(1)) &&      // третий не прошёл
-              assertTrue(log.contains("уже брались за пояс")) &&
+              assertTrue(log.contains("бонусное действие уже потрачено")) &&
               // лечили каждый раз по-настоящему
               assertTrue(second.fightStats.hp > first.fightStats.hp)
     },
@@ -527,7 +527,7 @@ object BattleStateSpec extends ZIOSpecDefault {
       } yield assertTrue(result == StateType.Battle) &&
               assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
               assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("уже брались за пояс")))
+              assertTrue(screens.exists(_.text.contains("бонусное действие уже потрачено")))
     },
 
     test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
