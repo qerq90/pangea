@@ -3,7 +3,7 @@ package pangea.service.state.states.hero
 import java.util.concurrent.TimeUnit
 import pangea.dao.hero.HeroDao
 import pangea.engine.{Branch, ChoiceColor, Renderer, SceneContent, Screen, Target}
-import pangea.model.hero.Hero
+import pangea.model.hero.{Achievement, Hero}
 import pangea.model.state.StateType
 import pangea.model.user.User
 import pangea.repository.artifact.ArtifactRepository
@@ -31,6 +31,7 @@ case class HeroStatsState(
       "OpenFriendCode" -> Target.Goto(StateType.FriendCode),
       "OpenTraumas"  -> Target.Run { (user, _, renderer) => showTraumasScreen(user, renderer).as(StateType.HeroStats) },
       "OpenQuests"   -> Target.Run { (user, _, renderer) => showQuests(user, renderer).as(StateType.HeroStats) },
+      "OpenAchievements" -> Target.Run { (user, _, renderer) => showAchievements(user, renderer).as(StateType.HeroStats) },
       "Upgrade"      -> Target.Run { (user, _, renderer) => showUpgradeScreen(user, renderer).as(StateType.HeroStats) },
       "UpgradeStr"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "str") },
       "UpgradeVit"   -> Target.Run { (user, _, renderer) => applyUpgrade(user, renderer, "vit") },
@@ -80,6 +81,18 @@ case class HeroStatsState(
       keeps <- hasStorage(hero)
       text  <- QuestJournal.text(heroDao, content, hero, now)
       _     <- renderer.show(user, Screen(text,
+                 buildStatsScreen(hero, now, blessed = false, instantRests = 0, keeps).choices))
+    } yield ()
+
+  /** «Достижения»: счёт полученных из всех, полученные — с тем, что дают, а
+    * неполученные скрыты: только их число. Кнопки «Персонажа» остаются, как у
+    * журнала заданий. */
+  private def showAchievements(user: User, renderer: Renderer): Task[Unit] =
+    for {
+      now   <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
+      hero  <- getHero(user)
+      keeps <- hasStorage(hero)
+      _     <- renderer.show(user, Screen(HeroStatsState.achievementsText(content, hero),
                  buildStatsScreen(hero, now, blessed = false, instantRests = 0, keeps).choices))
     } yield ()
 
@@ -170,8 +183,10 @@ case class HeroStatsState(
       Option.when(hero.upgradePoints > 0)(
         content.choice("Upgrade", "heroStats.upgrade").copy(color = ChoiceColor.Positive, row = Some(1))),
       Some(content.choice("OpenQuests", "heroStats.quests").copy(row = Some(2))),
+      Some(content.choice("OpenAchievements", "heroStats.achievements").copy(row = Some(2))),
       Some(content.choice("OpenFriendCode", "heroStats.friendCode").copy(row = Some(2))),
-      Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(2)))
+      // «Назад» — отдельным последним рядом: в третьем ряду ему уже тесно.
+      Some(content.choice("Back", "heroStats.leave").copy(color = ChoiceColor.Negative, row = Some(3)))
     ).flatten
     Screen(hero.getInfo(nowMs, blessed, instantRests) + traumaLine, choices)
   }
@@ -180,4 +195,22 @@ case class HeroStatsState(
     heroDao.getHeroByUserId(user.userId)
       .flatMap(ZIO.fromOption(_))
       .orElseFail(new Throwable(s"No hero found for user ${user.userId}"))
+}
+
+object HeroStatsState {
+
+  /** Текст экрана достижений: «получено из всех», полученные (✅) — в порядке,
+    * в каком заведены, с тем, что дают. Неполученные скрыты: ни названия, ни
+    * бонуса — только сколько их ещё. */
+  def achievementsText(content: SceneContent, hero: Hero): String = {
+    val got    = Achievement.values.toList.filter(hero.hasAchievement)
+    val hidden = Achievement.values.size - got.size
+    val lines  =
+      if (got.isEmpty) List(content.text("heroStats.achievementsNone"))
+      else got.map(a => content.format("heroStats.achievementLine", "title" -> a.title, "bonus" -> a.bonusLine))
+    val locked = Option.when(hidden > 0)(content.format("heroStats.achievementsHidden", "count" -> hidden.toString))
+    content.format("heroStats.achievementsHeader",
+      "got" -> got.size.toString, "total" -> Achievement.values.size.toString) + "\n\n" +
+      (lines ++ locked.toList).mkString("\n")
+  }
 }
