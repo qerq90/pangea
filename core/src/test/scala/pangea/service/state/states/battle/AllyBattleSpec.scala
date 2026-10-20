@@ -470,6 +470,62 @@ object AllyBattleSpec extends ZIOSpecDefault {
       assertTrue(down.copy(monsterRace = Race.Construct.entryName).leaveDownedHero._2.isEmpty)
     },
 
+    test("герой лежит, последний моб стоит там, где союзнику его не достать: он подходит сам, и бой идёт дальше") {
+      // Как в бою из жалобы: герой лежит на 1, союзник на 2, орк на 4 — напротив
+      // него никого, и бить друг друга им нечем. Раньше так и стояли без конца.
+      val h    = hero(hp = 0L, allies = List(ally(pos = 2)))
+      val b0   = group(h, 1000L)
+      val down = b0.copy(noKin = true, group = b0.group.copy(heroDown = true, activePos = 4))
+      for {
+        t <- makeState(h, down)
+        (state, dao, r) = t
+        // раунд 1: бить некого — орк (два места за раунд) встаёт напротив союзника
+        _  <- state.action(testUser, tap("SquadTick"), r)
+        b1 <- battleOf(dao)
+        // раунд 2: союзник бьёт его — попал, прока нет
+        _  <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        _  <- state.action(testUser, tap("SquadTick"), r)
+        b2 <- battleOf(dao)
+      } yield assertTrue(b1.group.activePos == 2 && b1.monsterCurrentHp == 1000L) &&
+              assertTrue(b1.group.allyAt(2).exists(_.alive)) &&
+              assertTrue(b2.monsterCurrentHp < 1000L && b2.group.heroDown)
+    },
+
+    test("герой лежит: 📌 сходит и без него, союзник сам идёт к врагу, а после победы встаёт на своё место") {
+      // Пригвождённый орк напротив лежачего героя: с места не сойти, к союзнику
+      // не уйти. Союзник на 3 до него не достаёт. Раньше 📌 так и не сходил —
+      // раунды шли без героя, а сроки эффектов тикали только в его ход.
+      val h      = hero(hp = 0L, allies = List(ally(pos = 3)))
+      val b0     = group(h, 1000L)
+      // В бой отряд встаёт без пустот (Squad.compact) — здесь союзник через
+      // место от героя, как в отряде.
+      val pinned = b0.copy(noKin = true, effects = b0.effects.copy(monsterRootedTurns = 2),
+                     group = b0.group.copy(heroDown = true,
+                       allies = b0.group.allies.map(_.copy(position = 3, home = 3))))
+      for {
+        t <- makeState(h, pinned)
+        (state, dao, r) = t
+        // раунд 1: бить некому; срок 📌 убывает; союзник шагает к орку — на 2
+        _       <- state.action(testUser, tap("SquadTick"), r)
+        b1      <- battleOf(dao)
+        // раунд 2: союзник бьёт орка (попал, прока нет); 📌 сошёл — орк встаёт напротив союзника
+        _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        _       <- state.action(testUser, tap("SquadTick"), r)
+        b2      <- battleOf(dao)
+        // раунд 3: орка почти нет — союзник добивает; герой приходит в себя
+        _       <- dao.writeActiveBattle(userId, b2.copy(monsterCurrentHp = 1L).asJson)
+        _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
+        out     <- state.action(testUser, tap("SquadTick"), r)
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+      } yield assertTrue(b1.effects.monsterRootedTurns == 1 && b1.group.activePos == 1) &&
+              assertTrue(b1.group.allyAt(2).exists(_.stood.contains(3))) &&
+              assertTrue(b2.effects.monsterRootedTurns == 0 && b2.group.activePos == 2) &&
+              assertTrue(b2.monsterCurrentHp < 1000L) &&
+              assertTrue(out == StateType.Loot && updated.fightStats.hp == BattleState.DownReviveHp) &&
+              // в отряде союзник там же, где стоял до того, как пошёл сам
+              assertTrue(updated.squad.allyAt(3).exists(_.kind == AllyKind.Human) && updated.squad.allyAt(2).isEmpty)
+    },
+
     test("герой лежит, а последний союзник уходит по свитку — смерть, отложенная до этого момента") {
       val h = hero(hp = 1L, allies = List(ally(pos = 2, hp = Some(1L), armor = Some(0L))))
       for {

@@ -29,7 +29,11 @@ final case class BattleAlly(
     * стоит напротив него: приёмы мобов и минибоссов бьют того, кто перед ними. */
   poison:     Option[Poison]   = None,
   bleed:      Option[Bleed]    = None,
-  burn:       Option[Burn]     = None
+  burn:       Option[Burn]     = None,
+  /** Где он стоял, пока не пошёл на врага сам — герой лежал, а бить было
+    * некого (см. `SoloPveBattle.squadAdvance`). Это не расстановка героя:
+    * после боя он встаёт обратно, на своё место в строю. */
+  stood:      Option[Int]      = None
 ) {
   /** Нежить ли он: миазмы её лечат, а живых — травят. */
   def isUndead: Boolean = kind.race == Race.Undead
@@ -38,8 +42,9 @@ final case class BattleAlly(
   def hpPct: Long    = if (stats.hp <= 0L) 0L else hp * 100L / stats.hp
   def armorPct: Long = if (stats.armor <= 0L) 0L else armor * 100L / stats.armor
 
-  /** Обратно в отряд — с тем, что осталось. */
-  def toAlly: Ally = Ally(kind, position, hp, armor, energy, undead = undead)
+  /** Обратно в отряд — с тем, что осталось, и на своё место: куда он сам ушёл
+    * за врагом, пока герой лежал, там его не оставляем. */
+  def toAlly: Ally = Ally(kind, stood.getOrElse(position), hp, armor, energy, undead = undead)
 }
 
 object BattleAlly {
@@ -85,7 +90,8 @@ object BattleAlly {
       poison   <- c.getOrElse[Option[Poison]]("poison")(None)
       bleed    <- c.getOrElse[Option[Bleed]]("bleed")(None)
       burn     <- c.getOrElse[Option[Burn]]("burn")(None)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn)
+      stood    <- c.getOrElse[Option[Int]]("stood")(None)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn, stood)
 }
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее

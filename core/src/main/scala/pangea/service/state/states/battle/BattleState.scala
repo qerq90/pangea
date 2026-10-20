@@ -864,7 +864,9 @@ case class BattleState(
     }
 
   /** Герой делает шаг на соседнее место. Стоял там союзник — они меняются
-    * местами: сам союзник с места не сходит никогда, его переставляет герой.
+    * местами: пока герой на ногах, сам союзник с места не сходит, его
+    * переставляет герой (лежит — отряд идёт на врага сам, см.
+    * `SoloPveBattle.squadAdvance`).
     * Стоял напротив моб — герой теперь с ним в паре, и тот отвечает; ход на
     * этом кончается. */
   private def moveTurn(target: Option[Int])(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
@@ -885,7 +887,8 @@ case class BattleState(
     }
 
   /** Раунд без героя (он обнулён): союзники бьют, мобы отвечают им, конец
-    * раунда — как обычно, но героя никто не трогает. Мобов не осталось — герой
+    * раунда — как обычно, но героя никто не трогает, а кому некого бить, идёт
+    * к врагу: мобы к отряду, отряд к мобам. Мобов не осталось — герой
     * приходит в себя с [[BattleState.DownReviveHp]] HP и забирает победу;
     * не осталось союзников — смерть, отложенная до этого момента; иначе —
     * следующий раунд по таймеру. */
@@ -903,13 +906,21 @@ case class BattleState(
           allied   <- allyPhase(TurnResult(hero, walked,
                         Vector(turnsAwayLine(walked, turnedTo)).filter(_.nonEmpty), Outcome.Continue))
           promoted  = promoteAfterKill(allied)
-          sided    <- sideMobsPhase(promoted, now)
+          // Раунд идёт и без героя: временное на поле сходит за свои раунды, как
+          // в его ход (tickBuffs). Иначе пригвождённый (📌) так и стоял бы
+          // пригвождённым до конца боя, а дым не рассеивался бы вовсе.
+          ticked    = promoted.copy(battle = promoted.battle.tickBuffs())
+          sided    <- sideMobsPhase(ticked, now)
           promoted2 = promoteAfterKill(sided)
           // Охрану доломали союзники, пока герой лежал, — башням некого
           // прикрывать, и бой кончается так же, как если бы её добил он сам.
           abandoned = towersAlone(promoted2)
           ended    <- endRound(battle, abandoned)
-          res       = ended
+          // Конец раунда: кому некого бить, идёт к врагу — мобы к отряду, отряд
+          // к мобам. Каждый раунд, даже если в этом никто никого не задел: иначе
+          // такой раунд ничем бы не кончался, и следующий тоже — бой стоял бы.
+          res       = if (ended.outcome != Outcome.Continue) ended
+                      else ended.copy(battle = ended.battle.closeInOnSquad._1.squadAdvance._1)
           state    <- res.outcome match {
             case Outcome.Victory =>
               val revived = res.hero.copy(fightStats = res.hero.fightStats.copy(hp = BattleState.DownReviveHp))
@@ -4315,23 +4326,17 @@ case class BattleState(
         res.copy(battle = b, outcome = outcome, log = res.log ++ log)
       }
 
-  /** Кого бьёт союзник: напротив, затем моб в паре с героем, затем сосед. */
-  private def allyTarget(a: BattleAlly, battle: SoloPveBattle): Option[Int] =
-    List(a.position, battle.group.heroPos, a.position - 1, a.position + 1).distinct
-      .filter(p => math.abs(p - a.position) <= GroupState.Reach)
-      .find(p => battle.monsterAt(p).exists(_.alive))
-
   private def allyTurn(a: BattleAlly, battle: SoloPveBattle): Task[(SoloPveBattle, Vector[String])] =
     for {
       // 1) обычная атака по цели
-      struck <- allyTarget(a, battle) match {
+      struck <- battle.allyTarget(a) match {
         case None      => ZIO.succeed(AllyBlow(battle, None, 0L, slew = false))
         case Some(pos) => allyHits(a, battle, pos, a.stats.atk, crushing = false)
       }
       b1 = struck.battle
       // 2) случайное умение из тех, что по карману и к месту
       a1 = b1.group.allies.find(_.kind == a.kind).getOrElse(a)
-      target2 = allyTarget(a1, b1)
+      target2 = b1.allyTarget(a1)
       // Крыса умений не знает — только кусает (см. AllyKind.usesSkills).
       // Удар попадает в выбор только вместе с целью — без неё его и нет.
       options = if (!a1.kind.usesSkills) Nil else AllySkill.values.toList.flatMap {

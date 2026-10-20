@@ -410,6 +410,8 @@ case class SoloPveBattle(
     * эльф-стрелок останавливается, как только достаёт героя. Не двигаются: те, кто уже достаёт героя, кто занят союзником
     * напротив, и моб в полях (за него — `pullFree`). На место героя никто не
     * шагает: к пустой паре ведёт `pullFree`. В дыму герой не виден — все стоят.
+    * Герой лежит — к нему тоже никто не идёт: мобы идут к отряду, а отряд к
+    * ним ([[closeInOnSquad]], [[squadAdvance]]).
     * Возвращает бой и кто куда шагнул. */
   def closeIn: (SoloPveBattle, List[(MonsterSlot, Int)]) =
     if (effects.heroInSmoke || group.heroDown) (this, Nil)
@@ -469,6 +471,102 @@ case class SoloPveBattle(
       }
     }
 
+  /** Герой лежит — лежачего мобы не добивают, и им остаётся отряд. Бьют они
+    * только того, кто стоит прямо напротив (см. `BattleState.freeTurnOf`), так
+    * что к нему надо подойти: кто не стоит напротив живого союзника, идёт к
+    * ближайшему союзнику, напротив которого пусто, — по месту за раунд, орки по
+    * два (см. [[RaceTactics]]); ближние к своей цели первыми, чтобы следом
+    * двинулись и дальние. Свободных союзников нет — стоят: место освободится,
+    * тогда и пойдут. Сооружения, пригвождённые и кто держит позицию
+    * (Некромант) стоят — к ним идёт отряд ([[squadAdvance]]). В дыму не видно
+    * никого — все стоят.
+    *
+    * Раньше, пока герой лежал, не шагал никто, и моб, до которого союзнику не
+    * дотянуться, стоял так до конца времён: бой шёл пустыми раундами.
+    * Возвращает бой и кто куда шагнул. */
+  def closeInOnSquad: (SoloPveBattle, List[(MonsterSlot, Int)]) =
+    if (!group.heroDown || effects.heroInSmoke) (this, Nil)
+    else {
+      val walkers = ((group.activePos, activeSlot) :: group.entries).filter { case (pos, slot) =>
+        slot.alive && walks(slot) && !group.allyAt(pos).exists(_.alive)
+      }
+      val order = walkers.sortBy { case (pos, _) => freeAllyNear(pos).fold(Int.MaxValue)(g => math.abs(g - pos)) }
+      // Место моба за чужие шаги не меняется: на занятое место никто не встаёт.
+      order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), (from, slot)) =>
+        b.freeAllyNear(from).fold((b, moved)) { goal =>
+          @annotation.tailrec
+          def walk(at: Int, left: Int): Int =
+            if (left <= 0 || at == goal) at
+            else b.stepToward(at, goal) match {
+              case None       => at
+              case Some(next) => walk(next, left - 1)
+            }
+          val to = walk(from, RaceTactics.speed(Race.withName(slot.race)))
+          if (to == from) (b, moved) else (b.relocate(from, to), moved :+ (slot -> to))
+        }
+      }
+    }
+
+  /** Ближайший к месту `pos` живой союзник, напротив которого пусто (при равном
+    * расстоянии — тот, что ближе к началу строя): к нему и идёт моб, пока герой
+    * лежит. Таких нет — None. */
+  private def freeAllyNear(pos: Int): Option[Int] =
+    group.allies.collect { case a if a.alive && !group.hasMonster(a.position) => a.position }
+      .sortBy(p => (math.abs(p - pos), p)).headOption
+
+  /** Моб с места `from` встаёт на место `to`: активный — в полях, прочие — в строю. */
+  private def relocate(from: Int, to: Int): SoloPveBattle =
+    if (from == group.activePos) copy(group = group.copy(activePos = to))
+    else copy(group = group.copy(places = group.places.updated(group.idxOf(from), to)))
+
+  /** Кого бьёт союзник: моба напротив, затем того, что в паре с героем, затем
+    * соседа — в досягаемости [[GroupState.Reach]]. Бить некого — None. */
+  def allyTarget(a: BattleAlly): Option[Int] =
+    List(a.position, group.heroPos, a.position - 1, a.position + 1).distinct
+      .filter(p => math.abs(p - a.position) <= GroupState.Reach)
+      .find(p => monsterAt(p).exists(_.alive))
+
+  /** Герой лежит — отряд идёт на врага сам: кому бить некого (см.
+    * [[allyTarget]]), шагает к ближайшему живому мобу по своему ряду — на
+    * позицию за раунд, пока тот не окажется в досягаемости. Лежащего героя
+    * переступает; на место другого союзника не встаёт — подождёт. За свою
+    * сторону ([[Formation.HeroPlaces]]) не заходит. Ближние к своей цели идут
+    * первыми, чтобы следом двинулись и дальние. Сошедший с места запоминает,
+    * где стоял (`BattleAlly.stood`): после боя он встаёт туда же.
+    *
+    * Иначе тот, кто сам к отряду не идёт, — Некромант за спинами своих, — стоял
+    * бы вне досягаемости до конца боя. Возвращает бой и кто куда шагнул. */
+  def squadAdvance: (SoloPveBattle, List[(BattleAlly, Int)]) =
+    if (!group.heroDown) (this, Nil)
+    else {
+      val idle  = group.allies.filter(a => a.alive && allyTarget(a).isEmpty)
+      val order = idle.sortBy(a => mobNear(a.position).fold(Int.MaxValue)(p => math.abs(p - a.position)))
+      // Позиция союзника за чужие шаги не меняется: на занятую никто не встаёт.
+      order.foldLeft((this, List.empty[(BattleAlly, Int)])) { case ((b, moved), a) =>
+        b.mobNear(a.position).flatMap(b.allyStepToward(a.position, _)).fold((b, moved)) { next =>
+          (b.copy(group = b.group.updateAlly(a.position)(x =>
+             x.copy(position = next, stood = x.stood.orElse(Some(x.position))))),
+           moved :+ (a -> next))
+        }
+      }
+    }
+
+  /** Ближайшее к позиции `pos` место, где стоит живой моб (при равном
+    * расстоянии — ближе к началу строя). Мобов нет — None. */
+  private def mobNear(pos: Int): Option[Int] =
+    ((group.activePos, activeSlot) :: group.entries).collect { case (p, s) if s.alive => p }
+      .sortBy(p => (math.abs(p - pos), p)).headOption
+
+  /** Куда шагнёт союзник с позиции `pos` к мобу на месте `goal`: на соседнюю
+    * позицию в его сторону, а лежит там герой — через него. Там союзник или
+    * край своей стороны — None. */
+  private def allyStepToward(pos: Int, goal: Int): Option[Int] = {
+    val dir  = if (goal > pos) 1 else -1
+    val near = pos + dir
+    val next = if (near == group.heroPos) near + dir else near
+    Option.when(next >= 1 && next <= Formation.HeroPlaces && group.allyAt(next).isEmpty)(next)
+  }
+
   /** Куда шагнёт моб с места `pos` в сторону героя.
     *
     * Обычно на соседнее место, если оно свободно. Стоит там сооружение —
@@ -478,8 +576,13 @@ case class SoloPveBattle(
     * разбирает охрану в одиночку.
     *
     * Живого моба так не перешагнуть: за ним очередь, и она движется сама. */
-  def stepTowardsHero(pos: Int): Option[Int] = {
-    val step = if (pos > group.heroPos) -1 else 1
+  def stepTowardsHero(pos: Int): Option[Int] = stepToward(pos, group.heroPos)
+
+  /** Куда шагнёт моб с места `pos` в сторону места `goal` — по тем же правилам,
+    * что и к герою ([[stepTowardsHero]]): пока герой лежит, мобы так идут к
+    * отряду ([[closeInOnSquad]]). */
+  def stepToward(pos: Int, goal: Int): Option[Int] = {
+    val step = if (pos > goal) -1 else 1
     @annotation.tailrec
     def walk(at: Int): Option[Int] = {
       val next = at + step
