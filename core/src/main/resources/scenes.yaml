@@ -2129,6 +2129,10 @@ equipment:
 
 heroStats:
   quests: "📜 Задания"
+  # Достижения: счёт и список — полученные ✅, остальные 🔒, у каждого — что даёт.
+  achievements: "🏆 Достижения"
+  achievementsHeader: "🏆 Достижения: получено {got} из {total}"
+  achievementLine: "{mark} {title} — {bonus}"
   inventory: "Рюкзак"
   bag: "Инвентарь"
   friendCode: "🎟 Код друга"
