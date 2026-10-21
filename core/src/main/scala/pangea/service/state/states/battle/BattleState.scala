@@ -196,12 +196,14 @@ case class BattleState(
       // Союзники бьют после ответа активного моба; добили активного — снова
       // продвигаем следующего к герою.
       allied  <- allyPhase(promoted)
-      promoted2 = promoteAfterKill(allied)
+      // Добил союзник — Джо встаёт так же, как от удара героя.
+      promoted2 = promoteAfterKill(joeRises(allied))
       sided   <- sideMobsPhase(promoted2, now)
       // Арена: раны на чужих бойцах тикают в конце хода того, кто их наложил.
       wounded  = arenaWounds(sided)
-      // Активный вне пары мог истечь ранами на своём ходу — тогда следующий.
-      promoted3 = promoteAfterKill(wounded)
+      // Активный вне пары мог истечь ранами на своём ходу — тогда следующий
+      // (а Джо — встаёт).
+      promoted3 = promoteAfterKill(joeRises(wounded))
       // Аура держит всё поле: нежить крепнет, живые чахнут. Добитых ею разбираем
       // тем же порядком, что павших от ран.
       // Раны союзников тикают там же, где и прочие: после всех ходов раунда.
@@ -886,9 +888,10 @@ case class BattleState(
         closeTurn(TurnResult(hero, moved, Vector(line), Outcome.Continue), nowMs, Set.empty)
     }
 
-  /** Раунд без героя (он обнулён): союзники бьют, мобы отвечают им, конец
-    * раунда — как обычно, но героя никто не трогает, а кому некого бить, идёт
-    * к врагу: мобы к отряду, отряд к мобам. Мобов не осталось — герой
+  /** Раунд без героя (он обнулён): союзники бьют, мобы отвечают им — ударом и
+    * умениями, минибоссы идут по своему кругу; раны тикают, аура держит поле,
+    * Гнилой Джо встаёт. Конец раунда — как обычно, но героя никто не трогает, а
+    * кому некого бить, идёт к врагу: мобы к отряду, отряд к мобам. Мобов не осталось — герой
     * приходит в себя с [[BattleState.DownReviveHp]] HP и забирает победу;
     * не осталось союзников — смерть, отложенная до этого момента; иначе —
     * следующий раунд по таймеру. */
@@ -905,16 +908,23 @@ case class BattleState(
           (walked, turnedTo) = moved
           allied   <- allyPhase(TurnResult(hero, walked,
                         Vector(turnsAwayLine(walked, turnedTo)).filter(_.nonEmpty), Outcome.Continue))
-          promoted  = promoteAfterKill(allied)
+          // Гнилой Джо встаёт, кто бы его ни добил: союзник — тоже.
+          promoted  = promoteAfterKill(joeRises(allied))
           // Раунд идёт и без героя: временное на поле сходит за свои раунды, как
           // в его ход (tickBuffs). Иначе пригвождённый (📌) так и стоял бы
           // пригвождённым до конца боя, а дым не рассеивался бы вовсе.
           ticked    = promoted.copy(battle = promoted.battle.tickBuffs())
           sided    <- sideMobsPhase(ticked, now)
-          promoted2 = promoteAfterKill(sided)
+          // Истёк ранами на своём ходу — тоже смерть, и от неё Джо тоже встаёт.
+          promoted2 = promoteAfterKill(joeRises(sided))
+          // Дальше — как в обычном раунде: раны на союзниках тикают, аура держит
+          // поле. Свою ауру лежачий не держит — держать её нечем; чужая (миазмы
+          // Некроманта) работает как всегда.
+          allyTicked = tickAllyEffects(promoted2)
+          fogged     = promoteAfterKill(auraTick(allyTicked, on = false))
           // Охрану доломали союзники, пока герой лежал, — башням некого
           // прикрывать, и бой кончается так же, как если бы её добил он сам.
-          abandoned = towersAlone(promoted2)
+          abandoned = towersAlone(fogged)
           ended    <- endRound(battle, abandoned)
           // Конец раунда: кому некого бить, идёт к врагу — мобы к отряду, отряд
           // к мобам. Каждый раунд, даже если в этом никто никого не задел: иначе
@@ -4237,7 +4247,10 @@ case class BattleState(
 
     // ── Герой ─────────────────────────────────────────────────────────────────
     val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
-    val heroSign   = if (calms && res.battle.effects.heroMiasmaCalm > 0) 0 else aura.sign(heroNature)
+    // Лежачего аура не трогает — ни лечит, ни жжёт: встанет он, когда отряд
+    // отобьётся, а до тех пор его здоровье — ноль.
+    val heroSign   = if (res.battle.group.heroDown || (calms && res.battle.effects.heroMiasmaCalm > 0)) 0
+                     else aura.sign(heroNature)
     val maxHp      = res.hero.effectiveMaxHp(0L)
     val heroHp     = heroSign match {
       // Лечение не опускает: текущее HP выше потолка аура не срезает.
@@ -4633,16 +4646,21 @@ case class BattleState(
       (h1, sideTraumaLine) = sideTrauma
       log1 = log0 ++ sideTraumaLine.toVector
       // 2) умение: раненому соседу — лечение, себе — что по карману, герою — урон
-      //    (минибосс вне пары идёт по своему кругу)
+      //    (минибосс вне пары идёт по своему кругу). Герой пал прямо сейчас —
+      //    мобы замирают; лежит с прошлого раунда — колдуют по отряду, как и бьют
+      //    его (см. sideMobsPhase). Раньше у лежачего ноль HP глушил умения всем.
       casted <-
-        if (smoke || h1.fightStats.hp <= 0 || t1.monsterCurrentHp <= 0 || t1.effects.monsterSkillBlockedTurns > 0)
+        if (smoke || (h1.fightStats.hp <= 0 && !battle.group.heroDown) || t1.monsterCurrentHp <= 0 ||
+            t1.effects.monsterSkillBlockedTurns > 0)
           ZIO.succeed((h1, t1, battle, Vector.empty[String]))
         else allyAid(h1, t1, battle, pos, nowMs).flatMap {
           case Some((t2, b2, line)) => ZIO.succeed((h1, t2, b2, Vector(line)))
           case None =>
             // Кто держит позицию (Некромант), колдует в `quietPhase`, где бы ни
             // стоял: здесь ему ход не достаётся, иначе за раунд вышло бы два.
-            val holdsOwn = t1.boss.exists(_.holdsPosition)
+            // Герой лежит — его хода нет, и тот, что в полях боя, колдует здесь.
+            val holdsOwn = t1.boss.exists(_.holdsPosition) &&
+                             !(battle.group.heroDown && pos == battle.group.activePos)
             // Минибосс, который дерётся в строю, идёт по своему кругу и не
             // доставая героя: зов крыс и объединение — про строй, а не про
             // героя, и ждать свободного места напротив ему незачем. Прикрыли его
