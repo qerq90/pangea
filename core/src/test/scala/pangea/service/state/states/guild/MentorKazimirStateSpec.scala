@@ -78,6 +78,33 @@ object MentorKazimirStateSpec extends ZIOSpecDefault {
               assertTrue(pick.choices.filter(_.id == "BrandItem").map(_.data("id")) == List("1", "2"))
     },
 
+    test("«Назад» после выбора руны ведёт к выбору рун, на ту же страницу, — и отказ после выбора вещи тоже") {
+      val items = List(weapon(1L, Skill.CunningStrike), helmet(4L, PassiveKind.Healer))
+      for {
+        t <- make(hero(rep = 0L), items)
+        (state, _, _, r) = t
+        // список боевых рун: кнопка руны помнит страницу списка
+        _    <- state.action(testUser, tap("BrandList", "kind" -> "a", "p" -> "0"), r)
+        list <- r.sentScreens.map(_.last)
+        // руну выбрали со второй страницы — «Назад» к боевым рунам, на вторую
+        _    <- state.action(testUser, tap("BrandRune", "k" -> cunning.key, "p" -> "0", "rp" -> "1"), r)
+        pick <- r.sentScreens.map(_.last)
+        // выбрали вещь, а репутации нет — отказ, и «Назад» туда же
+        _    <- state.action(testUser, tap("BrandItem", "k" -> cunning.key, "id" -> "1", "rp" -> "1"), r)
+        nope <- r.sentScreens.map(_.last)
+        // понимание: «Назад» из выбора вещи — к списку рун, а не в меню понимания
+        _    <- state.action(testUser, tap("DeepenRune", "k" -> healer.key, "p" -> "0", "rp" -> "0"), r)
+        deep <- r.sentScreens.map(_.last)
+      } yield assertTrue(list.choices.find(_.id == "BrandRune").exists(_.data.get("rp").contains("0"))) &&
+              assertTrue(pick.choices.find(_.id == "BrandList").exists(_.data == Map("kind" -> "a", "p" -> "1"))) &&
+              assertTrue(!pick.choices.exists(_.id == "Brand")) &&
+              assertTrue(pick.choices.filter(_.id == "BrandItem").forall(_.data.get("rp").contains("1"))) &&
+              assertTrue(nope.text.contains("репутации")) &&
+              assertTrue(nope.choices.map(c => (c.id, c.data)) == List(("BrandList", Map("kind" -> "a", "p" -> "1")))) &&
+              assertTrue(deep.choices.find(_.id == "DeepenList").exists(_.data == Map("p" -> "0"))) &&
+              assertTrue(!deep.choices.exists(_.id == "Deepen"))
+    },
+
     test("клеймо: вещь сгорает, репутация уходит, руна на теле, в бою — своя кнопка; повторно — «уже на тебе»") {
       for {
         t <- make(hero(rep = 600L), List(weapon(1L, Skill.CunningStrike), weapon(2L, Skill.CunningStrike)))

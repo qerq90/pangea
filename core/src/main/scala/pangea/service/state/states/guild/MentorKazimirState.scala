@@ -146,7 +146,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
           val text  = s"${rune.label}\n\n" +
             content.text(if (rune.isActive) "kazimir.brand.pickActive" else "kazimir.brand.pickPassive") + "\n\n" +
             content.format("kazimir.brand.cost", "cost" -> hero.runes.nextCost.toString)
-          renderer.show(user, itemList(text, with_, page, rune, "BrandItem", "BrandRune", "Brand")).as(StateType.MentorKazimir)
+          renderer.show(user, itemList(text, with_, page, rune, "BrandItem", "BrandRune", brandBack(rune, ua), runePage(ua)))
+            .as(StateType.MentorKazimir)
       }
     } yield res
 
@@ -159,10 +160,12 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
         case (Some(rune), Some(item)) if Rune.of(item).contains(rune) =>
           val r    = hero.runes
           val cost = r.nextCost
-          if (r.isBranded(rune)) say(user, renderer, content.text("kazimir.brand.already"))
-          else if (!r.hasRoomFor(rune)) say(user, renderer, content.text("kazimir.brand.noRoom"))
+          // Отказ — «Назад» к выбору руны: выбрать другую можно сразу.
+          val back = brandBack(rune, ua)
+          if (r.isBranded(rune)) say(user, renderer, content.text("kazimir.brand.already"), back)
+          else if (!r.hasRoomFor(rune)) say(user, renderer, content.text("kazimir.brand.noRoom"), back)
           else if (hero.guildReputation < cost)
-            say(user, renderer, content.format("kazimir.brand.noReputation", "cost" -> cost.toString, "have" -> hero.guildReputation.toString))
+            say(user, renderer, content.format("kazimir.brand.noReputation", "cost" -> cost.toString, "have" -> hero.guildReputation.toString), back)
           else for {
             _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
             _ <- heroDao.updateGuildReputation(user.userId, hero.guildReputation - cost)
@@ -173,9 +176,15 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
             _ <- renderer.show(user, Screen(content.text(if (rune.isActive) "kazimir.brand.doneActive" else "kazimir.brand.donePassive"), Nil))
             s <- brandMenu(user, renderer)
           } yield s
-        case _ => say(user, renderer, content.text("kazimir.itemGone"))
+        case (rune, _) =>
+          say(user, renderer, content.text("kazimir.itemGone"), rune.fold(MenuBack)(brandBack(_, ua)))
       }
     } yield res
+
+  /** Куда «Назад» из выбора вещи под клеймо: к списку рун того же вида, на ту
+    * страницу, с которой руну выбрали. */
+  private def brandBack(rune: Rune, ua: UserAction): Back =
+    Back("BrandList", Map("kind" -> (if (rune.isActive) "a" else "p"), "p" -> runePage(ua)))
 
   // ── Переклеймовать ──────────────────────────────────────────────────────────
 
@@ -212,7 +221,7 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
           for {
             inv  <- inventoryRepo.get(hero.id).mapError(e => new Throwable(e.toString))
             fits  = !losesStash || InventoryState.fitsAfterCapacityChange(inv, -stash.ExtraSlots, 0)
-            s    <- if (!fits) say(user, renderer, content.text("kazimir.rebrand.bagFull"))
+            s    <- if (!fits) say(user, renderer, content.text("kazimir.rebrand.bagFull"), Back("Rebrand"))
                     else for {
                       _ <- heroDao.updateRunes(user.userId, hero.runes.unbrand(rune))
                       _ <- ZIO.when(losesStash)(inventoryRepo.increaseCapacity(hero.id, -stash.ExtraSlots).mapError(e => new Throwable(e.toString)))
@@ -253,7 +262,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
           val text  = content.format("kazimir.deepen.rune", "name" -> rune.label,
             "n" -> hero.runes.understandingOf(rune).toString, "max" -> Rune.cap(hero.lvl).toString) + "\n\n" +
             content.text("kazimir.deepen.pickItem")
-          renderer.show(user, itemList(text, with_, page, rune, "DeepenItem", "DeepenRune", "Deepen")).as(StateType.MentorKazimir)
+          renderer.show(user, itemList(text, with_, page, rune, "DeepenItem", "DeepenRune", deepenBack(ua), runePage(ua)))
+            .as(StateType.MentorKazimir)
       }
     } yield res
 
@@ -265,7 +275,8 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
         case (Some(rune), Some(item)) if Rune.of(item).contains(rune) =>
           val cap = Rune.cap(hero.lvl)
           val (updated, gained) = hero.runes.deepen(rune, Rune.pointsOf(item), cap)
-          if (gained == 0L) say(user, renderer, content.format("kazimir.deepen.atCap", "name" -> rune.label, "max" -> cap.toString))
+          if (gained == 0L)
+            say(user, renderer, content.format("kazimir.deepen.atCap", "name" -> rune.label, "max" -> cap.toString), deepenBack(ua))
           else for {
             _ <- inventoryRepo.removeItem(item.id, hero.id).mapError(e => new Throwable(e.toString))
             _ <- heroDao.updateRunes(user.userId, updated)
@@ -273,9 +284,13 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
                    "n" -> updated.understandingOf(rune).toString, "gain" -> gained.toString), Nil))
             s <- deepenRune(user, ua, renderer)
           } yield s
-        case _ => say(user, renderer, content.text("kazimir.itemGone"))
+        case _ => say(user, renderer, content.text("kazimir.itemGone"), deepenBack(ua))
       }
     } yield res
+
+  /** Куда «Назад» из выбора вещи для понимания: к списку рун, на ту страницу,
+    * с которой руну выбрали. */
+  private def deepenBack(ua: UserAction): Back = Back("DeepenList", Map("p" -> runePage(ua)))
 
   /** Что сгорит по «Сдать всё»: вещи с рунами разрешённых редкостей, по каждой
     * руне — не больше, чем влезает в потолок понимания (сначала те, что дают
@@ -417,38 +432,49 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
 
   // ── Общее ───────────────────────────────────────────────────────────────────
 
-  /** Список рун кнопками по страницам: кнопка руны несёт её ключ, навигация — вид и страницу. */
+  /** Список рун кнопками по страницам: кнопка руны несёт её ключ и страницу
+    * списка (`rp`) — по ней «Назад» из выбора вещи вернёт сюда же; навигация —
+    * вид и страницу. */
   private def runeList(text: String, runes: List[Rune], page: Int, pick: String, self: String,
                        selfData: Map[String, String], back: String): Screen = {
     val (pageRunes, totalPages, p) = ItemMenu.page(runes, page)
     val buttons = pageRunes.zipWithIndex.map { case (rune, i) =>
-      Choice(pick, ItemMenu.truncate(rune.label), data = Map("k" -> rune.key, "p" -> "0"), row = Some(i))
+      Choice(pick, ItemMenu.truncate(rune.label), data = Map("k" -> rune.key, "p" -> "0", "rp" -> p.toString), row = Some(i))
     }
     val body = if (runes.isEmpty) text + "\n\n" + content.text("kazimir.noRunes") else text
-    Screen(body, buttons ++ nav(self, selfData, p, totalPages, back))
+    Screen(body, buttons ++ nav(self, selfData, p, totalPages, Back(back)))
   }
 
-  /** Вещи с руной кнопками по страницам. */
-  private def itemList(text: String, items: List[Item], page: Int, rune: Rune, pick: String, self: String, back: String): Screen = {
+  /** Вещи с руной кнопками по страницам. `rp` — страница списка рун, с которой
+    * пришли: её несут и вещи, и листание, чтобы «Назад» из отказа или отсюда
+    * вернул к выбору руны, а не в меню. */
+  private def itemList(text: String, items: List[Item], page: Int, rune: Rune, pick: String, self: String,
+                       back: Back, rp: String): Screen = {
     val (pageItems, totalPages, p) = ItemMenu.page(items, page)
+    val from    = Map("k" -> rune.key, "rp" -> rp)
     val buttons = pageItems.zipWithIndex.map { case (item, i) =>
-      Choice(pick, ItemMenu.itemButtonLabel(item), data = Map("k" -> rune.key, "id" -> item.id.toString), row = Some(i))
+      Choice(pick, ItemMenu.itemButtonLabel(item), data = from + ("id" -> item.id.toString), row = Some(i))
     }
     val body = if (items.isEmpty) text + "\n\n" + content.text("kazimir.noItems") else text
-    Screen(body, buttons ++ nav(self, Map("k" -> rune.key), p, totalPages, back))
+    Screen(body, buttons ++ nav(self, from, p, totalPages, back))
   }
 
-  private def nav(self: String, data: Map[String, String], page: Int, totalPages: Int, back: String): List[Choice] = {
+  private def nav(self: String, data: Map[String, String], page: Int, totalPages: Int, back: Back): List[Choice] = {
     val row = ItemMenu.NavRow
     List(
-      Some(content.choice(back, "kazimir.back").copy(row = Some(row))),
+      Some(content.choice(back.action, "kazimir.back").copy(data = back.data, row = Some(row))),
       Option.when(page > 0)(Choice(self, content.text("common.prev"), data = data + ("p" -> (page - 1).toString), row = Some(row))),
       Option.when(page < totalPages - 1)(Choice(self, content.text("common.next"), data = data + ("p" -> (page + 1).toString), row = Some(row)))
     ).flatten
   }
 
-  private def say(user: User, renderer: Renderer, text: String): Task[StateType] =
-    renderer.show(user, Screen(text, List(content.choice("KazimirMenu", "kazimir.back")))).as(StateType.MentorKazimir)
+  /** Сообщение с одной кнопкой «Назад» — туда, откуда пришли (по умолчанию в меню). */
+  private def say(user: User, renderer: Renderer, text: String, back: Back = MenuBack): Task[StateType] =
+    renderer.show(user, Screen(text, List(content.choice(back.action, "kazimir.back").copy(data = back.data))))
+      .as(StateType.MentorKazimir)
+
+  /** Страница списка рун, с которой выбрали руну. */
+  private def runePage(ua: UserAction): String = payload(ua, "rp").getOrElse("0")
 
   /** Руны, встречающиеся на вещах, — по одному разу, по алфавиту. */
   private def runesIn(items: List[Item]): List[Rune] = items.flatMap(Rune.of).distinct.sortBy(_.label)
@@ -467,6 +493,12 @@ case class MentorKazimirState(heroDao: HeroDao, inventoryRepo: InventoryReposito
 }
 
 object MentorKazimirState {
+
+  /** Куда ведёт «Назад»: действие и его данные (вид рун, страница). */
+  final case class Back(action: String, data: Map[String, String] = Map.empty)
+
+  /** «Назад» в меню Казимира. */
+  val MenuBack: Back = Back("KazimirMenu")
 
   /** Сколько имени в гильдии даёт Казимир за первую прочитанную плиту. */
   val QuestReputation: Long = 50L
