@@ -58,7 +58,10 @@ object BossCycleSpec extends ZIOSpecDefault {
       group = base.group.copy(originRace = Some(Race.Orc.entryName)))
   }
 
-  private def round(h: Hero, battle: SoloPveBattle, at: Int, seed: Long) =
+  private def round(h: Hero, battle: SoloPveBattle, at: Int, seed: Long) = act(h, battle, attack(at), seed)
+
+  /** Ход героя любым действием. */
+  private def act(h: Hero, battle: SoloPveBattle, action: UserAction, seed: Long) =
     for {
       dao      <- TestHeroDao.withHero(userId, h)
       _        <- dao.writeActiveBattle(userId, battle.asJson)
@@ -66,7 +69,7 @@ object BossCycleSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
       state     = BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content)
       _        <- TestRandom.setSeed(seed)
-      _        <- state.action(testUser, attack(at), renderer)
+      _        <- state.action(testUser, action, renderer)
       after    <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
       hurt     <- dao.getHeroByUserId(userId).map(_.get)
       log      <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
@@ -92,6 +95,17 @@ object BossCycleSpec extends ZIOSpecDefault {
     TestRandom.feedInts(List.fill(10)(100): _*) *> TestRandom.feedLongs(List.fill(10)(100L): _*)
 
   private def allyOf(b: SoloPveBattle) = b.group.allies.headOption
+
+  /** Герой на 1 в паре с крепким охранником, минибосс — в строю на втором. */
+  private def withBossInLine(h: Hero, boss: MiniBoss): SoloPveBattle = {
+    val lvl   = boss.bossLvl(h.lvl)
+    val guard = Monster(0L, lvl, Race.Orc, MobRarity.Common,
+                  FightStats(atk = 1, hp = 100000000L, armor = 0, defence = 0, evasion = 0, accuracy = 1, energy = 0))
+    val mob   = Monster(0L, lvl, boss.race, MobRarity.Legendary, boss.stats(lvl), customName = Some(boss.monsterName))
+    val base  = SoloPveBattle.fromGroup(List(guard, mob), h, List(0L, boss.stats(lvl).energy))
+    base.copy(noKin = true, minionLvl = 20L,
+      group = base.group.copy(others = base.group.others.map(_.copy(boss = Some(boss.entryName)))))
+  }
 
   /** Союзник, который переживёт удар минибосса: статы наёмника для этого малы. */
   private def tough(b: SoloPveBattle): SoloPveBattle =
@@ -250,6 +264,54 @@ object BossCycleSpec extends ZIOSpecDefault {
               assertTrue(out == StateType.Battle) &&
               assertTrue(log.contains("Гнилой Джо отказывается умирать")) &&
               assertTrue(after.exists(a => a.bossRevives == 1 && a.monsterCurrentHp > 0L))
+    },
+
+    test("предел Крысиного короля держит и удары союзников: больше пятой части запаса за раунд он не теряет") {
+      val h    = hero(behindAlly)
+      val base = tough(bossOne(MiniBoss.RatKing, h, turn = 1))
+      // союзник бьёт так, что без предела короля бы не стало
+      val b    = base.copy(group = base.group.copy(allies = base.group.allies.map(a =>
+                   a.copy(stats = a.stats.copy(atk = 100000000L)))))
+      val cap  = b.monsterStats.hp * MiniBoss.RatKing.RoundDamageCapPct / 100L
+      for {
+        t <- squadRound(h, b, seed = 13L, feed = sureHits)
+        (out, after, _) = t
+      } yield assertTrue(out == StateType.Battle) &&
+              assertTrue(after.exists(a => a.monsterCurrentHp > 0L && b.monsterCurrentHp - a.monsterCurrentHp <= cap))
+    },
+
+    test("минибосс в строю, а не в паре, ходит по-настоящему: король зовёт крыс, и они встают в строй") {
+      // Герой на 1 в паре с охранником, Крысиный король — в строю на втором.
+      // Раньше его ход шёл во временном бою: писк был, а крыс не прибавлялось.
+      val h     = hero(Squad())
+      val king  = MiniBoss.RatKing
+      val b     = withBossInLine(h, king)
+      for {
+        t <- act(h, b, UserAction("", Some("""{"action":"Wait"}""")), seed = 13L)
+        (after, _, log) = t
+      } yield assertTrue(b.group.paired && b.group.others.size == 1 && b.boss.isEmpty) &&
+              assertTrue(log.contains("Крысиный писк разносится по окрестностям")) &&
+              assertTrue(after.group.others.size > 1) &&
+              assertTrue(after.bossTurn == 1) &&
+              assertTrue(after.group.places.size == after.group.others.size) &&
+              assertTrue(after.group.places.distinct.size == after.group.places.size)
+    },
+
+    test("Некромант в строю, а не в паре, колдует свой круг: павшая нежить встаёт") {
+      // Раньше он колдовал только в ход героя и только стоя в полях боя — в
+      // строю молчал весь бой.
+      val h      = hero(Squad())
+      val necro  = MiniBoss.Necromancer
+      val base   = withBossInLine(h, necro)
+      val fallen = SlainMonster(base.monsterLvl, Race.Orc.entryName, MobRarity.Common.entryName,
+                     marked = false, name = "Орк", undead = true)
+      val b      = base.copy(group = base.group.copy(slain = List(fallen)))
+      for {
+        t <- act(h, b, UserAction("", Some("""{"action":"Wait"}""")), seed = 13L)
+        (after, _, log) = t
+      } yield assertTrue(log.contains("павшая нежить встаёт снова")) &&
+              assertTrue(after.group.others.size == 2 && after.group.slain.isEmpty) &&
+              assertTrue(after.bossTurn == 1)
     },
 
     test("Некромант за союзником берёт свой ход один раз за раунд") {

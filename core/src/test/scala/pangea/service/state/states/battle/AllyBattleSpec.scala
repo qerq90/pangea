@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{BattleAlly, Poison, SoloPveBattle}
+import pangea.model.battle.{BattleAlly, Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
@@ -479,14 +479,14 @@ object AllyBattleSpec extends ZIOSpecDefault {
       for {
         t <- makeState(h, down)
         (state, dao, r) = t
-        // раунд 1: бить некого — орк (два места за раунд) встаёт напротив союзника
+        // раунд 1: бить некого — орк идёт к союзнику и встаёт, как только достанет
         _  <- state.action(testUser, tap("SquadTick"), r)
         b1 <- battleOf(dao)
-        // раунд 2: союзник бьёт его — попал, прока нет
+        // раунд 2: союзник бьёт его как соседа — попал, прока нет
         _  <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
         _  <- state.action(testUser, tap("SquadTick"), r)
         b2 <- battleOf(dao)
-      } yield assertTrue(b1.group.activePos == 2 && b1.monsterCurrentHp == 1000L) &&
+      } yield assertTrue(b1.group.activePos == 3 && b1.monsterCurrentHp == 1000L) &&
               assertTrue(b1.group.allyAt(2).exists(_.alive)) &&
               assertTrue(b2.monsterCurrentHp < 1000L && b2.group.heroDown)
     },
@@ -508,7 +508,8 @@ object AllyBattleSpec extends ZIOSpecDefault {
         // раунд 1: бить некому; срок 📌 убывает; союзник шагает к орку — на 2
         _       <- state.action(testUser, tap("SquadTick"), r)
         b1      <- battleOf(dao)
-        // раунд 2: союзник бьёт орка (попал, прока нет); 📌 сошёл — орк встаёт напротив союзника
+        // раунд 2: союзник бьёт орка (попал, прока нет); 📌 сошёл, но орку идти
+        // незачем — союзник рядом, и он бьёт его с места
         _       <- TestRandom.feedInts(60, 99) *> TestRandom.feedLongs(100L)
         _       <- state.action(testUser, tap("SquadTick"), r)
         b2      <- battleOf(dao)
@@ -519,11 +520,104 @@ object AllyBattleSpec extends ZIOSpecDefault {
         updated <- dao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(b1.effects.monsterRootedTurns == 1 && b1.group.activePos == 1) &&
               assertTrue(b1.group.allyAt(2).exists(_.stood.contains(3))) &&
-              assertTrue(b2.effects.monsterRootedTurns == 0 && b2.group.activePos == 2) &&
+              assertTrue(b2.effects.monsterRootedTurns == 0 && b2.group.activePos == 1) &&
               assertTrue(b2.monsterCurrentHp < 1000L) &&
               assertTrue(out == StateType.Loot && updated.fightStats.hp == BattleState.DownReviveHp) &&
               // в отряде союзник там же, где стоял до того, как пошёл сам
               assertTrue(updated.squad.allyAt(3).exists(_.kind == AllyKind.Human) && updated.squad.allyAt(2).isEmpty)
+    },
+
+    test("герой лежит, а приговорённый дотерпел свои раунды — он уходит, герой приходит в себя без добычи") {
+      // Раньше уход проверялся только после хода героя: пока герой лежал,
+      // приговорённый стоял до конца.
+      val h    = hero(hp = 0L, allies = List(ally(pos = 2)))
+      val b0   = group(h, 1000L)
+      val down = b0.copy(noKin = true, escapesAfter = 3, group = b0.group.copy(heroDown = true, round = 3))
+      for {
+        t <- makeState(h, down)
+        (state, dao, r) = t
+        out     <- state.action(testUser, tap("SquadTick"), r)
+        left    <- dao.readActiveBattle(userId)
+        updated <- dao.getHeroByUserId(userId).map(_.get)
+        said    <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(out == StateType.Dungeon && left.isEmpty) &&
+              assertTrue(updated.fightStats.hp == BattleState.DownReviveHp) &&
+              assertTrue(said.contains("больше не ждёт") && said.contains("враг ушёл, и вы приходите в себя"))
+    },
+
+    test("моб бьёт союзника и сбоку, как героя: напротив никого, героя не достать — бьёт союзника рядом") {
+      // Герой на 1 в паре со своим мобом, союзник на 3, орк на 4: напротив орка
+      // пусто, до героя ему не дотянуться — бьёт союзника сбоку. Раньше стоял.
+      val h  = hero(allies = List(ally(pos = 2)))
+      val b0 = group(h, 1000L, 1000L)
+      val b  = b0.copy(noKin = true, group = b0.group.copy(places = List(4),
+                 allies = b0.group.allies.map(_.copy(position = 3, home = 3))))
+      for {
+        t <- makeState(h, b)
+        (state, _, r) = t
+        _    <- TestRandom.setSeed(7L)
+        _    <- state.action(testUser, aimed("Attack", 1), r)
+        said <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(said.contains("бьёт Йорген Кремень") || said.contains("промахивается по Йорген Кремень"))
+    },
+
+    test("герой лежит: эльф-стрелок бьёт союзника за три места и ближе не подходит") {
+      val h    = hero(hp = 0L, allies = List(ally(pos = 2)))
+      val elf  = Monster(0L, lvl, Race.Elf, Rarity.Common,
+                   FightStats(atk = 20L, hp = 1000L, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      val b0   = SoloPveBattle.fromGroup(List(elf), h, Nil)
+      val down = b0.copy(noKin = true, group = b0.group.copy(heroDown = true, activePos = 5))
+      for {
+        t <- makeState(h, down)
+        (state, dao, r) = t
+        _    <- TestRandom.setSeed(7L)
+        _    <- state.action(testUser, tap("SquadTick"), r)
+        b1   <- battleOf(dao)
+        said <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(said.contains("бьёт Йорген Кремень") || said.contains("промахивается по Йорген Кремень")) &&
+              assertTrue(b1.group.activePos == 5)
+    },
+
+    test("удар моба по союзнику — со всем, что достаётся герою: холод сковывает, пламя его растапливает, яд остаётся") {
+      val h = hero(hp = 0L, allies = List(ally(pos = 2)))
+      def mob(race: Race): Monster = Monster(0L, lvl, race, Rarity.Common,
+        FightStats(atk = 20L, hp = 100000L, armor = 0, defence = 0, evasion = 0, accuracy = 9999, energy = 0))
+      // Моб стоит напротив союзника; герой лежит.
+      def facing(race: Race, prep: BattleAlly => BattleAlly = identity): SoloPveBattle = {
+        val b0 = SoloPveBattle.fromGroup(List(mob(race)), h, Nil)
+        b0.copy(noKin = true, group = b0.group.copy(heroDown = true, activePos = 2, allies = b0.group.allies.map(prep)))
+      }
+      // Броски: союзник попал (50), без прока (99); моб попал (100), стихия сработала (1).
+      val rolls = TestRandom.feedInts(50, 99, 100, 1) *> TestRandom.feedLongs(100L, 100L)
+      for {
+        // Гном бьёт холодом: союзник скован, в строю у него знак холода.
+        t1     <- makeState(h, facing(Race.Gnome))
+        (s1, d1, r1) = t1
+        _      <- rolls
+        _      <- s1.action(testUser, tap("SquadTick"), r1)
+        cold   <- battleOf(d1)
+        said1  <- r1.sentScreens.map(_.map(_.text).mkString("\n"))
+        // Демон бьёт огнём по скованному: лёд тает, огонь не занимается.
+        t2     <- makeState(h, facing(Race.Demon, _.copy(coldCut = Element.Cold.DefenceReductionCut)))
+        (s2, d2, r2) = t2
+        _      <- rolls
+        _      <- s2.action(testUser, tap("SquadTick"), r2)
+        thawed <- battleOf(d2)
+        said2  <- r2.sentScreens.map(_.map(_.text).mkString("\n"))
+        // Мурлок бьёт отравленным оружием: удар дошёл до HP — в ране яд.
+        t3     <- makeState(h, facing(Race.Murloc, _.copy(armor = 0L)))
+        (s3, d3, r3) = t3
+        _      <- TestRandom.feedInts(50, 99, 100) *> TestRandom.feedLongs(100L, 100L)
+        _      <- s3.action(testUser, tap("SquadTick"), r3)
+        venom  <- battleOf(d3)
+        said3  <- r3.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(cold.group.allyAt(2).exists(_.coldCut == Element.Cold.DefenceReductionCut)) &&
+              assertTrue(said1.contains("Йорген Кремень: морозный удар сковывает")) &&
+              assertTrue(said1.contains("% ❄️ VS")) &&
+              assertTrue(thawed.group.allyAt(2).exists(a => a.coldCut == 0 && a.burn.isEmpty)) &&
+              assertTrue(said2.contains("Йорген Кремень: пламя растопило лёд")) &&
+              assertTrue(venom.group.allyAt(2).exists(_.poison.isDefined)) &&
+              assertTrue(said3.contains("Йорген Кремень: отравленное оружие оставило яд"))
     },
 
     test("герой лежит, а последний союзник уходит по свитку — смерть, отложенная до этого момента") {

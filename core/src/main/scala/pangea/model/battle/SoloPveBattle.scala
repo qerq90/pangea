@@ -471,15 +471,14 @@ case class SoloPveBattle(
       }
     }
 
-  /** Герой лежит — лежачего мобы не добивают, и им остаётся отряд. Бьют они
-    * только того, кто стоит прямо напротив (см. `BattleState.freeTurnOf`), так
-    * что к нему надо подойти: кто не стоит напротив живого союзника, идёт к
-    * ближайшему союзнику, напротив которого пусто, — по месту за раунд, орки по
-    * два (см. [[RaceTactics]]); ближние к своей цели первыми, чтобы следом
-    * двинулись и дальние. Свободных союзников нет — стоят: место освободится,
-    * тогда и пойдут. Сооружения, пригвождённые и кто держит позицию
-    * (Некромант) стоят — к ним идёт отряд ([[squadAdvance]]). В дыму не видно
-    * никого — все стоят.
+  /** Герой лежит — лежачего мобы не добивают, и им остаётся отряд. Идут они к
+    * нему так же, как шли бы к герою ([[closeIn]]): кто не достаёт ни одного
+    * живого союзника, шагает к ближайшему — по месту за раунд, орки по два, — и
+    * встаёт, как только достанет: эльф-стрелок за три места, прочие — с
+    * соседнего (см. [[RaceTactics]]). Ближние к своей цели идут первыми, чтобы
+    * следом двинулись и дальние. Сооружения, пригвождённые и кто держит
+    * позицию (Некромант) стоят — к ним идёт отряд ([[squadAdvance]]). В дыму не
+    * видно никого — все стоят.
     *
     * Раньше, пока герой лежал, не шагал никто, и моб, до которого союзнику не
     * дотянуться, стоял так до конца времён: бой шёл пустыми раундами.
@@ -487,16 +486,18 @@ case class SoloPveBattle(
   def closeInOnSquad: (SoloPveBattle, List[(MonsterSlot, Int)]) =
     if (!group.heroDown || effects.heroInSmoke) (this, Nil)
     else {
+      def reachOf(slot: MonsterSlot): Int = RaceTactics.reach(Race.withName(slot.race))
       val walkers = ((group.activePos, activeSlot) :: group.entries).filter { case (pos, slot) =>
-        slot.alive && walks(slot) && !group.allyAt(pos).exists(_.alive)
+        slot.alive && walks(slot) && allyWithin(pos, reachOf(slot)).isEmpty
       }
-      val order = walkers.sortBy { case (pos, _) => freeAllyNear(pos).fold(Int.MaxValue)(g => math.abs(g - pos)) }
+      val order = walkers.sortBy { case (pos, _) => allyNear(pos).fold(Int.MaxValue)(g => math.abs(g - pos)) }
       // Место моба за чужие шаги не меняется: на занятое место никто не встаёт.
       order.foldLeft((this, List.empty[(MonsterSlot, Int)])) { case ((b, moved), (from, slot)) =>
-        b.freeAllyNear(from).fold((b, moved)) { goal =>
+        b.allyNear(from).fold((b, moved)) { goal =>
+          val reach = reachOf(slot)
           @annotation.tailrec
           def walk(at: Int, left: Int): Int =
-            if (left <= 0 || at == goal) at
+            if (left <= 0 || b.allyWithin(at, reach).isDefined) at
             else b.stepToward(at, goal) match {
               case None       => at
               case Some(next) => walk(next, left - 1)
@@ -507,12 +508,17 @@ case class SoloPveBattle(
       }
     }
 
-  /** Ближайший к месту `pos` живой союзник, напротив которого пусто (при равном
-    * расстоянии — тот, что ближе к началу строя): к нему и идёт моб, пока герой
-    * лежит. Таких нет — None. */
-  private def freeAllyNear(pos: Int): Option[Int] =
-    group.allies.collect { case a if a.alive && !group.hasMonster(a.position) => a.position }
-      .sortBy(p => (math.abs(p - pos), p)).headOption
+  /** Ближайший к месту `pos` живой союзник (при равном расстоянии — тот, что
+    * ближе к началу строя): к нему и идёт моб, пока герой лежит. Нет — None. */
+  private def allyNear(pos: Int): Option[Int] =
+    group.allies.collect { case a if a.alive => a.position }.sortBy(p => (math.abs(p - pos), p)).headOption
+
+  /** Кого из союзников достаёт моб с места `pos`, бьющий на `reach` мест:
+    * стоящего напротив, а нет его — ближайшего в досягаемости (при равном
+    * расстоянии — ближе к началу строя). Никого — None. */
+  def allyWithin(pos: Int, reach: Int): Option[BattleAlly] =
+    group.allies.filter(a => a.alive && math.abs(a.position - pos) <= reach)
+      .sortBy(a => (math.abs(a.position - pos), a.position)).headOption
 
   /** Моб с места `from` встаёт на место `to`: активный — в полях, прочие — в строю. */
   private def relocate(from: Int, to: Int): SoloPveBattle =

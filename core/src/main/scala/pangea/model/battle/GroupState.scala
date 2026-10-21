@@ -33,7 +33,11 @@ final case class BattleAlly(
   /** Где он стоял, пока не пошёл на врага сам — герой лежал, а бить было
     * некого (см. `SoloPveBattle.squadAdvance`). Это не расстановка героя:
     * после боя он встаёт обратно, на своё место в строю. */
-  stood:      Option[Int]      = None
+  stood:      Option[Int]      = None,
+  /** Холод обгрызает защиту: на столько процентных пунктов меньше она режет
+    * удар — копится и не затухает, как у героя (`heroColdDefenceCut`); огонь
+    * его растапливает. */
+  coldCut:    Int              = 0
 ) {
   /** Нежить ли он: миазмы её лечат, а живых — травят. */
   def isUndead: Boolean = kind.race == Race.Undead
@@ -41,6 +45,9 @@ final case class BattleAlly(
   def alive: Boolean = hp > 0L
   def hpPct: Long    = if (stats.hp <= 0L) 0L else hp * 100L / stats.hp
   def armorPct: Long = if (stats.armor <= 0L) 0L else armor * 100L / stats.armor
+
+  /** Скован ли холодом. */
+  def cold: Boolean = coldCut > 0
 
   /** Обратно в отряд — с тем, что осталось, и на своё место: куда он сам ушёл
     * за врагом, пока герой лежал, там его не оставляем. */
@@ -91,7 +98,9 @@ object BattleAlly {
       bleed    <- c.getOrElse[Option[Bleed]]("bleed")(None)
       burn     <- c.getOrElse[Option[Burn]]("burn")(None)
       stood    <- c.getOrElse[Option[Int]]("stood")(None)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn, stood)
+      coldCut  <- c.getOrElse[Int]("coldCut")(0)
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn, stood,
+                       coldCut)
 }
 
 /** Моб группы, стоящий НЕ в паре с героем: всё, что описывает его и его текущее
