@@ -359,15 +359,19 @@ object GroupStateSpec extends ZIOSpecDefault {
 
     // ── Герой лежит: мобы идут к отряду, отряд — к мобам ─────────────────────
 
-    test("герой лежит: моб идёт к союзнику, напротив которого пусто, — орк за раунд на два места, прочие на одно") {
-      // Как в бою из жалобы: герой лежит на 1, союзник на 2, последний моб на 4.
+    test("герой лежит: моб идёт к ближайшему союзнику и встаёт, как только достанет, — орк за раунд на два места, эльф бьёт за три") {
+      // Герой лежит на 1, союзник на 2, последний моб на 6. Идёт он так же, как
+      // шёл бы к герою: пока не достанет — с соседнего места, эльф — за три.
       val orc   = SoloPveBattle.fromGroup(List(monster(Race.Orc, 100L)), hero, Nil)
-      val down  = orc.copy(group = orc.group.copy(heroDown = true, activePos = 4,
+      val down  = orc.copy(group = orc.group.copy(heroDown = true, activePos = 6,
                     allies = List(fighter(AllyKind.Murloc, 2))))
       val human = down.copy(monsterRace = Race.Human.entryName)
-      assertTrue(down.closeInOnSquad._1.group.activePos == 2) &&
-      assertTrue(human.closeInOnSquad._1.group.activePos == 3) &&
-      assertTrue(human.closeInOnSquad._1.closeInOnSquad._1.group.activePos == 2) &&
+      val elf   = down.copy(monsterRace = Race.Elf.entryName)
+      def walked(b: SoloPveBattle, rounds: Int): List[Int] =
+        Iterator.iterate(b)(_.closeInOnSquad._1).take(rounds + 1).toList.map(_.group.activePos)
+      assertTrue(walked(down, 3) == List(6, 4, 3, 3)) &&
+      assertTrue(walked(human, 5) == List(6, 5, 4, 3, 3, 3)) &&
+      assertTrue(walked(elf, 2) == List(6, 5, 5)) &&
       // пока герой на ногах, к отряду не идут: к герою их ведёт closeIn
       assertTrue(down.copy(group = down.group.copy(heroDown = false)).closeInOnSquad._2.isEmpty) &&
       // в дыму не видно никого
@@ -379,19 +383,17 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(down.copy(bossKind = Some(MiniBoss.Necromancer.entryName)).closeInOnSquad._2.isEmpty)
     },
 
-    test("герой лежит: кто стоит напротив союзника, стоит; к свободному союзнику первым идёт ближний, второй ждёт") {
-      // Герой лежит на 1, союзники на 2 и 5. Напротив второго — моб, он занят.
-      // Люди на 7 и 8 идут к пятому: первым — тот, что ближе, второй за ним.
-      val b0   = SoloPveBattle.fromGroup(List.fill(3)(monster(Race.Human, 100L)), hero, Nil)
-      val down = b0.copy(group = b0.group.copy(heroDown = true, activePos = 2, places = List(7, 8),
+    test("герой лежит: кто уже достаёт союзника, стоит; дальние идут к ближайшему — ближний первым, второй за ним") {
+      // Герой лежит на 1, союзники на 2 и 5. Напротив второго — моб, а сосед на 3
+      // и так его достаёт: оба стоят. Люди на 7 и 8 идут к пятому.
+      val b0   = SoloPveBattle.fromGroup(List.fill(4)(monster(Race.Human, 100L)), hero, Nil)
+      val down = b0.copy(group = b0.group.copy(heroDown = true, activePos = 2, places = List(3, 7, 8),
                    allies = List(fighter(AllyKind.Murloc, 2), fighter(AllyKind.Gnome, 5))))
       val (r1, moved) = down.closeInOnSquad
-      val r2 = r1.closeInOnSquad._1
       assertTrue(r1.group.activePos == 2) &&
-      assertTrue(r1.group.places == List(6, 7) && moved.map(_._2) == List(6, 7)) &&
-      // первый дошёл и встал напротив; второму свободных союзников не осталось — стоит
-      assertTrue(r2.group.places == List(5, 7)) &&
-      assertTrue(r2.closeInOnSquad._2.isEmpty)
+      assertTrue(r1.group.places == List(3, 6, 7) && moved.map(_._2) == List(6, 7)) &&
+      // первый дошёл и достаёт пятого; второй упёрся в него и ждёт за спиной
+      assertTrue(r1.closeInOnSquad._2.isEmpty)
     },
 
     test("герой лежит: отряд идёт на врага — кому некого бить, шагает к ближайшему мобу, лежащего переступает") {
