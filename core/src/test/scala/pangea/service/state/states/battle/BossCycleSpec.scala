@@ -3,10 +3,11 @@ package pangea.service.state.states.battle
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{Bleed, Burn, Poison, SoloPveBattle}
+import pangea.model.battle.{Bleed, Burn, Poison, SlainMonster, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.squad.{Ally, AllyKind, Squad}
+import pangea.model.state.StateType
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
 import pangea.service.state.UserAction
@@ -70,6 +71,25 @@ object BossCycleSpec extends ZIOSpecDefault {
       hurt     <- dao.getHeroByUserId(userId).map(_.get)
       log      <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
     } yield (after.get, hurt, log)
+
+  /** Раунд без героя: он лежит с нулём HP, отряд бьётся за него сам (см.
+    * `BattleState.squadTick`). `feed` — броски, которые нужны тесту точно. */
+  private def squadRound(h: Hero, battle: SoloPveBattle, seed: Long, feed: ZIO[Any, Nothing, Unit] = ZIO.unit) =
+    for {
+      dao      <- TestHeroDao.withHero(userId, h.copy(fightStats = h.fightStats.copy(hp = 0L)))
+      _        <- dao.writeActiveBattle(userId, battle.copy(group = battle.group.copy(heroDown = true)).asJson)
+      renderer <- TestRenderer.make
+      content  <- ZIO.attempt(SceneContent.load())
+      state     = BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content)
+      _        <- TestRandom.setSeed(seed) *> feed
+      out      <- state.action(testUser, UserAction("", Some("""{"action":"SquadTick"}""")), renderer)
+      after    <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+      log      <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+    } yield (out, after, log)
+
+  /** Всякий бросок на попадание — в цель, на прок — мимо. */
+  private val sureHits: ZIO[Any, Nothing, Unit] =
+    TestRandom.feedInts(List.fill(10)(100): _*) *> TestRandom.feedLongs(List.fill(10)(100L): _*)
 
   private def allyOf(b: SoloPveBattle) = b.group.allies.headOption
 
@@ -157,6 +177,79 @@ object BossCycleSpec extends ZIOSpecDefault {
               assertTrue(ally.flatMap(_.bleed).exists(_.pct == 10)) &&
               assertTrue(ally.flatMap(_.burn).exists(_.pct > 10)) &&
               assertTrue(log.contains(Poison.Icon) && log.contains(Burn.Icon))
+    },
+
+    // ── Герой лежит: приёмы и круг идут и без него ────────────────────────────
+
+    test("герой лежит — круг минибосса идёт: смрад Гнилого Джо травит союзника напротив") {
+      // Раньше у лежачего героя ноль HP глушил умения всем мобам: били только
+      // ударом, а минибоссы стояли со своим кругом.
+      val h = hero(behindAlly)
+      val b = tough(bossOne(MiniBoss.RottenJoe, h, turn = 0))
+      for {
+        t <- squadRound(h, b, seed = 13L)
+        (out, after, log) = t
+      } yield assertTrue(out == StateType.Battle) &&
+              assertTrue(log.contains("Ядовитые зловония")) &&
+              assertTrue(after.exists(a => allyOf(a).flatMap(_.poison).exists(_.pct > 0))) &&
+              // круг сдвинулся и энергия списана — приём состоялся
+              assertTrue(after.exists(_.bossTurn == 1)) &&
+              assertTrue(after.exists(_.monsterCurrentEnergy < b.monsterCurrentEnergy)) &&
+              // лежачего не трогают: приём достался союзнику
+              assertTrue(after.exists(_.effects.heroPoison.isEmpty))
+    },
+
+    test("герой лежит — Некромант колдует сам: павшая нежить встаёт, миазмы держат поле") {
+      // Он держит позицию и колдует в ход героя; пока герой лежит, хода героя
+      // нет, — раньше Некромант так и стоял молча.
+      val h      = hero(behindAlly)
+      val base   = tough(bossOne(MiniBoss.Necromancer, h, turn = 0))
+      val fallen = SlainMonster(base.monsterLvl, Race.Orc.entryName, MobRarity.Common.entryName,
+                     marked = false, name = "Орк", undead = true)
+      val b      = base.copy(group = base.group.copy(slain = List(fallen)))
+      for {
+        t <- squadRound(h, b, seed = 13L)
+        (out, after, log) = t
+      } yield assertTrue(out == StateType.Battle) &&
+              assertTrue(log.contains("павшая нежить встаёт снова")) &&
+              assertTrue(after.exists(a => a.group.others.size == 1 && a.group.slain.isEmpty)) &&
+              assertTrue(after.exists(_.bossTurn == 1)) &&
+              // и его миазмы ходят по полю: держит их или выдохся — строка об этом есть
+              assertTrue(log.contains("🟣"))
+    },
+
+    test("герой лежит — Гнилого Джо добил союзник: Джо встаёт, как от удара героя") {
+      val h = hero(behindAlly)
+      val b = tough(bossOne(MiniBoss.RottenJoe, h, turn = 3)).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
+      for {
+        t <- squadRound(h, b, seed = 13L, feed = sureHits)
+        (out, after, log) = t
+      } yield assertTrue(out == StateType.Battle) &&
+              assertTrue(log.contains("Гнилой Джо отказывается умирать")) &&
+              assertTrue(after.exists(a => a.bossRevives == 1 && a.monsterCurrentHp > 0L))
+    },
+
+    test("Гнилого Джо добил союзник, пока герой ждёт, — Джо тоже встаёт") {
+      // Герой третьим, союзники на 1 и 2: до Джо на первом месте ему не
+      // дотянуться — он ждёт, а Джо добивает союзник.
+      val squad = Squad(heroPos = 3, allies = List(
+        Ally(AllyKind.Human, 1, 100000L, 100000L, 0L), Ally(AllyKind.Gnome, 2, 100000L, 100000L, 0L)))
+      val h = hero(squad)
+      val b = tough(bossOne(MiniBoss.RottenJoe, h, turn = 3)).copy(monsterCurrentHp = 1L, monsterCurrentArmor = 0L)
+      for {
+        dao      <- TestHeroDao.withHero(userId, h)
+        _        <- dao.writeActiveBattle(userId, b.asJson)
+        renderer <- TestRenderer.make
+        content  <- ZIO.attempt(SceneContent.load())
+        state     = BattleState(dao, TestInventoryRepository.accepting, TestItemRepository.make, content)
+        _        <- TestRandom.setSeed(13L) *> sureHits
+        out      <- state.action(testUser, UserAction("", Some("""{"action":"Wait"}""")), renderer)
+        after    <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
+        log      <- renderer.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(b.group.heroPos == 3 && !b.group.paired) &&
+              assertTrue(out == StateType.Battle) &&
+              assertTrue(log.contains("Гнилой Джо отказывается умирать")) &&
+              assertTrue(after.exists(a => a.bossRevives == 1 && a.monsterCurrentHp > 0L))
     },
 
     test("Некромант за союзником берёт свой ход один раз за раунд") {
