@@ -57,6 +57,7 @@ case class HomeState(
       "HomeLibrary" -> Target.Run { (u, _, r) => library(u, r) },
       "HomeAltar"   -> Target.Goto(StateType.RuneAltar),
       "HomeHerbs"   -> Target.Goto(StateType.HerbWorkbench),
+      "HomeGems"    -> Target.Goto(StateType.GemVault),
       "HomeAzat"    -> Target.Run { (u, _, r) => azat(u, r) },
       "HomeAzatUp"  -> Target.Run { (u, _, r) => azatRefill(u, r) },
       "LeaveHome"   -> Target.Goto(StateType.GlobalMap)
@@ -199,6 +200,7 @@ case class HomeState(
             Some(Choice("HomeAltar", content.text("home.house.altar"), row = Some(1))),
             Option.when(second)(Choice("HomeHerbs", content.text("home.house.workbench"), row = Some(1))),
             Option.when(second)(Choice("HomeAzat", content.text("home.house.azat"), row = Some(1))),
+            Option.when(h == House.Island)(Choice("HomeGems", content.text("home.house.gems"), row = Some(1))),
             Some(Choice("HomeOffice", content.text("home.house.office"), row = Some(2))),
             Some(Choice("LeaveHome", content.text("home.house.leave"), color = ChoiceColor.Negative, row = Some(3)))
           ).flatten

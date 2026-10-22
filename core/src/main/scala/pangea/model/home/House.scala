@@ -75,6 +75,9 @@ object HomeRates {
   /** Котелок: мест — как в кубе Азата. */
   val CauldronSlots: Int = 9
 
+  /** Хранилище камней на острове. */
+  val GemVault: Int = 50
+
   /** Личный алтарь Азата: потолок энергии дома. Дом с алтарём приходит с ним полным. */
   val AltarMaxCharges: Int = 100
 
@@ -90,7 +93,8 @@ object HomeRates {
   *
   * Со второго дома: `herbs` — травы на полках верстака, `brews` — полка готовых
   * отваров, `cauldron` — что лежит в котелке, `charges` — энергия дома от
-  * личного алтаря Азата (её тратит котелок). */
+  * личного алтаря Азата (её тратят котелок и хранилище камней). На острове —
+  * `gems`: хранилище камней. */
 final case class HomeData(
   tier:      Int               = 0,
   metJunona: Boolean           = false,
@@ -98,7 +102,8 @@ final case class HomeData(
   herbs:     List[Item]        = Nil,
   brews:     List[Item]        = Nil,
   cauldron:  List[Item]        = Nil,
-  charges:   Int               = 0
+  charges:   Int               = 0,
+  gems:      List[Item]        = Nil
 ) {
   def house: Option[House] = House.byTier(tier)
 
@@ -125,5 +130,6 @@ object HomeData {
       brews    <- c.getOrElse[List[Item]]("brews")(Nil)
       cauldron <- c.getOrElse[List[Item]]("cauldron")(Nil)
       charges  <- c.getOrElse[Int]("charges")(0)
-    } yield HomeData(tier, met, runes, herbs, brews, cauldron, charges)
+      gems     <- c.getOrElse[List[Item]]("gems")(Nil)
+    } yield HomeData(tier, met, runes, herbs, brews, cauldron, charges, gems)
 }
