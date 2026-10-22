@@ -5,6 +5,7 @@ import pangea.engine.SceneContent
 import pangea.model.hero.{Achievement, FetPotion, Hero}
 import pangea.model.stats.{BaseStats, ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
+import pangea.model.quest.NpcQuest
 import pangea.service.state.{NpcQuestLog, UserAction}
 import pangea.test.{TestArtifactRepository, TestFixtures, TestHeroDao, TestInventoryRepository, TestRenderer}
 import zio.ZIO
@@ -68,7 +69,7 @@ object FetPotionSpec extends ZIOSpecDefault {
       val hero   = TestFixtures.hero(userId).copy(lvl = 3L, exp = 10L, upgradePoints = 0L, dungeonLevel = 5)
       val frozen = hero.copy(expFrozen = true)
       assertTrue(frozen.gainExp(100000L) == frozen && frozen.expFrom(500L) == 0L) &&
-      assertTrue(NpcQuestLog.expReward(frozen) == 0L && NpcQuestLog.expReward(hero) > 0L) &&
+      assertTrue(NpcQuestLog.expReward(frozen, NpcQuest.Innkeeper) == 0L && NpcQuestLog.expReward(hero, NpcQuest.Innkeeper) > 0L) &&
       assertTrue(hero.gainExp(100000L).lvl > hero.lvl) &&
       assertTrue(frozen.getInfo(0L).contains("Опыт остановлен") && !hero.getInfo(0L).contains("Опыт остановлен"))
     },

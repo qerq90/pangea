@@ -3,7 +3,7 @@ package pangea.service.state
 import io.circe.syntax.EncoderOps
 import pangea.dao.hero.HeroDao
 import pangea.model.hero.Hero
-import pangea.model.quest.{NpcQuest, NpcQuests}
+import pangea.model.quest.{FirstSteps, NpcQuest, NpcQuests}
 import pangea.model.user.UserId
 import zio.{Task, ZIO}
 
@@ -24,13 +24,18 @@ object NpcQuestLog {
       if (next == q) ZIO.succeed(q) else save(heroDao, userId, next).as(next)
     }
 
-  /** Опыт за задание: как за пять боёв на текущем этаже (опыт остановлен —
+  /** Опыт за задание: как за пять боёв на текущем этаже, а за вступительные
+    * задания горожан — ещё [[NpcQuest.StarterExp]] сверху (опыт остановлен —
     * ничего, см. Hero.expFrom). */
-  def expReward(hero: Hero): Long = hero.expFrom(NpcQuest.ExpPerDungeonLevel * hero.dungeonLevel.toLong.max(1L))
+  def expReward(hero: Hero, quest: NpcQuest): Long = {
+    val byFloor = NpcQuest.ExpPerDungeonLevel * hero.dungeonLevel.toLong.max(1L)
+    val starter = if (FirstSteps.CityQuests.contains(quest)) NpcQuest.StarterExp else 0L
+    hero.expFrom(byFloor + starter)
+  }
 
   /** Начислить опыт за задание и записать уровень. Возвращает героя после. */
-  def grantExp(heroDao: HeroDao, hero: Hero): Task[Hero] = {
-    val leveled = hero.gainExp(expReward(hero))
+  def grantExp(heroDao: HeroDao, hero: Hero, quest: NpcQuest): Task[Hero] = {
+    val leveled = hero.gainExp(expReward(hero, quest))
     heroDao.updateExpAndLevel(hero.userId, leveled.exp, leveled.lvl, leveled.upgradePoints).as(leveled)
   }
 

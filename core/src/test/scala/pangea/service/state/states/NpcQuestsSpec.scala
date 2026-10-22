@@ -8,7 +8,7 @@ import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
 import pangea.model.item.{FlaskEffect, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
-import pangea.model.quest.{NpcQuest, NpcQuestProgress, NpcQuests}
+import pangea.model.quest.{FirstSteps, NpcQuest, NpcQuestProgress, NpcQuests}
 import pangea.model.state.StateType
 import pangea.model.stats.{FightStats, StatBoost}
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -75,9 +75,13 @@ object NpcQuestsSpec extends ZIOSpecDefault {
         assertTrue(decoded.recipes.isEmpty) &&
         assertTrue(q.asJson.as[NpcQuests].toOption.contains(q))
       },
-      test("опыт за задание — пять боёв на текущем этаже") {
-        assertTrue(NpcQuestLog.expReward(hero) == 15L) &&
-        assertTrue(NpcQuestLog.expReward(hero.copy(dungeonLevel = 0)) == 5L)
+      test("опыт за задание — пять боёв на текущем этаже, а за вступительные задания горожан ещё 40 сверху") {
+        assertTrue(FirstSteps.CityQuests.forall(q => NpcQuestLog.expReward(hero, q) == 55L)) &&
+        assertTrue(NpcQuestLog.expReward(hero.copy(dungeonLevel = 0), NpcQuest.Innkeeper) == 45L) &&
+        // Казимир, Фет и Рахадим — без надбавки: их задания не для новичка
+        assertTrue(List(NpcQuest.Kazimir, NpcQuest.Fet, NpcQuest.Rakhadim).forall(q => NpcQuestLog.expReward(hero, q) == 15L)) &&
+        // опыт остановлен — не даётся и надбавка
+        assertTrue(NpcQuestLog.expReward(hero.copy(expFrozen = true), NpcQuest.Innkeeper) == 0L)
       }
     ),
 
@@ -115,7 +119,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           menu <- r.sentScreens.map(_.last)
         } yield assertTrue(inv.snapshot.map(_.id) == List(1L, 3L)) &&   // ушёл мешок
                 assertTrue(h.silver == 1000L + InnkeeperState.QuestSilver) &&
-                assertTrue(h.exp == 15L) &&
+                assertTrue(h.exp == 55L) &&
                 assertTrue(q.isDone(NpcQuest.Innkeeper)) &&
                 assertTrue(all.contains("портал домой")) &&
                 assertTrue(menu.choices.exists(_.id == "KinetLore")) &&
@@ -207,7 +211,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           h2  <- heroOf(dao2)
         } yield assertTrue(charges == 4) &&
                 assertTrue(h.silver == 1000L + GustavoState.QuestSilver) &&
-                assertTrue(h.exp == 15L) &&
+                assertTrue(h.exp == 55L) &&
                 assertTrue(q.isDone(NpcQuest.Gustavo)) &&
                 assertTrue(all.contains("Ашалдарон")) &&
                 assertTrue(h2.silver == 1000L + GustavoState.QuestSilver + GustavoState.QuestFlaskSilver)
@@ -352,7 +356,7 @@ object NpcQuestsSpec extends ZIOSpecDefault {
                 assertTrue(confirm.contains("даром")) &&
                 assertTrue(h.masterHornBoosts.armor == 3L) &&
                 assertTrue(h.guildReputation == 100L && h.silver == 0L) &&  // ничего не списано
-                assertTrue(h.exp == 15L) &&
+                assertTrue(h.exp == 55L) &&
                 assertTrue(q2.isDone(NpcQuest.Horn)) &&
                 assertTrue(all.contains("Репутация — это учёт")) &&
                 assertTrue(all.contains("Иди. И оружие себе найди"))
