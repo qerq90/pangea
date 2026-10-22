@@ -27,15 +27,15 @@ object NpcQuestLog {
   /** Опыт за задание: как за пять боёв на текущем этаже, а за вступительные
     * задания горожан — ещё [[NpcQuest.StarterExp]] сверху (опыт остановлен —
     * ничего, см. Hero.expFrom). */
-  def expReward(hero: Hero, quest: NpcQuest): Long = {
+  def expReward(hero: Hero, quest: NpcQuest, nowMs: Long): Long = {
     val byFloor = NpcQuest.ExpPerDungeonLevel * hero.dungeonLevel.toLong.max(1L)
     val starter = if (FirstSteps.CityQuests.contains(quest)) NpcQuest.StarterExp else 0L
-    hero.expFrom(byFloor + starter)
+    hero.expFrom(byFloor + starter, nowMs)
   }
 
   /** Начислить опыт за задание и записать уровень. Возвращает героя после. */
-  def grantExp(heroDao: HeroDao, hero: Hero, quest: NpcQuest): Task[Hero] = {
-    val leveled = hero.gainExp(expReward(hero, quest))
+  def grantExp(heroDao: HeroDao, hero: Hero, quest: NpcQuest, nowMs: Long): Task[Hero] = {
+    val leveled = hero.gainExp(expReward(hero, quest, nowMs))
     heroDao.updateExpAndLevel(hero.userId, leveled.exp, leveled.lvl, leveled.upgradePoints).as(leveled)
   }
 

@@ -17,6 +17,7 @@ import pangea.model.state.StateType.{
   Equipment,
   FoundItem,
   GlobalMap,
+  Home,
   SilverVein,
   Guild,
   Gustavo,
@@ -136,6 +137,7 @@ import pangea.service.state.states.gustavo.{
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
+import pangea.service.state.states.home.HomeState
 import pangea.service.state.states.hero.{FriendCodeState, HeroStatsState, KnowledgeState, SkillsState, SquadState}
 import pangea.service.referral.Referrals
 import pangea.service.state.states.tavern.{
@@ -268,6 +270,7 @@ object StatesMap {
           GustavoFlask    -> GustavoFlaskState(heroDao, content, bank),
           GustavoBelt     -> GustavoBeltState(heroDao, content, bank),
           Tavern          -> TavernState(heroDao, scheduler, content, bank),
+          Home            -> HomeState(heroDao, scheduler, content, bank),
           CardSeller -> CardSellerState(
             heroDao,
             inventoryRepo,

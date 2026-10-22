@@ -5070,7 +5070,8 @@ case class BattleState(
                   .max(1L)
       // Опыт остановлен зельем Фета — за бой ничего (expFrom).
       expGained = hero.expFrom(
-                    if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp)
+                    if (storyFight) 0L else if (blessed) (baseExp * (100L + BattleState.BlessingBonusPct) / 100L).max(1L) else baseExp,
+                    now)
       leveled = hero.gainExp(expGained)
       // лут катаем чистым ядром; начисление (инвентарь/серебро) — в LootState
       seed <- Random.nextLong

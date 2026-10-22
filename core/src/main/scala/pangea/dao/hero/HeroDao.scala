@@ -78,6 +78,10 @@ trait HeroDao {
   def writeAzatData(userId: UserId, data: Json): Task[Unit]
   def readAzatData(userId: UserId): Task[Option[Json]]
 
+  /** Дом героя и его хозяйство ([[pangea.model.home.HomeData]]). Durable. */
+  def writeHomeData(userId: UserId, data: Json): Task[Unit]
+  def readHomeData(userId: UserId): Task[Option[Json]]
+
   /** Знания героя о мире: встречал ли он элементалей, купил ли легенду у
    *  трактирщика. Durable, живёт в `heroes.lore_data`. */
   def writeLoreData(userId: UserId, data: Json): Task[Unit]

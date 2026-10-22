@@ -25,7 +25,8 @@ class TestHeroDao(
   vaultStowRef:  Ref[Map[UserId, Json]],
   dailyRef:      Ref[Map[UserId, Json]],
   npcQuestsRef:  Ref[Map[UserId, Json]],
-  battlePrefsRef: Ref[Map[UserId, Json]]
+  battlePrefsRef: Ref[Map[UserId, Json]],
+  homeRef:       Ref[Map[UserId, Json]]
 ) extends HeroDao {
 
   def getHeroByUserId(userId: UserId): Task[Option[Hero]] = heroRef.get.map(_.get(userId))
@@ -52,7 +53,8 @@ class TestHeroDao(
       vaultStowRef.update(_ - userId) *>
       dailyRef.update(_ - userId) *>
       npcQuestsRef.update(_ - userId) *>
-      battlePrefsRef.update(_ - userId)
+      battlePrefsRef.update(_ - userId) *>
+      homeRef.update(_ - userId)
 
   def updateRace(userId: UserId, race: Race): Task[Unit] =
     raceRef.update(_.updated(userId, race))
@@ -168,6 +170,12 @@ class TestHeroDao(
   def readAzatData(userId: UserId): Task[Option[Json]] =
     azatRef.get.map(_.get(userId))
 
+  def writeHomeData(userId: UserId, data: Json): Task[Unit] =
+    homeRef.update(_.updated(userId, data))
+
+  def readHomeData(userId: UserId): Task[Option[Json]] =
+    homeRef.get.map(_.get(userId))
+
   def writeLoreData(userId: UserId, data: Json): Task[Unit] =
     loreRef.update(_.updated(userId, data))
 
@@ -226,7 +234,8 @@ object TestHeroDao {
       dailyRef      <- Ref.make(Map.empty[UserId, Json])
       npcQuestsRef  <- Ref.make(Map.empty[UserId, Json])
       prefsRef      <- Ref.make(Map.empty[UserId, Json])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef)
+      homeRef       <- Ref.make(Map.empty[UserId, Json])
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef, homeRef)
 
   def withHero(userId: UserId, hero: Hero): Task[TestHeroDao] =
     for {
@@ -246,5 +255,6 @@ object TestHeroDao {
       dailyRef      <- Ref.make(Map.empty[UserId, Json])
       npcQuestsRef  <- Ref.make(Map.empty[UserId, Json])
       prefsRef      <- Ref.make(Map.empty[UserId, Json])
-    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef)
+      homeRef       <- Ref.make(Map.empty[UserId, Json])
+    } yield new TestHeroDao(raceRef, heroRef, sceneDataRef, battleRef, merchantRef, questRef, gustavoRef, cardSellerRef, returnRef, azatRef, loreRef, killLogRef, vaultStowRef, dailyRef, npcQuestsRef, prefsRef, homeRef)
 }

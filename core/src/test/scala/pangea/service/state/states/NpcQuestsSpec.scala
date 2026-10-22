@@ -76,12 +76,12 @@ object NpcQuestsSpec extends ZIOSpecDefault {
         assertTrue(q.asJson.as[NpcQuests].toOption.contains(q))
       },
       test("опыт за задание — пять боёв на текущем этаже, а за вступительные задания горожан ещё 40 сверху") {
-        assertTrue(FirstSteps.CityQuests.forall(q => NpcQuestLog.expReward(hero, q) == 55L)) &&
-        assertTrue(NpcQuestLog.expReward(hero.copy(dungeonLevel = 0), NpcQuest.Innkeeper) == 45L) &&
+        assertTrue(FirstSteps.CityQuests.forall(q => NpcQuestLog.expReward(hero, q, 0L) == 55L)) &&
+        assertTrue(NpcQuestLog.expReward(hero.copy(dungeonLevel = 0), NpcQuest.Innkeeper, 0L) == 45L) &&
         // Казимир, Фет и Рахадим — без надбавки: их задания не для новичка
-        assertTrue(List(NpcQuest.Kazimir, NpcQuest.Fet, NpcQuest.Rakhadim).forall(q => NpcQuestLog.expReward(hero, q) == 15L)) &&
+        assertTrue(List(NpcQuest.Kazimir, NpcQuest.Fet, NpcQuest.Rakhadim).forall(q => NpcQuestLog.expReward(hero, q, 0L) == 15L)) &&
         // опыт остановлен — не даётся и надбавка
-        assertTrue(NpcQuestLog.expReward(hero.copy(expFrozen = true), NpcQuest.Innkeeper) == 0L)
+        assertTrue(NpcQuestLog.expReward(hero.copy(expFrozen = true), NpcQuest.Innkeeper, 0L) == 0L)
       }
     ),
 
