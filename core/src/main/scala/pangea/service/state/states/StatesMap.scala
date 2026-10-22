@@ -20,6 +20,7 @@ import pangea.model.state.StateType.{
   Home,
   RuneAltar,
   HerbWorkbench,
+  GemVault,
   SilverVein,
   Guild,
   Gustavo,
@@ -139,7 +140,7 @@ import pangea.service.state.states.gustavo.{
   GustavoSuppliesState
 }
 import pangea.service.state.states.registration.RegistrationState
-import pangea.service.state.states.home.{HerbWorkbenchState, HomeState, RuneAltarState}
+import pangea.service.state.states.home.{GemVaultState, HerbWorkbenchState, HomeState, RuneAltarState}
 import pangea.service.state.states.hero.{FriendCodeState, HeroStatsState, KnowledgeState, SkillsState, SquadState}
 import pangea.service.referral.Referrals
 import pangea.service.state.states.tavern.{
@@ -275,6 +276,7 @@ object StatesMap {
           Home            -> HomeState(heroDao, scheduler, content, bank),
           RuneAltar       -> RuneAltarState(heroDao, inventoryRepo, itemRepo, content),
           HerbWorkbench   -> HerbWorkbenchState(heroDao, inventoryRepo, itemRepo, content, artifacts),
+          GemVault        -> GemVaultState(heroDao, inventoryRepo, itemRepo, content, artifacts),
           CardSeller -> CardSellerState(
             heroDao,
             inventoryRepo,
