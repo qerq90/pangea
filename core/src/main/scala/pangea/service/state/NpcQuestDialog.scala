@@ -58,8 +58,8 @@ final case class NpcQuestDialog(heroDao: HeroDao, content: SceneContent, quest: 
   def complete(user: User, hero: Hero, extra: NpcQuests => NpcQuests): Task[(Hero, String)] =
     for {
       _       <- NpcQuestLog.modify(heroDao, user.userId)(q => extra(q.finish(quest)))
-      leveled <- NpcQuestLog.grantExp(heroDao, hero)
-      expLine  = content.format("npcQuests.common.exp", "exp" -> NpcQuestLog.expReward(hero).toString)
+      leveled <- NpcQuestLog.grantExp(heroDao, hero, quest)
+      expLine  = content.format("npcQuests.common.exp", "exp" -> NpcQuestLog.expReward(hero, quest).toString)
       lvlLine  = if (leveled.lvl > hero.lvl) "\n" + content.format("npcQuests.common.levelUp", "level" -> leveled.lvl.toString) else ""
     } yield (leveled, expLine + lvlLine)
 }
