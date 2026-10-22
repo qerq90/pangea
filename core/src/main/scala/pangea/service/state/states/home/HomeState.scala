@@ -83,13 +83,14 @@ case class HomeState(
     * знакомство; дальше — короткое приветствие, своё для тех, у кого дом есть. */
   private def office(user: User, renderer: Renderer): Task[StateType] =
     for {
+      hero   <- getHero(user)
       home   <- loadHome(user)
       first   = !home.metJunona
       _      <- ZIO.when(first)(saveHome(user, home.copy(metJunona = true)))
       current = home.house
       text    =
         if (first) content.text("home.office.intro")
-        else if (current.contains(House.Island)) content.text("home.office.top")
+        else if (current.contains(House.Island)) content.format("home.office.top", "race" -> hero.race.genitivePlural)
         else if (current.isDefined) content.text("home.office.owner")
         else content.text("home.office.greeting")
       offers  = House.forSale(current).flatMap(offerButtons(_, current)).zipWithIndex.map { case (c, i) => c.copy(row = Some(i)) }
@@ -192,8 +193,15 @@ case class HomeState(
       }
     }
 
+  /** Библиотека — у каждого дома своя: маленькая в добротном доме, большая
+    * личная на острове. В домике её нет. */
   private def library(user: User, renderer: Renderer): Task[StateType] =
-    renderer.show(user, Screen(content.text("home.library"), List(backToHouse))).as(StateType.Home)
+    loadHome(user).flatMap { home =>
+      home.house.filter(_.tier >= House.Townhouse.tier) match {
+        case None    => showHouse(user, renderer)
+        case Some(h) => renderer.show(user, Screen(content.text(s"home.houses.${h.key}.library"), List(backToHouse))).as(StateType.Home)
+      }
+    }
 
   // ── Кровать ─────────────────────────────────────────────────────────────────
 

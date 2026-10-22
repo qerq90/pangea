@@ -70,6 +70,8 @@ object HomeStateSpec extends ZIOSpecDefault {
         again <- last(r)
       } yield assertTrue(first.text.contains("Юнону Кинтслев") && first.text.contains("ты из искателей") &&
                 first.text.contains("Покупка, обустройство, продажа и расширение имущества")) &&
+              // она видела, как герой свалился на сторожку, — и подмигивает
+              assertTrue(first.text.contains("Она подмигивает")) &&
               assertTrue(met.metJunona && !met.owns) &&
               assertTrue(again.text.contains("Живой — уже хорошо") && !again.text.contains("ратуши")) &&
               // три дома: домик — за серебро и за дублоны; и «Уйти»
@@ -130,7 +132,8 @@ object HomeStateSpec extends ZIOSpecDefault {
         same   <- homeOf(dao)
       } yield assertTrue(office.text.contains("Как дом?") && office.choices.map(_.label) == List(
                 "🏠 Добротный дом — 700 🟡", "🏠 Ключ от острова — 1 900 🟡", "🏠 Домой")) &&
-              assertTrue(pitch.text.contains("сдать обратно в управление совета") && pitch.text.contains("Выйдет 700")) &&
+              assertTrue(pitch.text.contains("сдать обратно в управление совета") && pitch.text.contains("Выйдет 700") &&
+                pitch.text.contains("всё личное тоже") && pitch.text.contains("место, чтобы расшириться")) &&
               assertTrue(pitch.text.contains("Твой «Домик в две комнаты» уходит в управление совета.")) &&
               assertTrue(h.doubloons == 50L && home.house.contains(House.Townhouse)) &&
               assertTrue(inside.choices.map(_.id) == List("HomeBed", "HomeLibrary", "HomeOffice", "LeaveHome")) &&
@@ -151,7 +154,8 @@ object HomeStateSpec extends ZIOSpecDefault {
       } yield assertTrue(pitch.text.contains("ключ-портал") && pitch.text.contains("тринадцать с половиной сундуков")) &&
               assertTrue(pitch.text.contains("совет зачтёт его целиком: 1 200")) &&
               assertTrue(h.doubloons == 0L && said.contains("плывут облака")) &&
-              assertTrue(top.text.contains("Выше острова") && top.choices.map(_.id) == List("HomeMain"))
+              assertTrue(top.text.contains("Выше острова") && top.text.contains("среди людей бывают такие ненасытные")) &&
+              assertTrue(top.choices.map(_.id) == List("HomeMain"))
     },
 
     test("кровать как комната в таверне: проспал — травмы прошли, силы вернулись, и «выспался» +10% опыта") {
@@ -208,6 +212,25 @@ object HomeStateSpec extends ZIOSpecDefault {
       assertTrue(rested.expFrom(100L, 1000L) == 100L) &&   // срок вышел
       assertTrue(rested.copy(expFrozen = true).expFrom(100L, 0L) == 0L) &&
       assertTrue(rested.getInfo(0L).contains("Выспались дома: +10% опыта") && !hero().getInfo(0L).contains("Выспались"))
+    },
+
+    test("библиотека — своя у каждого дома: маленькая в добротном, большая личная на острове, в домике нет") {
+      for {
+        t2 <- make(hero(), HomeData(tier = 2, metJunona = true))
+        (s2, _, _, r2) = t2
+        _  <- s2.action(testUser, tap("HomeLibrary"), r2)
+        l2 <- last(r2)
+        t3 <- make(hero(), HomeData(tier = 3, metJunona = true))
+        (s3, _, _, r3) = t3
+        _  <- s3.action(testUser, tap("HomeLibrary"), r3)
+        l3 <- last(r3)
+        t1 <- make(hero(), HomeData(tier = 1, metJunona = true))
+        (s1, _, _, r1) = t1
+        _  <- s1.action(testUser, tap("HomeLibrary"), r1)
+        l1 <- last(r1)
+      } yield assertTrue(l2.text.startsWith("Маленькая библиотека")) &&
+              assertTrue(l3.text.startsWith("Большая личная библиотека")) &&
+              assertTrue(l1.text.contains("Ваш домик"))
     },
 
     test("сон и «выспался» — по дому: 2 / 1,5 / 1 ч и 4 / 8 / 12 ч") {
