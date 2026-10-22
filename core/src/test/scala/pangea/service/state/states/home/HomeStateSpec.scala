@@ -136,7 +136,7 @@ object HomeStateSpec extends ZIOSpecDefault {
                 pitch.text.contains("всё личное тоже") && pitch.text.contains("место, чтобы расшириться")) &&
               assertTrue(pitch.text.contains("Твой «Домик в две комнаты» уходит в управление совета.")) &&
               assertTrue(h.doubloons == 50L && home.house.contains(House.Townhouse)) &&
-              assertTrue(inside.choices.map(_.id) == List("HomeBed", "HomeLibrary", "HomeAltar", "HomeOffice", "LeaveHome")) &&
+              assertTrue(inside.choices.map(_.id) == List("HomeBed", "HomeLibrary", "HomeAltar", "HomeHerbs", "HomeAzat", "HomeOffice", "LeaveHome")) &&
               assertTrue(same.house.contains(House.Townhouse))
     },
 
@@ -231,6 +231,39 @@ object HomeStateSpec extends ZIOSpecDefault {
       } yield assertTrue(l2.text.startsWith("Маленькая библиотека")) &&
               assertTrue(l3.text.startsWith("Большая личная библиотека")) &&
               assertTrue(l1.text.contains("Ваш домик"))
+    },
+
+    test("алтарь Азата: дом с ним приходит с полной энергией; пополнение +50 за 10 000 серебра, не выше 100") {
+      for {
+        // купил добротный дом — алтарь полон
+        t <- make(hero(doubloons = 700L), HomeData(tier = 1, metJunona = true))
+        (state, dao, _, r) = t
+        _      <- state.action(testUser, buy(House.Townhouse, HomeState.PayDoubloons), r)
+        bought <- homeOf(dao)
+        // энергия просела — пополняем
+        _      <- dao.writeHomeData(userId, bought.copy(charges = 70).asJson)
+        _      <- dao.updateSilver(userId, 25000L)
+        _      <- state.action(testUser, tap("HomeAzat"), r)
+        screen <- last(r)
+        _      <- state.action(testUser, tap("HomeAzatUp"), r)
+        topped <- homeOf(dao)
+        h1     <- heroOf(dao)
+        // полный — второй раз не берёт денег
+        _      <- state.action(testUser, tap("HomeAzatUp"), r)
+        h2     <- heroOf(dao)
+        said   <- texts(r)
+        // денег нет — «не хватает»
+        _      <- dao.writeHomeData(userId, topped.copy(charges = 10).asJson)
+        _      <- dao.updateSilver(userId, 4000L)
+        _      <- state.action(testUser, tap("HomeAzatUp"), r)
+        poor   <- texts(r)
+        low    <- homeOf(dao)
+      } yield assertTrue(bought.charges == HomeRates.AltarMaxCharges) &&
+              assertTrue(screen.text.contains("питает весь дом") && screen.text.contains("Энергия дома: 70/100")) &&
+              assertTrue(screen.choices.map(_.label).headOption.contains("✨ Пополнить +50 — 10 000 🪙")) &&
+              assertTrue(topped.charges == 100 && h1.silver == 15000L) &&
+              assertTrue(h2.silver == 15000L && said.contains("Алтарь и так полон")) &&
+              assertTrue(poor.contains("Не хватает 6 000 🪙") && low.charges == 10)
     },
 
     test("сон и «выспался» — по дому: 2 / 1,5 / 1 ч и 4 / 8 / 12 ч") {
