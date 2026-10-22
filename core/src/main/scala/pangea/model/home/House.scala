@@ -68,11 +68,23 @@ object HomeRates {
 
 /** Всё о доме героя, что хранится в `heroes.home_data`: `tier` — ступень дома
   * (0 — дома нет), `metJunona` — была ли первая встреча: листок на доске у
-  * ратуши и знакомство с Юноной. */
-final case class HomeData(tier: Int = 0, metJunona: Boolean = false) {
+  * ратуши и знакомство с Юноной; `runes` — рунический алтарь: сколько узоров
+  * лежит по каждой руне (ключ руны → число в малых рунах, большая — пять). */
+final case class HomeData(
+  tier:      Int               = 0,
+  metJunona: Boolean           = false,
+  runes:     Map[String, Long] = Map.empty
+) {
   def house: Option[House] = House.byTier(tier)
 
   def owns: Boolean = house.isDefined
+
+  /** Сколько узоров руны `key` на алтаре. */
+  def runeCount(key: String): Long = runes.getOrElse(key, 0L)
+
+  /** Записать, сколько узоров руны на алтаре; ноль — руна уходит из счёта. */
+  def withRune(key: String, count: Long): HomeData =
+    copy(runes = if (count > 0L) runes.updated(key, count) else runes - key)
 }
 
 object HomeData {
@@ -81,7 +93,8 @@ object HomeData {
   implicit val encoder: Encoder[HomeData] = deriveEncoder
   implicit val decoder: Decoder[HomeData] = (c: HCursor) =>
     for {
-      tier <- c.getOrElse[Int]("tier")(0)
-      met  <- c.getOrElse[Boolean]("metJunona")(false)
-    } yield HomeData(tier, met)
+      tier  <- c.getOrElse[Int]("tier")(0)
+      met   <- c.getOrElse[Boolean]("metJunona")(false)
+      runes <- c.getOrElse[Map[String, Long]]("runes")(Map.empty)
+    } yield HomeData(tier, met, runes)
 }

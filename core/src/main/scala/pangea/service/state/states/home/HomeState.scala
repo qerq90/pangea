@@ -55,6 +55,7 @@ case class HomeState(
       "HomeWakeYes" -> Target.Run { (u, _, r) => wakeEarly(u, r) },
       "HomeWakeNo"  -> Target.Run { (u, _, r) => showSleeping(u, r) },
       "HomeLibrary" -> Target.Run { (u, _, r) => library(u, r) },
+      "HomeAltar"   -> Target.Goto(StateType.RuneAltar),
       "LeaveHome"   -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.Home) }
@@ -183,11 +184,13 @@ case class HomeState(
       home.house match {
         case None => office(user, renderer)
         case Some(h) =>
+          // Ряд 0 — отдых и чтение, ряд 1 — хозяйство дома, дальше — Юнона и дверь.
           val buttons = List(
             Some(Choice("HomeBed", content.text("home.house.bed"), color = ChoiceColor.Positive, row = Some(0))),
             Option.when(h.tier >= House.Townhouse.tier)(Choice("HomeLibrary", content.text("home.house.library"), row = Some(0))),
-            Some(Choice("HomeOffice", content.text("home.house.office"), row = Some(1))),
-            Some(Choice("LeaveHome", content.text("home.house.leave"), color = ChoiceColor.Negative, row = Some(2)))
+            Some(Choice("HomeAltar", content.text("home.house.altar"), row = Some(1))),
+            Some(Choice("HomeOffice", content.text("home.house.office"), row = Some(2))),
+            Some(Choice("LeaveHome", content.text("home.house.leave"), color = ChoiceColor.Negative, row = Some(3)))
           ).flatten
           renderer.show(user, Screen(content.text(s"home.houses.${h.key}.inside"), buttons)).as(StateType.Home)
       }
