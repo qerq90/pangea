@@ -259,7 +259,8 @@ object HomeStateSpec extends ZIOSpecDefault {
         poor   <- texts(r)
         low    <- homeOf(dao)
       } yield assertTrue(bought.charges == HomeRates.AltarMaxCharges) &&
-              assertTrue(screen.text.contains("питает весь дом") && screen.text.contains("Энергия дома: 70/100")) &&
+              assertTrue(screen.text.contains("растворяются прямо на камне") && screen.text.contains("питает весь дом") &&
+                screen.text.contains("Энергия дома: 70/100")) &&
               assertTrue(screen.choices.map(_.label).headOption.contains("✨ Пополнить +50 — 10 000 🪙")) &&
               assertTrue(topped.charges == 100 && h1.silver == 15000L) &&
               assertTrue(h2.silver == 15000L && said.contains("Алтарь и так полон")) &&
