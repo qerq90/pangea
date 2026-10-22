@@ -3,6 +3,7 @@ package pangea.model.quest
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.hero.LoreData
+import pangea.model.home.{HomeData, House}
 import pangea.model.user.UserId
 import pangea.service.state.FirstStepsQuest
 import pangea.test.TestFixtures
@@ -31,9 +32,12 @@ object FirstStepsSpec extends ZIOSpecDefault {
                                                NpcQuest.Priest, NpcQuest.Horn))
     },
 
-    test("домов пока нет — и задание не закрывается, даже когда остальное сделано") {
-      val all = FirstSteps.progress(hero.copy(lvl = 30L), done(FirstSteps.CityQuests: _*))
-      assertTrue(all.strong && all.city && !all.house && !all.done)
+    test("без дома задание не закрывается; любой дом у Юноны закрывает пункт «логово»") {
+      val all    = FirstSteps.progress(hero.copy(lvl = 30L), done(FirstSteps.CityQuests: _*))
+      val housed = FirstSteps.progress(hero.copy(lvl = 30L), done(FirstSteps.CityQuests: _*), HomeData(tier = 1))
+      assertTrue(all.strong && all.city && !all.house && !all.done) &&
+      assertTrue(housed.house && housed.done) &&
+      assertTrue(House.values.forall(h => FirstSteps.progress(hero, NpcQuests.empty, HomeData(tier = h.tier)).house))
     },
 
     test("на экране — три пункта с отметками") {

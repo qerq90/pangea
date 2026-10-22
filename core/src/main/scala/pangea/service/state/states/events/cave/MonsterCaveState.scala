@@ -844,8 +844,9 @@ case class MonsterCaveState(
       // Выездные в счёт пещер не идут: за каждое своё объявление.
       val quest = questOf(scene)
       for {
+        now    <- nowMs
         hero   <- getHero(user)
-        got     = hero.expFrom(bonus)
+        got     = hero.expFrom(bonus, now)
         leveled = hero.gainExp(got)
         _      <- heroDao.updateExpAndLevel(user.userId, leveled.exp, leveled.lvl, leveled.upgradePoints)
         _      <- renderer.show(user, Screen(content.format(key(scene, "cleared"), "exp" -> got.toString), Nil))

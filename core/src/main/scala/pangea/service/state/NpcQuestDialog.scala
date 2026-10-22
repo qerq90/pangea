@@ -57,9 +57,10 @@ final case class NpcQuestDialog(heroDao: HeroDao, content: SceneContent, quest: 
     * опыт и (если случился) новый уровень — сцена вклеивает их в свою награду. */
   def complete(user: User, hero: Hero, extra: NpcQuests => NpcQuests): Task[(Hero, String)] =
     for {
+      now     <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
       _       <- NpcQuestLog.modify(heroDao, user.userId)(q => extra(q.finish(quest)))
-      leveled <- NpcQuestLog.grantExp(heroDao, hero, quest)
-      expLine  = content.format("npcQuests.common.exp", "exp" -> NpcQuestLog.expReward(hero, quest).toString)
+      leveled <- NpcQuestLog.grantExp(heroDao, hero, quest, now)
+      expLine  = content.format("npcQuests.common.exp", "exp" -> NpcQuestLog.expReward(hero, quest, now).toString)
       lvlLine  = if (leveled.lvl > hero.lvl) "\n" + content.format("npcQuests.common.levelUp", "level" -> leveled.lvl.toString) else ""
     } yield (leveled, expLine + lvlLine)
 }

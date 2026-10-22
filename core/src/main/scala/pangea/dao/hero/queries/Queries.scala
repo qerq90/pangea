@@ -126,6 +126,12 @@ object Queries {
   def readAzatData(userId: UserId): Fragment =
     sql"select azat_data from $tableName where user_id = $userId"
 
+  def writeHomeData(userId: UserId, data: Json): Fragment =
+    sql"update $tableName set home_data = $data where user_id = $userId"
+
+  def readHomeData(userId: UserId): Fragment =
+    sql"select home_data from $tableName where user_id = $userId"
+
   def updateWeaponDust(userId: UserId, dust: Json): Fragment =
     sql"update $tableName set weapon_dust = $dust where user_id = $userId"
 

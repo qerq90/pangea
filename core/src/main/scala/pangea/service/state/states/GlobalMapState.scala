@@ -15,6 +15,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
     routes = Map(
       "Tavern"          -> Target.Goto(StateType.Tavern),
       "Guild"           -> Target.Goto(StateType.Guild),
+      "Home"            -> Target.Goto(StateType.Home),
       "HarborQuarter"   -> Target.Goto(StateType.HarborQuarter),
       "MarketSquare"    -> Target.Goto(StateType.MarketSquare),
       "CityCenter"      -> Target.Goto(StateType.CityCenter),
@@ -45,6 +46,7 @@ case class GlobalMapState(heroDao: HeroDao, content: SceneContent) extends State
         byId("CityCenter").copy(color = ChoiceColor.Primary, row = Some(0)),
         byId("Tavern").copy(color = ChoiceColor.Positive, row = Some(1)),
         byId("Guild").copy(color = ChoiceColor.Positive, row = Some(1)),
+        byId("Home").copy(color = ChoiceColor.Positive, row = Some(1)),
         byId("OpenCharacter").copy(row = Some(2)),
         byId("ReturnToDungeon").copy(row = Some(2)),
         byId("LeaveCity").copy(color = ChoiceColor.Negative, row = Some(3))

@@ -2,6 +2,7 @@ package pangea.service.state
 
 import pangea.engine.SceneContent
 import pangea.model.hero.Hero
+import pangea.model.home.HomeData
 import pangea.model.quest.{FirstSteps, NpcQuests}
 
 /** Как задание «Встать на ноги» выглядит на экране (см. [[FirstSteps]]): пункты
@@ -9,8 +10,8 @@ import pangea.model.quest.{FirstSteps, NpcQuests}
 object FirstStepsQuest {
 
   /** Пункты задания, по строке на каждый. */
-  def objectives(content: SceneContent, hero: Hero, quests: NpcQuests): String = {
-    val p = FirstSteps.progress(hero, quests)
+  def objectives(content: SceneContent, hero: Hero, quests: NpcQuests, home: HomeData = HomeData.empty): String = {
+    val p = FirstSteps.progress(hero, quests, home)
     def mark(ok: Boolean): String = if (ok) "✅" else "⬜"
     List(
       s"${mark(p.strong)} ${content.format("firstSteps.strong", "lvl" -> FirstSteps.TargetLvl.toString)}",

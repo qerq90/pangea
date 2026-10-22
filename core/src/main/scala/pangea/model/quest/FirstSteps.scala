@@ -1,14 +1,14 @@
 package pangea.model.quest
 
 import pangea.model.hero.Hero
+import pangea.model.home.HomeData
 
 /** «Встать на ноги» — задание, которое герой ставит себе сам, очнувшись в
   * сторожке посреди лабиринта: окрепнуть, обзавестись логовом и разведать город.
   *
   * Копить для него ничего не нужно: каждый пункт проверяется по тому, что у
-  * героя уже есть, — по уровню и по сданным заданиям горожан. Дом пока купить
-  * негде: пункт ждёт, пока в городе появятся дома, и задание до тех пор не
-  * закрывается. Взятым его отмечает `LoreData.firstSteps`. */
+  * героя уже есть, — по уровню, по дому (любому, у Юноны Кинтслев) и по сданным
+  * заданиям горожан. Взятым его отмечает `LoreData.firstSteps`. */
 object FirstSteps {
 
   /** Окрепнуть — дойти до этого уровня. */
@@ -28,10 +28,9 @@ object FirstSteps {
     def done: Boolean = strong && house && city
   }
 
-  def progress(hero: Hero, quests: NpcQuests): Progress =
+  def progress(hero: Hero, quests: NpcQuests, home: HomeData = HomeData.empty): Progress =
     Progress(
       strong   = hero.lvl >= TargetLvl,
-      // Домов в городе пока нет — купить негде; пункт прикрутим вместе с домами.
-      house    = false,
+      house    = home.owns,
       cityDone = CityQuests.count(quests.isDone))
 }

@@ -3,6 +3,7 @@ package pangea.service.state
 import pangea.dao.hero.HeroDao
 import pangea.engine.SceneContent
 import pangea.model.hero.{Hero, LoreData}
+import pangea.model.home.HomeData
 import pangea.model.quest.{BoardDesk, DailyNpc, DailyQuests, DailyRates, FirstSteps, NpcQuest, NpcQuests}
 import pangea.service.state.states.guild.QuestBoardState
 import zio.Task
@@ -18,16 +19,17 @@ object QuestJournal {
       quests <- NpcQuestLog.load(heroDao, hero.userId)
       daily  <- DailyQuestLog.load(heroDao, hero.userId)
       board  <- heroDao.readQuestData(hero.userId).map(_.flatMap(_.as[BoardDesk].toOption))
-    } yield render(content, hero, lore, quests, daily, board, nowMs)
+      home   <- heroDao.readHomeData(hero.userId).map(_.flatMap(_.as[HomeData].toOption).getOrElse(HomeData.empty))
+    } yield render(content, hero, lore, quests, daily, board, nowMs, home)
 
   /** Разделы — через пустую строку: сюжет, горожане, поручения, доска. Пусто
     * везде — так и говорим. */
   def render(content: SceneContent, hero: Hero, lore: LoreData, quests: NpcQuests, daily: DailyQuests,
-             board: Option[BoardDesk], nowMs: Long): String = {
-    val story = Option.when(lore.firstSteps && !FirstSteps.progress(hero, quests).done)(
+             board: Option[BoardDesk], nowMs: Long, home: HomeData = HomeData.empty): String = {
+    val story = Option.when(lore.firstSteps && !FirstSteps.progress(hero, quests, home).done)(
       content.format("journal.story",
         "title"      -> content.text("firstSteps.title"),
-        "objectives" -> FirstStepsQuest.objectives(content, hero, quests))).toList
+        "objectives" -> FirstStepsQuest.objectives(content, hero, quests, home))).toList
     val npcs = NpcQuest.values.toList.filter(quests.isTaken).map(npcLine(content, _, quests))
     val today = DailyRates.dayOf(nowMs)
     val dailies = DailyNpc.values.toList.flatMap { npc =>

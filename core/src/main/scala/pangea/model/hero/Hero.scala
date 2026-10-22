@@ -296,10 +296,15 @@ case class Hero(
     val curEn    = fightStats.energy.min(maxEn)
     val blessingLine = if (blessed) "\n ✨ Благословение Активно" else ""
     val frozenLine   = if (expFrozen) "\n ❄ Опыт остановлен" else ""
+    val restedLine   = statBoosts.remainingMs(pangea.model.home.HomeRates.RestedBoost, nowMs).fold("") { ms =>
+      val mins = (ms / 60000L).max(1L)
+      val left = if (mins >= 60L) s"${mins / 60L} ч ${mins % 60L} мин" else s"$mins мин"
+      s"\n 🛏 Выспались дома: +${pangea.model.home.HomeRates.RestedExpPct}% опыта, ещё $left"
+    }
     val restsLine    = if (instantRests > 0) s"\n ⚡ Быстрых отдыхов: $instantRests" else ""
     import Hero.withNative
     s"""$raceName, Уровень $lvl  ☠ Убито: $kills
-       | $getLvlExp/$getNeededExp опыта$frozenLine$blessingLine$restsLine
+       | $getLvlExp/$getNeededExp опыта$frozenLine$restedLine$blessingLine$restsLine
        |
        | 💪 СИЛ ${withNative(effB.str, natB.str)}  ТЕЛО ${withNative(effB.vit, natB.vit)}
        | 🏃 ЛОВ ${withNative(effB.agi, natB.agi)}  ИНТ ${withNative(effB.int, natB.int)}
@@ -321,8 +326,16 @@ case class Hero(
   def getLvlExp: Long    = exp
 
   /** Сколько опыта герой на самом деле получит из `amount`: пока опыт
-   *  остановлен (`expFrozen`), — ничего. Этим числом и говорят игроку «+N опыта». */
-  def expFrom(amount: Long): Long = if (expFrozen) 0L else amount
+   *  остановлен (`expFrozen`), — ничего; выспался дома — на
+   *  [[pangea.model.home.HomeRates.RestedExpPct]]% больше (прибавка вверх, чтобы
+   *  и малый опыт что-то прибавил). Этим числом и говорят игроку «+N опыта». */
+  def expFrom(amount: Long, nowMs: Long): Long =
+    if (expFrozen) 0L
+    else if (rested(nowMs)) amount + (amount * pangea.model.home.HomeRates.RestedExpPct + 99L) / 100L
+    else amount
+
+  /** Выспался ли дома: действует ли баф «выспался» (см. [[pangea.model.home.House.restedMs]]). */
+  def rested(nowMs: Long): Boolean = statBoosts.hasActive(pangea.model.home.HomeRates.RestedBoost, nowMs)
 
   /** Начисление опыта с прокачкой уровней по [[Hero.neededExpForLevel]]. Возвращает героя
    *  с обновлёнными `exp`/`lvl`/`upgradePoints` (4 очка характеристик за уровень,

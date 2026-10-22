@@ -68,8 +68,8 @@ object FetPotionSpec extends ZIOSpecDefault {
     test("пока опыт стоит, его не дают ниоткуда — и «Персонаж» об этом говорит") {
       val hero   = TestFixtures.hero(userId).copy(lvl = 3L, exp = 10L, upgradePoints = 0L, dungeonLevel = 5)
       val frozen = hero.copy(expFrozen = true)
-      assertTrue(frozen.gainExp(100000L) == frozen && frozen.expFrom(500L) == 0L) &&
-      assertTrue(NpcQuestLog.expReward(frozen, NpcQuest.Innkeeper) == 0L && NpcQuestLog.expReward(hero, NpcQuest.Innkeeper) > 0L) &&
+      assertTrue(frozen.gainExp(100000L) == frozen && frozen.expFrom(500L, 0L) == 0L) &&
+      assertTrue(NpcQuestLog.expReward(frozen, NpcQuest.Innkeeper, 0L) == 0L && NpcQuestLog.expReward(hero, NpcQuest.Innkeeper, 0L) > 0L) &&
       assertTrue(hero.gainExp(100000L).lvl > hero.lvl) &&
       assertTrue(frozen.getInfo(0L).contains("Опыт остановлен") && !hero.getInfo(0L).contains("Опыт остановлен"))
     },
