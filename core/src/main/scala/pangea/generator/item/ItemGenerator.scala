@@ -29,9 +29,13 @@ object ItemGenerator {
     ((param + param / 100.0 * pct).toLong, next)
   }
 
+  /** База обязательной прибавки HP нагрудника — на уровень предмета, сверх
+    * коэффициента редкости. Была 12, подняли в полтора раза. */
+  val ChestHpBase: Double = 18.0
+
   // Обязательные прибавки: оружию (Weapon) — к атаке lvl×(6+R3) ±20%;
-  // нагруднику (ChestPlate) — к HP персонажа lvl×(12+R3) ±10%; щиту — к защите
-  // ровно 3×lvl (см. ShieldRates). R3 = rarity.factorR3.
+  // нагруднику (ChestPlate) — к HP персонажа lvl×(ChestHpBase+R3) ±10%; щиту —
+  // к защите ровно 3×lvl (см. ShieldRates). R3 = rarity.factorR3.
   private def applyMandatory(item: Item, rng: Rng): (Item, Rng) = {
     val r3 = item.rarity.factorR3
     item.itemType match {
@@ -39,7 +43,7 @@ object ItemGenerator {
         val (bonus, next) = modifySpread(item.lvl * (6.0 + r3), rng, 20L)
         (item.withAttack(item.attack + bonus), next)
       case ItemType.ChestPlate =>
-        val (bonus, next) = modifySpread(item.lvl * (12.0 + r3), rng, 10L)
+        val (bonus, next) = modifySpread(item.lvl * (ChestHpBase + r3), rng, 10L)
         (item.withHp(item.hp + bonus), next)
       case ItemType.Shield =>
         (item.withDefence(item.defence + ShieldRates.DefencePerLvl * item.lvl), rng)

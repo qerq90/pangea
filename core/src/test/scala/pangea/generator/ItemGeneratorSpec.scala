@@ -88,14 +88,15 @@ object ItemGeneratorSpec extends ZIOSpecDefault {
       assertTrue(weapons.nonEmpty) && assertTrue(weapons.forall(_.attack > 0L))
     },
 
-    test("нагрудник даёт обязательный HP ≈ lvl×(12+R3)±10%") {
+    test("нагрудник даёт обязательный HP ≈ lvl×(18+R3)±10%") {
       val lvl  = 10L
-      val base = lvl * (12.0 + Rarity.Green.factorR3) // R3 = 4 → 160
+      val base = lvl * (ItemGenerator.ChestHpBase + Rarity.Green.factorR3) // R3 = 4 → 220
       val lo   = (base * 0.9).toLong
       val hi   = (base * 1.1).toLong + 1
       val chests = (1L to 800L)
         .map(s => ItemGenerator.createItemAtLevel(lvl, Rarity.Green, Rng(s))._1)
         .filter(_.itemType == ItemType.ChestPlate)
+      assertTrue(ItemGenerator.ChestHpBase == 18.0) &&   // было 12 — подняли в полтора раза
       assertTrue(chests.nonEmpty) &&
       assertTrue(chests.forall(c => c.hp >= lo && c.hp <= hi))
     },
