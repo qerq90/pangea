@@ -2,6 +2,7 @@ package pangea.model.home
 
 import io.circe.generic.semiauto.deriveEncoder
 import io.circe.{Decoder, Encoder, HCursor}
+import pangea.model.item.Item
 
 /** Дом героя — один из трёх, по ступеням. Продаёт их Юнона Кинтслев,
   * представитель городского совета. Дом выше покупается с зачётом того, что
@@ -64,16 +65,40 @@ object HomeRates {
 
   /** Имя бафа «выспался» среди временных бафов героя (`Hero.statBoosts`). */
   val RestedBoost: String = "home:rested"
+
+  /** Верстак травника: сколько трав держат полки — всего, не по видам. */
+  val HerbShelves: Int = 50
+
+  /** Полка готовых отваров. */
+  val BrewShelves: Int = 25
+
+  /** Котелок: мест — как в кубе Азата. */
+  val CauldronSlots: Int = 9
+
+  /** Личный алтарь Азата: потолок энергии дома. Дом с алтарём приходит с ним полным. */
+  val AltarMaxCharges: Int = 100
+
+  /** Пополнение алтаря: столько энергии за столько серебра — как в храме. */
+  val AltarRefillCharges: Int = 50
+  val AltarRefillSilver: Long = 10000L
 }
 
 /** Всё о доме героя, что хранится в `heroes.home_data`: `tier` — ступень дома
   * (0 — дома нет), `metJunona` — была ли первая встреча: листок на доске у
   * ратуши и знакомство с Юноной; `runes` — рунический алтарь: сколько узоров
-  * лежит по каждой руне (ключ руны → число в малых рунах, большая — пять). */
+  * лежит по каждой руне (ключ руны → число в малых рунах, большая — пять).
+  *
+  * Со второго дома: `herbs` — травы на полках верстака, `brews` — полка готовых
+  * отваров, `cauldron` — что лежит в котелке, `charges` — энергия дома от
+  * личного алтаря Азата (её тратит котелок). */
 final case class HomeData(
   tier:      Int               = 0,
   metJunona: Boolean           = false,
-  runes:     Map[String, Long] = Map.empty
+  runes:     Map[String, Long] = Map.empty,
+  herbs:     List[Item]        = Nil,
+  brews:     List[Item]        = Nil,
+  cauldron:  List[Item]        = Nil,
+  charges:   Int               = 0
 ) {
   def house: Option[House] = House.byTier(tier)
 
@@ -95,6 +120,10 @@ object HomeData {
     for {
       tier  <- c.getOrElse[Int]("tier")(0)
       met   <- c.getOrElse[Boolean]("metJunona")(false)
-      runes <- c.getOrElse[Map[String, Long]]("runes")(Map.empty)
-    } yield HomeData(tier, met, runes)
+      runes    <- c.getOrElse[Map[String, Long]]("runes")(Map.empty)
+      herbs    <- c.getOrElse[List[Item]]("herbs")(Nil)
+      brews    <- c.getOrElse[List[Item]]("brews")(Nil)
+      cauldron <- c.getOrElse[List[Item]]("cauldron")(Nil)
+      charges  <- c.getOrElse[Int]("charges")(0)
+    } yield HomeData(tier, met, runes, herbs, brews, cauldron, charges)
 }

@@ -56,6 +56,9 @@ case class HomeState(
       "HomeWakeNo"  -> Target.Run { (u, _, r) => showSleeping(u, r) },
       "HomeLibrary" -> Target.Run { (u, _, r) => library(u, r) },
       "HomeAltar"   -> Target.Goto(StateType.RuneAltar),
+      "HomeHerbs"   -> Target.Goto(StateType.HerbWorkbench),
+      "HomeAzat"    -> Target.Run { (u, _, r) => azat(u, r) },
+      "HomeAzatUp"  -> Target.Run { (u, _, r) => azatRefill(u, r) },
       "LeaveHome"   -> Target.Goto(StateType.GlobalMap)
     ),
     fallback = Target.Run { (u, _, r) => enter(u, r).as(StateType.Home) }
@@ -147,7 +150,11 @@ case class HomeState(
               renderer.show(user, Screen(content.format("home.office.lack", "lack" -> priceText(lack, pay)), Nil)) *>
                 office(user, renderer)
             case Right(_) =>
-              saveHome(user, home.copy(tier = h.tier, metJunona = true)) *>
+              // Дом с алтарём Азата приходит с полным алтарём — один раз, при
+              // первом таком доме: дальше энергию дома пополняют сами.
+              val charges = if (h.tier >= House.Townhouse.tier && home.tier < House.Townhouse.tier) HomeRates.AltarMaxCharges
+                            else home.charges
+              saveHome(user, home.copy(tier = h.tier, metJunona = true, charges = charges)) *>
                 renderer.show(user, Screen(content.text(s"home.houses.${h.key}.bought"), Nil)) *>
                 showHouse(user, renderer)
           }
@@ -185,10 +192,13 @@ case class HomeState(
         case None => office(user, renderer)
         case Some(h) =>
           // Ряд 0 — отдых и чтение, ряд 1 — хозяйство дома, дальше — Юнона и дверь.
+          val second = h.tier >= House.Townhouse.tier
           val buttons = List(
             Some(Choice("HomeBed", content.text("home.house.bed"), color = ChoiceColor.Positive, row = Some(0))),
-            Option.when(h.tier >= House.Townhouse.tier)(Choice("HomeLibrary", content.text("home.house.library"), row = Some(0))),
+            Option.when(second)(Choice("HomeLibrary", content.text("home.house.library"), row = Some(0))),
             Some(Choice("HomeAltar", content.text("home.house.altar"), row = Some(1))),
+            Option.when(second)(Choice("HomeHerbs", content.text("home.house.workbench"), row = Some(1))),
+            Option.when(second)(Choice("HomeAzat", content.text("home.house.azat"), row = Some(1))),
             Some(Choice("HomeOffice", content.text("home.house.office"), row = Some(2))),
             Some(Choice("LeaveHome", content.text("home.house.leave"), color = ChoiceColor.Negative, row = Some(3)))
           ).flatten
@@ -205,6 +215,43 @@ case class HomeState(
         case Some(h) => renderer.show(user, Screen(content.text(s"home.houses.${h.key}.library"), List(backToHouse))).as(StateType.Home)
       }
     }
+
+  // ── Алтарь Азата ────────────────────────────────────────────────────────────
+
+  /** Личный алтарь Азата — со второго дома: его магия питает весь дом (котелок
+    * и всё, что работает на силе Азата). Энергия дома пополняется здесь же — по
+    * цене храма. */
+  private def azat(user: User, renderer: Renderer): Task[StateType] =
+    loadHome(user).flatMap { home =>
+      if (!home.house.exists(_.tier >= House.Townhouse.tier)) showHouse(user, renderer)
+      else renderer.show(user, Screen(content.format("home.azat.text",
+          "n" -> home.charges.toString, "max" -> HomeRates.AltarMaxCharges.toString), List(
+          Choice("HomeAzatUp", content.format("home.azat.refill", "charges" -> HomeRates.AltarRefillCharges.toString,
+            "price" -> money(HomeRates.AltarRefillSilver)), color = ChoiceColor.Positive, row = Some(0)),
+          backToHouse.copy(row = Some(1))
+        ))).as(StateType.Home)
+    }
+
+  /** Пополнить: +[[HomeRates.AltarRefillCharges]] за серебро (с ячейкой), не выше потолка. */
+  private def azatRefill(user: User, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      home <- loadHome(user)
+      res  <- if (!home.house.exists(_.tier >= House.Townhouse.tier)) showHouse(user, renderer)
+              else if (home.charges >= HomeRates.AltarMaxCharges)
+                renderer.show(user, Screen(content.format("home.azat.full",
+                  "n" -> home.charges.toString, "max" -> HomeRates.AltarMaxCharges.toString), Nil)) *> azat(user, renderer)
+              else charge(hero, PaySilver, HomeRates.AltarRefillSilver).flatMap {
+                case Left(lack) =>
+                  renderer.show(user, Screen(content.format("home.azat.lack", "lack" -> money(lack)), Nil)) *> azat(user, renderer)
+                case Right(_) =>
+                  val next = (home.charges + HomeRates.AltarRefillCharges).min(HomeRates.AltarMaxCharges)
+                  saveHome(user, home.copy(charges = next)) *>
+                    renderer.show(user, Screen(content.format("home.azat.refilled",
+                      "n" -> next.toString, "max" -> HomeRates.AltarMaxCharges.toString), Nil)) *>
+                    azat(user, renderer)
+              }
+    } yield res
 
   // ── Кровать ─────────────────────────────────────────────────────────────────
 
