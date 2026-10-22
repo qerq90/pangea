@@ -112,7 +112,7 @@ object HomeStateSpec extends ZIOSpecDefault {
               assertTrue(h2.silver == 1000L && home.house.contains(House.Cottage)) &&
               assertTrue(FirstSteps.progress(h2, NpcQuests.empty, home).house) &&
               // сразу — в дом: кровать, «К Юноне», «Уйти»; библиотеки в домике нет
-              assertTrue(inside.text.contains("Ваш домик") && inside.choices.map(_.id) == List("HomeBed", "HomeOffice", "LeaveHome"))
+              assertTrue(inside.text.contains("Ваш домик") && inside.choices.map(_.id) == List("HomeBed", "HomeAltar", "HomeOffice", "LeaveHome"))
     },
 
     test("второй дом с домиком — особая реплика о зачёте и 700 дублонов; старый уходит, библиотека появляется") {
@@ -136,7 +136,7 @@ object HomeStateSpec extends ZIOSpecDefault {
                 pitch.text.contains("всё личное тоже") && pitch.text.contains("место, чтобы расшириться")) &&
               assertTrue(pitch.text.contains("Твой «Домик в две комнаты» уходит в управление совета.")) &&
               assertTrue(h.doubloons == 50L && home.house.contains(House.Townhouse)) &&
-              assertTrue(inside.choices.map(_.id) == List("HomeBed", "HomeLibrary", "HomeOffice", "LeaveHome")) &&
+              assertTrue(inside.choices.map(_.id) == List("HomeBed", "HomeLibrary", "HomeAltar", "HomeOffice", "LeaveHome")) &&
               assertTrue(same.house.contains(House.Townhouse))
     },
 
