@@ -768,6 +768,43 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("«Малое исцеление» — Йорген Кремень: +"))
     },
 
+    test("лечение достаёт только до соседей: дальнего в списке нет, а нацелить на него — ход не тратится") {
+      val h = heroWithSkills(hero(allies = List(ally(pos = 2, hp = Some(100L)), ally(pos = 3, hp = Some(100L)))),
+        Skill.SweepingStrike, Skill.MinorHeal)
+      for {
+        t <- makeState(h, SoloPveBattle.from(monster(100000L), h))
+        (state, dao, r) = t
+        _       <- state.action(testUser, tap("Skill_202"), r)
+        ask     <- r.sentScreens.map(_.last)
+        targets  = ask.choices.filter(_.id == "Skill_202").flatMap(_.data.get("target"))
+        _       <- state.action(testUser, aimed("Skill_202", 3), r)
+        said    <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        after   <- battleOf(dao)
+      } yield assertTrue(targets == List("1", "2")) &&
+              assertTrue(said.contains("До этого союзника не дотянуться")) &&
+              // ход не потрачен: умение не применено, дальний не вылечен
+              assertTrue(after.group.round == 0 && after.slotByItem(202L).exists(_.uses == 0)) &&
+              assertTrue(after.group.allyAt(3).exists(_.hp == 100L))
+    },
+
+    test("рядом никого: лечение — себе, без вопроса о цели") {
+      val h = heroWithSkills(hero(allies = List(ally(pos = 2, hp = Some(100L)))), Skill.SweepingStrike, Skill.MinorHeal)
+      val b = SoloPveBattle.from(monster(100000L), h)
+      // союзник отошёл на место 3 — до него уже не дотянуться
+      val apart = b.copy(group = b.group.copy(allies = b.group.allies.map(_.copy(position = 3))))
+      for {
+        t <- makeState(h, apart)
+        (state, dao, r) = t
+        _       <- state.action(testUser, tap("Skill_202"), r)
+        screens <- r.sentScreens
+        after   <- battleOf(dao)
+        said     = screens.map(_.text).mkString("\n")
+      } yield assertTrue(!screens.exists(_.text.contains("в кого?"))) &&
+              assertTrue(said.contains("Применив руну вы исцеляетесь")) &&
+              assertTrue(after.slotByItem(202L).exists(_.uses == 1)) &&
+              assertTrue(after.group.allyAt(3).exists(_.hp == 100L))
+    },
+
     test("Таран по мобу на месте 2 (напротив него — союзник): герой встаёт на 2, союзник — на 1; целью Таран берёт только мобов") {
       val h = heroWithSkills(hero(), Skill.SweepingStrike, Skill.Ram)
       for {

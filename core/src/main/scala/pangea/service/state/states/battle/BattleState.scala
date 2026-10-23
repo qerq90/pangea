@@ -2972,9 +2972,9 @@ case class BattleState(
   // ── Ход игрока: активный навык ──────────────────────────────────────────────
 
   /** Кнопка умения. В группе умение с уроном достаёт и соседа героя (моб под
-    * номером 2), поэтому сначала спрашиваем, в кого бить; лечение и броня — на
-    * себя, без вопросов. Неготовому умению экран цели не нужен — обычный ход сам
-    * скажет, почему нельзя. */
+    * номером 2), поэтому сначала спрашиваем, в кого бить; лечение и броня — себе
+    * или союзнику рядом, а рядом никого — себе, без вопросов. Неготовому умению
+    * экран цели не нужен — обычный ход сам скажет, почему нельзя. */
   private def skillRoute(user: User, itemId: Long, target: Option[Int], renderer: Renderer): Task[StateType] =
     for {
       now    <- ZIO.clockWith(_.currentTime(TimeUnit.MILLISECONDS))
@@ -2987,17 +2987,19 @@ case class BattleState(
           // Соперник увидит название умения, а не его рассказ от первого лица.
           battle.slotByItem(itemId).map(_.skill.label).getOrElse(""))(
           skillTurn(itemId, target
-            .orElse(battle.slotByItem(itemId).flatMap(s => skillTargets(hero, battle, s.skill).headOption))
+            .orElse(battle.slotByItem(itemId).filterNot(s => BattleState.supports(s.skill.effect))
+              .flatMap(s => skillTargets(hero, battle, s.skill).headOption))
             .getOrElse(battle.group.heroPos)))
     } yield state
 
-  /** Спрашивать ли цель: рядом с героем кто-то стоит, умение готово и бьёт. */
+  /** Спрашивать ли цель: умение готово, и выбрать есть из кого — бьёт, а рядом
+    * больше одного врага, или лечит, а рядом стоит союзник. */
   private def needsTarget(hero: Hero, battle: SoloPveBattle, itemId: Long): Boolean =
     battle.slotByItem(itemId).exists { slot =>
       val ready = slot.cooldown <= 0 && hero.fightStats.energy >= slot.skill.energyCost(hero)
       ready && (
         (BattleState.dealsDamage(slot.skill.effect) && skillTargets(hero, battle, slot.skill).size > 1) ||
-        (BattleState.supports(slot.skill.effect) && battle.group.allies.exists(_.alive)))
+        (BattleState.supports(slot.skill.effect) && supportAllies(battle).nonEmpty))
     }
 
   /** Экран выбора цели для базовой атаки: те же кнопки, что у умения с уроном. */
@@ -3025,16 +3027,21 @@ case class BattleState(
   private def skillTargets(hero: Hero, battle: SoloPveBattle, skill: Skill): List[Int] =
     battle.group.targetsWithin(BattleState.skillReach(hero, skill))
 
+  /** До каких союзников достают лечение и броня: живые соседи героя по ряду
+    * (см. [[BattleState.SupportReach]]) — так же, как удар по врагам. */
+  private def supportAllies(battle: SoloPveBattle): List[BattleAlly] =
+    battle.group.alliesWithin(BattleState.SupportReach)
+
   /** Кнопки целей под действие `choiceId`: лечение и броня — себе или
-    * союзнику по позициям отряда; урон — `enemies`, моб в паре и все, до кого
-    * достаёт оружие (см. [[heroTargets]]). */
+    * союзнику рядом (см. [[supportAllies]]); урон — `enemies`, моб в паре и все,
+    * до кого достаёт оружие (см. [[heroTargets]]). */
   private def targetChoices(battle: SoloPveBattle, choiceId: String, label: String, support: Boolean,
                             enemies: List[Int]): Screen = {
     val targets =
       if (support) {
         val me = pangea.engine.Choice(choiceId, content.text("battle.group.targetSelf"),
           data = Map("target" -> battle.group.heroPos.toString), row = Some(0))
-        me :: battle.group.allies.filter(_.alive).sortBy(_.position).zipWithIndex.map { case (a, i) =>
+        me :: supportAllies(battle).zipWithIndex.map { case (a, i) =>
           pangea.engine.Choice(choiceId,
             pangea.engine.Choice.fit(content.format("battle.group.targetAlly",
               "n" -> a.position.toString, "name" -> a.name, "hp" -> a.hpPct.toString, "armor" -> a.armorPct.toString)),
@@ -3077,6 +3084,10 @@ case class BattleState(
         )
       case Some(slot) if BattleState.needsEnemy(slot.skill.effect) && skillTargets(hero, battle, slot.skill).isEmpty =>
         cont(hero, battle, content.text("battle.group.noTarget"))
+      // Лечение и броня — себе или союзнику рядом; до дальнего не дотянуться.
+      case Some(slot) if BattleState.supports(slot.skill.effect) && target != battle.group.heroPos &&
+                         !supportAllies(battle).exists(_.position == target) =>
+        cont(hero, battle, content.text("battle.group.allyOutOfReach"))
       // Блок и Контрудар тратят бонусное действие раунда — то же, что пояс.
       case Some(slot) if BattleState.bonusAction(slot.skill.effect) && battle.consumableUsedThisRound =>
         cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
@@ -5962,7 +5973,13 @@ object BattleState {
   def parseAction(ua: pangea.service.state.UserAction): Option[String] =
     ua.payload.flatMap(p => io.circe.jawn.decode[Map[String, String]](p).toOption.flatMap(_.get("action")))
 
-  /** Лечит ли умение или чинит броню — такое можно отдать союзнику. */
+  /** Дальность лечения и брони на союзника: только соседи героя по ряду, как
+    * удар мечом по врагам. Массовое или дальнобойное лечение, если появится, —
+    * отдельными умениями со своей дальностью. */
+  val SupportReach: Int = 1
+
+  /** Лечит ли умение или чинит броню — такое можно отдать союзнику рядом
+    * (см. [[SupportReach]]). */
   def supports(effect: Skill.Effect): Boolean = effect match {
     case Skill.Effect.Heal | Skill.Effect.RepairArmor | Skill.Effect.GuardRepair(_, _) => true
     case _                                                                             => false
