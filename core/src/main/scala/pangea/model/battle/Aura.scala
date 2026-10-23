@@ -45,9 +45,6 @@ object AuraRates {
   /** Ниже этого запаса энергии держать миазмы нечем — они оседают. */
   val MiasmaMinEnergy: Long = 10L
 
-  /** Сколько раундов вылеченный не чувствует ауры. */
-  val MiasmaCalmRounds: Int = 3
-
   /** Святая вода: какую долю макс. HP она снимает с мёртвого за раунд. */
   val HolyWaterPct: Long = 5L
 }
@@ -67,10 +64,9 @@ sealed abstract class Aura(
   val pct: Long,
   /** Какую часть текущей энергии герой тратит на неё за раунд, в %. */
   val energyCostPct: Long,
-  /** Ниже этого запаса энергии аура не держится. */
-  val minEnergy: Long,
-  /** На сколько раундов лечение выводит из-под ауры. */
-  val calmRounds: Int
+  /** Ниже этого запаса энергии аура не держится. Лечение из-под ауры не
+    * выводит: она достаёт каждого на поле, сколько бы его ни лечили. */
+  val minEnergy: Long
 ) extends EnumEntry {
 
   /** Сколько аура даст или возьмёт у того, у кого столько максимума HP: своя
@@ -89,7 +85,7 @@ object Aura extends Enum[Aura] {
 
   /** Миазмы тьмы: мёртвое крепнет, живое гниёт, камню и пламени всё равно. */
   case object Miasma extends Aura("miasma", AuraRates.MiasmaPct, AuraRates.MiasmaEnergyCostPct,
-    AuraRates.MiasmaMinEnergy, AuraRates.MiasmaCalmRounds) {
+    AuraRates.MiasmaMinEnergy) {
     def sign(nature: Nature): Int = nature match {
       case Nature.Undead  =>  1
       case Nature.Living  => -1
@@ -98,9 +94,8 @@ object Aura extends Enum[Aura] {
   }
 
   /** Святая вода: мёртвое жжёт, живому и камню она безразлична. Держит её не
-    * герой, а сама вода на поле: энергии она не просит и передышки после
-    * лечения не знает. */
-  case object HolyWater extends Aura("holyWater", AuraRates.HolyWaterPct, 0L, 0L, 0) {
+    * герой, а сама вода на поле: энергии она не просит. */
+  case object HolyWater extends Aura("holyWater", AuraRates.HolyWaterPct, 0L, 0L) {
     def sign(nature: Nature): Int = nature match {
       case Nature.Undead => -1
       case _             => 0

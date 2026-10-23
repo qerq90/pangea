@@ -216,8 +216,7 @@ object ItemSet extends Enum[ItemSet] {
                    s"Вы держите аурой всё поле боя — миазмы тьмы. В конце раунда на них уходит " +
                    s"${pangea.model.battle.AuraRates.MiasmaEnergyCostPct}% вашей энергии, и на столько же, " +
                    s"сверх ${pangea.model.battle.AuraRates.MiasmaPct}% максимума HP, вся нежить на поле " +
-                   s"лечится, а всё живое — теряет. Лечение выводит из-под ауры на " +
-                   s"${pangea.model.battle.AuraRates.MiasmaCalmRounds} раунда. Энергии меньше " +
+                   s"лечится, а всё живое — теряет. Энергии меньше " +
                    s"${pangea.model.battle.AuraRates.MiasmaMinEnergy} — аура оседает."),
       SetBonus(12, s"Враг, добитый вами, с шансом $RiseChancePct% восстаёт нежитью и идёт за вами двое " +
                    s"суток: с $RiseHpPct% HP и той бронёй, что на нём осталась. Элементали, Гнилой Джо " +
