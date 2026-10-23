@@ -11,7 +11,7 @@ object TestFixtures {
   val noItem: Item = Item.NoItem
   val emptyEquipment: Equipment = Equipment(
     noItem, noItem, noItem, noItem, noItem, noItem, noItem,
-    noItem, noItem, noItem, noItem, noItem, noItem, noItem
+    noItem, noItem, noItem, noItem, noItem, noItem
   )
 
   /** Пустой предмет набора: только принадлежность, без единого стата — чтобы

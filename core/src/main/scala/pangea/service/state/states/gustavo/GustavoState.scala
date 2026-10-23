@@ -297,33 +297,23 @@ object GustavoState {
   /** «На флягу» — если фляги у героя нет и наполнять нечего. */
   val QuestFlaskSilver: Long = 75L
 
-  /** Что Густаво наполнит за отчёт: флягу, надетую по-старому, и все фляги в
-    * ячейках пояса — кроме вампирских, кровь он не разливает
+  /** Что Густаво наполнит за отчёт: все фляги в ячейках пояса — кроме
+    * вампирских, кровь он не разливает
     * ([[pangea.model.item.FlaskEffect.refillsAtGustavo]]). Снаряжение с полными
     * флягами и сколько их было; наполнять нечего — None. */
-  def questFill(eq: Equipment): Option[(Equipment, Int)] = {
-    val slot = eq.flask.details match {
-      case f: ItemDetails.Flask if f.effect.refillsAtGustavo => Some(eq.flask.copy(details = f.refilled))
-      case _                                                 => None
-    }
-    val belt = eq.belt.details match {
+  def questFill(eq: Equipment): Option[(Equipment, Int)] =
+    eq.belt.details match {
       case b: ItemDetails.Belt =>
         val fillable = b.slots.count {
           case f: BeltSlot.Flask => f.kind.effect.refillsAtGustavo
           case _                 => false
         }
-        Option.when(fillable > 0)((eq.belt.copy(details = b.copy(slots = b.slots.map {
+        Option.when(fillable > 0)((eq.copy(belt = eq.belt.copy(details = b.copy(slots = b.slots.map {
           case f: BeltSlot.Flask if f.kind.effect.refillsAtGustavo => f.refilled
           case other                                               => other
-        })), fillable))
+        }))), fillable))
       case _ => None
     }
-    val count = slot.size + belt.fold(0)(_._2)
-    Option.when(count > 0)((eq.copy(
-      flask = slot.getOrElse(eq.flask),
-      belt  = belt.fold(eq.belt)(_._1)
-    ), count))
-  }
 
   /** Действует ли сейчас хоть одно зелье Густаво. */
   def potionActive(hero: Hero, now: Long): Boolean =

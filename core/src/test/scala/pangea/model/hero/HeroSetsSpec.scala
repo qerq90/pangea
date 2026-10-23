@@ -118,9 +118,8 @@ object HeroSetsSpec extends ZIOSpecDefault {
     },
 
     // ── Подключение к статам героя ────────────────────────────────────────────
-    test("считаются только 12 сетовых слотов: фляга и доп. оружие в набор не идут") {
+    test("считаются только 12 сетовых слотов: доп. оружие в набор не идёт") {
       val eq = TestFixtures.emptyEquipment.copy(
-        flask            = piece(1L, ItemType.Flask, Some(ItemSet.Ghoul)),
         additionalWeapon = piece(2L, ItemType.AdditionalWeapon, Some(ItemSet.Ghoul)),
         helmet           = piece(3L, ItemType.Helmet, Some(ItemSet.Ghoul)))
       assertTrue(eq.setCounts == Map[ItemSet, Int](ItemSet.Ghoul -> 1)) // только шлем

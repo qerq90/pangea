@@ -59,12 +59,7 @@ case class EquipmentState(
       scene <- readScene(user)
       // одна кнопка = один слот. Делаем индексы слотов сразу с предметами, чтобы
       // потом легко мапнуть нажатие на slot index.
-      // Слот фляги доживает свой век: фляги теперь носят на поясе, и пустую
-      // ячейку показывать незачем — а занятую оставляем, чтобы игрок снял вещь
-      // и переложил её в пояс сам.
-      indexed = slots.zipWithIndex.filter { case (slot, _) =>
-                  slot.name != FlaskSlotName || slot.get(hero.equipment).itemType != ItemType.NoItem
-                }
+      indexed = slots.zipWithIndex
       (pageSlots, totalPages, page) = ItemMenu.page(indexed, scene.page.getOrElse(0))
       header = s"🎽 ${content.text("equipment.header")}" + (if (totalPages > 1) s" (${page + 1}/$totalPages)" else "")
       slotBtns = pageSlots.zipWithIndex.map { case ((slot, slotIdx), rowIdx) =>
@@ -460,9 +455,6 @@ object EquipmentState {
 
   val SlotPrefix = "EquipSlot_"
 
-  /** Имя доживающего слота фляги: пустым он не показывается. */
-  val FlaskSlotName = "Фляга"
-
   /** Руки: правая держит одноручное или двуручное, левая — второе одноручное. */
   val RightHandName = "Правая рука"
   val LeftHandName  = "Левая рука"
@@ -515,9 +507,6 @@ object EquipmentState {
     Slot("Кольцо 1",    _.firstRing,    _.copy(firstRing    = Item.NoItem), Set(ItemType.Ring), Some(1)),
     Slot("Кольцо 2",    _.secondRing,   _.copy(secondRing   = Item.NoItem), Set(ItemType.Ring), Some(2)),
     Slot("Пояс",        _.belt,         _.copy(belt         = Item.NoItem), Set(ItemType.Belt)),
-    // Фляги теперь носят на поясе: в слот их больше не надеть, а занятый слот
-    // доживает до того, как игрок сам переложит флягу (см. FlaskSlotName).
-    Slot(FlaskSlotName, _.flask,        _.copy(flask        = Item.NoItem), Set.empty),
     // Руки — пара слотов, как кольца (см. InventoryState.equip): в каждую —
     // оружие или щит; двуручное встаёт в правую и занимает обе.
     Slot(RightHandName, _.weapon,       _.copy(weapon       = Item.NoItem), HandTypes, Some(1)),

@@ -18,7 +18,6 @@ case class Equipment(
   firstRing: Item,
   secondRing: Item,
   belt: Item,
-  flask: Item,
   // Правая рука: одноручное оружие или щит — или двуручное, и тогда занята и левая.
   weapon: Item,
   additionalWeapon: Item,
@@ -28,7 +27,7 @@ case class Equipment(
   def allArmor: Long =
     helmet.armor + shoulderPads.armor + chestPlate.armor + bracelets.armor +
     gloves.armor + pants.armor + boots.armor + amulet.armor +
-    firstRing.armor + secondRing.armor + belt.armor + flask.armor +
+    firstRing.armor + secondRing.armor + belt.armor +
     weapon.armor + additionalWeapon.armor + leftHand.armor
 
   // Суммарная прибавка к HP от экипировки (сейчас её даёт только нагрудник)
@@ -37,20 +36,20 @@ case class Equipment(
   def allEnergy: Long =
     helmet.energy + shoulderPads.energy + chestPlate.energy + bracelets.energy +
     gloves.energy + pants.energy + boots.energy + amulet.energy +
-    firstRing.energy + secondRing.energy + belt.energy + flask.energy +
+    firstRing.energy + secondRing.energy + belt.energy +
     weapon.energy + additionalWeapon.energy + leftHand.energy
 
   def allHp: Long =
     helmet.hp + shoulderPads.hp + chestPlate.hp + bracelets.hp +
     gloves.hp + pants.hp + boots.hp + amulet.hp +
-    firstRing.hp + secondRing.hp + belt.hp + flask.hp +
+    firstRing.hp + secondRing.hp + belt.hp +
     weapon.hp + additionalWeapon.hp + leftHand.hp
 
   /** Все надетые предметы (включая пустые слоты) — единый список для агрегаций,
    *  которым не важен конкретный слот (пассивки, будущие суммы статов). */
   def allItems: List[Item] = List(
     helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
-    firstRing, secondRing, belt, flask, weapon, leftHand, additionalWeapon
+    firstRing, secondRing, belt, weapon, leftHand, additionalWeapon
   )
 
   /** Ставит предмет в его же слот вместо прежнего: вещь та же самая, но
@@ -70,7 +69,6 @@ case class Equipment(
     case pangea.model.item.ItemType.Ring             =>
       if (firstRing.id == item.id) copy(firstRing = item) else copy(secondRing = item)
     case pangea.model.item.ItemType.Belt             => copy(belt = item)
-    case pangea.model.item.ItemType.Flask            => copy(flask = item)
     case pangea.model.item.ItemType.Weapon | pangea.model.item.ItemType.Shield =>
       if (leftHand.itemType != ItemType.NoItem && leftHand.id == item.id) copy(leftHand = item)
       else copy(weapon = item)
@@ -83,7 +81,7 @@ case class Equipment(
   def passiveKinds: Set[pangea.model.item.PassiveKind] =
     allItems.flatMap(_.passive).toSet
 
-  /** Слоты, которые считаются в наборы: всё, кроме фляги и доп. оружия, — и обе
+  /** Слоты, которые считаются в наборы: всё, кроме доп. оружия, — и обе
    *  руки. Вещей одного набора так можно надеть тринадцать, но полным набор
    *  считается с двенадцати (см. [[pangea.model.item.ItemSet]]), и выше
    *  двенадцати счёт не растёт (см. [[setCounts]]). */
@@ -141,7 +139,7 @@ case class Equipment(
    *  грань. Стакаются (в отличие от пассивок), поэтому список, а не множество. */
   def armorGems: List[Gem] =
     (List(helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
-      firstRing, secondRing, belt, flask) ++ handShields).flatMap(_.socketedGems)
+      firstRing, secondRing, belt) ++ handShields).flatMap(_.socketedGems)
 
   /** Какие предметы из снаряжения занимают слот данного типа. Для Ring, Weapon и
    *  Shield возвращает оба слота (колец два, рук две); для прочих типов — один. Пустые
@@ -158,7 +156,8 @@ case class Equipment(
     case ItemType.Amulet           => List(amulet)
     case ItemType.Ring             => List(firstRing, secondRing)
     case ItemType.Belt             => List(belt)
-    case ItemType.Flask            => List(flask)
+    // Фляги носят на поясе, в ячейках: своего слота в снаряжении у них нет.
+    case ItemType.Flask            => Nil
     case ItemType.Weapon           => List(weapon, leftHand)
     case ItemType.Shield           => List(weapon, leftHand)
     case ItemType.AdditionalWeapon => List(additionalWeapon)
@@ -179,7 +178,8 @@ object Equipment {
   implicit val encoder: Encoder[Equipment] = deriveEncoder[Equipment]
 
   /** Декодер рукописный: в снаряжении, сохранённом до разделения рук, левой руки
-    * нет — она пуста, а прежнее оружие остаётся в правой (`weapon`). */
+    * нет — она пуста, а прежнее оружие остаётся в правой (`weapon`). Слот фляги
+    * в старых записях ещё лежит (пустой) — его просто не читаем. */
   implicit val decoder: Decoder[Equipment] = (c: HCursor) =>
     for {
       helmet           <- c.get[Item]("helmet")
@@ -193,12 +193,11 @@ object Equipment {
       firstRing        <- c.get[Item]("firstRing")
       secondRing       <- c.get[Item]("secondRing")
       belt             <- c.get[Item]("belt")
-      flask            <- c.get[Item]("flask")
       weapon           <- c.get[Item]("weapon")
       additionalWeapon <- c.get[Item]("additionalWeapon")
       leftHand         <- c.getOrElse[Item]("leftHand")(Item.NoItem)
     } yield Equipment(helmet, shoulderPads, chestPlate, bracelets, gloves, pants, boots, amulet,
-      firstRing, secondRing, belt, flask, weapon, additionalWeapon, leftHand)
+      firstRing, secondRing, belt, weapon, additionalWeapon, leftHand)
 
   implicit val meta: Meta[Equipment] = new Meta(pgDecoderGet, pgEncoderPut)
 }

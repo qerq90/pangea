@@ -32,10 +32,16 @@ object BrewSpec extends ZIOSpecDefault {
   private def herb(kind: MaterialKind, id: Long): Item = MaterialGenerator.item(kind).copy(id = id)
   private def brew(kind: BrewKind, id: Long): Item     = BrewKind.item(kind).copy(id = id)
 
-  private def flask(charges: Int, max: Int = 6): Item =
-    Item(1L, "Фляга", 1L, Rarity.Gray, ItemType.Flask,
+  /** Пояс с флягами в ячейках: синий держит три. */
+  private def beltOf(slots: BeltSlot*): Item =
+    Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = charges, maxCharges = max))
+      details = ItemDetails.Belt(slots.toList))
+
+  private def beltSlots(h: pangea.model.hero.Hero): List[BeltSlot] = h.equipment.belt.details match {
+    case b: ItemDetails.Belt => b.slots
+    case _                   => Nil
+  }
 
   private val baseHero = TestFixtures.hero(userId)
 
@@ -325,7 +331,8 @@ object BrewSpec extends ZIOSpecDefault {
     },
 
     test("живая вода заправляет флягу целителя; полную — не тратится; без фляги — не тратится") {
-      val withFlask = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask(charges = 1)))
+      val withFlask = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(
+        belt = beltOf(BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 1))))
       for {
         t <- inventory(withFlask, List(brew(BrewKind.LivingWater, 10L), brew(BrewKind.LivingWater, 11L)))
         (state, dao, inv, r) = t
@@ -340,16 +347,15 @@ object BrewSpec extends ZIOSpecDefault {
         _   <- state2.action(testUser, selectItem(10L), r2)
         _   <- state2.action(testUser, tap("RefillByBrew"), r2)
         log2 <- texts(r2)
-      } yield assertTrue(h1.equipment.flask.details == ItemDetails.Flask(FlaskEffect.HealPercent(25), 6, 6)) &&
+      } yield assertTrue(beltSlots(h1) == List(BeltSlot.Flask(FlaskKind.Healer, Rarity.Blue, 6))) &&
               assertTrue(inv.snapshot.size == 1 && after.choices.exists(_.id == "RefillByBrew")) && // остались на карточке стопки
               assertTrue(log.contains("полна до краёв") && log.contains("и так полна") && inv.snapshot.size == 1) &&
               assertTrue(log2.contains("Фляги нет") && inv2.snapshot.size == 1)
     },
 
     test("живая вода заправляет флягу кузнеца, но не дымную; дымную заправляет сонный дурман; кнопка только по толку") {
-      def flaskOf(kind: FlaskKind) = pangea.generator.item.FlaskGenerator.item(kind, Rarity.Blue).copy(id = 1L).copy(
-        details = ItemDetails.Flask(kind.effect, 1, 6))
-      def withFlask(kind: FlaskKind) = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = flaskOf(kind)))
+      def withFlask(kind: FlaskKind) = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(
+        belt = beltOf(BeltSlot.Flask(kind, Rarity.Blue, 1))))
       for {
         t <- inventory(withFlask(FlaskKind.Smith), List(brew(BrewKind.LivingWater, 10L), brew(BrewKind.SleepingDope, 11L)))
         (state, dao, inv, r) = t
@@ -370,10 +376,10 @@ object BrewSpec extends ZIOSpecDefault {
         h2    <- dao2.getHeroByUserId(userId).map(_.get)
         log2  <- texts(r2)
       } yield assertTrue(!dope.choices.exists(_.id == "RefillByBrew") && water.choices.exists(_.id == "RefillByBrew")) &&
-              assertTrue(h.equipment.flask.details == ItemDetails.Flask(FlaskKind.Smith.effect, 6, 6) && inv.snapshot.map(_.id) == List(11L)) &&
+              assertTrue(beltSlots(h) == List(BeltSlot.Flask(FlaskKind.Smith, Rarity.Blue, 6)) && inv.snapshot.map(_.id) == List(11L)) &&
               assertTrue(!water2.choices.exists(_.id == "RefillByBrew") && dope2.choices.exists(_.id == "RefillByBrew")) &&
               assertTrue(log2.contains("такую флягу не заправить")) &&
-              assertTrue(h2.equipment.flask.details == ItemDetails.Flask(FlaskKind.Smoke.effect, 6, 6) && inv2.snapshot.map(_.id) == List(10L))
+              assertTrue(beltSlots(h2) == List(BeltSlot.Flask(FlaskKind.Smoke, Rarity.Blue, 6)) && inv2.snapshot.map(_.id) == List(10L))
     },
 
     test("живая вода заправляет и флягу на поясе — даже выпитую до дна; чужого толка не трогает") {
@@ -400,9 +406,8 @@ object BrewSpec extends ZIOSpecDefault {
     },
 
     test("ядовитая и кровавая смазки: мажут оружие на ближайший бой и заправляют флягу своего толка") {
-      val poisonFlask = pangea.generator.item.FlaskGenerator.item(FlaskKind.Poison, Rarity.Blue).copy(id = 1L,
-        details = ItemDetails.Flask(FlaskKind.Poison.effect, 2, 6))
-      val armed = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = poisonFlask,
+      val armed = baseHero.copy(equipment = TestFixtures.emptyEquipment.copy(
+        belt   = beltOf(BeltSlot.Flask(FlaskKind.Poison, Rarity.Blue, 2)),
         weapon = Item(50L, "Меч", 1L, Rarity.Gray, ItemType.Weapon, attack = 1, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)))
       for {
         t <- inventory(armed, List(brew(BrewKind.VenomSalve, 10L), brew(BrewKind.VenomSalve, 11L), brew(BrewKind.BloodSalve, 12L)))
@@ -427,7 +432,7 @@ object BrewSpec extends ZIOSpecDefault {
         h4    <- dao2.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(card.choices.map(_.id) == List("BeltPut", "CoatWeapon", "RefillByBrew", "Drop", "InventoryList")) &&
               assertTrue(h1.weaponDust.coat.contains(pangea.model.hero.WeaponCoat.Poison) && log.contains("смазано ядом")) &&
-              assertTrue(h2.equipment.flask.details == ItemDetails.Flask(FlaskKind.Poison.effect, 6, 6)) &&
+              assertTrue(beltSlots(h2) == List(BeltSlot.Flask(FlaskKind.Poison, Rarity.Blue, 6))) &&
               assertTrue(left == List(12L)) &&
               // кровавая: фляга яда ей не по толку — кнопки заправки нет, мажет поверх яда
               assertTrue(blood.choices.map(_.id) == List("BeltPut", "CoatWeapon", "Drop", "InventoryList")) &&

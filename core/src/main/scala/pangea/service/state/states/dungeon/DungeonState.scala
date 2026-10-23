@@ -259,13 +259,8 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
     val maxEn        = hero.maxEnergy(nowMs)
     val newEnergy    = (hero.fightStats.energy + (maxEn * 10 / 100L).max(1L)).min(maxEn)
     val energyBack   = newEnergy - hero.fightStats.energy
-    val flask    = hero.equipment.flask
-    // Ручей — вода: наполняет только флягу целителя; кузнеца, стихийную и прочие — нет.
-    val flaskDetails = flask.details match {
-      case f: ItemDetails.Flask if f.effect.refillsAtSpring => Some(f)
-      case _                                                => None
-    }
-    // И на поясе ту же воду — хоть початую, хоть выпитую до дна.
+    // Ручей — вода: наполняет только флягу целителя; кузнеца, стихийную и прочие
+    // — нет. На поясе — хоть початую, хоть выпитую до дна.
     val beltRefilled = hero.equipment.belt.details match {
       case b: ItemDetails.Belt if b.slots.exists(BeltSlot.refillsAtSpring) =>
         Some(b.copy(slots = b.slots.map {
@@ -274,10 +269,9 @@ case class DungeonState(heroDao: HeroDao, inventoryRepo: pangea.repository.inven
         }))
       case _ => None
     }
-    val hasFlask = flaskDetails.isDefined || beltRefilled.isDefined
+    val hasFlask = beltRefilled.isDefined
     val refilledEq = hero.equipment.copy(
-      flask = flaskDetails.fold(flask)(f => flask.copy(details = f.refilled)),
-      belt  = beltRefilled.fold(hero.equipment.belt)(b => hero.equipment.belt.copy(details = b)))
+      belt = beltRefilled.fold(hero.equipment.belt)(b => hero.equipment.belt.copy(details = b)))
     for {
       _ <- heroDao.updateFightStats(user.userId, hero.fightStats.copy(hp = maxHp, energy = newEnergy))
       _ <- ZIO.when(hasFlask)(heroDao.updateEquipment(user.userId, refilledEq))

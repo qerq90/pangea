@@ -34,12 +34,6 @@ trait GustavoScene {
     case _                      => None
   }
 
-  /** Цена пополнения фляги: 25 серебра за каждый недостающий глоток. */
-  protected def flaskRefillCost(hero: Hero): Long =
-    charged(hero.equipment.flask)
-      .map(c => (c.maxCharges - c.charges).toLong * GustavoData.FlaskRefillCostPerCharge)
-      .getOrElse(0L)
-
   /** Цена пополнения пояса: 100 серебра за каждый недостающий заряд фляг,
     * что лежат в его ячейках. Кровь Густаво не разливает, такие фляги в счёт
     * не идут (см. [[pangea.model.item.FlaskEffect.refillsAtGustavo]]). */

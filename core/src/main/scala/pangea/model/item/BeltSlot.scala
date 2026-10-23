@@ -19,6 +19,10 @@ sealed trait BeltSlot {
 
   /** Сколько раз этим можно воспользоваться: заряды фляги, горсть пыли — один. */
   def uses: Int
+
+  /** Ячейка после того, как из неё взяли одно: у фляги и розы — заряд, прочее
+    * — целиком. Пустая ячейка помнит, чем была полна. */
+  def taken: BeltSlot
 }
 
 object BeltSlot {
@@ -32,6 +36,7 @@ object BeltSlot {
     def spent: Flask      = copy(charges = (charges - 1).max(0))
     def refilled: Flask   = copy(charges = maxCharges)
     def empty: Boolean    = charges <= 0
+    def taken: BeltSlot   = spent
   }
 
   /** Горсть пыли: одна ячейка — одна горсть. Высыпанная ячейка помнит, чем
@@ -42,6 +47,7 @@ object BeltSlot {
     def uses: Int     = if (spent) 0 else 1
     def poured: Dust  = copy(spent = true)
     def refilled: Dust = copy(spent = false)
+    def taken: BeltSlot = poured
   }
 
   /** Склянка отвара в ячейке: одна ячейка — одна склянка, стопка в сумке
@@ -52,6 +58,7 @@ object BeltSlot {
     def uses: Int      = if (spent) 0 else 1
     def drunk: Brew    = copy(spent = true)
     def refilled: Brew = copy(spent = false)
+    def taken: BeltSlot = drunk
   }
 
   /** Раскрывшаяся роза в ячейке: цветок ложится целиком, со всеми своими
@@ -64,6 +71,7 @@ object BeltSlot {
     def spent: Rose       = copy(charges = (charges - 1).max(0))
     def refilled: Rose    = copy(charges = maxCharges)
     def withered: Boolean = charges <= 0
+    def taken: BeltSlot   = spent
   }
 
   /** Нальёт ли ячейку ручей: только флягу с водой (см. [[FlaskEffect.refillsAtSpring]]). */
@@ -79,6 +87,7 @@ object BeltSlot {
     def uses: Int           = if (spent) 0 else 1
     def poured: HolyWater   = copy(spent = true)
     def refilled: HolyWater = copy(spent = false)
+    def taken: BeltSlot     = poured
   }
 
   /** Что из сумки вообще можно положить на пояс: фляга, пыль, отвар (кроме

@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{Formation, SoloPveBattle}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{Monster, Race, Rarity}
 import pangea.model.skill.{MonsterEnergy, Skill}
 import pangea.model.state.StateType
@@ -20,6 +20,15 @@ import zio.test._
 /** Групповой бой: герой под номером 1 против строя мобов. В паре — активный,
   * сосед под номером 2 достаёт героя сбоку, дальние копят и лечат. */
 object GroupBattleSpec extends ZIOSpecDefault {
+
+  /** Фляга целителя в первой ячейке синего пояса. */
+  private def healBelt(charges: Int): Item =
+    Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Gray, charges))))
+
+  /** Глоток из первой ячейки пояса. */
+  private val drink: UserAction = UserAction("", Some("""{"action":"BeltUse","slot":"0"}"""))
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
@@ -211,20 +220,17 @@ object GroupBattleSpec extends ZIOSpecDefault {
     },
 
     test("глоток фляги раунд не завершает: сосед сбоку не бьёт, подкрепление не идёт, раунд не растёт") {
-      val flask = Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
-        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-        details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
-      val h = hero().copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask))
+      val h = hero().copy(equipment = TestFixtures.emptyEquipment.copy(belt = healBelt(1)))
       for {
         t <- makeState(h, group(1000L, 1000L))
         (state, dao, r) = t
         _       <- TestRandom.feedInts(99, 1) // если бы сосед ходил: попадание и подкрепление (1 ≤ 2 — пришло бы)
-        _       <- state.action(testUser, tap("UseFlask"), r)
+        _       <- state.action(testUser, drink, r)
         after   <- battleOf(dao)
         u       <- dao.getHeroByUserId(userId).map(_.get)
         screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
         // пустая фляга — тоже не ход
-        _       <- state.action(testUser, tap("UseFlask"), r)
+        _       <- state.action(testUser, drink, r)
         again   <- battleOf(dao)
       } yield assertTrue(u.fightStats.hp == h.effectiveMaxHp(0L) && after.consumableUsedThisRound) && // полон, никто не ударил
               assertTrue(!screens.contains("атаковал вас сбоку") && !screens.contains("прибежал сородич")) &&
@@ -729,18 +735,15 @@ object GroupBattleSpec extends ZIOSpecDefault {
     },
 
     test("добил моба в паре — следующий встал: фляга снова доступна, кулдауны оттикали, а использованное умение — нет") {
-      val flask = Item(303L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
-        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-        details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = 3, maxCharges = 3))
       val h0 = heroWithSkills(Skill.SweepingStrike, Skill.MinorHeal)
-      val h  = h0.copy(fightStats = h0.fightStats.copy(hp = 100L), equipment = h0.equipment.copy(flask = flask))
+      val h  = h0.copy(fightStats = h0.fightStats.copy(hp = 100L), equipment = h0.equipment.copy(belt = healBelt(3)))
       for {
         t <- makeState(h, groupFor(h, 10L, 1000L).copy(skillSlots = List(
                pangea.model.battle.SkillSlotState(101L, Skill.SweepingStrike),
                pangea.model.battle.SkillSlotState(202L, Skill.MinorHeal, cooldown = 1))))
         (state, dao, r) = t
         // глоток фляги раунд не завершает; затем умение добивает моба в паре (10 HP)
-        _       <- state.action(testUser, tap("UseFlask"), r)
+        _       <- state.action(testUser, drink, r)
         mid     <- battleOf(dao)
         _       <- quietRound(99, 99) *> TestRandom.feedLongs(100L)
         _       <- state.action(testUser, aimed("Skill_101", 1), r)

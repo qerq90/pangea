@@ -12,7 +12,7 @@ sealed trait BrewEffect
 object BrewEffect {
   /** Снимает одну травму на выбор — лёгкую или среднюю; тяжёлые не берёт. */
   case object CureTrauma extends BrewEffect
-  /** Заправляет надетую флягу целиком — если она из этих источников. */
+  /** Заправляет флягу на поясе целиком — если она из этих источников. */
   final case class RefillFlask(sources: Set[RefillSource]) extends BrewEffect
   /** Смазка оружия на ближайший бой (яд или кровь); заодно заправляет флягу того же толка. */
   final case class Coat(coat: WeaponCoat, refills: RefillSource) extends BrewEffect

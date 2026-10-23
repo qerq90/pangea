@@ -8,13 +8,10 @@ import pangea.service.state.{CityExit, State, UserAction}
 import zio.Task
 
 /**
- * Раздел «Пополнить припасы» лавки Густаво. Меню из трёх кнопок:
- *  1. «Фляга» → [[GustavoFlaskState]] (пополнение зарядов фляги);
- *  2. «Пояс»  → [[GustavoBeltState]] (пополнение бутылей пояса);
- *  3. «Назад» → меню [[GustavoState]].
- * Цена считается за каждую недостающую единицу: 25 серебра за глоток фляги
- * ([[GustavoData.FlaskRefillCostPerCharge]]), 100 серебра за бутыль пояса
- * ([[GustavoData.BeltRefillCostPerBottle]]).
+ * Раздел «Пополнить припасы» лавки Густаво:
+ *  1. «Пояс»  → [[GustavoBeltState]] (фляги в ячейках пояса);
+ *  2. «Назад» → меню [[GustavoState]].
+ * Цена — 100 серебра за каждый недостающий заряд ([[GustavoData.BeltRefillCostPerBottle]]).
  */
 case class GustavoSuppliesState(
   heroDao: HeroDao,
@@ -23,7 +20,6 @@ case class GustavoSuppliesState(
 
   private val branch = new Branch(
     routes = Map(
-      "Flask" -> Target.Goto(StateType.GustavoFlask),
       "Belt"  -> Target.Goto(StateType.GustavoBelt),
       "Back"  -> Target.Goto(StateType.Gustavo),
       CityExit.route
@@ -32,8 +28,7 @@ case class GustavoSuppliesState(
   )
 
   override def targetStates: Set[StateType] =
-    Set(StateType.Gustavo, StateType.GustavoSupplies, StateType.GustavoFlask, StateType.GustavoBelt,
-        StateType.GlobalMap)
+    Set(StateType.Gustavo, StateType.GustavoSupplies, StateType.GustavoBelt, StateType.GlobalMap)
 
   override def enter(user: User, renderer: Renderer): Task[Unit] = render(user, renderer)
 
@@ -44,7 +39,6 @@ case class GustavoSuppliesState(
     for {
       hero <- getHero(user)
       choices = List(
-        content.choice("Flask", "gustavo.supplies.flaskLabel", "cost" -> flaskRefillCost(hero).toString),
         content.choice("Belt",  "gustavo.supplies.beltLabel",  "cost" -> beltRefillCost(hero).toString),
         content.choice("Back",  "gustavo.supplies.back"),
         CityExit.button(content)
