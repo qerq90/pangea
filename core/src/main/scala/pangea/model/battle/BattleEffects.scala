@@ -92,6 +92,25 @@ object Burn {
   implicit val decoder: Decoder[Burn] = deriveDecoder
 }
 
+/** Что лечение делает с ранами того, кого лечат, — у героя и у союзника одно
+ *  правило: яд ослабляет на [[Poison.HealCut]] п.п., а пламя лечение тратит
+ *  собой — само оно слабее на [[Burn.healWeakenPct]]% (не больше 100), и гореть
+ *  остаётся излишек сверх [[Burn.HealWeakenBase]] п.п. Кровотечение лечение
+ *  снимает целиком — это делает сам лечащий, здесь его нет. `amount` — сколько
+ *  лечения дошло; `burnCutPct` — на сколько его съело пламя (None — не горел). */
+final case class HealedWounds(amount: Long, poison: Option[Poison], burn: Option[Burn], burnCutPct: Option[Int])
+
+object HealedWounds {
+  def of(raw: Long, poison: Option[Poison], burn: Option[Burn]): HealedWounds = {
+    val cut = burn.map(_.healWeakenPct.min(100))
+    HealedWounds(
+      amount     = cut.fold(raw)(c => (raw * (100 - c) / 100).max(0L)),
+      poison     = poison.flatMap(_.weakenedByHeal),
+      burn       = burn.flatMap(b => Burn.of(b.pct - Burn.HealWeakenBase)),
+      burnCutPct = cut)
+  }
+}
+
 /** Тикающая регенерация героя: в конце раунда лечит `pct`% макс.HP, затем слабеет
  *  на `DecayPerRound` п.п. до исчезновения. */
 case class Regen(pct: Int) {

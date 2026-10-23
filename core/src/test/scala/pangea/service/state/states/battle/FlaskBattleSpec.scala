@@ -150,6 +150,22 @@ object FlaskBattleSpec extends ZIOSpecDefault {
               assertTrue(log.contains("Пламя гаснет") && !log.contains("объят ярким пламенем"))
     },
 
+    test("лечение героя ослабляет яд на 4 п.п. и снимает кровь; слабый яд выводит без остатка") {
+      val h    = hero(FlaskKind.Healer, hp = 1000L)
+      val base = SoloPveBattle.from(monster(), h)
+      def hurt(poison: Int) = base.copy(effects = base.effects.copy(
+        heroPoison = Some(Poison(poison)), heroBleed = Some(Bleed(4))))
+      for {
+        r1 <- use(h, hurt(10), "UseFlask")
+        (_, after1, log1, _, _) = r1
+        r2 <- use(h, hurt(Poison.HealCut), "UseFlask")
+        (_, after2, log2, _, _) = r2
+        e1 = after1.get.effects
+      } yield assertTrue(e1.heroPoison.contains(Poison(10 - Poison.HealCut)) && e1.heroBleed.isEmpty) &&
+              assertTrue(log1.contains("🟢 Лечение ослабляет яд: осталось 6%.")) &&
+              assertTrue(after2.get.effects.heroPoison.isEmpty && log2.contains("🟢 Лечение вывело яд без остатка."))
+    },
+
     test("фляга очищения снимает горение, яд, кровь и дебафы с героя") {
       val h    = hero(FlaskKind.Cleansing)
       val base = SoloPveBattle.from(monster(), h)

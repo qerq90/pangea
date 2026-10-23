@@ -2,7 +2,7 @@ package pangea.service.state.states.battle
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
-import pangea.model.battle.{BattleAlly, Element, Poison, SoloPveBattle}
+import pangea.model.battle.{BattleAlly, Bleed, Burn, Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
 import pangea.model.item.{Item, ItemDetails, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity}
@@ -766,6 +766,28 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(targets(1)._2.contains("2") && targets(1)._1.startsWith("2. Йорген Кремень")) &&
               assertTrue(a.hp > 100L) &&
               assertTrue(screens.contains("«Малое исцеление» — Йорген Кремень: +"))
+    },
+
+    test("лечение героя по союзнику — как по самому герою: кровь прочь, яд слабее, пламя ест лечение и гаснет") {
+      val h    = heroWithSkills(hero(allies = List(ally(hp = Some(100L)))), Skill.SweepingStrike, Skill.MinorHeal)
+      val b    = SoloPveBattle.from(monster(100000L), h)
+      val hurt = b.copy(group = b.group.updateAlly(2)(_.copy(
+        poison = Some(Poison(10)), bleed = Some(Bleed(4)), burn = Some(Burn(4)))))
+      for {
+        t <- makeState(h, hurt)
+        (state, dao, r) = t
+        // умение + базовая атака; моб; союзник + прок; подкрепление
+        _       <- TestRandom.feedInts(60, 99, 60, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _       <- state.action(testUser, aimed("Skill_202", 2), r)
+        after   <- battleOf(dao)
+        screens <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        a        = after.group.allyAt(2)
+      } yield assertTrue(a.exists(x => x.bleed.isEmpty && x.burn.isEmpty && x.hp > 100L)) &&
+              // яд: 10 − 4 лечением, и в конце раунда тик — ещё −2
+              assertTrue(a.exists(_.poison.contains(Poison(10 - Poison.HealCut - Poison.DecayPerRound)))) &&
+              assertTrue(screens.contains("«Малое исцеление» — Йорген Кремень: +")) &&
+              assertTrue(screens.contains("🟢 Йорген Кремень: лечение ослабляет яд — осталось 6%.")) &&
+              assertTrue(screens.contains("🔥 Йорген Кремень: пламя пожирает лечение — оно слабее на 54%. Зато огонь погас."))
     },
 
     test("лечение достаёт только до соседей: дальнего в списке нет, а нацелить на него — ход не тратится") {
