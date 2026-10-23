@@ -219,9 +219,11 @@ case class BattleState(
       ratted  <- ratCall(hero, ended)
       // Напротив героя пусто, а свободный моб появился — он шагает к герою.
       pulled  = pullFreeStep(ratted)
+      // Мобы своё прошли — теперь отряд: кому некого бить, идёт к врагу.
+      advanced = squadStep(pulled)
       // Подсказка про поглощённый удар идёт последней строкой раунда — уже после
       // всего, что в нём случилось.
-      hinted  = plainSteelHint(hero, pulled)
+      hinted  = plainSteelHint(hero, advanced)
       // Раунд не кончился — герой ещё в нём (см. SoloPveBattle.midRound).
       marked   = hinted.copy(battle = hinted.battle.copy(midRound = hinted.outcome == Outcome.Continue && !hinted.endsRound))
       state  <- commit(user, marked, now, renderer, hero, note)
@@ -868,9 +870,8 @@ case class BattleState(
     }
 
   /** Герой делает шаг на соседнее место. Стоял там союзник — они меняются
-    * местами: пока герой на ногах, сам союзник с места не сходит, его
-    * переставляет герой (лежит — отряд идёт на врага сам, см.
-    * `SoloPveBattle.squadAdvance`).
+    * местами. Сам союзник сходит с места, только когда бить ему некого: в
+    * конце раунда он идёт к врагу (см. `SoloPveBattle.squadAdvance`).
     * Стоял напротив моб — герой теперь с ним в паре, и тот отвечает; ход на
     * этом кончается. */
   private def moveTurn(target: Option[Int])(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] =
@@ -1037,6 +1038,19 @@ case class BattleState(
       TurnResult(fed, tickedBattle, lines, if (alive) Outcome.Continue else Outcome.Death)
     }
   }
+
+  /** Конец раунда: кому из отряда некого бить, шагает к ближайшему врагу
+    * (`SoloPveBattle.squadAdvance`). Идут после мобов: те уже подтянулись к
+    * герою, и отряд идёт к тем, кто остался вне досягаемости.
+    *
+    * В лабиринте — при живом герое: пока он лежит, раунды идут в `squadTick`,
+    * и отряд шагает там. На арене — в ход своей стороны, лежит её герой или нет
+    * (его отряд в его ход бьётся сам, см. `downTurn`): свой союзник шагает своим
+    * ходом, а места после хода записываются стороне (`ArenaBattle.harvest`) —
+    * соперник увидит его уже там. Чужих бойцов здесь никто не двигает. */
+  private def squadStep(res: TurnResult): TurnResult =
+    if (res.outcome != Outcome.Continue || !res.endsRound || (res.battle.group.heroDown && res.battle.arena.isEmpty)) res
+    else res.copy(battle = res.battle.squadAdvance._1)
 
   /** Кто сам дошёл до места напротив героя, тот и встаёт с ним в пару (конец
     * раунда). Издалека никого не тянем: павший в паре замены не подставляет, и
