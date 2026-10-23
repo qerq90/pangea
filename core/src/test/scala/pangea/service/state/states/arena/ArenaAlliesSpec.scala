@@ -144,6 +144,38 @@ object ArenaAlliesSpec extends ZIOSpecDefault {
               assertTrue(beaten == 1L)
     },
 
+    test("свой союзник, которому некого бить, в конце своего хода шагает к врагу — соперник видит его на новом месте") {
+      for {
+        t <- started(quick, slow)
+        (_, battle, dao, fights, _, r) = t
+        now     = fight(fights)
+        // моя крыса на 4: соперник на 1 ей не по зубам
+        _      <- fights.update(now.withSide(now.a.copy(allies = List(ArenaAlly(1, rat(4, hp = 1000L))), nextAlly = 2)), 0L)
+        _      <- battle.action(one, tap("ArenaPoke"), r)
+        _      <- battle.action(one, tap("Wait"), r)
+        mine    = fight(fights).a.allies.headOption.map(_.ally.position)
+        _      <- battle.action(two, tap("ArenaPoke"), r)
+        theirs <- battleOf(dao, twoId)
+      } yield assertTrue(mine.contains(3)) &&
+              assertTrue(theirs.group.entries.exists { case (place, s) => place == 3 && s.arenaUnit.contains(1) })
+    },
+
+    test("герой лежит — его отряд в его ход и бьётся, и шагает к врагу") {
+      val frail = slow.copy(fightStats = slow.fightStats.copy(hp = 10L))
+      for {
+        t <- started(quick, frail)
+        (_, battle, _, fights, _, r) = t
+        _      <- foeSide(fights)(_.copy(allies = List(ArenaAlly(1, rat(4, hp = 1000L))), nextAlly = 2))
+        _      <- battle.action(one, tap("ArenaPoke"), r)
+        _      <- TestRandom.feedInts(60) *> TestRandom.feedLongs(100L)
+        _      <- battle.action(one, aimed("Attack", 1), r)       // соперник падает
+        before  = fight(fights).b.flatMap(_.allies.headOption).map(_.ally.position)
+        _      <- battle.action(two, tap("ArenaPoke"), r)        // его ход — за него его отряд
+        after   = fight(fights).b.flatMap(_.allies.headOption).map(_.ally.position)
+      } yield assertTrue(before.contains(4)) &&
+              assertTrue(after.contains(3))
+    },
+
     test("раны на сопернике тикают в конце хода того, кто их наложил") {
       for {
         t <- started(quick, slow)

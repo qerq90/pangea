@@ -1039,13 +1039,17 @@ case class BattleState(
     }
   }
 
-  /** Конец раунда при живом герое: кому из отряда некого бить, шагает к
-    * ближайшему врагу (`SoloPveBattle.squadAdvance`) — так же, как пока герой
-    * лежит. Идут после мобов: те уже подтянулись к герою, и отряд идёт к тем,
-    * кто остался вне досягаемости. На арене бойцы шагают только своим ходом —
-    * за них здесь не ходят. */
+  /** Конец раунда: кому из отряда некого бить, шагает к ближайшему врагу
+    * (`SoloPveBattle.squadAdvance`). Идут после мобов: те уже подтянулись к
+    * герою, и отряд идёт к тем, кто остался вне досягаемости.
+    *
+    * В лабиринте — при живом герое: пока он лежит, раунды идут в `squadTick`,
+    * и отряд шагает там. На арене — в ход своей стороны, лежит её герой или нет
+    * (его отряд в его ход бьётся сам, см. `downTurn`): свой союзник шагает своим
+    * ходом, а места после хода записываются стороне (`ArenaBattle.harvest`) —
+    * соперник увидит его уже там. Чужих бойцов здесь никто не двигает. */
   private def squadStep(res: TurnResult): TurnResult =
-    if (res.outcome != Outcome.Continue || !res.endsRound || res.battle.group.heroDown || res.battle.arena.isDefined) res
+    if (res.outcome != Outcome.Continue || !res.endsRound || (res.battle.group.heroDown && res.battle.arena.isEmpty)) res
     else res.copy(battle = res.battle.squadAdvance._1)
 
   /** Кто сам дошёл до места напротив героя, тот и встаёт с ним в пару (конец
