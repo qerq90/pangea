@@ -3,7 +3,7 @@ package pangea.service.state.states.events.cave
 import io.circe.syntax.EncoderOps
 import pangea.domain.Rng
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.generator.item.{FlaskGenerator, MaterialGenerator, TreasureMapGenerator}
+import pangea.generator.item.{MaterialGenerator, TreasureMapGenerator}
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.monster.MiniBoss
 import pangea.model.battle.SoloPveBattle
@@ -14,7 +14,7 @@ import pangea.model.item.{GemKind, ItemType, TrophyKind}
 import pangea.model.squad.{AllyKind, AllyRates, Squad, UndeadForm}
 import pangea.model.hero.{Hero, Knowledge, LoreData}
 import pangea.generator.loot.TreasureHuntGenerator
-import pangea.model.item.{BrewKind, FlaskKind, Item, ItemDetails, MapZone, MaterialKind, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, BrewKind, FlaskKind, Item, ItemDetails, MapZone, MaterialKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity}
 import pangea.model.schedule.TaskKind
 import pangea.model.state.StateType
@@ -92,6 +92,12 @@ object MonsterCaveSpec extends ZIOSpecDefault {
   private val emptyRooms: List[String] = SceneContent.load().list("cave.rooms.empty")
 
   private def brew(kind: BrewKind, id: Long): Item = BrewKind.item(kind).copy(id = id)
+
+  /** Синий пояс с такими ячейками. */
+  private def beltOf(slots: BeltSlot*): Item =
+    Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Belt(slots.toList))
 
   /** Трофей расы `race` с уровнем `lvl` — такой падает с обычного моба. */
   private def trophy(kind: TrophyKind, race: Race, lvl: Long): Item =
@@ -252,22 +258,48 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(battle.exists(_.monsterStats.energy == base.energy * 80L / 100L))
     },
 
-    test("дымная фляга работает так же, но тратит один заряд — и надетая тоже") {
-      val flask = FlaskGenerator.item(FlaskKind.Smoke, ItemRarity.Blue).copy(id = 5L)
-      val armed = hero().copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask))
+    test("дымная фляга с пояса работает так же и тратит один заряд; пояс в списке — первым") {
+      val armed = hero().copy(equipment = TestFixtures.emptyEquipment.copy(
+                    belt = beltOf(BeltSlot.Flask(FlaskKind.Smoke, ItemRarity.Blue, 6))))
       for {
-        t <- cave(armed)
+        t <- cave(armed, items = List(brew(BrewKind.SleepingDope, 7L)))
+        (state, dao, inv, _, r) = t
+        _     <- put(dao, smallCave(inside = false))
+        _     <- state.action(testUser, tap("CaveSupply"), r)
+        list  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CaveBelt_0"), r)
+        scene <- sceneOf(dao)
+        after <- dao.getHeroByUserId(userId).map(_.get.equipment.belt.details)
+      } yield assertTrue(list.choices.headOption.exists(c =>
+                c.id == "CaveBelt_0" && c.label.startsWith("👝") && c.label.contains("Дымная фляга"))) &&
+              assertTrue(list.choices.exists(_.id == "CaveUse_7")) &&
+              assertTrue(scene.exists(_.weakened)) &&
+              assertTrue(after == ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Smoke, ItemRarity.Blue, 5)))) &&
+              // дурман в сумке цел: в дело пошла фляга с пояса
+              assertTrue(inv.snapshot.map(_.id) == List(7L))
+    },
+
+    test("с пояса в списке — только то, что в нём ещё есть; у алтаря пояса нет") {
+      val h = hero().copy(equipment = TestFixtures.emptyEquipment.copy(belt = beltOf(
+                BeltSlot.Dust(MaterialKind.RubyDust, spent = true),
+                BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Blue, 0))))
+      for {
+        t <- cave(h)
         (state, dao, _, _, r) = t
         _     <- put(dao, smallCave(inside = false))
         _     <- state.action(testUser, tap("CaveSupply"), r)
-        _     <- state.action(testUser, tap("CaveUse_5"), r)
-        scene <- sceneOf(dao)
-        after <- dao.getHeroByUserId(userId).map(_.get.equipment.flask.details)
-      } yield assertTrue(scene.exists(_.weakened)) &&
-              assertTrue(after match {
-                case ItemDetails.Flask(_, charges, max) => charges == max - 1
-                case _                                  => false
-              })
+        gate  <- r.sentScreens.map(_.last)
+        // пустая фляга на месте, но плескать из неё нечего — ячейка не тронута
+        _     <- state.action(testUser, tap("CaveBelt_1"), r)
+        said  <- texts(r)
+        kept  <- dao.getHeroByUserId(userId).map(_.get.equipment.belt)
+        _     <- put(dao, altarCave())
+        _     <- state.action(testUser, tap("CaveAltar"), r)
+        altar <- r.sentScreens.map(_.last)
+      } yield // высыпанной пыли нет, пустая фляга есть — она так и остаётся флягой
+              assertTrue(gate.choices.filter(_.id.startsWith("CaveBelt_")).map(_.id) == List("CaveBelt_1")) &&
+              assertTrue(said.contains("пуста — плескать нечем") && kept == h.equipment.belt) &&
+              assertTrue(!altar.choices.exists(_.id.startsWith("CaveBelt_")))
     },
 
     test("глефовый гриб: вся пещера встречает героя отравленной") {

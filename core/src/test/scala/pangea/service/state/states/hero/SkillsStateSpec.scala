@@ -172,7 +172,6 @@ object SkillsStateSpec extends ZIOSpecDefault {
         firstRing        = passiveItem(ItemType.Ring, PassiveKind.Jeweler, id = 9L),
         secondRing       = passiveItem(ItemType.Ring, PassiveKind.Marauder, id = 10L),
         belt             = Item.NoItem,
-        flask            = Item.NoItem,
         weapon           = weaponWith(Skill.SweepingStrike, id = 11L),
         additionalWeapon = Item.NoItem
       )

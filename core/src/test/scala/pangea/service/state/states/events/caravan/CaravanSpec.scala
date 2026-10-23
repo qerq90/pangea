@@ -3,12 +3,11 @@ package pangea.service.state.states.events.caravan
 import io.circe.syntax.EncoderOps
 import pangea.domain.Rng
 import pangea.engine.SceneContent
-import pangea.generator.item.FlaskGenerator
 import pangea.generator.monster.MonsterGenerator
 import pangea.model.battle.SoloPveBattle
 import pangea.model.caravan.{CaravanGenerator, CaravanRates, CaravanScene}
 import pangea.model.hero.Hero
-import pangea.model.item.{BrewKind, DivineKind, FlaskKind, Item, ItemDetails, ItemType, PassiveKind, Rarity => ItemRarity}
+import pangea.model.item.{BeltSlot, BrewKind, DivineKind, FlaskKind, Item, ItemDetails, ItemType, PassiveKind, Rarity => ItemRarity}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.state.StateType
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -37,7 +36,7 @@ object CaravanSpec extends ZIOSpecDefault {
     dungeonLevel: Int         = 10,
     silver:       Long        = 0L,
     passives:     List[(PassiveKind, ItemType)] = Nil,
-    flask:        Option[Item] = None,
+    belt:         Option[Item] = None,
     blade:        Option[Item] = None
   ): Hero = {
     val h  = TestFixtures.hero(userId, dungeonLevel = dungeonLevel)
@@ -46,7 +45,7 @@ object CaravanSpec extends ZIOSpecDefault {
       case (acc, ((kind, t), i))               => acc.copy(gloves = passive(kind, t, 100L + i))
     }
     h.copy(lvl = 10L, silver = silver, equipment = eq.copy(
-      flask            = flask.getOrElse(Item.NoItem),
+      belt             = belt.getOrElse(Item.NoItem),
       additionalWeapon = blade.getOrElse(Item.NoItem)))
   }
 
@@ -261,21 +260,22 @@ object CaravanSpec extends ZIOSpecDefault {
               assertTrue(said.contains("просели на 20%") && inv.snapshot.isEmpty)
     },
 
-    test("дымная фляга одурманивает и открывает дорогу к поклаже, тратя заряд") {
-      val flask = FlaskGenerator.item(FlaskKind.Smoke, ItemRarity.Blue).copy(id = 5L)
+    test("дымная фляга с пояса одурманивает и открывает дорогу к поклаже, тратя заряд") {
+      val belt = Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+        attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+        details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Smoke, ItemRarity.Blue, 6))))
       for {
-        t <- caravan(hero(flask = Some(flask)))
+        t <- caravan(hero(belt = Some(belt)))
         (state, dao, _, r) = t
         _     <- put(dao, scene())
         _     <- state.action(testUser, tap("CaravanSupply"), r)
-        _     <- state.action(testUser, tap("CaravanUse_5"), r)
+        list  <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CaravanBelt_0"), r)
         after <- sceneOf(dao)
-        left  <- dao.getHeroByUserId(userId).map(_.get.equipment.flask.details)
-      } yield assertTrue(after.exists(s => s.weakened && s.smoke)) &&
-              assertTrue(left match {
-                case ItemDetails.Flask(_, charges, max) => charges == max - 1
-                case _                                  => false
-              })
+        left  <- dao.getHeroByUserId(userId).map(_.get.equipment.belt.details)
+      } yield assertTrue(list.choices.headOption.exists(c => c.id == "CaravanBelt_0" && c.label.startsWith("👝"))) &&
+              assertTrue(after.exists(s => s.weakened && s.smoke)) &&
+              assertTrue(left == ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Smoke, ItemRarity.Blue, 5))))
     },
 
     test("в бою охрана бьёт на пятую часть слабее, если её одурманили") {

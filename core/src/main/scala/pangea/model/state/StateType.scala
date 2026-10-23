@@ -108,7 +108,6 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object GustavoHeal     extends StateType
   case object GustavoBoost    extends StateType
   case object GustavoSupplies extends StateType
-  case object GustavoFlask    extends StateType
   case object GustavoBelt     extends StateType
   case object Tavern     extends StateType
   case object QuestBoard extends StateType
@@ -163,7 +162,7 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
     GlobalMap, HarborQuarter, MarketSquare, StreetMerchants, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
     TradeHouse, BankVault, Auction, FetShop, Mail,
     Arena,
-    Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoFlask, GustavoBelt,
+    Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoBelt,
     Tavern, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
     MasterHorn, MentorKazimir, Home, RuneAltar, HerbWorkbench, GemVault)
 }

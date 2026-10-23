@@ -328,31 +328,6 @@ object DungeonStateSpec extends ZIOSpecDefault {
               assertTrue(screens.exists(_.text.contains("ручья")))
     },
 
-    test("FindEvent Spring с экипированной флягой → фляга в слоте пополнена") {
-      import pangea.model.item.{FlaskEffect, Item, ItemType, Rarity}
-      val flask = Item(1L, "Фляга", 1L, Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
-                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
-      val heroWithEmptyFlask = TestFixtures.hero(userId).copy(
-        fightStats = TestFixtures.hero(userId).fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
-      )
-      for {
-        heroDao  <- TestHeroDao.withHero(userId, heroWithEmptyFlask)
-        renderer <- TestRenderer.make
-        content  <- ZIO.attempt(SceneContent.load())
-        scheduler <- TestScheduler.make
-        invRepo   = TestInventoryRepository.accepting
-        state     = DungeonState(heroDao, invRepo, scheduler, content)
-        _        <- TestRandom.feedInts(67, 99) // без засады
-        result   <- state.action(testUser, tap("FindEvent"), renderer)
-        updated  <- heroDao.getHeroByUserId(userId)
-        screens  <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Dungeon) &&
-              assertTrue(updated.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("пополнена")))
-    },
-
     test("FindEvent Spring → фляга целителя на поясе наполнена, даже пустая; кузнеца — нет") {
       import pangea.model.item.{BeltSlot, FlaskKind, ItemType, Rarity}
       val beltItem = Item(3L, "Пояс", 1L, Rarity.Green, ItemType.Belt,

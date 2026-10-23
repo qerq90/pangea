@@ -151,27 +151,26 @@ case class MonsterCaveState(
 
   // ── Вещь, пущенная в дело на пороге ────────────────────────────────────────
 
-  /** Весь скарб героя кнопками: и то, что в сумке, и надетая фляга — дымную
-    * редко носят в мешке, а именно она здесь и нужна. */
-  private def supplies(hero: Hero, items: List[Item]): List[Item] = {
-    val flask = hero.equipment.flask
-    val worn  = Option.when(flask.id > 0L && CaveSupply.charged(flask).isDefined)(flask)
-    items ++ worn.toList
-  }
-
+  /** Скарб героя кнопками: сперва то, что на поясе (дымную флягу носят там),
+    * потом сумка. Алтарю пояс ни к чему — ему кладут кости, камни и трофеи. */
   private def showSupplies(user: User, scene: CaveScene, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      all    = supplies(hero, inv.items.data)
+      belt   = if (atAltar(scene)) Nil else CaveSupply.beltSupplies(hero.equipment.belt)
+      all    = belt ++ inv.items.data.map(Supply.Carried)
       _ <- if (all.isEmpty)
              renderer.show(user, Screen(content.text("cave.supply.empty"), List(backToGate)))
            else {
              val (pageItems, pages, p) = ItemMenu.page(all, scene.page)
              val text = content.format(if (atAltar(scene)) "cave.altar.pick" else "cave.supply.pick",
                "page" -> (p + 1).toString, "total" -> pages.toString)
-             val buttons = pageItems.zipWithIndex.map { case (item, i) =>
-               Choice(s"$UsePrefix${item.id}", ItemMenu.itemButtonLabel(item), row = Some(i))
+             val buttons = pageItems.zipWithIndex.map {
+               case (Supply.OnBelt(slot, item), i) =>
+                 Choice(s"$BeltPrefix$slot", ItemMenu.truncate(content.format("common.onBelt", "name" -> item.displayTitle)),
+                   row = Some(i))
+               case (Supply.Carried(item), i) =>
+                 Choice(s"$UsePrefix${item.id}", ItemMenu.itemButtonLabel(item), row = Some(i))
              }
              val nav = List(
                Some(backToGate),
@@ -198,18 +197,33 @@ case class MonsterCaveState(
     for {
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      chosen = supplies(hero, inv.items.data).find(_.id == itemId)
+      chosen = inv.items.data.find(_.id == itemId)
       res <- chosen match {
         case None                       => showSupplies(user, scene, renderer).as(StateType.MonsterCave)
         case Some(item) if item.isQuestItem =>
           renderer.show(user, Screen(content.format("cave.supply.quest", "name" -> item.displayTitle), Nil)) *>
             showSupplies(user, scene, renderer).as(StateType.MonsterCave)
         case Some(item) if atAltar(scene) => offer(user, hero, scene, item, renderer)
-        case Some(item)                   => spend(user, hero, scene, item, renderer)
+        case Some(item)                   => spend(user, hero, scene, item, renderer)(
+                                               takeFrom(hero, item, CaveSupply.charged(item)))
       }
     } yield res
 
-  private def spend(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer): Task[StateType] = {
+  /** Вещь из ячейки пояса — на пороге, как и из сумки: у фляги и розы уходит
+    * один заряд, прочее — целиком; ячейка помнит, чем была полна. */
+  private def useBelt(user: User, scene: CaveScene, slot: Int, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      res  <- CaveSupply.beltSupplies(hero.equipment.belt).find(_.slot == slot) match {
+        case Some(s) if !atAltar(scene) =>
+          spend(user, hero, scene, s.item, renderer)(heroDao.updateEquipment(user.userId,
+            hero.equipment.copy(belt = CaveSupply.beltTaken(hero.equipment.belt, slot))))
+        case _ => showSupplies(user, scene, renderer).as(StateType.MonsterCave)
+      }
+    } yield res
+
+  /** `take` — как вещь уходит: из сумки или из ячейки пояса. */
+  private def spend(user: User, hero: Hero, scene: CaveScene, item: Item, renderer: Renderer)(take: Task[Unit]): Task[StateType] = {
     val boon    = CaveSupply.boonOf(item)
     val charged = CaveSupply.charged(item)
     // Карта клада читается отдельно от прочего скарба: она не дурманит пещеру,
@@ -235,7 +249,7 @@ case class MonsterCaveState(
         case CaveBoon.None   => content.format(key(scene, "supply.wasted"), "name" -> item.displayTitle)
       }
       for {
-        _ <- takeFrom(user, hero, item, charged)
+        _ <- take
         _ <- writeScene(user, next)
         _ <- renderer.show(user, Screen(line, Nil))
         _ <- showSupplies(user, next, renderer)
@@ -384,11 +398,9 @@ case class MonsterCaveState(
     renderer.show(user, Screen(txt(scene, name), Nil)) *>
       showSupplies(user, scene, renderer).as(StateType.MonsterCave)
 
-  /** Заряд — из фляги (хоть надетой, хоть из сумки), всё прочее — из сумки целиком. */
-  private def takeFrom(user: User, hero: Hero, item: Item, charged: Option[ItemDetails.Charged]): Task[Unit] =
+  /** Заряд — из фляги в сумке, всё прочее — из сумки целиком. */
+  private def takeFrom(hero: Hero, item: Item, charged: Option[ItemDetails.Charged]): Task[Unit] =
     charged match {
-      case Some(c) if hero.equipment.flask.id == item.id =>
-        heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = item.copy(details = c.spent)))
       case Some(c) =>
         inventoryRepo.updateItem(hero.id, item.copy(details = c.spent)).mapError(asThrowable).unit
       case None =>
@@ -896,6 +908,12 @@ case class MonsterCaveState(
             .fold(showSupplies(user, scene, renderer).as(StateType.MonsterCave: StateType))(
               useItem(user, scene, _, renderer))
         }
+      case Some(a) if a.startsWith(BeltPrefix) =>
+        withScene(user) { scene =>
+          a.drop(BeltPrefix.length).toIntOption
+            .fold(showSupplies(user, scene, renderer).as(StateType.MonsterCave: StateType))(
+              useBelt(user, scene, _, renderer))
+        }
       case _ => awake(user, renderer)(
         withScene(user)(s => if (s.inside) showRoom(user, s, renderer) else showGate(user, s, renderer)))
     }
@@ -946,6 +964,9 @@ case class MonsterCaveState(
 object MonsterCaveState {
   /** Префикс кнопки «пустить эту вещь в дело» перед входом. */
   val UsePrefix: String = "CaveUse_"
+
+  /** То же для вещи из ячейки пояса: за префиксом — номер ячейки. */
+  val BeltPrefix: String = "CaveBelt_"
 
   /** Ключи, на которые у канализации свои слова (`sewer.<имя>`); на всё
     * остальное она отвечает словами пещеры (`cave.<имя>`). Список держим

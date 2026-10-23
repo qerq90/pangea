@@ -24,8 +24,14 @@ object FlaskBattleSpec extends ZIOSpecDefault {
   private def aimed(key: String, target: Int): UserAction =
     UserAction("", Some(s"""{"action":"$key","target":"$target"}"""))
 
-  private def flask(kind: FlaskKind, rarity: ItemRarity = ItemRarity.Blue): Item =
-    FlaskGenerator.item(kind, rarity).copy(id = 7L)
+  /** Пояс с одной флягой в первой ячейке: полной, если заряды не названы. */
+  private def beltWith(kind: FlaskKind, charges: Option[Int] = None, rarity: ItemRarity = ItemRarity.Blue): Item =
+    Item(9L, "Пояс", 1L, ItemRarity.Blue, ItemType.Belt,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Belt(List(BeltSlot.Flask(kind, rarity, charges.getOrElse(FlaskKind.chargesFor(rarity))))))
+
+  /** Глоток из первой ячейки пояса. */
+  private val drink: UserAction = UserAction("", Some("""{"action":"BeltUse","slot":"0"}"""))
 
   private def weapon: Item =
     Item(50L, "Меч", 1L, ItemRarity.Blue, ItemType.Weapon,
@@ -36,14 +42,14 @@ object FlaskBattleSpec extends ZIOSpecDefault {
     Item(51L, "Кираса", 1L, ItemRarity.Blue, ItemType.ChestPlate,
       attack = 0, accuracy = 0, energy = 0, armor = 1000, defence = 0, evasion = 0)
 
-  /** Герой с флягой: бьёт без промаха, живучий; часть HP, брони и энергии не хватает. */
+  /** Герой с флягой на поясе: бьёт без промаха, живучий; часть HP, брони и энергии не хватает. */
   private def hero(kind: FlaskKind, hp: Long = 50000L, armor: Long = 0L, energy: Long = 0L): Hero =
     TestFixtures.hero(userId).copy(
       lvl        = 10L,
       fightStats = FightStats(atk = 100, hp = hp, armor = armor, defence = 0,
                               evasion = 0, accuracy = 9999, energy = energy),
       baseStats  = TestFixtures.hero(userId).baseStats.copy(str = 1, vit = 5000, int = 100, agi = 100),
-      equipment  = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest, flask = flask(kind)))
+      equipment  = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest, belt = beltWith(kind)))
 
   private def monster(hp: Long = 100000L, armor: Long = 0L): Monster =
     Monster(0L, 10L, Race.Orc, Rarity.Common,
@@ -59,19 +65,20 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       content  <- ZIO.attempt(SceneContent.load())
     } yield (BattleState(dao, inv, TestItemRepository.make, content), dao, renderer)
 
-  private def use(h: Hero, b: SoloPveBattle, actions: String*) =
+  private def use(h: Hero, b: SoloPveBattle, actions: UserAction*) =
     for {
       t <- makeState(h, b)
       (state, dao, r) = t
-      outs    <- ZIO.foreach(actions.toList)(a => state.action(testUser, tap(a), r))
+      outs    <- ZIO.foreach(actions.toList)(a => state.action(testUser, a, r))
       updated <- dao.getHeroByUserId(userId).map(_.get)
       after   <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
       screens <- r.sentScreens
     } yield (updated, after, screens.map(_.text).mkString("\n"), outs.last, screens)
 
-  private def charges(h: Hero): Int = h.equipment.flask.details match {
-    case f: ItemDetails.Flask => f.charges
-    case _                    => -1
+  /** Заряды фляги в первой ячейке пояса. */
+  private def charges(h: Hero): Int = h.equipment.belt.details match {
+    case b: ItemDetails.Belt => b.slots.collectFirst { case f: BeltSlot.Flask => f.charges }.getOrElse(-1)
+    case _                   => -1
   }
 
   override def spec = suite("Фляги")(
@@ -87,7 +94,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       assertTrue(FlaskKind.families.size == 9 && FlaskKind.elemental.size == 4)
     },
 
-    test("отдельной кнопки фляги в бою нет: расходники достают с пояса") {
+    test("отдельной кнопки фляги в бою нет: фляга на поясе, её достают кнопкой «Пояс»") {
       val h = hero(FlaskKind.Poison)
       for {
         t <- makeState(h, SoloPveBattle.from(monster(), h))
@@ -95,14 +102,13 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         _      <- state.enter(testUser, r)
         screen <- r.sentScreens.map(_.last)
       } yield assertTrue(!screen.choices.exists(_.id == "UseFlask")) &&
-              // пояса на этом герое нет, значит и кнопки пояса быть не должно
-              assertTrue(!screen.choices.exists(_.id == "Belt"))
+              assertTrue(screen.choices.exists(_.id == "Belt"))
     },
 
     test("фляга кузнеца чинит броню на 25% потолка, не выше потолка") {
       val h = hero(FlaskKind.Smith, armor = 10L)
       for {
-        r <- use(h, SoloPveBattle.from(monster(), h), "UseFlask")
+        r <- use(h, SoloPveBattle.from(monster(), h), drink)
         (u, _, log, _, _) = r
         maxArmor = h.effectiveMaxArmor(0L)
       } yield assertTrue(u.fightStats.armor == (10L + maxArmor * 25L / 100L).min(maxArmor)) &&
@@ -113,7 +119,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
     test("фляга бодрости возвращает 30% потолка энергии") {
       val h = hero(FlaskKind.Vigor, energy = 0L)
       for {
-        r <- use(h, SoloPveBattle.from(monster(), h), "UseFlask")
+        r <- use(h, SoloPveBattle.from(monster(), h), drink)
         (u, _, log, _, _) = r
         maxEn = h.maxEnergy(0L)
       } yield assertTrue(u.fightStats.energy == (maxEn * 30L / 100L).min(maxEn)) &&
@@ -123,7 +129,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
     test("стихийные фляги: прок гарантирован без броска — огонь жжёт, холод сковывает, молния выжигает энергию, ветер помогает") {
       def splash(kind: FlaskKind) = {
         val h = hero(kind)
-        use(h, SoloPveBattle.from(monster(), h), "UseFlask").map(r => (r._2.get, r._3))
+        use(h, SoloPveBattle.from(monster(), h), drink).map(r => (r._2.get, r._3))
       }
       for {
         fire  <- splash(FlaskKind.Fire)
@@ -144,7 +150,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       val lvl  = 1L
       val boss = Monster(0L, lvl, Race.Elemental, Rarity.Legendary, MiniBoss.FireElemental.stats(lvl))
       for {
-        r <- use(h, SoloPveBattle.from(boss, h).copy(bossKind = Some(MiniBoss.FireElemental.entryName)), "UseFlask")
+        r <- use(h, SoloPveBattle.from(boss, h).copy(bossKind = Some(MiniBoss.FireElemental.entryName)), drink)
         (_, after, log, _, _) = r
       } yield assertTrue(after.get.effects.monsterBurn.isEmpty) &&
               assertTrue(log.contains("Пламя гаснет") && !log.contains("объят ярким пламенем"))
@@ -156,9 +162,9 @@ object FlaskBattleSpec extends ZIOSpecDefault {
       def hurt(poison: Int) = base.copy(effects = base.effects.copy(
         heroPoison = Some(Poison(poison)), heroBleed = Some(Bleed(4))))
       for {
-        r1 <- use(h, hurt(10), "UseFlask")
+        r1 <- use(h, hurt(10), drink)
         (_, after1, log1, _, _) = r1
-        r2 <- use(h, hurt(Poison.HealCut), "UseFlask")
+        r2 <- use(h, hurt(Poison.HealCut), drink)
         (_, after2, log2, _, _) = r2
         e1 = after1.get.effects
       } yield assertTrue(e1.heroPoison.contains(Poison(10 - Poison.HealCut)) && e1.heroBleed.isEmpty) &&
@@ -173,7 +179,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         heroBurn = Some(Burn(10)), heroPoison = Some(Poison(10)), heroBleed = Some(Bleed(4)),
         heroStunnedTurns = 2, heroGroundedTurns = 2, heroColdDefenceCut = 20))
       for {
-        r <- use(h, hurt, "UseFlask")
+        r <- use(h, hurt, drink)
         (_, after, log, _, _) = r
         e = after.get.effects
       } yield assertTrue(e.heroBurn.isEmpty && e.heroPoison.isEmpty && e.heroBleed.isEmpty) &&
@@ -193,7 +199,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         t <- makeState(h, wounded)
         (state, dao, r) = t
         _   <- TestRandom.feedInts(List.fill(4)(quiet).flatten: _*) *> TestRandom.feedLongs(List.fill(8)(100L): _*)
-        _   <- state.action(testUser, tap("UseFlask"), r)
+        _   <- state.action(testUser, drink, r)
         b0  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         _   <- ZIO.foreachDiscard(1 to 4)(_ => state.action(testUser, aimed("Attack", 1), r))
         b4  <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
@@ -225,7 +231,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         t <- makeState(h, b)
         (state, dao, r) = t
         _   <- seed
-        _   <- state.action(testUser, tap("UseFlask"), r)
+        _   <- state.action(testUser, drink, r)
         h1  <- dao.getHeroByUserId(userId).map(_.get)
         _   <- state.action(testUser, tap("Attack"), r)
         h2  <- dao.getHeroByUserId(userId).map(_.get)
@@ -256,7 +262,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         tp <- makeState(hp, SoloPveBattle.from(monster(), hp))
         (sp, dp, rp) = tp
         _   <- seed(3)
-        _   <- sp.action(testUser, tap("UseFlask"), rp)
+        _   <- sp.action(testUser, drink, rp)
         p0  <- dp.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
         _   <- sp.action(testUser, tap("Attack"), rp)
         p1  <- dp.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
@@ -264,7 +270,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
         tb <- makeState(hb, SoloPveBattle.from(monster(), hb))
         (sb, db, rb) = tb
         _   <- seed(3)
-        _   <- sb.action(testUser, tap("UseFlask"), rb)
+        _   <- sb.action(testUser, drink, rb)
         _   <- sb.action(testUser, tap("Attack"), rb)
         _   <- sb.action(testUser, tap("Attack"), rb)
         _   <- sb.action(testUser, tap("Attack"), rb)
@@ -294,7 +300,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
     test("вампирская фляга пьёт кровь павших: 10% на +1 заряд с каждого, не выше полной; полной бросок не нужен") {
       def kill(start: Int, roll: Int) = {
         val h  = hero(FlaskKind.Vampiric).copy(equipment = TestFixtures.emptyEquipment.copy(weapon = weapon, chestPlate = chest,
-                   flask = flask(FlaskKind.Vampiric).copy(details = ItemDetails.Flask(FlaskKind.Vampiric.effect, start, 6))))
+                   belt = beltWith(FlaskKind.Vampiric, Some(start))))
         val h2 = h.copy(fightStats = h.fightStats.copy(atk = 100000L))
         for {
           t <- makeState(h2, SoloPveBattle.from(monster(hp = 10L), h2))
@@ -376,7 +382,7 @@ object FlaskBattleSpec extends ZIOSpecDefault {
     test("глоток любой фляги тратит расходник раунда: второй в том же раунде не выпить") {
       val h = hero(FlaskKind.Smith, armor = 0L)
       for {
-        r <- use(h, SoloPveBattle.from(monster(), h), "UseFlask", "UseFlask")
+        r <- use(h, SoloPveBattle.from(monster(), h), drink, drink)
         (u, _, log, _, _) = r
       } yield assertTrue(charges(u) == 5) && assertTrue(log.contains("бонусное действие уже потрачено"))
     }

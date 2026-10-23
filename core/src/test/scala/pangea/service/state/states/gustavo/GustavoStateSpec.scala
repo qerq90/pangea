@@ -2,7 +2,7 @@ package pangea.service.state.states.gustavo
 
 import io.circe.syntax.EncoderOps
 import pangea.engine.{ChoiceColor, SceneContent}
-import pangea.model.item.{BeltSlot, FlaskEffect, FlaskKind, Item, ItemDetails, ItemType, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Item, ItemDetails, ItemType, Rarity}
 import pangea.model.state.StateType
 import pangea.model.stats.{ParamsBuff, StatBoost, StatBoosts}
 import pangea.model.trauma.Trauma
@@ -27,18 +27,6 @@ object GustavoStateSpec extends ZIOSpecDefault {
 
   private val farFuture = 1_000_000_000L
   private def hurtHero  = hero(traumaUntil = Some(farFuture), traumaNames = List(Trauma.SmashedFinger.name))
-
-  // фляга с charges/maxCharges для тестов пополнения
-  private def flask(charges: Int, maxCharges: Int): Item =
-    Item.NoItem.copy(name = "Фляга", itemType = ItemType.Flask,
-      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = charges, maxCharges = maxCharges))
-
-  private def flaskCharges(i: Item): Option[Int] = i.details match {
-    case f: ItemDetails.Flask => Some(f.charges)
-    case _                    => None
-  }
-  private def heroWithFlask(f: Item, silver: Long = 5000L) =
-    hero(silver = silver).copy(equipment = TestFixtures.emptyEquipment.copy(flask = f))
 
   /** Пояс с одной флягой в ячейке: столько зарядов в ней и осталось. Серый
     * запас фляги целителя — три глотка, как раз для тестов пополнения. */
@@ -284,112 +272,18 @@ object GustavoStateSpec extends ZIOSpecDefault {
           _       <- GustavoSuppliesState(heroDao, content).enter(testUser, renderer)
           screens <- renderer.sentScreens
           ids      = screens.last.choices.map(_.id)
-        } yield assertTrue(ids == List("Flask", "Belt", "Back", "GoToCity"))
+        } yield assertTrue(ids == List("Belt", "Back", "GoToCity"))
       },
 
-      test("Flask → GustavoFlask; Belt → GustavoBelt; Back → Gustavo") {
+      test("Belt → GustavoBelt; Back → Gustavo") {
         for {
           t <- env(hero())
           (heroDao, renderer, content) = t
           state = GustavoSuppliesState(heroDao, content)
-          flaskR  <- state.action(testUser, tap("Flask"), renderer)
           beltR   <- state.action(testUser, tap("Belt"), renderer)
           backR   <- state.action(testUser, tap("Back"), renderer)
-        } yield assertTrue(flaskR == StateType.GustavoFlask) &&
-                assertTrue(beltR == StateType.GustavoBelt) &&
+        } yield assertTrue(beltR == StateType.GustavoBelt) &&
                 assertTrue(backR == StateType.Gustavo)
-      }
-    ),
-
-    // ── Пополнение фляги ───────────────────────────────────────────────────────
-    suite("GustavoFlaskState")(
-
-      test("enter с неполной флягой → предложение с ценой (2 глотка × 25 = 50) и Купить/Назад") {
-        for {
-          t <- env(heroWithFlask(flask(1, 3)))
-          (heroDao, renderer, content) = t
-          _       <- GustavoFlaskState(heroDao, content).enter(testUser, renderer)
-          screens <- renderer.sentScreens
-          ids      = screens.last.choices.map(_.id).toSet
-        } yield assertTrue(screens.last.text.contains("50")) &&
-                assertTrue(ids == Set("Refill", "Back"))
-      },
-
-      test("Refill → пополняет заряды до максимума, списывает 50, уходит в припасы") {
-        for {
-          t <- env(heroWithFlask(flask(1, 3)))
-          (heroDao, renderer, content) = t
-          st      <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
-          h       <- heroDao.getHeroByUserId(userId).map(_.get)
-          screens <- renderer.sentScreens
-        } yield assertTrue(st == StateType.GustavoSupplies) &&
-                assertTrue(flaskCharges(h.equipment.flask).contains(3)) &&
-                assertTrue(h.silver == 4950L) &&
-                assertTrue(screens.exists(_.text.contains("наполнил флягу")))
-      },
-
-      test("Refill без серебра → сообщение, заряды и серебро не меняются") {
-        for {
-          t <- env(heroWithFlask(flask(1, 3), silver = 10L))
-          (heroDao, renderer, content) = t
-          _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
-          h       <- heroDao.getHeroByUserId(userId).map(_.get)
-          screens <- renderer.sentScreens
-        } yield assertTrue(h.silver == 10L) &&
-                assertTrue(flaskCharges(h.equipment.flask).contains(1)) &&
-                assertTrue(screens.exists(_.text.contains("Столько серебра нет")))
-      },
-
-      test("Refill с полной флягой → «уже полная», серебро не списано") {
-        for {
-          t <- env(heroWithFlask(flask(3, 3)))
-          (heroDao, renderer, content) = t
-          _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
-          h       <- heroDao.getHeroByUserId(userId).map(_.get)
-          screens <- renderer.sentScreens
-        } yield assertTrue(h.silver == 5000L) &&
-                assertTrue(screens.exists(_.text.contains("полная")))
-      },
-
-      test("вампирскую флягу Густаво не заправляет: «сама напьётся», серебро не списано; флягу кузнеца — заправляет") {
-        val vampiric = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Vampiric, pangea.model.item.Rarity.Blue)
-          .copy(details = ItemDetails.Flask(FlaskEffect.Vampiric(3, 30), charges = 1, maxCharges = 6))
-        val smith = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Smith, pangea.model.item.Rarity.Blue)
-          .copy(details = ItemDetails.Flask(FlaskEffect.ArmorPercent(25), charges = 1, maxCharges = 6))
-        for {
-          t <- env(heroWithFlask(vampiric))
-          (heroDao, renderer, content) = t
-          _       <- GustavoFlaskState(heroDao, content).enter(testUser, renderer)
-          _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
-          h       <- heroDao.getHeroByUserId(userId).map(_.get)
-          screens <- renderer.sentScreens
-          t2 <- env(heroWithFlask(smith))
-          (heroDao2, renderer2, content2) = t2
-          _       <- GustavoFlaskState(heroDao2, content2).action(testUser, tap("Refill"), renderer2)
-          h2      <- heroDao2.getHeroByUserId(userId).map(_.get)
-        } yield assertTrue(h.silver == 5000L && flaskCharges(h.equipment.flask).contains(1)) &&
-                assertTrue(screens.forall(s => !s.choices.exists(_.id == "Refill"))) &&
-                assertTrue(screens.exists(_.text.contains("сама напьётся"))) &&
-                assertTrue(flaskCharges(h2.equipment.flask).contains(6) && h2.silver == 5000L - 125L)
-      },
-
-      test("Refill без фляги → «фляги нет», серебро не списано") {
-        for {
-          t <- env(hero())
-          (heroDao, renderer, content) = t
-          _       <- GustavoFlaskState(heroDao, content).action(testUser, tap("Refill"), renderer)
-          h       <- heroDao.getHeroByUserId(userId).map(_.get)
-          screens <- renderer.sentScreens
-        } yield assertTrue(h.silver == 5000L) &&
-                assertTrue(screens.exists(_.text.contains("фляги-то у тебя и нет")))
-      },
-
-      test("Back → GustavoSupplies") {
-        for {
-          t <- env(hero())
-          (heroDao, renderer, content) = t
-          st <- GustavoFlaskState(heroDao, content).action(testUser, tap("Back"), renderer)
-        } yield assertTrue(st == StateType.GustavoSupplies)
       }
     ),
 

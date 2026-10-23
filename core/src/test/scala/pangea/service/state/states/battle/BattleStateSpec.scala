@@ -17,11 +17,6 @@ import zio.test.TestRandom
 
 object BattleStateSpec extends ZIOSpecDefault {
 
-  private def flaskCharges(i: Item): Option[Int] = i.details match {
-    case f: ItemDetails.Flask => Some(f.charges)
-    case _                    => None
-  }
-
   /** Что лежит на поясе героя после хода. */
   private def beltSlots(i: Item): List[BeltSlot] = i.details match {
     case b: ItemDetails.Belt => b.slots
@@ -34,10 +29,11 @@ object BattleStateSpec extends ZIOSpecDefault {
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Belt(slots.toList))
 
-  private def healFlask(charges: Int): Item =
-    Item(1L, "Фляга", 1L, ItemRarity.Gray, ItemType.Flask,
-      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-      details = ItemDetails.Flask(pangea.model.item.FlaskEffect.HealPercent(25), charges = charges, maxCharges = charges))
+  /** Фляга целителя на один глоток — в первой ячейке пояса. */
+  private def healBelt: Item = belt(BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Gray, 1))
+
+  /** Глоток из первой ячейки пояса. */
+  private val drink: UserAction = UserAction("", Some("""{"action":"BeltUse","slot":"0"}"""))
 
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
@@ -283,13 +279,13 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("горящий герой лечится флягой слабее: −(50% + процент горения)") {
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+        equipment  = TestFixtures.emptyEquipment.copy(belt = healBelt))
       def healedWith(burn: Option[Int]) = {
         val b = strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = burn.map(Burn(_))))
         for {
           t <- makeState(heroWithFlask, b)
           (state, heroDao, renderer) = t
-          _    <- state.action(testUser, tap("UseFlask"), renderer)
+          _    <- state.action(testUser, drink, renderer)
           hero <- heroDao.getHeroByUserId(userId).map(_.get)
         } yield hero.fightStats.hp - 10L
       }
@@ -303,13 +299,13 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("лечение тратит горение: 50% гасит его целиком, 51% оставляет 1%") {
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+        equipment  = TestFixtures.emptyEquipment.copy(belt = healBelt))
       def afterHeal(pct: Int) =
         for {
           t <- makeState(heroWithFlask,
                  strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(pct)))))
           (state, heroDao, renderer) = t
-          _       <- state.action(testUser, tap("UseFlask"), renderer)
+          _       <- state.action(testUser, drink, renderer)
           hero    <- heroDao.getHeroByUserId(userId).map(_.get)
           after   <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
           screens <- renderer.sentScreens
@@ -330,12 +326,12 @@ object BattleStateSpec extends ZIOSpecDefault {
     test("слабое горение лечение переживает, но само гаснет без остатка") {
       val heroWithFlask = strongHero.copy(
         fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = healFlask(1)))
+        equipment  = TestFixtures.emptyEquipment.copy(belt = healBelt))
       for {
         t <- makeState(heroWithFlask,
                strongBattle.copy(effects = strongBattle.effects.copy(heroBurn = Some(Burn(10)))))
         (state, heroDao, renderer) = t
-        _     <- state.action(testUser, tap("UseFlask"), renderer)
+        _     <- state.action(testUser, drink, renderer)
         hero  <- heroDao.getHeroByUserId(userId).map(_.get)
         after <- heroDao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption).get)
       } yield assertTrue(hero.fightStats.hp > 10L) && // 40% лечения дошло
@@ -472,82 +468,6 @@ object BattleStateSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("лёг на оружие")) &&
               assertTrue(beltSlots(after.equipment.belt) ==
                 List(BeltSlot.Dust(pangea.model.item.MaterialKind.RubyDust, spent = true)))
-    },
-
-    test("UseFlask без фляги → сообщение об ошибке, HP не меняется") {
-      val lowHpHero = strongHero.copy(fightStats = strongHero.fightStats.copy(hp = 10L))
-      for {
-        triple               <- makeState(lowHpHero, strongBattle)
-        (state, heroDao, renderer) = triple
-        result               <- state.action(testUser, tap("UseFlask"), renderer)
-        updatedHero          <- heroDao.getHeroByUserId(userId)
-        screens              <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
-              assertTrue(screens.exists(_.text.contains("не экипирована")))
-    },
-
-    test("UseFlask с экипированной флягой → HP восстановлен на 25%, заряд потрачен") {
-      import pangea.model.item.FlaskEffect
-      val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
-                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
-      val heroWithFlask = strongHero.copy(
-        fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
-      )
-      for {
-        triple                     <- makeState(heroWithFlask, strongBattle)
-        (state, heroDao, renderer)  = triple
-        result                     <- state.action(testUser, tap("UseFlask"), renderer)
-        updatedHero                <- heroDao.getHeroByUserId(userId)
-        screens                    <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updatedHero.exists(_.fightStats.hp > 10L)) &&
-              assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(0))) &&
-              assertTrue(screens.exists(_.text.contains("HP")))
-    },
-
-    test("UseFlask дважды за раунд → второй раз заблокирован, HP не меняется повторно") {
-      import pangea.model.item.FlaskEffect
-      val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
-                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 8, maxCharges = 8))
-      val heroWithFlask     = strongHero.copy(
-        fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
-      )
-      val battleAlreadyUsed = strongBattle.copy(consumableUsedThisRound = true)
-      for {
-        triple                     <- makeState(heroWithFlask, battleAlreadyUsed)
-        (state, heroDao, renderer)  = triple
-        result                     <- state.action(testUser, tap("UseFlask"), renderer)
-        updatedHero                <- heroDao.getHeroByUserId(userId)
-        screens                    <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
-              assertTrue(updatedHero.exists(h => flaskCharges(h.equipment.flask).contains(8))) &&
-              assertTrue(screens.exists(_.text.contains("бонусное действие уже потрачено")))
-    },
-
-    test("UseFlask с пустой флягой → сообщение о пустой фляге, HP не меняется") {
-      import pangea.model.item.FlaskEffect
-      val flask = Item(1L, "Фляга", 1L, pangea.model.item.Rarity.Gray, ItemType.Flask,
-                   attack=0, accuracy=0, energy=0, armor=0, defence=0, evasion=0,
-                   details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 0, maxCharges = 8))
-      val heroEmptyFlask = strongHero.copy(
-        fightStats = strongHero.fightStats.copy(hp = 10L),
-        equipment  = TestFixtures.emptyEquipment.copy(flask = flask)
-      )
-      for {
-        triple                     <- makeState(heroEmptyFlask, strongBattle)
-        (state, heroDao, renderer)  = triple
-        result                     <- state.action(testUser, tap("UseFlask"), renderer)
-        updatedHero                <- heroDao.getHeroByUserId(userId)
-        screens                    <- renderer.sentScreens
-      } yield assertTrue(result == StateType.Battle) &&
-              assertTrue(updatedHero.exists(_.fightStats.hp == 10L)) &&
-              assertTrue(screens.exists(_.text.contains("пуста")))
     },
 
     test("Огонь в оружии: прок (30%) поджигает моба — накладывается горение") {

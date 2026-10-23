@@ -94,7 +94,8 @@ object TakeAndEquipSpec extends ZIOSpecDefault {
       assertTrue(TakeAndEquip.replaces(busy, helmet) && !TakeAndEquip.fits(busy, helmet)) &&
       assertTrue(!TakeAndEquip.replaces(hero, helmet)) &&
       assertTrue(!TakeAndEquip.replaces(busy, helmet.copy(lvl = 2L))) &&
-      assertTrue(!TakeAndEquip.replaces(wearing(_.copy(flask = item(3L, ItemType.Flask))), item(4L, ItemType.Flask))) &&
+      // фляге в снаряжении слота нет — её носят на поясе
+      assertTrue(!TakeAndEquip.replaces(busy, item(4L, ItemType.Flask)) && !TakeAndEquip.fits(busy, item(4L, ItemType.Flask))) &&
       // и так, и так — «можно надеть сразу»
       assertTrue(TakeAndEquip.canWear(busy, helmet) && TakeAndEquip.canWear(hero, helmet))
     },

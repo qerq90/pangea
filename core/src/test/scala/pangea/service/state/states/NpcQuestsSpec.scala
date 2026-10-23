@@ -6,7 +6,7 @@ import pangea.generator.item.GemGenerator
 import pangea.model.artifact.ArtifactKind
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
-import pangea.model.item.{BeltSlot, FlaskEffect, FlaskKind, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
+import pangea.model.item.{BeltSlot, FlaskKind, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.quest.{FirstSteps, NpcQuest, NpcQuestProgress, NpcQuests}
 import pangea.model.state.StateType
@@ -45,9 +45,11 @@ object NpcQuestsSpec extends ZIOSpecDefault {
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       details = ItemDetails.Trophy(Race.Human.entryName, kind))
 
-  private def flask(charges: Int, maxCharges: Int): Item =
-    Item.NoItem.copy(name = "Фляга", itemType = ItemType.Flask,
-      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = charges, maxCharges = maxCharges))
+  /** Пояс с флягами в ячейках: синий держит три. */
+  private def beltOf(slots: BeltSlot*): Item =
+    Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
+      attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+      details = ItemDetails.Belt(slots.toList))
 
   private def quests(dao: TestHeroDao): Task[NpcQuests] = NpcQuestLog.load(dao, userId)
 
@@ -195,7 +197,8 @@ object NpcQuestsSpec extends ZIOSpecDefault {
       },
       test("отчёт: фляга до краёв, серебро, опыт; без фляги — серебро «на флягу»") {
         for {
-          dao <- TestHeroDao.withHero(userId, hero.copy(equipment = TestFixtures.emptyEquipment.copy(flask = flask(0, 4))))
+          dao <- TestHeroDao.withHero(userId, hero.copy(equipment = TestFixtures.emptyEquipment.copy(
+                   belt = beltOf(BeltSlot.Flask(FlaskKind.Healer, Rarity.White, 0)))))
           _   <- seed(dao, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))
           r   <- TestRenderer.make
           c   <- content
@@ -203,7 +206,10 @@ object NpcQuestsSpec extends ZIOSpecDefault {
           h   <- heroOf(dao)
           q   <- quests(dao)
           all <- texts(r)
-          charges = h.equipment.flask.details match { case f: ItemDetails.Flask => f.charges; case _ => -1 }
+          charges = h.equipment.belt.details match {
+                      case b: ItemDetails.Belt => b.slots.collectFirst { case f: BeltSlot.Flask => f.charges }.getOrElse(-1)
+                      case _                   => -1
+                    }
           dao2 <- TestHeroDao.withHero(userId, hero)
           _   <- seed(dao2, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))
           r2  <- TestRenderer.make
@@ -218,12 +224,10 @@ object NpcQuestsSpec extends ZIOSpecDefault {
       },
       test("отчёт: фляги на поясе — тоже до краёв, вампирскую Густаво не трогает") {
         val full = FlaskKind.chargesFor(Rarity.Gray)
-        val belt = Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
-          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-          details = ItemDetails.Belt(List(
-            BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 0),
-            BeltSlot.Flask(FlaskKind.Fire, Rarity.Gray, 1),
-            BeltSlot.Flask(FlaskKind.Vampiric, Rarity.Gray, 0))))
+        val belt = beltOf(
+          BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 0),
+          BeltSlot.Flask(FlaskKind.Fire, Rarity.Gray, 1),
+          BeltSlot.Flask(FlaskKind.Vampiric, Rarity.Gray, 0))
         for {
           dao <- TestHeroDao.withHero(userId, hero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt)))
           _   <- seed(dao, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))

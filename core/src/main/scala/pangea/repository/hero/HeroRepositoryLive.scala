@@ -65,7 +65,6 @@ object HeroRepositoryLive {
         NoItem,
         NoItem,
         NoItem,
-        NoItem,
         NoItem
       ),
       dungeonLevel = 1,

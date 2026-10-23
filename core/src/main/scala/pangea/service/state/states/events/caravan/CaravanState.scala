@@ -18,7 +18,7 @@ import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
 import pangea.service.state.states.LootState.LootData
-import pangea.service.state.states.events.cave.{CaveBoon, CaveSupply}
+import pangea.service.state.states.events.cave.{CaveBoon, CaveSupply, Supply}
 import pangea.service.state.states.events.caravan.CaravanState._
 import pangea.model.quest.BoardKind
 import pangea.service.state.{BoardProgress, CharacterMenu, ItemMenu, State, UserAction}
@@ -165,14 +165,17 @@ case class CaravanState(
 
   // ── Вещи и страх ──────────────────────────────────────────────────────────
 
-  /** Список вещей — тот же, что у входа в пещеру: сумка и надетая фляга. */
-  private def supplies(hero: Hero, items: List[Item]): List[Item] = {
-    val flask = hero.equipment.flask
-    val worn  = Option.when(flask.id > 0L && CaveSupply.charged(flask).isDefined)(flask)
+  /** Вещи при герое — сумка, а с ней божественное оружие из доп. слота. */
+  private def carried(hero: Hero, items: List[Item]): List[Item] = {
     val blade = hero.equipment.additionalWeapon
     val divine = Option.when(blade.id > 0L && blade.divine.isDefined)(blade)
-    items ++ worn.toList ++ divine.toList
+    items ++ divine.toList
   }
+
+  /** Список вещей — тот же, что у входа в пещеру: сперва пояс (дымную флягу
+    * носят там), потом всё, что при герое. */
+  private def supplies(hero: Hero, items: List[Item]): List[Supply] =
+    CaveSupply.beltSupplies(hero.equipment.belt) ++ carried(hero, items).map(Supply.Carried)
 
   private def showSupplies(user: User, scene: CaravanScene, renderer: Renderer): Task[Unit] =
     for {
@@ -182,8 +185,12 @@ case class CaravanState(
       _ <- if (all.isEmpty) renderer.show(user, Screen(content.text("caravan.supply.empty"), List(backButton)))
            else {
              val (pageItems, pages, p) = ItemMenu.page(all, scene.page)
-             val buttons = pageItems.zipWithIndex.map { case (item, i) =>
-               Choice(s"$UsePrefix${item.id}", ItemMenu.itemButtonLabel(item), row = Some(i))
+             val buttons = pageItems.zipWithIndex.map {
+               case (Supply.OnBelt(slot, item), i) =>
+                 Choice(s"$BeltPrefix$slot", ItemMenu.truncate(content.format("common.onBelt", "name" -> item.displayTitle)),
+                   row = Some(i))
+               case (Supply.Carried(item), i) =>
+                 Choice(s"$UsePrefix${item.id}", ItemMenu.itemButtonLabel(item), row = Some(i))
              }
              val nav = List(
                Some(backButton),
@@ -210,13 +217,26 @@ case class CaravanState(
     for {
       hero <- getHero(user)
       inv  <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      item  = supplies(hero, inv.items.data).find(_.id == itemId)
+      item  = carried(hero, inv.items.data).find(_.id == itemId)
       res <- item match {
         case None => showSupplies(user, scene, renderer).as(StateType.Caravan)
         case Some(it) if it.isQuestItem =>
           say(user, scene, content.format("caravan.supply.quest", "name" -> it.displayTitle), renderer)
         case Some(it) if it.divine.isDefined => frighten(user, hero, scene, it, renderer)
-        case Some(it) => dope(user, hero, scene, it, renderer)
+        case Some(it) => dope(user, scene, it, renderer)(takeFrom(hero, it, CaveSupply.charged(it)))
+      }
+    } yield res
+
+  /** Вещь из ячейки пояса — так же, как из сумки: у фляги уходит один заряд,
+    * прочее — целиком; ячейка помнит, чем была полна. */
+  private def useBelt(user: User, scene: CaravanScene, slot: Int, renderer: Renderer): Task[StateType] =
+    for {
+      hero <- getHero(user)
+      res  <- CaveSupply.beltSupplies(hero.equipment.belt).find(_.slot == slot) match {
+        case Some(s) =>
+          dope(user, scene, s.item, renderer)(heroDao.updateEquipment(user.userId,
+            hero.equipment.copy(belt = CaveSupply.beltTaken(hero.equipment.belt, slot))))
+        case None => showSupplies(user, scene, renderer).as(StateType.Caravan)
       }
     } yield res
 
@@ -239,8 +259,9 @@ case class CaravanState(
     }
 
   /** Дурман и дым: охрана вялая, а караван приходится брать двумя заходами —
-    * половина успевает опомниться, пока герой возится с первой. */
-  private def dope(user: User, hero: Hero, scene: CaravanScene, item: Item, renderer: Renderer): Task[StateType] = {
+    * половина успевает опомниться, пока герой возится с первой. `take` — как
+    * вещь уходит: из сумки или из ячейки пояса. */
+  private def dope(user: User, scene: CaravanScene, item: Item, renderer: Renderer)(take: Task[Unit]): Task[StateType] = {
     val boon    = CaveSupply.boonOf(item)
     val charged = CaveSupply.charged(item)
     val smoke   = item.details match {
@@ -254,7 +275,7 @@ case class CaravanState(
     else {
       val next = scene.copy(weakened = true, smoke = scene.smoke || smoke)
       for {
-        _ <- takeFrom(user, hero, item, charged)
+        _ <- take
         _ <- writeScene(user, next)
         _ <- renderer.show(user, Screen(content.format(
                if (smoke) "caravan.supply.smoke" else "caravan.supply.dope",
@@ -264,10 +285,8 @@ case class CaravanState(
     }
   }
 
-  private def takeFrom(user: User, hero: Hero, item: Item, charged: Option[ItemDetails.Charged]): Task[Unit] =
+  private def takeFrom(hero: Hero, item: Item, charged: Option[ItemDetails.Charged]): Task[Unit] =
     charged match {
-      case Some(c) if hero.equipment.flask.id == item.id =>
-        heroDao.updateEquipment(user.userId, hero.equipment.copy(flask = item.copy(details = c.spent)))
       case Some(c) => inventoryRepo.updateItem(hero.id, item.copy(details = c.spent)).mapError(asThrowable).unit
       case None    => inventoryRepo.removeItem(item.id, hero.id).mapError(asThrowable).unit
     }
@@ -430,6 +449,12 @@ case class CaravanState(
             .fold(showSupplies(user, scene, renderer).as(StateType.Caravan: StateType))(
               useItem(user, scene, _, renderer))
         }
+      case Some(a) if a.startsWith(BeltPrefix) =>
+        withScene(user) { scene =>
+          a.drop(BeltPrefix.length).toIntOption
+            .fold(showSupplies(user, scene, renderer).as(StateType.Caravan: StateType))(
+              useBelt(user, scene, _, renderer))
+        }
       case Some(a) if a.startsWith(BuyPrefix) =>
         withScene(user) { scene =>
           a.drop(BuyPrefix.length).toIntOption
@@ -461,8 +486,9 @@ case class CaravanState(
 }
 
 object CaravanState {
-  val UsePrefix: String = "CaravanUse_"
-  val BuyPrefix: String = "CaravanBuy_"
+  val UsePrefix: String  = "CaravanUse_"
+  val BeltPrefix: String = "CaravanBelt_"
+  val BuyPrefix: String  = "CaravanBuy_"
 
   /** Дважды напугать один караван нельзя: клинок и рык уводят по четверти, и
     * вместе это уже половина. */

@@ -4,7 +4,7 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{Bleed, Element, Poison, SoloPveBattle}
 import pangea.model.hero.Hero
-import pangea.model.item.{FlaskEffect, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity}
+import pangea.model.item.{BeltSlot, FlaskKind, Item, ItemDetails, ItemSet, ItemType, MaterialKind, Rarity}
 import pangea.model.monster.{MiniBoss, Monster, Race, Rarity => MobRarity}
 import pangea.model.stats.FightStats
 import pangea.model.state.StateType
@@ -32,10 +32,11 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
     Item(50L, "Меч", 1L, Rarity.Blue, ItemType.Weapon,
       attack = 10, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0)
 
-  private def healFlask: Item =
-    Item(1L, "Фляга", 1L, Rarity.Gray, ItemType.Flask,
+  /** Фляга целителя на один глоток — в первой ячейке пояса. */
+  private def healBelt: Item =
+    Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
-      details = ItemDetails.Flask(FlaskEffect.HealPercent(25), charges = 1, maxCharges = 1))
+      details = ItemDetails.Belt(List(BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 1))))
 
   /** Герой бьёт без промаха и переживает удары волка. `armor` — его броня. */
   private def hero(atk: Long = 100L, hp: Long = 500000L, armor: Long = 0L): Hero =
@@ -228,7 +229,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
 
     // ── Кровотечение на герое ─────────────────────────────────────────────────
     test("кровь на герое тикает процентом от макс.HP и не затухает; фляга её снимает") {
-      val h    = hero(armor = 10000L).copy(equipment = TestFixtures.emptyEquipment.copy(weapon = weapon, flask = healFlask))
+      val h    = hero(armor = 10000L).copy(equipment = TestFixtures.emptyEquipment.copy(weapon = weapon, belt = healBelt))
       val base = wolfBattle(h, turn = 3)
       val bled = base.copy(effects = base.effects.copy(heroBleed = Some(Bleed(2))))
       for {
@@ -238,7 +239,7 @@ object WhiteWolfBattleSpec extends ZIOSpecDefault {
         t    <- makeState(h, bled)
         (state, dao, r) = t
         _    <- TestRandom.feedInts(90, 50) *> TestRandom.feedLongs(100L) // попадание моба и прок холода
-        _    <- state.action(testUser, tap("UseFlask"), r)
+        _    <- state.action(testUser, UserAction("", Some("""{"action":"BeltUse","slot":"0"}""")), r)
         healed <- dao.readActiveBattle(userId).map(_.flatMap(_.as[SoloPveBattle].toOption))
       } yield assertTrue(500000L - u.fightStats.hp == maxHp * 2L / 100L) &&
               assertTrue(log.contains(s"Кровотечение снимает с вас ${maxHp * 2L / 100L} HP")) &&

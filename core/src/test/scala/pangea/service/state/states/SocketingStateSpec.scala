@@ -82,15 +82,16 @@ object SocketingStateSpec extends ZIOSpecDefault {
       attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
       sockets = List(None))
 
-  /** Все 14 слотов заняты предметами с гнездом — максимум возможных целей. */
+  /** Все 13 слотов заняты предметами с гнездом — максимум возможных целей
+    * (левая рука пуста). */
   private val fullEquipment: Equipment = {
     val types = List(
       ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
       ItemType.Gloves, ItemType.Pants, ItemType.Boots, ItemType.Amulet,
-      ItemType.Ring, ItemType.Ring, ItemType.Belt, ItemType.Flask,
+      ItemType.Ring, ItemType.Ring, ItemType.Belt,
       ItemType.Weapon, ItemType.AdditionalWeapon)
     val i = types.zipWithIndex.map { case (t, n) => socketable(100L + n, t) }
-    Equipment(i(0), i(1), i(2), i(3), i(4), i(5), i(6), i(7), i(8), i(9), i(10), i(11), i(12), i(13))
+    Equipment(i(0), i(1), i(2), i(3), i(4), i(5), i(6), i(7), i(8), i(9), i(10), i(11), i(12))
   }
 
   /** Нажатие навигационной кнопки. */
@@ -191,7 +192,7 @@ object SocketingStateSpec extends ZIOSpecDefault {
 
     // ── Страницы ─────────────────────────────────────────────────────────────
 
-    test("14 целей не лезут на клавиатуру ВК — режем на страницы по 8") {
+    test("13 целей не лезут на клавиатуру ВК — режем на страницы по 8") {
       for {
         t <- withEquipment(fullEquipment, GemKind.Ruby)
         (state, _, _, renderer) = t
@@ -217,7 +218,7 @@ object SocketingStateSpec extends ZIOSpecDefault {
         second <- renderer.sentScreens.map(_.last)
         _      <- state.action(testUser, tap("SocketPrev"), renderer)
         first  <- renderer.sentScreens.map(_.last)
-      } yield assertTrue(targetIds(second.choices.map(_.id)).size == 14 - ItemMenu.DefaultPageSize) &&
+      } yield assertTrue(targetIds(second.choices.map(_.id)).size == 13 - ItemMenu.DefaultPageSize) &&
               assertTrue(second.text.contains("(2/2)")) &&
               // на последней странице вперёд листать некуда
               assertTrue(!second.choices.map(_.id).contains("SocketNext")) &&
@@ -234,8 +235,8 @@ object SocketingStateSpec extends ZIOSpecDefault {
         (state, dao, invRepo, renderer) = t
         _      <- state.enter(testUser, renderer)
         _      <- state.action(testUser, tap("SocketNext"), renderer)
-        // 113 — доп. оружие, последняя цель списка
-        result <- state.action(testUser, pickTarget(113L), renderer)
+        // 112 — доп. оружие, последняя цель списка
+        result <- state.action(testUser, pickTarget(112L), renderer)
         hero   <- dao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(result == StateType.Inventory) &&
               assertTrue(hero.equipment.additionalWeapon.socketedGems.map(_.kind) == List(GemKind.Ruby)) &&

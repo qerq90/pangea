@@ -208,8 +208,8 @@ case class InventoryState(
 
   /** Карточка отвара: описание, рецепт, сколько таких в сумке. Кнопки — по делу:
     * «Использовать» у того, что применяют с карточки; «На пояс» у того, чем пользуются в бою;
-    * «Заправить флягу», если у героя есть фляга такого толка — на поясе или
-    * надетая по-старому; «Смазать оружие» у смазок. Шнапс уходит Трактирщику,
+    * «Заправить флягу», если на поясе есть фляга такого толка; «Смазать
+    * оружие» у смазок. Шнапс уходит Трактирщику,
     * кнопок у него нет.
     *
     * Боевой отвар с карточки не пьётся вовсе — об этом говорим прямо, иначе
@@ -1088,17 +1088,10 @@ object InventoryState {
   final case class BrewFlask(name: String, source: RefillSource, charges: Int, maxCharges: Int,
                              refilled: Equipment)
 
-  /** Фляги героя по порядку: сперва надетая по-старому, за ней — с пояса по
-    * ячейкам. Фляги теперь живут на поясе, старый слот лишь доживает. */
+  /** Фляги героя на поясе — по ячейкам. */
   def brewFlasks(hero: Hero): List[BrewFlask] = {
     val equip = hero.equipment
-    val inSlot = equip.flask.details match {
-      case f: ItemDetails.Flask =>
-        List(BrewFlask(equip.flask.name, f.effect.refillSource, f.charges, f.maxCharges,
-          equip.copy(flask = equip.flask.copy(details = f.refilled))))
-      case _ => Nil
-    }
-    val onBelt = equip.belt.details match {
+    equip.belt.details match {
       case b: ItemDetails.Belt =>
         b.slots.zipWithIndex.collect { case (f: BeltSlot.Flask, i) =>
           BrewFlask(f.name, f.kind.effect.refillSource, f.charges, f.maxCharges,
@@ -1106,7 +1099,6 @@ object InventoryState {
         }
       case _ => Nil
     }
-    inSlot ++ onBelt
   }
 
 
@@ -1293,7 +1285,7 @@ object InventoryState {
       if (eq.firstRing.itemType == ItemType.NoItem || eq.secondRing.itemType == ItemType.NoItem) Item.NoItem
       else eq.secondRing
     case ItemType.Belt             => eq.belt
-    case ItemType.Flask            => eq.flask
+    case ItemType.Flask            => Item.NoItem // фляги носят на поясе, не в снаряжении
     case ItemType.Weapon           => eq.weapon
     case ItemType.Shield           => eq.weapon // руки — см. wield
     case ItemType.AdditionalWeapon => eq.additionalWeapon
@@ -1324,7 +1316,7 @@ object InventoryState {
       if (eq.firstRing.itemType == ItemType.NoItem) eq.copy(firstRing = item)
       else eq.copy(secondRing = item)
     case ItemType.Belt             => eq.copy(belt = item)
-    case ItemType.Flask            => eq.copy(flask = item)
+    case ItemType.Flask            => eq // фляга ложится в ячейку пояса
     case ItemType.Weapon           => eq.copy(weapon = item)
     case ItemType.Shield           => eq.copy(weapon = item) // руки — см. wield
     case ItemType.AdditionalWeapon => eq.copy(additionalWeapon = item)

@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit
 
 /** Бой строится как «прочитать всё в начале хода → чисто посчитать ход →
   * записать всё один раз в конце». Боевые функции ([[attackTurn]]/[[skillTurn]]/
-  * [[flaskTurn]]/[[beltTurn]]/[[fleeTurn]] и внутренние [[playerStrike]]/
+  * [[beltTurn]]/[[fleeTurn]] и внутренние [[playerStrike]]/
   * [[monsterPhase]]/[[dealSkillDamage]]) НЕ трогают `heroDao`/`renderer` — они
   * только считают и накапливают лог сообщений ([[BattleState.TurnResult]]).
   * Единственная точка I/O — [[resolve]]/[[commit]]: она персистит итог хода
@@ -69,7 +69,6 @@ case class BattleState(
       "Move"        -> Target.Run((u, _, r) => moveRoute(u, r)),
       "MoveTo"      -> Target.Run((u, ua, r) => resolve(u, r, content.text("arena.turn.move"))(moveTurn(BattleState.parseTarget(ua)))),
       "SquadTick"   -> Target.Run((u, _, r) => squadTick(u, r)),
-      "UseFlask"    -> Target.Run((u, _, r) => resolve(u, r, content.text("arena.turn.flask"))(flaskTurn)),
       // Пояс ход не тратит: он присылает список расходников, а применяет уже
       // кнопка внутри того сообщения.
       "Belt"        -> Target.Run((u, _,  r) => showBelt(u, r)),
@@ -3561,9 +3560,8 @@ case class BattleState(
       else (true, Vector.empty)
     }
 
-  /** Эффект выпитой фляги. Герой приходит уже с потраченным зарядом, а бой —
-    * с отметкой о расходнике: откуда фляга, из пояса или из доживающего
-    * слота, здесь уже неважно. */
+  /** Эффект выпитой фляги. Герой приходит уже с потраченным зарядом в ячейке
+    * пояса, а бой — с отметкой о расходнике. */
   private def flaskEffect(
       hero: Hero,
       battle: SoloPveBattle,
@@ -3666,25 +3664,6 @@ case class BattleState(
             Vector(content.format("battle.flaskBleedCoat", "rounds" -> rounds.toString)) ++ qhLog,
             Outcome.Continue, endsRound = false)
     }
-
-  /** Фляга из доживающего слота: кнопки в бою у неё больше нет, но ход
-    * остаётся рабочим — старое сообщение в диалоге не должно ронять бой. */
-  private def flaskTurn(hero: Hero, battle: SoloPveBattle, nowMs: Long): Task[TurnResult] = {
-    val flask = hero.equipment.flask
-    flask.details match {
-      case f: ItemDetails.Flask if f.charges <= 0 =>
-        cont(hero, battle, content.text("battle.flaskEmpty"))
-      case _: ItemDetails.Flask if battle.consumableUsedThisRound =>
-        cont(hero, battle, content.text("battle.consumableAlreadyUsed"))
-      case f: ItemDetails.Flask =>
-        quickHandsRoll(hero).map { case (consumed, qhLog) =>
-          val drunk = hero.copy(equipment = hero.equipment.copy(flask = flask.copy(details = f.spent)))
-          flaskEffect(drunk, battle.copy(consumableUsedThisRound = consumed), f.effect, flask.name, nowMs, qhLog)
-        }
-      case _ =>
-        cont(hero, battle, content.text("battle.noFlask"))
-    }
-  }
 
   /** Пояс в бою: сумка с расходниками. Кнопка «Пояс» ход не тратит — она
     * присылает отдельное сообщение со списком ячеек, и кнопки живут внутри
@@ -5242,8 +5221,7 @@ case class BattleState(
 
   /** Вампирская фляга: за каждого павшего — бросок на +1 заряд (FlaskRates.VampiricRefillPct),
     * но не выше полной. Бросок не тратится, если фляги нет или она полна. Пьёт
-    * фляга из старого слота, а нет её — первая неполная вампирская на поясе,
-    * хоть бы и пустая.
+    * первая неполная вампирская на поясе, хоть бы и пустая.
     *
     * Героя читаем заново: до нас пояс уже добрал из сумки опустевшие ячейки
     * ([[refillBelt]]), и запись по старому снимку стёрла бы этот добор.
@@ -5251,11 +5229,6 @@ case class BattleState(
   private def vampiricRefill(user: User, slain: Int): Task[Option[(Int, Int, Int)]] =
     getHero(user).flatMap { hero =>
       val equip = hero.equipment
-      val inSlot = equip.flask.details match {
-        case f @ ItemDetails.Flask(FlaskEffect.Vampiric(_, _), charges, max) if charges < max =>
-          Some((charges, max, (n: Int) => equip.copy(flask = equip.flask.copy(details = f.withCharges(n)))))
-        case _ => None
-      }
       val onBelt = equip.belt.details match {
         case b: ItemDetails.Belt =>
           b.slots.zipWithIndex.collectFirst {
@@ -5265,7 +5238,7 @@ case class BattleState(
           }
         case _ => None
       }
-      inSlot.orElse(onBelt) match {
+      onBelt match {
         case None => ZIO.succeed(None)
         case Some((charges, max, withCharges)) =>
           ZIO.foldLeft((1 to slain).toList)(charges) { (cur, _) =>
@@ -5572,8 +5545,7 @@ case class BattleState(
       "heroEnergy"     -> hero.fightStats.energy.min(maxEnergy).toString,
       "heroMaxEnergy"  -> maxEnergy.toString,
       "monsterEnergy"    -> mobEnergy.toString,
-      "monsterMaxEnergy" -> mobMaxEnergy.toString,
-      "flaskCharges"   -> BattleState.flaskCharges(hero).toString
+      "monsterMaxEnergy" -> mobMaxEnergy.toString
     )
     // Готовый навык синий, если хватает энергии на каст, и красный — если нет.
     // Блок и Контрудар краснеют и тогда, когда бонусное действие раунда уже
@@ -5894,12 +5866,6 @@ object BattleState {
       // Запас лежит у Азата, а не в герое, — его допишет commit.
       instantRests: Int = 0
   )
-
-  /** Текущее число зарядов надетой фляги (0, если фляга не надета). */
-  def flaskCharges(hero: Hero): Int = hero.equipment.flask.details match {
-    case f: ItemDetails.Flask => f.charges
-    case _                    => 0
-  }
 
   /** Чем на поясе героя ещё можно воспользоваться — их число стоит на кнопке
     * «Пояс». Пустые ячейки не считаем: брать из них нечего — ни глотка, ни

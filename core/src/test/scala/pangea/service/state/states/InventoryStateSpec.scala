@@ -456,7 +456,7 @@ object InventoryStateSpec extends ZIOSpecDefault {
               assertTrue(!screens.last.text.contains("Ур."))
     },
 
-    test("у фляги нет «Надеть», только «На пояс»; старая кнопка не прячет её в скрытый слот") {
+    test("у фляги нет «Надеть», только «На пояс»; старая кнопка «Надеть» её никуда не надевает") {
       val flask = pangea.generator.item.FlaskGenerator.item(pangea.model.item.FlaskKind.Healer, Rarity.Blue).copy(id = 60L)
       for {
         quad                                <- makeState(baseHero, List(flask))
@@ -469,8 +469,8 @@ object InventoryStateSpec extends ZIOSpecDefault {
         hero <- heroDao.getHeroByUserId(userId).map(_.get)
       } yield assertTrue(!card.choices.exists(_.id == "Equip") && card.choices.exists(_.id == "BeltPut")) &&
               assertTrue(said.contains("Флягу не надевают")) &&
-              // фляга осталась в сумке, старый слот пуст
-              assertTrue(hero.equipment.flask.itemType == ItemType.NoItem) &&
+              // фляга осталась в сумке, снаряжение не тронуто
+              assertTrue(hero.equipment == baseHero.equipment) &&
               assertTrue(invRepo.snapshot.map(_.id) == List(flask.id))
     },
 

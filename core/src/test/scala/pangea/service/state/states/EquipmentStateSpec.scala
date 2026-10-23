@@ -19,10 +19,11 @@ object EquipmentStateSpec extends ZIOSpecDefault {
   private def selectItem(itemId: Long): UserAction =
     UserAction("", Some(s"""{"action":"${InventoryState.ItemActionPrefix}$itemId"}"""))
 
-  // Индекс слотов в [[EquipmentState.slots]]
-  private val WeaponSlotIdx = 12
-  private val BeltSlotIdx   = 10
-  private val Ring2SlotIdx  = 9
+  // Индекс слотов в [[EquipmentState.slots]] — по имени: список слотов меняется
+  private def slotIdx(name: String): Int = EquipmentState.slots.indexWhere(_.name == name)
+  private val WeaponSlotIdx = slotIdx(EquipmentState.RightHandName)
+  private val BeltSlotIdx   = slotIdx("Пояс")
+  private val Ring2SlotIdx  = slotIdx("Кольцо 2")
 
   private def wearItem(itemId: Long): UserAction =
     UserAction("", Some(s"""{"action":"EquipWear","id":"$itemId"}"""))
