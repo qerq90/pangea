@@ -22,7 +22,7 @@ object HomeStateSpec extends ZIOSpecDefault {
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String, data: (String, String)*): UserAction =
     UserAction("", Some((("action" -> key) +: data).map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")))
-  private def offer(h: House, pay: String) = tap("HomeOffer", "h" -> h.key, "pay" -> pay)
+  private def offer(h: House)              = tap("HomeOffer", "h" -> h.key)
   private def buy(h: House, pay: String)   = tap("HomeBuy", "h" -> h.key, "pay" -> pay)
 
   private def hero(silver: Long = 0L, doubloons: Long = 0L) =
@@ -74,10 +74,22 @@ object HomeStateSpec extends ZIOSpecDefault {
               assertTrue(first.text.contains("Она подмигивает")) &&
               assertTrue(met.metJunona && !met.owns) &&
               assertTrue(again.text.contains("Живой — уже хорошо") && !again.text.contains("ратуши")) &&
-              // три дома: домик — за серебро и за дублоны; и «Уйти»
+              // три дома — без цен, четвёртой — «Обустройство»; и «Уйти»
               assertTrue(first.choices.map(_.label) == List(
-                "🏠 Домик в две комнаты — 20 000 🪙", "🏠 Домик в две комнаты — 100 🟡",
-                "🏠 Добротный дом — 800 🟡", "🏠 Ключ от острова — 2 000 🟡", "Уйти"))
+                "🏠 Домик в две комнаты", "🏠 Добротный дом", "🏠 Ключ от острова", "🛠 Обустройство", "Уйти"))
+    },
+
+    test("«Обустройство» — пока пустое: реплика Юноны и «Назад» в канцелярию") {
+      for {
+        t <- make(hero(), HomeData(metJunona = true))
+        (state, _, _, r) = t
+        _      <- state.action(testUser, tap("HomeFurnish"), r)
+        page   <- last(r)
+        _      <- state.action(testUser, tap("HomeOffice"), r)
+        office <- last(r)
+      } yield assertTrue(page.text.contains("«Обустройство». Папка пуста.")) &&
+              assertTrue(page.choices.map(c => c.id -> c.label) == List("HomeOffice" -> "↩ Назад")) &&
+              assertTrue(office.choices.exists(_.id == "HomeFurnish"))
     },
 
     test("цены с зачётом старого дома: 700 за второй с домиком, 1900 и 1200 за остров; ниже — не продают") {
@@ -95,7 +107,7 @@ object HomeStateSpec extends ZIOSpecDefault {
       for {
         t <- make(hero(silver = 15000L), HomeData(metJunona = true))
         (state, dao, _, r) = t
-        _      <- state.action(testUser, offer(House.Cottage, HomeState.PaySilver), r)
+        _      <- state.action(testUser, offer(House.Cottage), r)
         pitch  <- last(r)
         _      <- state.action(testUser, buy(House.Cottage, HomeState.PaySilver), r)
         poor   <- texts(r)
@@ -106,8 +118,13 @@ object HomeStateSpec extends ZIOSpecDefault {
         h2     <- heroOf(dao)
         home   <- homeOf(dao)
         inside <- last(r)
-      } yield assertTrue(pitch.text.contains("рунический алтарь") && pitch.text.contains("Подписываем? «Домик в две комнаты» за 20 000 🪙.")) &&
-              assertTrue(pitch.choices.map(_.id) == List("HomeBuy", "HomeOffice")) &&
+      } yield assertTrue(pitch.text.contains("рунический алтарь") &&
+                pitch.text.contains("Подписываем? «Домик в две комнаты» за 20 000 🪙 или 100 🟡.")) &&
+              // нажал на дом — цены кнопками и «Назад»
+              assertTrue(pitch.choices.map(c => c.id -> c.label) == List(
+                "HomeBuy" -> "✍ Подписать за 20 000 🪙", "HomeBuy" -> "✍ Подписать за 100 🟡", "HomeOffice" -> "↩ Назад")) &&
+              assertTrue(pitch.choices.filter(_.id == "HomeBuy").map(_.data.get("pay")) ==
+                List(Some(HomeState.PaySilver), Some(HomeState.PayDoubloons))) &&
               assertTrue(poor.contains("Не хватает 5 000 🪙") && h1.silver == 15000L) &&
               assertTrue(h2.silver == 1000L && home.house.contains(House.Cottage)) &&
               assertTrue(FirstSteps.progress(h2, NpcQuests.empty, home).house) &&
@@ -121,7 +138,7 @@ object HomeStateSpec extends ZIOSpecDefault {
         (state, dao, _, r) = t
         _      <- state.action(testUser, tap("HomeOffice"), r)
         office <- last(r)
-        _      <- state.action(testUser, offer(House.Townhouse, HomeState.PayDoubloons), r)
+        _      <- state.action(testUser, offer(House.Townhouse), r)
         pitch  <- last(r)
         _      <- state.action(testUser, buy(House.Townhouse, HomeState.PayDoubloons), r)
         h      <- heroOf(dao)
@@ -131,7 +148,8 @@ object HomeStateSpec extends ZIOSpecDefault {
         _      <- state.action(testUser, buy(House.Cottage, HomeState.PayDoubloons), r)
         same   <- homeOf(dao)
       } yield assertTrue(office.text.contains("Как дом?") && office.choices.map(_.label) == List(
-                "🏠 Добротный дом — 700 🟡", "🏠 Ключ от острова — 1 900 🟡", "🏠 Домой")) &&
+                "🏠 Добротный дом", "🏠 Ключ от острова", "🛠 Обустройство", "🏠 Домой")) &&
+              assertTrue(pitch.choices.map(_.label) == List("✍ Подписать за 700 🟡", "↩ Назад")) &&
               assertTrue(pitch.text.contains("сдать обратно в управление совета") && pitch.text.contains("Выйдет 700") &&
                 pitch.text.contains("всё личное тоже") && pitch.text.contains("место, чтобы расшириться")) &&
               assertTrue(pitch.text.contains("Твой «Домик в две комнаты» уходит в управление совета.")) &&
@@ -144,7 +162,7 @@ object HomeStateSpec extends ZIOSpecDefault {
       for {
         t <- make(hero(doubloons = 1200L), HomeData(tier = 2, metJunona = true))
         (state, dao, _, r) = t
-        _      <- state.action(testUser, offer(House.Island, HomeState.PayDoubloons), r)
+        _      <- state.action(testUser, offer(House.Island), r)
         pitch  <- last(r)
         _      <- state.action(testUser, buy(House.Island, HomeState.PayDoubloons), r)
         h      <- heroOf(dao)
@@ -155,7 +173,7 @@ object HomeStateSpec extends ZIOSpecDefault {
               assertTrue(pitch.text.contains("совет зачтёт его целиком: 1 200")) &&
               assertTrue(h.doubloons == 0L && said.contains("плывут облака")) &&
               assertTrue(top.text.contains("Выше острова") && top.text.contains("среди людей бывают такие ненасытные")) &&
-              assertTrue(top.choices.map(_.id) == List("HomeMain"))
+              assertTrue(top.choices.map(_.id) == List("HomeFurnish", "HomeMain"))
     },
 
     test("кровать как комната в таверне: проспал — травмы прошли, силы вернулись, и «выспался» +10% опыта") {

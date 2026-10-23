@@ -2618,7 +2618,10 @@ case class BattleState(
               Option.when(impenTriggered)(content.text("battle.impenetrable")),
               Option.when(toughTriggered)(content.format("battle.toughness", "armor" -> restoredArmor.toString)),
               Option.when(thorns > 0)(content.format("battle.thorns", "damage" -> thorns.toString, "monster" -> battle.monsterName)),
-              Option.when(ignites && !thawed)(content.text("battle.elemental.ignites")),
+              // Из минибоссов поджигает только огненный элементаль; остальные —
+              // мобы с огнём на оружии (демоны), у них строка без элементаля.
+              Option.when(ignites && !thawed)(content.text(
+                if (battle.boss.isDefined) "battle.elemental.ignites" else "battle.mobIgnites")),
               Option.when(thawed)(content.text("battle.elements.thawHero")),
               Option.when(poisons)(content.text("battle.mobPoisons")),
               Option.when(mobProc && procElement.contains(Element.Cold) && !quenched)(content.text("battle.mobColdBite")),

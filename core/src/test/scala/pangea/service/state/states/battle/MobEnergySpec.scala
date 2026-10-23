@@ -283,7 +283,8 @@ object MobEnergySpec extends ZIOSpecDefault {
       } yield assertTrue(after.effects.heroBurn.isDefined) &&
               assertTrue(after.effects.heroColdDefenceCut == 0) &&
               assertTrue(after.effects.mobAirBoostTurns == 0) &&
-              assertTrue(log.contains("поджёг вас"))
+              // демон — не элементаль: строка поджога своя
+              assertTrue(log.contains("Огненный удар поджёг вас") && !log.contains("элементаля"))
     },
 
     // ── Молния ────────────────────────────────────────────────────────────────
