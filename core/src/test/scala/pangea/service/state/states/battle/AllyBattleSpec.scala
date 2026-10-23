@@ -768,6 +768,26 @@ object AllyBattleSpec extends ZIOSpecDefault {
               assertTrue(screens.contains("«Малое исцеление» — Йорген Кремень: +"))
     },
 
+    test("при живом герое союзник, которому некого бить, в конце раунда шагает к врагу") {
+      val h = hero(allies = List(ally(pos = 2)))
+      val b = SoloPveBattle.from(monster(100000L), h)
+      // союзник на 3: моб в паре с героем на 1 ему не по руке
+      val apart = b.copy(group = b.group.copy(allies = b.group.allies.map(_.copy(position = 3))))
+      for {
+        t <- makeState(h, apart)
+        (state, dao, r) = t
+        // удар героя; ответ моба; подкрепление
+        _      <- TestRandom.feedInts(60, 99, 60, 99, 99) *> TestRandom.feedLongs(100L, 100L, 100L)
+        _      <- state.action(testUser, tap("Attack"), r)
+        after  <- battleOf(dao)
+        a       = after.group.allies.head
+        shown  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+      } yield assertTrue(a.position == 2 && a.stood.contains(3)) &&
+              // теперь моб в паре с героем ему по руке — со следующего раунда он бьёт
+              assertTrue(after.allyTarget(a).contains(1)) &&
+              assertTrue(shown.contains("2. 🔵 Йорген Кремень"))
+    },
+
     test("лечение героя по союзнику — как по самому герою: кровь прочь, яд слабее, пламя ест лечение и гаснет") {
       val h    = heroWithSkills(hero(allies = List(ally(hp = Some(100L)))), Skill.SweepingStrike, Skill.MinorHeal)
       val b    = SoloPveBattle.from(monster(100000L), h)
@@ -824,7 +844,8 @@ object AllyBattleSpec extends ZIOSpecDefault {
       } yield assertTrue(!screens.exists(_.text.contains("в кого?"))) &&
               assertTrue(said.contains("Применив руну вы исцеляетесь")) &&
               assertTrue(after.slotByItem(202L).exists(_.uses == 1)) &&
-              assertTrue(after.group.allyAt(3).exists(_.hp == 100L))
+              // лечение ему не досталось (в конце раунда он сам шагнул к врагу)
+              assertTrue(after.group.allies.headOption.exists(_.hp == 100L))
     },
 
     test("Таран по мобу на месте 2 (напротив него — союзник): герой встаёт на 2, союзник — на 1; целью Таран берёт только мобов") {

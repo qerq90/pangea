@@ -532,32 +532,32 @@ case class SoloPveBattle(
       .filter(p => math.abs(p - a.position) <= GroupState.Reach)
       .find(p => monsterAt(p).exists(_.alive))
 
-  /** Герой лежит — отряд идёт на врага сам: кому бить некого (см.
-    * [[allyTarget]]), шагает к ближайшему живому мобу по своему ряду — на
-    * позицию за раунд, пока тот не окажется в досягаемости. Лежащего героя
-    * переступает; на место другого союзника не встаёт — подождёт. Своей
-    * стороной ([[Formation.HeroPlaces]]) не ограничен: идёт хоть до хвоста
+  /** Отряд идёт на врага сам — и пока герой лежит, и при живом герое: кому бить
+    * некого (см. [[allyTarget]]), шагает к ближайшему живому мобу по своему ряду
+    * — на позицию за раунд, пока тот не окажется в досягаемости. Героя — лежит
+    * он или стоит — обходит; на место другого союзника не встаёт — подождёт.
+    * Своей стороной ([[Formation.HeroPlaces]]) не ограничен: идёт хоть до хвоста
     * чужого строя ([[Formation.MonsterPlaces]]) — иначе спрятавшегося там не
     * достать. Ближние к своей цели идут первыми, чтобы следом двинулись и
     * дальние. Сошедший с места запоминает, где стоял (`BattleAlly.stood`): после
     * боя он встаёт туда же — в отряде мест столько, сколько у своей стороны.
     *
     * Иначе тот, кто сам к отряду не идёт, — Некромант за спинами своих, — стоял
-    * бы вне досягаемости до конца боя. Возвращает бой и кто куда шагнул. */
-  def squadAdvance: (SoloPveBattle, List[(BattleAlly, Int)]) =
-    if (!group.heroDown) (this, Nil)
-    else {
-      val idle  = group.allies.filter(a => a.alive && allyTarget(a).isEmpty)
-      val order = idle.sortBy(a => mobNear(a.position).fold(Int.MaxValue)(p => math.abs(p - a.position)))
-      // Позиция союзника за чужие шаги не меняется: на занятую никто не встаёт.
-      order.foldLeft((this, List.empty[(BattleAlly, Int)])) { case ((b, moved), a) =>
-        b.mobNear(a.position).flatMap(b.allyStepToward(a.position, _)).fold((b, moved)) { next =>
-          (b.copy(group = b.group.updateAlly(a.position)(x =>
-             x.copy(position = next, stood = x.stood.orElse(Some(x.position))))),
-           moved :+ (a -> next))
-        }
+    * бы вне досягаемости до конца боя, а союзник с края строя — без дела, пока
+    * герой не переставит его сам. Когда шагать, решает раунд: в конце, после
+    * шагов мобов. Возвращает бой и кто куда шагнул. */
+  def squadAdvance: (SoloPveBattle, List[(BattleAlly, Int)]) = {
+    val idle  = group.allies.filter(a => a.alive && allyTarget(a).isEmpty)
+    val order = idle.sortBy(a => mobNear(a.position).fold(Int.MaxValue)(p => math.abs(p - a.position)))
+    // Позиция союзника за чужие шаги не меняется: на занятую никто не встаёт.
+    order.foldLeft((this, List.empty[(BattleAlly, Int)])) { case ((b, moved), a) =>
+      b.mobNear(a.position).flatMap(b.allyStepToward(a.position, _)).fold((b, moved)) { next =>
+        (b.copy(group = b.group.updateAlly(a.position)(x =>
+           x.copy(position = next, stood = x.stood.orElse(Some(x.position))))),
+         moved :+ (a -> next))
       }
     }
+  }
 
   /** Ближайшее к позиции `pos` место, где стоит живой моб (при равном
     * расстоянии — ближе к началу строя). Мобов нет — None. */

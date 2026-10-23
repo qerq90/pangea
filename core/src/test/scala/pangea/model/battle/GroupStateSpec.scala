@@ -411,8 +411,8 @@ object GroupStateSpec extends ZIOSpecDefault {
       assertTrue(after.stood.contains(2) && after.toAlly.position == 2) &&
       // и это переживает запись боя
       assertTrue(steps.last.asJson.as[SoloPveBattle].toOption.exists(_.group.allies.head.stood.contains(2))) &&
-      // пока герой на ногах, союзник сам с места не сходит
-      assertTrue(down.copy(group = down.group.copy(heroDown = false)).squadAdvance._2.isEmpty)
+      // и при живом герое так же: стоящего героя союзник обходит
+      assertTrue(down.copy(group = down.group.copy(heroDown = false)).squadAdvance._2.map(_._2) == List(4))
     },
 
     test("отряд идёт на врага: кому есть кого бить, стоит; на место своего не встаёт; дойдёт и до хвоста чужого строя") {
