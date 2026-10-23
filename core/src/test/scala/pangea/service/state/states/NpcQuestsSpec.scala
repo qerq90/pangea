@@ -6,7 +6,7 @@ import pangea.generator.item.GemGenerator
 import pangea.model.artifact.ArtifactKind
 import pangea.model.battle.SoloPveBattle
 import pangea.model.hero.Hero
-import pangea.model.item.{FlaskEffect, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
+import pangea.model.item.{BeltSlot, FlaskEffect, FlaskKind, GemKind, Item, ItemDetails, ItemType, Rarity, TrophyKind}
 import pangea.model.monster.{Race, Rarity => MobRarity}
 import pangea.model.quest.{FirstSteps, NpcQuest, NpcQuestProgress, NpcQuests}
 import pangea.model.state.StateType
@@ -215,6 +215,31 @@ object NpcQuestsSpec extends ZIOSpecDefault {
                 assertTrue(q.isDone(NpcQuest.Gustavo)) &&
                 assertTrue(all.contains("Ашалдарон")) &&
                 assertTrue(h2.silver == 1000L + GustavoState.QuestSilver + GustavoState.QuestFlaskSilver)
+      },
+      test("отчёт: фляги на поясе — тоже до краёв, вампирскую Густаво не трогает") {
+        val full = FlaskKind.chargesFor(Rarity.Gray)
+        val belt = Item(9L, "Пояс", 1L, Rarity.Blue, ItemType.Belt,
+          attack = 0, accuracy = 0, energy = 0, armor = 0, defence = 0, evasion = 0,
+          details = ItemDetails.Belt(List(
+            BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, 0),
+            BeltSlot.Flask(FlaskKind.Fire, Rarity.Gray, 1),
+            BeltSlot.Flask(FlaskKind.Vampiric, Rarity.Gray, 0))))
+        for {
+          dao <- TestHeroDao.withHero(userId, hero.copy(equipment = TestFixtures.emptyEquipment.copy(belt = belt)))
+          _   <- seed(dao, NpcQuest.Gustavo, NpcQuestProgress(step = 3, counter = 3L))
+          r   <- TestRenderer.make
+          c   <- content
+          _   <- GustavoState(dao, TestInventoryRepository.accepting, c).action(testUser, tap("GusQuest"), r)
+          h   <- heroOf(dao)
+          all <- texts(r)
+          slots = h.equipment.belt.details match { case b: ItemDetails.Belt => b.slots; case _ => Nil }
+        } yield assertTrue(slots == List(
+                  BeltSlot.Flask(FlaskKind.Healer, Rarity.Gray, full),
+                  BeltSlot.Flask(FlaskKind.Fire, Rarity.Gray, full),
+                  BeltSlot.Flask(FlaskKind.Vampiric, Rarity.Gray, 0))) &&
+                // фляги есть — серебра «на флягу» не положено
+                assertTrue(h.silver == 1000L + GustavoState.QuestSilver) &&
+                assertTrue(all.contains("наполнил фляги до краёв"))
       },
       test("зелье выветрилось раньше троих — Густаво наливает ещё одно даром") {
         for {

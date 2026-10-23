@@ -23,9 +23,10 @@ import java.util.concurrent.TimeUnit
   * Когда дом есть — сам дом: кровать, библиотека (со второго), дверь к Юноне,
   * если захочется дом побольше.
   *
-  * Покупка — в два шага: рассказ о доме с ценой и «Подписать». Дом выше
-  * покупается с зачётом того, что есть (см. [[House.doubloonPrice]]); за серебро
-  * — только домик, и только без дома.
+  * Покупка — в два шага: в канцелярии дома кнопками без цен, нажал на дом —
+  * рассказ Юноны и цены кнопками «Подписать за …»; нажал цену — подписал. Дом
+  * выше покупается с зачётом того, что есть (см. [[House.doubloonPrice]]); за
+  * серебро — только домик, и только без дома. «Обустройство» — пока заглушка.
   *
   * Кровать — как комната в таверне, только своя и бесплатно: сон по таймеру
   * (2 / 1,5 / 1 ч), травмы проходят, HP, броня, энергия и отряд — как новые; встал
@@ -49,6 +50,7 @@ case class HomeState(
       "HomeOffice"  -> Target.Run { (u, _, r) => office(u, r) },
       "HomeOffer"   -> Target.Run { (u, ua, r) => offer(u, ua, r) },
       "HomeBuy"     -> Target.Run { (u, ua, r) => buy(u, ua, r) },
+      "HomeFurnish" -> Target.Run { (u, _, r) => furnish(u, r) },
       "HomeBed"     -> Target.Run { (u, _, r) => bed(u, r) },
       "HomeSleep"   -> Target.Run { (u, _, r) => sleep(u, r) },
       WakeKey       -> Target.Run { (u, _, r) => wake(u, r) },
@@ -84,7 +86,8 @@ case class HomeState(
 
   // ── Канцелярия совета ───────────────────────────────────────────────────────
 
-  /** Юнона и что у совета есть на продажу. В первый раз — листок на доске и
+  /** Юнона и что у совета есть на продажу: дома — кнопками без цен (цены — в
+    * рассказе о доме), «Обустройство» и выход. В первый раз — листок на доске и
     * знакомство; дальше — короткое приветствие, своё для тех, у кого дом есть. */
   private def office(user: User, renderer: Renderer): Task[StateType] =
     for {
@@ -98,43 +101,48 @@ case class HomeState(
         else if (current.contains(House.Island)) content.format("home.office.top", "race" -> hero.race.genitivePlural)
         else if (current.isDefined) content.text("home.office.owner")
         else content.text("home.office.greeting")
-      offers  = House.forSale(current).flatMap(offerButtons(_, current)).zipWithIndex.map { case (c, i) => c.copy(row = Some(i)) }
+      houses  = House.forSale(current).zipWithIndex.map { case (h, i) =>
+                  Choice("HomeOffer", content.format("home.office.offer", "name" -> name(h)),
+                    color = ChoiceColor.Primary, data = Map("h" -> h.key), row = Some(i))
+                }
+      furnish = Choice("HomeFurnish", content.text("home.office.furnish"), color = ChoiceColor.Secondary, row = Some(houses.size))
       back    =
-        if (current.isDefined) Choice("HomeMain", content.text("home.office.home"), color = ChoiceColor.Negative, row = Some(offers.size))
-        else Choice("LeaveHome", content.text("home.office.leave"), color = ChoiceColor.Negative, row = Some(offers.size))
-      _      <- renderer.show(user, Screen(text, offers :+ back))
+        if (current.isDefined) Choice("HomeMain", content.text("home.office.home"), color = ChoiceColor.Negative, row = Some(houses.size + 1))
+        else Choice("LeaveHome", content.text("home.office.leave"), color = ChoiceColor.Negative, row = Some(houses.size + 1))
+      _      <- renderer.show(user, Screen(text, houses ++ List(furnish, back)))
     } yield StateType.Home
 
-  /** Кнопки покупки дома: цена — уже с зачётом сданного; у домика без дома —
-    * две, за серебро и за дублоны. */
-  private def offerButtons(h: House, current: Option[House]): List[Choice] = {
-    val silver = House.silverPrice(h, current).map(p =>
-      Choice("HomeOffer", content.format("home.office.offerSilver", "name" -> name(h), "price" -> money(p)),
-        data = Map("h" -> h.key, "pay" -> PaySilver)))
-    val gold = Choice("HomeOffer", content.format("home.office.offerDoubloons", "name" -> name(h),
-        "price" -> money(House.doubloonPrice(h, current))),
-      color = ChoiceColor.Primary, data = Map("h" -> h.key, "pay" -> PayDoubloons))
-    silver.toList :+ gold
-  }
-
-  /** Рассказ Юноны о доме, особая реплика про зачёт, если дом уже есть, и
-    * вопрос: подписываем? */
+  /** Дом из списка: рассказ Юноны, особая реплика про зачёт, если дом уже
+    * есть, и цены — кнопками «Подписать за …» (у домика без дома их две, за
+    * серебро и за дублоны); нажал цену — подписал. «Назад» — к списку домов. */
   private def offer(user: User, ua: UserAction, renderer: Renderer): Task[StateType] =
     loadHome(user).flatMap { home =>
-      deal(ua, home) match {
+      onSale(ua, home) match {
         case None => office(user, renderer)
-        case Some((h, pay, price)) =>
+        case Some(h) =>
+          val options = prices(h, home.house)
           val trade   = home.house.fold("")(old =>
-            "\n\n" + content.format(s"home.houses.${h.key}.tradeFrom.${old.key}", "price" -> money(price)))
-          val confirm = content.format("home.office.confirm", "name" -> name(h), "price" -> priceText(price, pay)) +
+            "\n\n" + content.format(s"home.houses.${h.key}.tradeFrom.${old.key}",
+              "price" -> money(House.doubloonPrice(h, home.house))))
+          val asked   = options.map { case (pay, price) => priceText(price, pay) }
+            .reduce((a, b) => content.format("home.office.priceOr", "first" -> a, "second" -> b))
+          val confirm = content.format("home.office.confirm", "name" -> name(h), "price" -> asked) +
             home.house.fold("")(old => " " + content.format("home.office.confirmTrade", "old" -> name(old)))
-          renderer.show(user, Screen(content.text(s"home.houses.${h.key}.pitch") + trade + "\n\n" + confirm, List(
-            Choice("HomeBuy", content.text("home.office.sign"), color = ChoiceColor.Positive,
-              data = Map("h" -> h.key, "pay" -> pay), row = Some(0)),
-            Choice("HomeOffice", content.text("home.office.think"), color = ChoiceColor.Negative, row = Some(0))
-          ))).as(StateType.Home)
+          val sign    = options.zipWithIndex.map { case ((pay, price), i) =>
+            Choice("HomeBuy", content.format("home.office.sign", "price" -> priceText(price, pay)),
+              color = ChoiceColor.Positive, data = Map("h" -> h.key, "pay" -> pay), row = Some(i))
+          }
+          val back    = Choice("HomeOffice", content.text("home.house.back"), color = ChoiceColor.Negative, row = Some(sign.size))
+          renderer.show(user, Screen(content.text(s"home.houses.${h.key}.pitch") + trade + "\n\n" + confirm,
+            sign :+ back)).as(StateType.Home)
       }
     }
+
+  /** «Обустройство» — пока заглушка: реплика Юноны и «Назад» в канцелярию. */
+  private def furnish(user: User, renderer: Renderer): Task[StateType] =
+    renderer.show(user, Screen(content.text("home.office.furnishText"), List(
+      Choice("HomeOffice", content.text("home.house.back"), color = ChoiceColor.Negative, row = Some(0))
+    ))).as(StateType.Home)
 
   /** Подписать: деньги — сначала, дом — потом. Не хватило — Юнона говорит
     * сколько, и ничего не списано. Старый дом уходит в управление сам: дом у
@@ -162,16 +170,21 @@ case class HomeState(
       }
     } yield res
 
+  /** Дом из кнопки — если он сейчас продаётся (дом ниже своего не продают). */
+  private def onSale(ua: UserAction, home: HomeData): Option[House] =
+    payload(ua, "h").flatMap(House.byKey).filter(House.forSale(home.house).contains)
+
+  /** Цены дома по способам платы: за серебро — только домик без дома, дублоны —
+    * всегда, уже с зачётом сданного. */
+  private def prices(h: House, current: Option[House]): List[(String, Long)] =
+    House.silverPrice(h, current).map(PaySilver -> _).toList :+ (PayDoubloons -> House.doubloonPrice(h, current))
+
   /** Что за сделка в кнопке: дом, который сейчас продаётся, способ платы и цена. */
   private def deal(ua: UserAction, home: HomeData): Option[(House, String, Long)] =
     for {
-      h     <- payload(ua, "h").flatMap(House.byKey).filter(House.forSale(home.house).contains)
+      h     <- onSale(ua, home)
       pay   <- payload(ua, "pay")
-      price <- pay match {
-        case PaySilver    => House.silverPrice(h, home.house)
-        case PayDoubloons => Some(House.doubloonPrice(h, home.house))
-        case _            => None
-      }
+      price <- prices(h, home.house).collectFirst { case (`pay`, p) => p }
     } yield (h, pay, price)
 
   /** Списать цену: серебро — общим кошелём (с ячейкой), дублоны — с героя.
