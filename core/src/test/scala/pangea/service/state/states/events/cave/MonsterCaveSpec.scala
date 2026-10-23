@@ -279,7 +279,7 @@ object MonsterCaveSpec extends ZIOSpecDefault {
               assertTrue(inv.snapshot.map(_.id) == List(7L))
     },
 
-    test("с пояса в списке — только то, что в нём ещё есть; у алтаря пояса нет") {
+    test("с пояса в списке — только то, что в нём ещё есть; у алтаря пояс тоже есть, но ему пока ни к чему") {
       val h = hero().copy(equipment = TestFixtures.emptyEquipment.copy(belt = beltOf(
                 BeltSlot.Dust(MaterialKind.RubyDust, spent = true),
                 BeltSlot.Flask(FlaskKind.Healer, ItemRarity.Blue, 0))))
@@ -296,10 +296,17 @@ object MonsterCaveSpec extends ZIOSpecDefault {
         _     <- put(dao, altarCave())
         _     <- state.action(testUser, tap("CaveAltar"), r)
         altar <- r.sentScreens.map(_.last)
+        _     <- state.action(testUser, tap("CaveBelt_1"), r)
+        told  <- texts(r)
+        same  <- dao.getHeroByUserId(userId).map(_.get.equipment.belt)
+        spent <- sceneOf(dao)
       } yield // высыпанной пыли нет, пустая фляга есть — она так и остаётся флягой
               assertTrue(gate.choices.filter(_.id.startsWith("CaveBelt_")).map(_.id) == List("CaveBelt_1")) &&
               assertTrue(said.contains("пуста — плескать нечем") && kept == h.equipment.belt) &&
-              assertTrue(!altar.choices.exists(_.id.startsWith("CaveBelt_")))
+              // у алтаря — тот же пояс; алтарь равнодушен, ячейка цела, сила его не тронута
+              assertTrue(altar.choices.filter(_.id.startsWith("CaveBelt_")).map(_.id) == List("CaveBelt_1")) &&
+              assertTrue(told.contains("Алтарь равнодушен") && same == h.equipment.belt) &&
+              assertTrue(spent.exists(!_.altarSpent))
     },
 
     test("глефовый гриб: вся пещера встречает героя отравленной") {

@@ -152,13 +152,12 @@ case class MonsterCaveState(
   // ── Вещь, пущенная в дело на пороге ────────────────────────────────────────
 
   /** Скарб героя кнопками: сперва то, что на поясе (дымную флягу носят там),
-    * потом сумка. Алтарю пояс ни к чему — ему кладут кости, камни и трофеи. */
+    * потом сумка. И у входа, и у алтаря. */
   private def showSupplies(user: User, scene: CaveScene, renderer: Renderer): Task[Unit] =
     for {
       hero  <- getHero(user)
       inv   <- inventoryRepo.get(hero.id).mapError(asThrowable)
-      belt   = if (atAltar(scene)) Nil else CaveSupply.beltSupplies(hero.equipment.belt)
-      all    = belt ++ inv.items.data.map(Supply.Carried)
+      all    = CaveSupply.beltSupplies(hero.equipment.belt) ++ inv.items.data.map(Supply.Carried)
       _ <- if (all.isEmpty)
              renderer.show(user, Screen(content.text("cave.supply.empty"), List(backToGate)))
            else {
@@ -210,15 +209,21 @@ case class MonsterCaveState(
     } yield res
 
   /** Вещь из ячейки пояса — на пороге, как и из сумки: у фляги и розы уходит
-    * один заряд, прочее — целиком; ячейка помнит, чем была полна. */
+    * один заряд, прочее — целиком; ячейка помнит, чем была полна.
+    *
+    * У алтаря — его же ответ, что и на вещь из сумки. Пока ему с пояса брать
+    * нечего: кости, камни и трофеи на поясе не носят, и алтарь равнодушен. Когда
+    * у него появится дело и до пояса, брать надо из ячейки (`BeltSlot.taken`),
+    * а не из сумки. */
   private def useBelt(user: User, scene: CaveScene, slot: Int, renderer: Renderer): Task[StateType] =
     for {
       hero <- getHero(user)
       res  <- CaveSupply.beltSupplies(hero.equipment.belt).find(_.slot == slot) match {
-        case Some(s) if !atAltar(scene) =>
+        case Some(s) if atAltar(scene) => offer(user, hero, scene, s.item, renderer)
+        case Some(s) =>
           spend(user, hero, scene, s.item, renderer)(heroDao.updateEquipment(user.userId,
             hero.equipment.copy(belt = CaveSupply.beltTaken(hero.equipment.belt, slot))))
-        case _ => showSupplies(user, scene, renderer).as(StateType.MonsterCave)
+        case None => showSupplies(user, scene, renderer).as(StateType.MonsterCave)
       }
     } yield res
 
