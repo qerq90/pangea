@@ -263,6 +263,11 @@ final case class GroupState(
   /** Союзник на позиции `pos`. */
   def allyAt(pos: Int): Option[BattleAlly] = allies.find(_.position == pos)
 
+  /** Живые союзники не дальше `reach` мест от героя по своему ряду, слева
+    * направо: до них герой дотягивается лечением и бронёй. */
+  def alliesWithin(reach: Int): List[BattleAlly] =
+    allies.filter(a => a.alive && math.abs(a.position - heroPos) <= reach).sortBy(_.position)
+
   /** Свободные места СВОЕЙ стороны: ни герой, ни союзник их не занимают. Мест у
     * отряда [[Formation.HeroPlaces]] — глубже, в хвосте чужого строя, стоять
     * некому. */
