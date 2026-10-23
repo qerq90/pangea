@@ -4,8 +4,9 @@ import io.circe.syntax.EncoderOps
 import pangea.engine.SceneContent
 import pangea.model.battle.{BattleEffects, BattlePrefs, Bleed, Formation, Poison, SlainMonster, SoloPveBattle}
 import pangea.model.hero.Hero
-import pangea.model.item.{Item, ItemSet, ItemType, Rarity => ItemRarity}
+import pangea.model.item.{Item, ItemDetails, ItemSet, ItemType, Rarity => ItemRarity}
 import pangea.model.monster.{MiniBoss, Race, Rarity}
+import pangea.model.skill.Skill
 import pangea.model.squad.{Ally, AllyKind, AllyRates, Squad, UndeadForm}
 import pangea.model.stats.FightStats
 import pangea.model.user.{TelegramId, User, UserId, VkId}
@@ -21,6 +22,8 @@ object NecromancerSetSpec extends ZIOSpecDefault {
   private val userId   = UserId(1L)
   private val testUser = User(userId, VkId("vk_test"), TelegramId("tg_test"))
   private def tap(key: String): UserAction = UserAction("", Some(s"""{"action":"$key"}"""))
+  private def aimed(key: String, target: Int): UserAction =
+    UserAction("", Some(s"""{"action":"$key","target":"$target"}"""))
   private val necro = ItemSet.Necromancer
 
   private val slots = List(ItemType.Helmet, ItemType.ShoulderPads, ItemType.ChestPlate, ItemType.Bracelets,
@@ -174,6 +177,24 @@ object NecromancerSetSpec extends ZIOSpecDefault {
               assertTrue(risen.hp > 400L && merc.hp < 500L) &&
               assertTrue(after.monsterCurrentHp < 100000L) &&
               assertTrue(!said.contains("крепнет во тьме") && !said.contains("гниёт на ходу"))
+    },
+
+    test("порог 10: лечение из-под миазм не выводит — вылеченный живой теряет HP в тот же раунд") {
+      // наёмник полон: лечение ему ничего не прибавит, а миазмы в конце раунда своё возьмут
+      val squad  = Squad(heroPos = 1, allies = List(Ally(AllyKind.Human, 2, 1000000L, 0L, 0L)))
+      val base   = hero(10, squad)
+      val healer = base.copy(equipment = base.equipment.copy(
+        chestPlate = base.equipment.chestPlate.copy(details = ItemDetails.Armor(Skill.MinorHeal))))
+      for {
+        t <- makeState(healer, SoloPveBattle.from(tough().toMonster, healer))
+        (state, dao, r) = t
+        _     <- allPass
+        _     <- state.action(testUser, aimed("Skill_802", 2), r)
+        after <- battleOf(dao)
+        said  <- r.sentScreens.map(_.map(_.text).mkString("\n"))
+        merc   = after.group.allyAt(2)
+      } yield assertTrue(said.contains("«Малое исцеление» — ") && said.contains("Миазмы держат поле боя в руках")) &&
+              assertTrue(merc.exists(m => m.hp < m.stats.hp))
     },
 
     test("порог 10: без энергии миазмы гаснут, а кнопка их сворачивает насовсем") {

@@ -21,9 +21,6 @@ final case class BattleAlly(
     * (Таран, «Переместиться»), а в отряде он записан под прежним — по нему
     * его там и находят. */
   home:     Int                = 0,
-  /** Сколько раундов он ещё не чувствует миазм тьмы: лечение выводит из них
-    * на несколько раундов (см. ItemSet.Necromancer.MiasmaHealBlockRounds). */
-  miasmaCalm: Int              = 0,
   /** Раны, которые тикают на союзнике в конце раунда, — те же, что на герое и
     * на мобах: яд слабеет, кровь держится, пламя растёт. Их оставляют те, кто
     * стоит напротив него: приёмы мобов и минибоссов бьют того, кто перед ними. */
@@ -93,13 +90,12 @@ object BattleAlly {
       lvl      <- c.getOrElse[Long]("lvl")(1L)
       undead   <- c.getOrElse[Option[UndeadForm]]("undead")(None)
       home     <- c.getOrElse[Int]("home")(position)
-      calm     <- c.getOrElse[Int]("miasmaCalm")(0)
       poison   <- c.getOrElse[Option[Poison]]("poison")(None)
       bleed    <- c.getOrElse[Option[Bleed]]("bleed")(None)
       burn     <- c.getOrElse[Option[Burn]]("burn")(None)
       stood    <- c.getOrElse[Option[Int]]("stood")(None)
       coldCut  <- c.getOrElse[Int]("coldCut")(0)
-    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, calm, poison, bleed, burn, stood,
+    } yield BattleAlly(kind, position, hp, armor, energy, stats, lvl, undead, home, poison, bleed, burn, stood,
                        coldCut)
 }
 

@@ -7,7 +7,7 @@ import pangea.domain.Rng
 import pangea.engine.{Branch, Renderer, SceneContent, Screen, Target}
 import pangea.generator.loot.LootGenerator
 import pangea.generator.monster.MonsterGenerator
-import pangea.model.battle.{Aura, AuraRates, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, MonsterSlot, Nature, Poison, RaceTactics, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
+import pangea.model.battle.{Aura, AuraRates, BattleAlly, BattleEffects, Bleed, Buff, Burn, Element, Formation, GroupState, HealedWounds, MonsterSlot, Nature, Poison, RaceTactics, Regen, SoloPveBattle, SkillSlotState, TimedDefenceDebuff}
 import pangea.model.cave.CaveGenerator
 import pangea.model.item.ItemSet
 import pangea.model.squad.AllySkill
@@ -2063,32 +2063,40 @@ case class BattleState(
       nowMs: Long
   ): (Long, Long, SoloPveBattle, Option[String]) = {
     // Кровотечение лечение снимает целиком — то же правило, что и у моба
-    // (см. Bleed): рана затянута. И оно же выводит из миазм тьмы на несколько
-    // раундов — герою-нежити это, наоборот, перерыв в подпитке.
-    val battle = battle0.copy(effects = battle0.effects.copy(heroBleed = None,
-      heroMiasmaCalm = Aura.Miasma.calmRounds))
-    battle.effects.heroBurn match {
-      case None =>
-        val newHp = (hero.fightStats.hp + raw).min(hero.effectiveMaxHp(nowMs))
-        (newHp, newHp - hero.fightStats.hp, battle, None)
-
-      case Some(burn) =>
-        // Ослабление = 50% базовых + текущий процент горения. Пламя при этом
-        // ТРАТИТСЯ: базовые 50 п.п. оно гасит собой, поэтому горение до 50%
-        // сгорает целиком, а сверх того остаётся гореть излишек (51% → 1%).
-        val cut     = burn.healWeakenPct.min(100)
-        val amount  = (raw * (100 - cut) / 100).max(0L)
-        val newHp   = (hero.fightStats.hp + amount).min(hero.effectiveMaxHp(nowMs))
-        val left    = Burn.of(burn.pct - Burn.HealWeakenBase)
-        val updated = battle.copy(effects = battle.effects.copy(heroBurn = left))
-        val line = left match {
-          case None    => Some(content.format("battle.burnEatsHealOut", "pct" -> cut.toString))
-          case Some(b) => Some(content.format("battle.burnEatsHeal",
-                                 "pct" -> cut.toString, "left" -> b.pct.toString))
-        }
-        (newHp, newHp - hero.fightStats.hp, updated, line)
-    }
+    // (см. Bleed): рана затянута. Яд оно ослабляет, а пламя тратит собой:
+    // горение до 50% сгорает целиком, сверх того остаётся гореть излишек
+    // (см. HealedWounds). Из-под миазм тьмы лечение не выводит.
+    val fx     = battle0.effects
+    val healed = HealedWounds.of(raw, fx.heroPoison, fx.heroBurn)
+    val newHp  = (hero.fightStats.hp + healed.amount).min(hero.effectiveMaxHp(nowMs))
+    val battle = battle0.copy(effects = fx.copy(heroBleed = None, heroPoison = healed.poison,
+      heroBurn = healed.burn))
+    val burnLine = healed.burnCutPct.map(cut => healed.burn match {
+      case None    => content.format("battle.burnEatsHealOut", "pct" -> cut.toString)
+      case Some(b) => content.format("battle.burnEatsHeal", "pct" -> cut.toString, "left" -> b.pct.toString)
+    })
+    val poisonLine = fx.heroPoison.map(_ => healed.poison match {
+      case None    => content.text("battle.healCuresPoison")
+      case Some(p) => content.format("battle.healEasesPoison", "left" -> p.pct.toString)
+    })
+    val lines = List(burnLine, poisonLine).flatten
+    (newHp, newHp - hero.fightStats.hp, battle, Option.when(lines.nonEmpty)(lines.mkString("\n")))
   }
+
+  /** Строки о том, что лечение героя сделало с ранами союзника: пламя съело
+    * часть лечения, яд ослаб или вышел. Кровь уходит молча — как и у героя. */
+  private def allyWoundLines(a: BattleAlly, w: HealedWounds): Vector[String] =
+    Vector(
+      w.burnCutPct.map(cut => w.burn match {
+        case None    => content.format("battle.group.allyBurnEatsHealOut", "name" -> a.name, "pct" -> cut.toString)
+        case Some(b) => content.format("battle.group.allyBurnEatsHeal",
+                          "name" -> a.name, "pct" -> cut.toString, "left" -> b.pct.toString)
+      }),
+      a.poison.map(_ => w.poison match {
+        case None    => content.format("battle.group.allyHealCuresPoison", "name" -> a.name)
+        case Some(p) => content.format("battle.group.allyHealEasesPoison", "name" -> a.name, "left" -> p.pct.toString)
+      })
+    ).flatten
 
   /** Итоговое снижение урона у героя: его защита против атаки моба, плюс бонус
     * «Заслона», минус то, что обгрызли морозные удары моба (Холод режет снижение
@@ -3331,16 +3339,25 @@ case class BattleState(
           dealSkillDamage(woundedHero, bumped, raw, line, next)
 
         // Лечение и броня по союзнику: то же число, но в его потолки; «Заслон»
-        // союзнику даёт только броню — бафа защиты у него нет.
+        // союзнику даёт только броню — бафа защиты у него нет. С ранами
+        // лечение обходится так же, как с ранами героя (см. activeHeal): кровь
+        // снимает, яд ослабляет, пламя тратит собой.
         case OnAlly(ally) =>
           val heals = slot.skill.effect == Skill.Effect.Heal
           val full  = if (heals) (raw * hero.passives.healMult).toLong.max(1L) else raw
-          val (updated, gained) =
-            if (heals) { val nh = (ally.hp + full).min(ally.stats.hp); (ally.copy(hp = nh), nh - ally.hp) }
-            else       { val na = (ally.armor + full).min(ally.stats.armor); (ally.copy(armor = na), na - ally.armor) }
+          val (updated, gained, wounds) =
+            if (heals) {
+              val w  = HealedWounds.of(full, ally.poison, ally.burn)
+              val nh = (ally.hp + w.amount).min(ally.stats.hp)
+              (ally.copy(hp = nh, poison = w.poison, bleed = None, burn = w.burn),
+               nh - ally.hp, allyWoundLines(ally, w))
+            } else {
+              val na = (ally.armor + full).min(ally.stats.armor)
+              (ally.copy(armor = na), na - ally.armor, Vector.empty[String])
+            }
           val line = content.format("battle.group.supportAlly", "name" -> ally.name,
             "skill" -> slot.skill.label, "amount" -> gained.toString, "what" -> (if (heals) "HP" else "брони"))
-          next(hero, bumped.copy(group = bumped.group.updateAlly(ally.position)(_ => updated)), Vector(line))
+          next(hero, bumped.copy(group = bumped.group.updateAlly(ally.position)(_ => updated)), line +: wounds)
 
         case Skill.Effect.Heal =>
           // «Целитель» множит активное лечение на 1.1, дальше — общий расчёт.
@@ -4283,16 +4300,12 @@ case class BattleState(
     * групповом бою это были бы двадцать строк. */
   private def applyAura(res: TurnResult, aura: Aura, spent: Long, head: Vector[String]): TurnResult = {
     def power(maxHp: Long): Long = aura.power(maxHp, spent)
-    // Передышка после лечения — только у аур, что её дают (миазмы). Святой
-    // воде до неё дела нет, и счётчики передышки она не трогает.
-    val calms = aura.calmRounds > 0
 
     // ── Герой ─────────────────────────────────────────────────────────────────
     val heroNature = if (res.hero.sets.heroIsUndead) Nature.Undead else Nature.of(res.hero.race)
     // Лежачего аура не трогает — ни лечит, ни жжёт: встанет он, когда отряд
     // отобьётся, а до тех пор его здоровье — ноль.
-    val heroSign   = if (res.battle.group.heroDown || (calms && res.battle.effects.heroMiasmaCalm > 0)) 0
-                     else aura.sign(heroNature)
+    val heroSign   = if (res.battle.group.heroDown) 0 else aura.sign(heroNature)
     val maxHp      = res.hero.effectiveMaxHp(0L)
     val heroHp     = heroSign match {
       // Лечение не опускает: текущее HP выше потолка аура не срезает.
@@ -4305,12 +4318,11 @@ case class BattleState(
 
     // ── Союзники: та же мера, по их природе ───────────────────────────────────
     val allies = res.battle.group.allies.map { a =>
-      val next = if (calms) a.copy(miasmaCalm = (a.miasmaCalm - 1).max(0)) else a
-      val sign = if ((calms && a.miasmaCalm > 0) || !a.alive) 0 else aura.sign(Nature.of(a.kind.race))
+      val sign = if (!a.alive) 0 else aura.sign(Nature.of(a.kind.race))
       sign match {
-        case s if s > 0 => next.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
-        case s if s < 0 => next.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
-        case _          => next
+        case s if s > 0 => a.copy(hp = (a.hp + power(a.stats.hp)).min(a.stats.hp).max(a.hp))
+        case s if s < 0 => a.copy(hp = (a.hp - power(a.stats.hp)).max(0L))
+        case _          => a
       }
     }
     val fellAllies  = allies.filter(a => !a.alive && res.battle.group.allyAt(a.position).exists(_.alive))
@@ -4331,7 +4343,6 @@ case class BattleState(
   /** Аура по чужой стороне: каждому по его природе, павшие уходят в добычу.
     * Строк не даёт — о себе аура сказала одной на всё поле. */
   private def auraOnMonsters(battle: SoloPveBattle, aura: Aura, power: Long => Long): SoloPveBattle = {
-    val calms = aura.calmRounds > 0
     def touched(sign: Int, cur: Long, maxHp: Long): Long = sign match {
       case s if s > 0 => (cur + power(maxHp)).min(maxHp).max(cur)
       case s if s < 0 => (cur - power(maxHp)).max(0L)
@@ -4339,22 +4350,14 @@ case class BattleState(
     }
     // Активный: его HP живут в полях боя.
     val afterActive = {
-      val sign = if ((calms && battle.effects.monsterMiasmaCalm > 0) || battle.monsterCurrentHp <= 0L) 0
-                 else aura.sign(Nature.of(battle.monsterRace, battle.monsterUndead))
-      battle.copy(
-        monsterCurrentHp = touched(sign, battle.monsterCurrentHp, battle.monsterStats.hp),
-        effects = if (!calms) battle.effects
-                  else battle.effects.copy(monsterMiasmaCalm = (battle.effects.monsterMiasmaCalm - 1).max(0)))
+      val sign = if (battle.monsterCurrentHp <= 0L) 0 else aura.sign(Nature.of(battle.monsterRace, battle.monsterUndead))
+      battle.copy(monsterCurrentHp = touched(sign, battle.monsterCurrentHp, battle.monsterStats.hp))
     }
     // Слоты строя: павших убираем с конца, чтобы индексы не плыли.
     val slots = afterActive.group.others.zipWithIndex.map { case (slot, idx) =>
-      val sign = if ((calms && slot.effects.monsterMiasmaCalm > 0) || !slot.alive) 0
-                 else aura.sign(Nature.of(slot.race, slot.undead))
+      val sign = if (!slot.alive) 0 else aura.sign(Nature.of(slot.race, slot.undead))
       val hp   = touched(sign, slot.currentHp, slot.stats.hp)
-      (slot.copy(currentHp = hp,
-         effects = if (!calms) slot.effects
-                   else slot.effects.copy(monsterMiasmaCalm = (slot.effects.monsterMiasmaCalm - 1).max(0))),
-       idx, hp <= 0L && slot.alive)
+      (slot.copy(currentHp = hp), idx, hp <= 0L && slot.alive)
     }
     val withSlots = afterActive.copy(group = afterActive.group.copy(others = slots.map(_._1)))
     slots.filter(_._3).map(_._2).sorted.reverse.foldLeft(withSlots)((b, idx) => b.sideFallen(idx))
@@ -4413,11 +4416,9 @@ case class BattleState(
             case BattleState.AllyCast.Flask =>
               val heal = (a1.stats.hp * AllySkill.HealPct / 100L).max(1L)
               val newHp = (a1.hp + heal).min(a1.stats.hp)
-              // Фляга выводит и из миазм — на те же несколько раундов, что у всех,
-              // а кровь и пламя снимает целиком, яд ослабляет: лечение лечит одинаково.
+              // Кровь и пламя фляга снимает целиком, яд ослабляет — как у мобов.
               ZIO.succeed((AllyBlow(paid.copy(group = paid.group.updateAlly(a1.position)(
-                  x => x.copy(hp = newHp, miasmaCalm = Aura.Miasma.calmRounds,
-                              poison = x.poison.flatMap(_.weakenedByHeal), bleed = None, burn = None))),
+                  x => x.copy(hp = newHp, poison = x.poison.flatMap(_.weakenedByHeal), bleed = None, burn = None))),
                   None, 0L, slew = false),
                 Vector(content.format("battle.ally.healingFlask", "name" -> a1.name, "hp" -> (newHp - a1.hp).toString))))
             case BattleState.AllyCast.Repair =>

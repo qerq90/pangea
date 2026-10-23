@@ -131,15 +131,12 @@ object MonsterSkill extends Enum[MonsterSkill] {
       val healed = newHp - battle.monsterCurrentHp
       val line   = template.replace("{name}", battle.monsterName).replace("{}", healed.toString)
       // Лечение: яд ослабляется на HealCut п.п.; кровотечение и горение снимаются
-      // ПОЛНОСТЬЮ (см. Poison.weakenedByHeal / Bleed / Burn).
-      // Лечение же выводит из миазм тьмы на несколько раундов
-      // (ItemSet.Necromancer.MiasmaHealBlockRounds): живое тело ненадолго
-      // перестаёт гнить, а нежить — крепнуть.
+      // ПОЛНОСТЬЮ (см. Poison.weakenedByHeal / Bleed / Burn). Из-под миазм тьмы
+      // лечение не выводит.
       val healedEffects = battle.effects.copy(
         monsterPoison = battle.effects.monsterPoison.flatMap(_.weakenedByHeal),
         monsterBleed  = None,
-        monsterBurn   = None,
-        monsterMiasmaCalm = pangea.model.battle.Aura.Miasma.calmRounds
+        monsterBurn   = None
       )
       Cast(battle.copy(monsterCurrentHp = newHp, effects = healedEffects), hero.fightStats.hp, hero.fightStats.armor, line)
     }
