@@ -27,7 +27,7 @@ object TreasureDigProgress {
   implicit val decoder: Decoder[TreasureDigProgress] = deriveDecoder[TreasureDigProgress]
 }
 
-/** Прогресс похода за сокровищем по карте клада (таймер ~10 минут).
+/** Прогресс похода за сокровищем по карте клада (таймер — 7 часов).
  *  @param startedAt момент отправки (epoch ms)
  *  @param zone      зона израсходованной карты — её диапазон уровней задаёт добычу
  */
