@@ -306,7 +306,7 @@ object StatesMap {
             scheduler,
             content
           ),
-          TreasureHunt -> TreasureHuntState(heroDao, scheduler, content),
+          TreasureHunt -> TreasureHuntState(heroDao, scheduler, content, inventoryRepo, itemRepo),
           Construction -> ConstructionState(heroDao, scheduler, content),
           Guild        -> GuildState(heroDao, content),
           TrophyExchange -> TrophyExchangeState(

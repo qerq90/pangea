@@ -131,7 +131,9 @@ object OutskirtsStateSpec extends ZIOSpecDefault {
               assertTrue(scene.flatMap(_.page).contains(1)) &&
               assertTrue(result == StateType.TreasureHunt) &&
               assertTrue(!invRepo.snapshot.exists(_.id == 9L)) &&
-              assertTrue(tasks.exists(_.kind == TaskKind.TreasureHunt))
+              // поход — 7 часов: таймер на столько и поставлен
+              assertTrue(tasks.exists(t => t.kind == TaskKind.TreasureHunt &&
+                t.fireAt == pangea.service.state.states.events.treasure.TreasureHuntState.HuntDurationMs))
     },
 
     test("«Уйти» с подтверждения возвращает на ту же страницу") {

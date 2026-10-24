@@ -22,7 +22,7 @@ object OutskirtsContentSpec extends ZIOSpecDefault {
       for {
         c <- ZIO.attempt(SceneContent.load())
         s = c.screen("outskirts.confirm")
-      } yield assertTrue(s.text.contains("10 минут")) &&
+      } yield assertTrue(s.text.contains("7 часов") && !s.text.contains("10 минут")) &&
         assertTrue(s.choices.map(_.id).toSet == Set("ConfirmDepart", "CancelDepart"))
     },
 
