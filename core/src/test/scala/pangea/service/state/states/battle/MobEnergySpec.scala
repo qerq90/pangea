@@ -139,19 +139,23 @@ object MobEnergySpec extends ZIOSpecDefault {
               assertTrue(after.effects.heroPoison.isDefined)
     },
 
-    test("мурлок и эльф всегда с отравленным оружием — без всяких заготовок") {
+    test("мурлок и эльф всегда с отравленным оружием — без всяких заготовок, но травят им через раз") {
       val h = hero()
-      def poisonAfter(race: Race) =
-        strike(h, mobBattle(race, energy = 0L), seedTurn()).map { case (after, _, log) =>
+      // Последний бросок — шанс яда: 1 — травит, 99 — мимо.
+      def poisonAfter(race: Race, roll: Int) =
+        strike(h, mobBattle(race, energy = 0L), seedTurn(roll)).map { case (after, _, log) =>
           (after.effects.heroPoison.isDefined, log.contains("Отравленное оружие"))
         }
       for {
-        murloc <- poisonAfter(Race.Murloc)
-        elf    <- poisonAfter(Race.Elf)
-        human  <- poisonAfter(Race.Human)
-      } yield assertTrue(Race.Murloc.weaponPoison && Race.Elf.weaponPoison) &&
+        murloc <- poisonAfter(Race.Murloc, 1)
+        elf    <- poisonAfter(Race.Elf, 1)
+        missed <- poisonAfter(Race.Murloc, 99)
+        human  <- poisonAfter(Race.Human, 1)
+      } yield assertTrue(Race.Murloc.weaponPoison && Race.Elf.weaponPoison && Poison.WeaponChancePct == 50L) &&
               assertTrue(murloc._1 && murloc._2) &&
               assertTrue(elf._1 && elf._2) &&
+              // бросок мимо шанса — удар дошёл до HP, а яда нет
+              assertTrue(!missed._1 && !missed._2) &&
               // у человека яда на клинке нет — у него молния
               assertTrue(!Race.Human.weaponPoison && !human._1)
     },

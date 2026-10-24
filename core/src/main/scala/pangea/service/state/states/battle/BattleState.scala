@@ -2597,11 +2597,14 @@ case class BattleState(
             procElement = powderElement(battle).filter(e => e == Element.Cold || e == Element.Air)
             mobProc <- chanceRoll(procElement.isDefined, Element.ProcChancePct)
             // Отравленное оружие: удар, дошедший до HP, травит. Мурлок и эльф
-            // ходят так всегда (Race.weaponPoison), Крысиному королю это
-            // поставлено флагом при встрече.
-            poisonedBlade = battle.effects.monsterPoisonsOnHit ||
-                              Race.withNameOption(battle.monsterRace).exists(_.weaponPoison)
-            poisons = poisonedBlade && newHp < hero.fightStats.hp
+            // ходят с ним всегда (Race.weaponPoison), но травят через раз
+            // (Poison.WeaponChancePct); Крысиному королю яд поставлен флагом при
+            // встрече, и он травит каждым таким ударом. Бросок — только если удар
+            // дошёл до HP.
+            reachedHp = newHp < hero.fightStats.hp
+            bladeHits <- chanceRoll(reachedHp && !battle.effects.monsterPoisonsOnHit &&
+                           Race.withNameOption(battle.monsterRace).exists(_.weaponPoison), Poison.WeaponChancePct)
+            poisons = reachedHp && (battle.effects.monsterPoisonsOnHit || bladeHits)
             // Огонь и холод гасят друг друга и на герое: огонь по замёрзшему
             // растапливает лёд и не занимается, холод по горящему гасит пламя и
             // не ложится.
@@ -4522,8 +4525,9 @@ case class BattleState(
           burnPct      = tmp.boss.map(_.heroIgniteBurnPct).getOrElse(Burn.Initial)
           procElement  = powderElement(tmp).filter(e => e == Element.Cold || e == Element.Air)
           mobProc <- chanceRoll(procElement.isDefined, Element.ProcChancePct)
-          poisons  = hpDmg > 0L && (tmp.effects.monsterPoisonsOnHit ||
-                       Race.withNameOption(tmp.monsterRace).exists(_.weaponPoison))
+          bladeHits <- chanceRoll(hpDmg > 0L && !tmp.effects.monsterPoisonsOnHit &&
+                         Race.withNameOption(tmp.monsterRace).exists(_.weaponPoison), Poison.WeaponChancePct)
+          poisons  = hpDmg > 0L && (tmp.effects.monsterPoisonsOnHit || bladeHits)
           thawed   = ignites && a.cold
           bites    = mobProc && procElement.contains(Element.Cold)
           quenched = bites && (a.burn.isDefined || (ignites && !thawed))

@@ -604,20 +604,27 @@ object AllyBattleSpec extends ZIOSpecDefault {
         _      <- s2.action(testUser, tap("SquadTick"), r2)
         thawed <- battleOf(d2)
         said2  <- r2.sentScreens.map(_.map(_.text).mkString("\n"))
-        // Мурлок бьёт отравленным оружием: удар дошёл до HP — в ране яд.
+        // Мурлок бьёт отравленным оружием: удар дошёл до HP, шанс яда сработал (1)
+        // — в ране яд; не сработал (99) — нет.
         t3     <- makeState(h, facing(Race.Murloc, _.copy(armor = 0L)))
         (s3, d3, r3) = t3
-        _      <- TestRandom.feedInts(50, 99, 100) *> TestRandom.feedLongs(100L, 100L)
+        _      <- TestRandom.feedInts(50, 99, 100, 1) *> TestRandom.feedLongs(100L, 100L)
         _      <- s3.action(testUser, tap("SquadTick"), r3)
         venom  <- battleOf(d3)
         said3  <- r3.sentScreens.map(_.map(_.text).mkString("\n"))
+        t4     <- makeState(h, facing(Race.Murloc, _.copy(armor = 0L)))
+        (s4, d4, _) = t4
+        _      <- TestRandom.feedInts(50, 99, 100, 99) *> TestRandom.feedLongs(100L, 100L)
+        _      <- s4.action(testUser, tap("SquadTick"), r3)
+        clean  <- battleOf(d4)
       } yield assertTrue(cold.group.allyAt(2).exists(_.coldCut == Element.Cold.DefenceReductionCut)) &&
               assertTrue(said1.contains("Йорген Кремень: морозный удар сковывает")) &&
               assertTrue(said1.contains("% ❄️ VS")) &&
               assertTrue(thawed.group.allyAt(2).exists(a => a.coldCut == 0 && a.burn.isEmpty)) &&
               assertTrue(said2.contains("Йорген Кремень: пламя растопило лёд")) &&
               assertTrue(venom.group.allyAt(2).exists(_.poison.isDefined)) &&
-              assertTrue(said3.contains("Йорген Кремень: отравленное оружие оставило яд"))
+              assertTrue(said3.contains("Йорген Кремень: отравленное оружие оставило яд")) &&
+              assertTrue(clean.group.allyAt(2).exists(a => a.poison.isEmpty && a.hp < a.stats.hp))
     },
 
     test("герой лежит, а последний союзник уходит по свитку — смерть, отложенная до этого момента") {
