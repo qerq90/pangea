@@ -138,7 +138,7 @@ object MoneyTransferSpec extends ZIOSpecDefault {
         friend <- heroOf(dao, friendUs)
         sent   <- api.sentMessages.map(_.map(_._1).mkString("\n"))
       } yield assertTrue(me.doubloons == 100L - 60L - 6L && friend.doubloons == 60L) &&
-              assertTrue(!sent.contains("только из города"))
+              assertTrue(!sent.contains("только в городе"))
     },
 
     test("не хватает с комиссией, меньше минимума, без суммы — ничего не списано, вещей не ищем") {
@@ -164,7 +164,7 @@ object MoneyTransferSpec extends ZIOSpecDefault {
               assertTrue(!sent.contains("В сумке нет ничего похожего"))
     },
 
-    test("серебро из лабиринта не передать — только из города") {
+    test("серебро из лабиринта не передать — только в городе") {
       for {
         t <- chat(silver = 500L, state = StateType.Dungeon)
         (handler, dao, bank, _, _, api) = t
@@ -172,7 +172,27 @@ object MoneyTransferSpec extends ZIOSpecDefault {
         me   <- heroOf(dao, userId)
         sent <- api.sentMessages.map(_.map(_._1).mkString("\n"))
       } yield assertTrue(me.silver == 500L && bank.silverSnapshot == 0L) &&
-              assertTrue(sent.contains("только из города"))
+              assertTrue(sent.contains("только в городе"))
+    },
+
+    test("в городе серебро передают с любого экрана; из «Персонажа» и посреди задания — нет") {
+      def from(state: StateType) =
+        for {
+          t <- chat(silver = 500L, state = state)
+          (handler, dao, _, _, _, api) = t
+          _    <- say(handler, "Передать серебро 100", -1L)
+          me   <- heroOf(dao, userId)
+          sent <- api.sentMessages.map(_.map(_._1).mkString("\n"))
+        } yield (me.silver < 500L, sent.contains("только в городе"))
+      for {
+        herbs   <- from(StateType.GustavoHerbs)
+        mercs   <- from(StateType.Mercenaries)
+        gate    <- from(StateType.Outskirts)
+        bag     <- from(StateType.Inventory)
+        thieves <- from(StateType.Thieves)
+      } yield assertTrue(herbs == (true, false) && mercs == (true, false) && gate == (true, false)) &&
+              // меню «Персонаж» и сцена задания — отказ, серебро на месте
+              assertTrue(bag == (false, true) && thieves == (false, true))
     }
   )
 }

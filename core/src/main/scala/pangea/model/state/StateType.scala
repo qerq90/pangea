@@ -156,13 +156,16 @@ object StateType extends Enum[StateType] with DoobieEnum[StateType] {
   case object MurlocElder   extends StateType // старейшина выходит к герою после двухсотого убитого
   case object MurlocVillage extends StateType // по карте: налёт на деревню или помощь снаряжением
 
-  /** Городские сцены — где герой «в городе» (сюжетную карту можно открыть только
-    * отсюда). Смотрится по `returnState` меню персонажа. */
+  /** Городские сцены — где герой «в городе»: отсюда передают вещи и серебро,
+    * сюда выручку аукциона приносят в руки, только отсюда открывают сюжетную
+    * карту (её смотрят по `returnState` меню персонажа). Город — любой его
+    * экран; не входят только меню «Персонаж» и сцены заданий (воры, дорога к
+    * заданию, поиски Марисы и прочие). */
   val cityStates: Set[StateType] = Set(
     GlobalMap, HarborQuarter, MarketSquare, StreetMerchants, CityCenter, TempleAzat, HallAzat, Cube, UnassumingBarrel,
-    TradeHouse, BankVault, Auction, FetShop, Mail,
-    Arena,
-    Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoBelt,
-    Tavern, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
+    TradeHouse, BankVault, Auction, FetShop, Mail, Transfer,
+    Arena, Outskirts,
+    Merchant, Gustavo, GustavoHeal, GustavoBoost, GustavoSupplies, GustavoBelt, GustavoHerbs,
+    Tavern, Mercenaries, QuestBoard, Innkeeper, CardSeller, Construction, Guild, TrophyExchange, TrainingHall,
     MasterHorn, MentorKazimir, Home, RuneAltar, HerbWorkbench, GemVault)
 }
