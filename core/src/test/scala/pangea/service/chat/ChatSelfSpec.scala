@@ -50,6 +50,23 @@ object ChatSelfSpec extends ZIOSpecDefault {
 
   override def spec = suite("Команды о себе в беседе")(
 
+    test("«Туториал»: узнают в любом написании, отвечают ссылкой на статью — и игроку, и незнакомцу") {
+      val key = ChatCommand.eventKey(0L, Some(201L))
+      for {
+        t <- handler(heroWith(None))
+        (state, api, _) = t
+        _    <- state.tutorialToChat(vkId, key)
+        // честный повтор того же сообщения от игрока гасится
+        _    <- state.tutorialToChat(vkId, key)
+        // а тот, кто ещё не играет, ответ тоже получит: статья ему не помешает
+        _    <- state.tutorialToChat(VkId("777"), ChatCommand.eventKey(0L, Some(202L)))
+        said <- api.chatMessages
+      } yield assertTrue(ChatCommand.tutorialCommand("Туториал") && ChatCommand.tutorialCommand("  туториал! ") &&
+                ChatCommand.tutorialCommand("/туториал")) &&
+              assertTrue(!ChatCommand.tutorialCommand("туториал по боям") && !ChatCommand.tutorialCommand("мой профиль")) &&
+              assertTrue(said.size == 2 && said.forall(_.contains(Links.Tutorial)))
+    },
+
     test("команду узнают в любом написании, а чужой текст не трогают") {
       assertTrue(ChatCommand.selfCommand("Мой профиль").contains(ChatCommand.Self.Profile)) &&
       assertTrue(ChatCommand.selfCommand("  мой   профиль  ").contains(ChatCommand.Self.Profile)) &&

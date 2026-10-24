@@ -12,7 +12,7 @@ import pangea.service.activity.{ActivityContest, GroupEvent}
 import pangea.service.admin.AdminPanel
 import pangea.engine.SceneContent
 import pangea.service.referral.Referrals
-import pangea.service.chat.{ChatCommand, ChatProfile}
+import pangea.service.chat.{ChatCommand, ChatProfile, Links}
 import pangea.service.parcel.{Parcels, TransferTarget, Transfers}
 import pangea.service.payout.Payouts
 import pangea.service.state.states.parcel.TransferState
@@ -126,6 +126,21 @@ class StateHandler(
           }
         }
     }
+
+  /** «Туториал» из общей беседы: ссылка на статью — туда же, в беседу. Отвечаем
+    * любому, кто спросил: игрок он или пока нет, статья ему не помешает. От
+    * повтора того же сообщения защищаемся, когда пишет игрок, — как у прочих
+    * команд беседы: счётчик событий есть только у игрока. */
+  def tutorialToChat(senderVk: VkId, eventId: Long): Task[Unit] = {
+    val text = content.format("chat.tutorial", "tutorial" -> Links.Tutorial)
+    userRepo.getUserByVkId(senderVk).flatMap {
+      case None => api.sendToChat(text)
+      case Some(sender) =>
+        lock.withLock(sender.userId) {
+          userRepo.checkAndRecordEvent(sender.userId, eventId).flatMap(fresh => ZIO.when(fresh)(api.sendToChat(text)).unit)
+        }
+    }
+  }
 
   private def tellAboutSelf(sender: User, command: ChatCommand.Self): Task[Unit] =
     heroRepo.getHero(sender.userId).flatMap {

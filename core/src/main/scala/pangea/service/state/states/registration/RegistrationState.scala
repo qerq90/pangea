@@ -16,6 +16,7 @@ import pangea.model.state.StateType.Registration
 import pangea.model.user.User
 import pangea.repository.inventory.InventoryRepository
 import pangea.repository.item.ItemRepository
+import pangea.service.chat.Links
 import pangea.service.state.states.InventoryState
 import pangea.service.state.{FirstStepsQuest, NpcQuestLog, State, UserAction}
 import zio.{Random, Task, ZIO}
@@ -164,7 +165,8 @@ case class RegistrationState(
   /** «Встать»: герой ставит себе задание «Встать на ноги» (см.
     * [[pangea.model.quest.FirstSteps]]) и уходит в лабиринт — к городу ему ещё
     * идти. Это единственный выход из регистрации. Задание пишется один раз,
-    * сцена регистрации стирается. */
+    * сцена регистрации стирается. Следом за заданием — отдельное сообщение с
+    * туториалом по игре и приглашением в общую беседу (см. [[Links]]). */
   private def stand(user: User, renderer: Renderer): Task[StateType] =
     for {
       lore   <- loreOf(user)
@@ -172,6 +174,8 @@ case class RegistrationState(
       hero   <- heroDao.getHeroByUserId(user.userId)
       quests <- NpcQuestLog.load(heroDao, user.userId)
       _      <- ZIO.foreachDiscard(hero)(h => renderer.show(user, Screen(FirstStepsQuest.taken(content, h, quests), Nil)))
+      _      <- renderer.show(user, Screen(content.format("registration.tutorial",
+                  "tutorial" -> Links.Tutorial, "chat" -> Links.Chat), Nil))
       _      <- heroDao.writeSceneData(user.userId, Json.Null)
     } yield StateType.Dungeon
 

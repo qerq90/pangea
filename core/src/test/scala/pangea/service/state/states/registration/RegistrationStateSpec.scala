@@ -263,11 +263,17 @@ object RegistrationStateSpec extends ZIOSpecDefault {
         _      <- ZIO.foreach(arrivalPath)(id => state.action(testUser, tap(id), renderer))
         beat3  <- renderer.sentScreens.map(_.last)
         result <- state.action(testUser, tap("ArrivalStand"), renderer)
-        quest  <- renderer.sentScreens.map(_.last)
+        shown  <- renderer.sentScreens
+        quest   = shown.init.last
+        guide   = shown.last
         lore   <- heroDao.readLoreData(userId).map(_.flatMap(_.as[LoreData].toOption))
         scene  <- heroDao.readSceneData(userId)
       } yield assertTrue(beat3.choices.map(_.id) == List("ArrivalStand")) &&
               assertTrue(result == StateType.Dungeon) &&
+              // следом за заданием — туториал и приглашение в общую беседу, без кнопок
+              assertTrue(guide.text.contains(pangea.service.chat.Links.Tutorial) &&
+                guide.text.contains(pangea.service.chat.Links.Chat) && guide.text.contains("«Туториал»")) &&
+              assertTrue(guide.choices.isEmpty && !guide.text.contains("{")) &&
               assertTrue(quest.text.contains("📜 Новое задание: «Встать на ноги»")) &&
               assertTrue(quest.text.contains("⬜ Окрепнуть — дойти до 5 уровня")) &&
               assertTrue(quest.text.contains("⬜ Обзавестись логовом — купить дом")) &&
