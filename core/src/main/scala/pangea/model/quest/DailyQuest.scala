@@ -337,8 +337,13 @@ object DailyRates {
     * На первых двух уровнях эта доля совсем мала — держит пол. */
   def exp(heroLvl: Long): Long = (pangea.model.hero.Hero.neededExpForLevel(heroLvl) / 50L).max(5L)
 
-  /** То же с поправкой на само поручение: за редкое платят вдвое. */
-  def exp(heroLvl: Long, kind: DailyKind): Long = exp(heroLvl) * kind.expFactor.toLong
+  /** Ровный опыт сверху за любое поручение — как у вступительных заданий
+    * горожан: на первых уровнях доля уровня совсем мала. */
+  val FlatExp: Long = 40L
+
+  /** Сколько опыта за поручение: доля уровня с поправкой на само поручение (за
+    * редкое — вдвое) и [[FlatExp]] сверху — он не удваивается. */
+  def exp(heroLvl: Long, kind: DailyKind): Long = exp(heroLvl) * kind.expFactor.toLong + FlatExp
 
   /** Серебро Ришелье — по уровню героя, и мерено его же прилавком: заказ стоит
     * примерно шесть зелёных вещей своего уровня (зелёная уходит ему за

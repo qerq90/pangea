@@ -343,7 +343,7 @@ object DailyQuestSpec extends ZIOSpecDefault {
         paid  <- dlg.hand(testUser, h, noon)
         after <- d.getHeroByUserId(userId).map(_.get)
         log   <- DailyQuestLog.load(d, userId).map(_.of(DailyNpc.Gustavo).get)
-      } yield assertTrue(paid.exists(_._2 == DailyRates.exp(h.lvl)) && log.done) &&
+      } yield assertTrue(paid.exists(_._2 == DailyRates.exp(h.lvl) + DailyRates.FlatExp) && log.done) &&
               assertTrue(after.exp >= DailyRates.exp(h.lvl)) &&
               // награда берёт только то, что уже сдано: сумку сдача не трогает
               assertTrue(inv.snapshot.map(_.id) == List(1L))
@@ -392,7 +392,10 @@ object DailyQuestSpec extends ZIOSpecDefault {
       // редкая трава оплачивается редкой склянкой и двойным опытом
       assertTrue(DailyKind.HerbRare.rareReward && !DailyKind.HerbsAny.rareReward) &&
       assertTrue(DailyKind.HerbRare.expFactor == 2 && DailyKind.HerbsAny.expFactor == 1) &&
-      assertTrue(DailyRates.exp(10L, DailyKind.HerbRare) == 2L * DailyRates.exp(10L)) &&
+      // и сверху ровные 40 опыта за любое поручение — у редкого они не удваиваются
+      assertTrue(DailyRates.FlatExp == 40L) &&
+      assertTrue(DailyRates.exp(10L, DailyKind.HerbsAny) == DailyRates.exp(10L) + 40L) &&
+      assertTrue(DailyRates.exp(10L, DailyKind.HerbRare) == 2L * DailyRates.exp(10L) + 40L) &&
       assertTrue((0L until 20L).forall(s => DailyRates.plainBrews.contains(DailyRates.brew(rare = false, s)))) &&
       assertTrue((0L until 20L).forall(s => DailyRates.rareBrews.contains(DailyRates.brew(rare = true, s)))) &&
       assertTrue(DailyRates.rareBrews.forall(b => b.recipe.exists(_.herbRank >= 2))) &&
