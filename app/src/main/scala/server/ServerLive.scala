@@ -75,12 +75,14 @@ final class ServerLive(
   }
 
   /** Что умеет общая беседа: «Передать» в ответ (или пересылкой) на
-    * сообщение того, кому передают, и две команды о себе — «Мой профиль» и
-    * «Моё снаряжение», ответ на которые уходит в саму беседу. Всё прочее там нас
-    * не касается. */
+    * сообщение того, кому передают, команды о себе — «Мой профиль» и «Моё
+    * снаряжение», ответ на которые уходит в саму беседу, — и «Туториал»: ссылка
+    * на статью о том, как всё устроено в игре. Всё прочее там нас не касается. */
   private def handleChat(msg: VkEvent.Message): Task[Unit] =
     msg.fromId.filter(_ > 0L) match {
       case None => ZIO.unit
+      case Some(from) if ChatCommand.tutorialCommand(msg.text) =>
+        stateHandler.tutorialToChat(VkId(from.toString), msg.chatEventKey)
       case Some(from) =>
         ChatCommand.selfCommand(msg.text) match {
           case Some(command) => stateHandler.selfToChat(VkId(from.toString), command, msg.chatEventKey)
